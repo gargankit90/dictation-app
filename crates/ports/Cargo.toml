@@ -1,0 +1,10 @@
+[package]
+name = "dictation-ports"
+description = "Traits for the boundaries to the OS and the network: hotkey, audio, transcriber, text inserter, clipboard, secrets, permissions, clock."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
