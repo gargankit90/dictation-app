@@ -1,0 +1,21 @@
+# Rust
+/target/
+
+# Node
+/node_modules/
+/dist/
+
+# Tauri
+/src-tauri/gen/
+
+# Local env and secrets
+.env
+.env.*
+
+# Coverage and test output
+/coverage/
+*.profraw
+lcov.info
+
+# macOS
+.DS_Store
