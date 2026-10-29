@@ -20,8 +20,9 @@ asking you questions.
 
 Never edit: `tests/e2e/`, `crates/*/tests/` written by the Tester,
 `test-reports/`, `reviews/`, `docs/milestones/`, `AGENTS.md`, this file,
-or the guards (`scripts/guard-push.sh`, `lefthook.yml` pre-push,
-`.claude/settings.json`, `.claude/hooks/`).
+or the guards (`scripts/guard-push.sh`, `scripts/pre-push`,
+`scripts/install-hooks.sh`, `lefthook.yml`, `.claude/settings.json`,
+`.claude/hooks/`).
 
 ## Steps
 

@@ -43,6 +43,7 @@ src                React UI
 ## Commands
 
 ```sh
+scripts/install-hooks.sh               # once per clone: git hooks incl. the push guard
 cargo build --workspace
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -86,9 +87,9 @@ record of approval.
   `main` changes only by merging a PR.
 - **Never skip hooks**: no `--no-verify`, no `git commit -n`, no changing
   `core.hooksPath`, no `LEFTHOOK=0`.
-- **Never edit the guards**: `scripts/guard-push.sh`, `lefthook.yml`'s
-  pre-push section, `.claude/settings.json`, `.claude/hooks/`. Only the owner
-  changes them.
+- **Never edit the guards**: `scripts/guard-push.sh`, `scripts/pre-push`,
+  `scripts/install-hooks.sh`, `lefthook.yml`, `.claude/settings.json`,
+  `.claude/hooks/`. Only the owner changes them.
 - Only the Tester merges, and only when step 7's conditions hold.
 - Stay inside your role's "may edit" list.
 - **Computer use happens only inside the Lume VM** (`cua-vm` MCP server),
@@ -107,8 +108,11 @@ record of approval.
 These rules are enforced locally because GitHub Free can't protect branches
 on a private repo:
 
-- `lefthook` pre-push runs `scripts/guard-push.sh`. It refuses pushes to
-  `main`, non-fast-forward pushes, branch deletions and tag moves.
+- git's pre-push hook (installed by `scripts/install-hooks.sh`) runs
+  `scripts/pre-push`, which runs `scripts/guard-push.sh`. It refuses pushes
+  to `main`, non-fast-forward pushes, branch deletions and tag moves, and
+  fails closed if the script is missing. Not lefthook: lefthook skips
+  pre-push jobs when it sees no changed files.
 - Claude Code loads `.claude/settings.json`. Its `PreToolUse` hook
   (`.claude/hooks/guard-git.sh`) blocks force pushes, pushes to `main`,
   skipping hooks, `gh pr merge` and edits to the guards.

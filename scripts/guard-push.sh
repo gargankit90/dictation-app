@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-push guard (run by lefthook). GitHub Free can't protect branches on a
+# Pre-push guard (run by scripts/pre-push). GitHub Free can't protect branches on a
 # private repo, so main is protected here: no pushes to main, no force pushes,
 # no deleting branches or moving tags. Milestones reach main only by PR merge.
 set -euo pipefail

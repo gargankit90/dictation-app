@@ -153,8 +153,9 @@ and the Code Reviewer must agree.
 - One short-lived branch per milestone: `m<id>-<slug>`.
 - Conventional Commits, one logical change each: `feat(core): …`,
   `test(core): …`, `fix(platform): …`, `docs: …`, `chore: …`.
-- Hooks (lefthook): pre-commit runs fast checks on staged files; pre-push runs
-  the push guard and the full gate. Never skip them.
+- Hooks: `scripts/install-hooks.sh` installs them. pre-commit (lefthook) runs
+  fast checks on staged files; pre-push runs `scripts/pre-push`: the push
+  guard, then the full gate (from M0.3). Never skip them.
 - PRs merge with a merge commit, by the Tester, after `Tester: PASS`,
   `Reviewer: APPROVED` and the Lead's manual checks. Each merged milestone is
   tagged `m<id>`.

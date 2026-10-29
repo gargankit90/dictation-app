@@ -1,6 +1,6 @@
-# Git hooks. M0.3 adds the pre-commit gate; for now only the push guard.
-pre-push:
-  commands:
-    guard-push:
-      run: scripts/guard-push.sh {1} {2}
-      use_stdin: true
+# Git hooks managed by lefthook. M0.3 adds the pre-commit checks and a
+# `pre-push-gate` hook that scripts/pre-push runs.
+#
+# pre-push is NOT managed here: lefthook skips pre-push jobs when it finds no
+# changed files, which would let a push to main through. scripts/install-hooks.sh
+# installs git's pre-push hook directly; it runs scripts/pre-push.

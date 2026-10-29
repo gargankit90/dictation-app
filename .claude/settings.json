@@ -14,7 +14,11 @@
       "Edit(**/scripts/guard-push.sh)",
       "Write(**/scripts/guard-push.sh)",
       "Edit(**/lefthook.yml)",
-      "Write(**/lefthook.yml)"
+      "Write(**/lefthook.yml)",
+      "Edit(**/scripts/pre-push)",
+      "Write(**/scripts/pre-push)",
+      "Edit(**/scripts/install-hooks.sh)",
+      "Write(**/scripts/install-hooks.sh)"
     ]
   },
   "hooks": {

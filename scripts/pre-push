@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Git pre-push hook body (installed by scripts/install-hooks.sh). Runs the push
+# guard on every push, then the quality gate once M0.3 adds it.
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel)
+refs=$(cat)
+
+printf '%s\n' "$refs" | "$root/scripts/guard-push.sh" "$@"

@@ -29,8 +29,8 @@ has 'gh[[:space:]]+pr[[:space:]]+merge' && block "merging a PR"
 has 'gh[[:space:]]+api.*(/merge\b|merges|git/refs|/protection|rulesets)' && block "changing refs or merging through the GitHub API"
 has 'gh[[:space:]]+(repo[[:space:]]+(delete|edit)|release[[:space:]]+delete)' && block "changing repo settings"
 
-if has '(guard-git\.sh|guard-push\.sh|lefthook\.yml|\.claude/settings)' &&
-   has '(>|[[:space:]]tee[[:space:]]|sed[[:space:]]+-i|perl[[:space:]]+-[a-z]*i|[[:space:]]rm[[:space:]]|^rm[[:space:]]|[[:space:]]mv[[:space:]]|^mv[[:space:]]|[[:space:]]cp[[:space:]]|chmod|truncate|python|git[[:space:]]+(checkout|restore|rm))'; then
+if has '(guard-git\.sh|guard-push\.sh|scripts/pre-push|install-hooks\.sh|lefthook\.yml|\.claude/settings)' &&
+   has '(>|(^|[[:space:];&|])(tee|rm|mv|cp|ln|chmod|truncate|install|dd)[[:space:]]|sed[[:space:]]+-i|perl[[:space:]]+-[a-z]*i|python|node|ruby|git[[:space:]]+(checkout|restore|rm|mv))'; then
   block "editing the git guards"
 fi
 
