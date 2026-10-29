@@ -110,10 +110,13 @@ record of approval.
 These rules are enforced locally because GitHub Free can't protect branches
 on a private repo:
 
-- git's pre-push hook (installed by `scripts/install-hooks.sh`) runs
-  `scripts/pre-push`, which runs `scripts/guard-push.sh`. It refuses pushes
-  to `main`, non-fast-forward pushes, branch deletions and tag moves, and
-  fails closed if the script is missing. Not lefthook: lefthook skips
+- git's pre-push hook, installed by `scripts/install-hooks.sh` together
+  with a copy of `scripts/guard-push.sh` next to it, runs that copy on every
+  push from every worktree. It refuses pushes to `main`, non-fast-forward
+  pushes, branch deletions and tag moves, and fails closed if the copy is
+  missing. Then it runs the checkout's `scripts/pre-push` (the quality gate,
+  from M0.3) if that checkout has one. Re-run `scripts/install-hooks.sh`
+  whenever `scripts/guard-push.sh` changes. Not lefthook: lefthook skips
   pre-push jobs when it sees no changed files.
 - Claude Code loads `.claude/settings.json`. Its `PreToolUse` hook
   (`.claude/hooks/guard-git.sh`) blocks force pushes, pushes to `main`,
