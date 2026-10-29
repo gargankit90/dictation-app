@@ -1,0 +1,10 @@
+# Generated or owned elsewhere.
+Cargo.lock
+package-lock.json
+dist/
+target/
+coverage/
+src-tauri/gen/
+src-tauri/icons/
+# Prose is wrapped by hand; Prettier would rewrap every paragraph.
+*.md
