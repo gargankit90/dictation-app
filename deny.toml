@@ -1,0 +1,68 @@
+# cargo-deny: licences, advisories, duplicate versions and sources.
+# Run with `cargo deny check`; part of the quality gate (docs/ENGINEERING.md).
+
+[graph]
+# Check what ships on the platforms we build for, not every target in the lockfile.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# Permissive licences only. Anything not listed, GPL/LGPL/AGPL included, fails.
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+]
+confidence-threshold = 0.9
+
+# MPL-2.0 is file-level copyleft: fine to link unmodified, but it isn't on the
+# allow list, so each crate that needs it is named here. All come in through
+# Tauri (tauri-utils -> dom_query -> cssparser/selectors; dirs -> option-ext).
+# Never add a GPL, LGPL or AGPL crate here.
+exceptions = [
+    { allow = ["MPL-2.0"], crate = "cssparser" },
+    { allow = ["MPL-2.0"], crate = "cssparser-macros" },
+    { allow = ["MPL-2.0"], crate = "dtoa-short" },
+    { allow = ["MPL-2.0"], crate = "selectors" },
+    { allow = ["MPL-2.0"], crate = "option-ext" },
+]
+
+[licenses.private]
+# Our own crates are `publish = false` and UNLICENSED.
+ignore = true
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+allow-wildcard-paths = true
+# Duplicates we can't fix: each older version is pinned by Tauri's own
+# dependencies. Remove an entry once `cargo deny check bans` stops needing it.
+skip = [
+    { crate = "base64@0.21.7", reason = "swift-rs (via tauri) is on 0.21" },
+    { crate = "getrandom@0.3.4", reason = "tauri itself is on 0.3" },
+    { crate = "hashbrown@0.12.3", reason = "indexmap 1 via schemars 0.8 (tauri-utils)" },
+    { crate = "indexmap@1.9.3", reason = "schemars 0.8 (tauri-utils, tauri-build)" },
+    { crate = "miniz_oxide@0.8.9", reason = "png 0.18 (ico via tauri-codegen, muda)" },
+    { crate = "syn@2.0.119", reason = "most proc-macros are still on syn 2" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
