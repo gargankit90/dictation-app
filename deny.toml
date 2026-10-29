@@ -45,7 +45,7 @@ exceptions = [
 ]
 
 [licenses.private]
-# Our own crates are `publish = false` and UNLICENSED.
+# Our own crates are `publish = false` with no `license` field (not open source).
 ignore = true
 
 [bans]

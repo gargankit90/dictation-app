@@ -4,7 +4,6 @@ description = "Pure dictation logic: coordinator state machine, text cleanup, au
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
 publish.workspace = true
 
 [lints]

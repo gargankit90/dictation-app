@@ -4,7 +4,6 @@ description = "OS adapters behind the ports (macOS and Windows) and fakes for te
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
 publish.workspace = true
 
 [lints]
