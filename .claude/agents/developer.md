@@ -41,9 +41,12 @@ or the guards (`scripts/guard-push.sh`, `scripts/pre-push`,
    template below.
 7. Report back to the coordinator with the PR URL.
 
-When the Tester or Code Reviewer leaves comments: reply in each thread
+The Tester and Code Reviewer work in parallel. Once both have reported, fix
+all their blocker and major findings in one round: reply in each thread
 (fixed in `<sha>`, or why not), push fixes as new commits to the same branch,
-and post a short PR comment listing what changed for the next round.
+and post a short PR comment listing what changed for the re-check. Minors
+don't block; leave their `tech-debt` issues open unless the fix is trivial.
+You may start the next milestone while this PR is in review.
 
 ## PR description template
 

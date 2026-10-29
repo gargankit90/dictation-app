@@ -157,7 +157,7 @@ and the Code Reviewer must agree.
 - Hooks: `scripts/install-hooks.sh` installs them. pre-commit (lefthook) runs
   fast checks on staged files; pre-push runs `scripts/pre-push`: the push
   guard, then the full gate (from M0.3). Never skip them.
-- PRs merge with a merge commit, by the Tester, after `Tester: PASS`,
+- PRs merge with a merge commit, by the Code Reviewer, after `Tester: PASS`,
   `Reviewer: APPROVED` and the Lead's manual checks. Each merged milestone is
   tagged `m<id>`.
 - Findings are rated **blocker**, **major** or **minor**. Blockers and majors
