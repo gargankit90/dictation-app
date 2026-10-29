@@ -27,7 +27,8 @@ in the keychain".
 
 Every push and every PR runs the same gate (`scripts/gate.sh`): git's
 pre-push hook runs it through `lefthook run pre-push-gate`, and GitHub Actions
-runs it on macOS. Run it yourself with:
+runs it on Linux (Ubuntu 24.04; a macOS job is added once the gate has
+Mac-specific code). Run it yourself with:
 
 ```sh
 scripts/gate.sh
