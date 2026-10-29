@@ -1,0 +1,6 @@
+# Git hooks. M0.3 adds the pre-commit gate; for now only the push guard.
+pre-push:
+  commands:
+    guard-push:
+      run: scripts/guard-push.sh {1} {2}
+      use_stdin: true
