@@ -110,6 +110,26 @@ blocked "cp /tmp/x .claude/settings.json"
 blocked "git checkout -- .claude/hooks/guard-git.sh"
 blocked "python3 -c 'open(\"scripts/install-hooks.sh\",\"w\")'"
 
+# Added with the hardened hook (M0.2 guard patches): patches, aliases and
+# hookspath variants are blocked; message text no longer trips the checks.
+blocked "git apply fix.patch"
+blocked "git am 0001-fix.patch"
+blocked "patch -p1 < fix.patch"
+blocked "git config alias.p 'push --force'"
+blocked "gh alias set m 'pr merge'"
+blocked "git -c core.hookspath=/dev/null commit -m x"
+allowed "git apply --check fix.patch"
+allowed "git commit -m 'docs: explain -n and --no-verify are banned'"
+
+# Fails closed on input it can't read.
+raw_input_blocked() { # name input
+  local code=0
+  printf '%s' "$2" | "$hook" 2>/dev/null || code=$?
+  check "guard-git: $1" 2 "$code"
+}
+raw_input_blocked "empty input is blocked" ""
+raw_input_blocked "non-JSON input is blocked" "git push --force"
+
 allowed "git push -u origin m0.3-quality-gate"
 allowed "git push origin m1-maintenance"
 allowed "git commit -m 'feat(core): add step'"
