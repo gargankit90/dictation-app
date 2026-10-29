@@ -76,4 +76,5 @@ one as OK or with finding numbers. Severity guide:
 - [ ] PR notes are complete (template in `.claude/agents/developer.md`).
 - [ ] No changes to the guards, `AGENTS.md` or milestone specs by the
       Developer.
-- [ ] Minors not fixed are recorded in `docs/tech-debt.md`.
+- [ ] Minors not fixed have a GitHub issue labelled `tech-debt`, linked from
+      the PR notes.

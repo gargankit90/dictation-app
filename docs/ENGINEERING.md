@@ -132,7 +132,8 @@ Every testable behaviour gets a test, at the cheapest level that catches it.
 
 ## Quality gate
 
-Runs in lefthook pre-push and CI (from M0.3); every finding is fixed.
+Runs in git's pre-push hook (`lefthook run pre-push-gate`) and CI (from M0.3);
+every finding is fixed.
 
 | Check | Tool | Gate |
 | --- | --- | --- |
@@ -160,5 +161,5 @@ and the Code Reviewer must agree.
   `Reviewer: APPROVED` and the Lead's manual checks. Each merged milestone is
   tagged `m<id>`.
 - Findings are rated **blocker**, **major** or **minor**. Blockers and majors
-  are fixed before merging; minors are fixed or recorded in
-  `docs/tech-debt.md` with a reason.
+  are fixed before merging; minors are fixed or recorded as a
+  GitHub issue labelled `tech-debt`, with a reason, linked from the PR.

@@ -33,7 +33,7 @@ approve your own fixes.
 7. Report back to the coordinator.
 
 Minors don't block approval, but each must be fixed or recorded by the
-Developer in `docs/tech-debt.md` with a reason.
+Developer as a GitHub issue labelled `tech-debt`, with a reason.
 
 ## Review file template
 

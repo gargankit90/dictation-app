@@ -102,8 +102,10 @@ record of approval.
 - **Licences:** adapt code only from MIT/Apache repos (Handy, OpenWhispr,
   FreeFlow, Muesli, transcribe.cpp, FluidAudio) and credit them in `NOTICE`.
   FluidVoice and VoiceInk are GPLv3: read for ideas, never copy.
-- Ask the Lead before anything outward-facing beyond pushing your branch and
-  commenting on PRs.
+- Ask the Lead before anything outward-facing beyond pushing your branch,
+  commenting on PRs, and opening or commenting on GitHub issues for
+  follow-ups (labels: `tech-debt`, `owner`, `guard`, `spec`, `ci`,
+  `process`, `manual-check`).
 
 These rules are enforced locally because GitHub Free can't protect branches
 on a private repo:
