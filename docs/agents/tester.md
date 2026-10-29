@@ -25,8 +25,8 @@ wrong, report it; don't fix it.
    force push).
 4. Look for untested behaviour: error paths, edge cases, empty inputs,
    cancellation, back-to-back runs.
-5. Run the gate and coverage (`lefthook run pre-push` and `cargo llvm-cov`
-   from M0.3). Coverage: `core` and `transcribe` ≥ 85%, `app` ≥ 70%.
+5. Run the gate and coverage (`lefthook run pre-push-gate` and
+   `cargo llvm-cov` from M0.3). Coverage: `core` and `transcribe` ≥ 85%, `app` ≥ 70%.
 6. E2E (from M1.5): copy the built `.app` into the VM and run it there, never
    on the owner's screen. Restore the golden snapshot first:
    `lume delete dictation-vm && lume clone dictation-vm-golden dictation-vm`,

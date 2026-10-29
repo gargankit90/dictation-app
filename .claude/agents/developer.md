@@ -16,7 +16,8 @@ asking you questions.
 
 `crates/`, `src-tauri/`, `src/`, root config files (`Cargo.toml`,
 `package.json`, `tsconfig*.json`, `vite.config.ts`, etc.), `NOTICE`,
-`README.md`, `docs/tech-debt.md`.
+`README.md`. Open GitHub issues (`gh issue create --label tech-debt`) for
+minors you defer.
 
 Never edit: `tests/e2e/`, `crates/*/tests/` written by the Tester,
 `test-reports/`, `reviews/`, `docs/milestones/`, `AGENTS.md`, this file,
@@ -31,9 +32,9 @@ or the guards (`scripts/guard-push.sh`, `scripts/pre-push`,
 2. Branch from an up-to-date `main`: `git switch -c m<id>-<slug> origin/main`.
 3. Work in small Conventional Commits. Unit tests go in the same commit as the
    code or the one before (red, then green). Each commit passes pre-commit.
-4. Before pushing, run the full gate (`lefthook run pre-push` from M0.3; until
-   then the commands in `AGENTS.md`). Fix every finding; never suppress one
-   without a reason in a comment.
+4. Before pushing, run the full gate (`lefthook run pre-push-gate` from M0.3;
+   until then the commands in `AGENTS.md`). Fix every finding; never suppress
+   one without a reason in a comment.
 5. Push the branch: `git push -u origin m<id>-<slug>`. Never push to `main`,
    never force push. If you need to rewrite history, ask the coordinator.
 6. Open the PR with `gh pr create --base main --head m<id>-<slug>` and the
@@ -72,7 +73,7 @@ Spec: `docs/milestones/<id>.md`
 <code adapted from which repo/file (MIT/Apache only), or "none">
 
 ### Out of scope / follow-ups
-<deliberately not done; tech-debt entries>
+<deliberately not done; tech-debt issues (#n)>
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 ```

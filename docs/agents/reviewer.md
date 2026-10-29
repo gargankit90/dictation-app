@@ -32,8 +32,10 @@ approve your own fixes.
    severity and a link to the review file.
 7. Report back to the coordinator.
 
-Minors don't block approval, but each must be fixed or recorded by the
-Developer in `docs/tech-debt.md` with a reason.
+Minors don't block approval. Open a GitHub issue labelled `tech-debt` for
+each new minor you raise and link it in the review, so nothing is lost if
+the PR merges right after your approval. The Developer then fixes it or
+leaves the issue open with a reason.
 
 ## Review file template
 

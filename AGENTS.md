@@ -129,16 +129,21 @@ record of approval.
 - **Licences:** adapt code only from MIT/Apache repos (Handy, OpenWhispr,
   FreeFlow, Muesli, transcribe.cpp, FluidAudio) and credit them in `NOTICE`.
   FluidVoice and VoiceInk are GPLv3: read for ideas, never copy.
-- Ask the Lead before anything outward-facing beyond pushing your branch and
-  commenting on PRs.
+- Ask the Lead before anything outward-facing beyond pushing your branch,
+  commenting on PRs, and opening or commenting on GitHub issues for
+  follow-ups (labels: `tech-debt`, `owner`, `guard`, `spec`, `ci`,
+  `process`, `manual-check`).
 
 These rules are enforced locally because GitHub Free can't protect branches
 on a private repo:
 
-- git's pre-push hook (installed by `scripts/install-hooks.sh`) runs
-  `scripts/pre-push`, which runs `scripts/guard-push.sh`. It refuses pushes
-  to `main`, non-fast-forward pushes, branch deletions and tag moves, and
-  fails closed if the script is missing. Not lefthook: lefthook skips
+- git's pre-push hook, installed by `scripts/install-hooks.sh` together
+  with a copy of `scripts/guard-push.sh` next to it, runs that copy on every
+  push from every worktree. It refuses pushes to `main`, non-fast-forward
+  pushes, branch deletions and tag moves, and fails closed if the copy is
+  missing. Then it runs the checkout's `scripts/pre-push` (the quality gate,
+  from M0.3) if that checkout has one. Re-run `scripts/install-hooks.sh`
+  whenever `scripts/guard-push.sh` changes. Not lefthook: lefthook skips
   pre-push jobs when it sees no changed files.
 - Claude Code loads `.claude/settings.json`. Its `PreToolUse` hook
   (`.claude/hooks/guard-git.sh`) blocks force pushes, pushes to `main`,
