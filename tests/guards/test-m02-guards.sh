@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Self-contained verification suite for M0.2 acceptance criteria 1-4 and the
 # PR #2 guard fixes (install-hooks.sh shared guard copy, linked worktrees with
-# and without scripts/pre-push, no-op pushes, guard-git.sh path/subshell blocks,
-# quoted-message blanking, and 20,000-char lexer cutoff timing).
+# and without scripts/pre-push, no-op pushes, guard-git.sh fail-closed input
+# handling, quoted option values, case-insensitive hook bypass checks, gh global
+# flags and GraphQL mutations, redirect-after-flag handling, expanded self-tamper
+# checks, .claude/settings.json deny rules, and 20,000-char lexer cutoff timing).
 # Read-only against the repository; all mutations happen inside a mktemp dir.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
 TMP_ROOT="$(mktemp -d)"
@@ -17,7 +19,7 @@ failed=0
 pass() { passed=$((passed + 1)); printf '  PASS: %s\n' "$1"; }
 fail() { failed=$((failed + 1)); printf '  FAIL: %s\n' "$1" >&2; }
 
-echo "=== 1. Criterion 1: Scope files exist (and docs/tech-debt.md is absent) ==="
+echo "=== 1. Criterion 1 & Minor #19: Scope files and .claude/settings.json ==="
 scope_paths=(
   "AGENTS.md"
   "CLAUDE.md"
@@ -37,14 +39,40 @@ scope_paths=(
   "reviews"
 )
 for p in "${scope_paths[@]}"; do
-  [ -e "$p" ] && pass "$p exists" || fail "$p missing"
+  if [ -e "$p" ]; then pass "$p exists"; else fail "$p missing"; fi
 done
-[ ! -e "docs/tech-debt.md" ] && pass "docs/tech-debt.md absent (issues replace file)" || fail "docs/tech-debt.md unexpectedly present"
+if [ ! -e "docs/tech-debt.md" ]; then
+  pass "docs/tech-debt.md absent (issues replace file)"
+else
+  fail "docs/tech-debt.md unexpectedly present"
+fi
 for s in scripts/guard-push.sh scripts/pre-push scripts/install-hooks.sh .claude/hooks/guard-git.sh; do
-  [ -x "$s" ] && pass "$s executable (+x)" || fail "$s not executable"
+  if [ -x "$s" ]; then pass "$s executable (+x)"; else fail "$s not executable"; fi
 done
 
-echo "=== 2. Criterion 2 & Finding 2: scripts/guard-push.sh stdin cases ==="
+# Minor #19: .claude/settings.json is valid JSON and includes the 6 local-override deny rules
+if jq -e 'type == "object" and (.permissions.deny | type == "array")' .claude/settings.json >/dev/null 2>&1; then
+  pass ".claude/settings.json is valid JSON with permissions.deny array"
+else
+  fail ".claude/settings.json invalid JSON or missing permissions.deny"
+fi
+deny_rules=(
+  "Edit(**/lefthook-local.yml)"
+  "Write(**/lefthook-local.yml)"
+  "Edit(**/.lefthook-local.yml)"
+  "Write(**/.lefthook-local.yml)"
+  "Edit(**/.claude/settings.local.json)"
+  "Write(**/.claude/settings.local.json)"
+)
+for rule in "${deny_rules[@]}"; do
+  if jq -e --arg r "$rule" '.permissions.deny | index($r) != null' .claude/settings.json >/dev/null 2>&1; then
+    pass ".claude/settings.json denies $rule"
+  else
+    fail ".claude/settings.json missing deny rule $rule"
+  fi
+done
+
+echo "=== 2. Criterion 2: scripts/guard-push.sh stdin cases ==="
 T_C2="$TMP_ROOT/c2-repo"
 git init -q -b work "$T_C2"
 gc_c2() { git -C "$T_C2" -c user.name=t -c user.email=t@e.invalid commit -q --allow-empty -m "$1"; git -C "$T_C2" rev-parse HEAD; }
@@ -81,12 +109,32 @@ check_push_stdin 0 "refs/heads/work $B_SHA refs/heads/m1-x $ZERO\n"    "new bran
 check_push_stdin 0 "refs/tags/m1 $B_SHA refs/tags/m1 $ZERO\n"          "new tag"
 check_push_stdin 0 "refs/heads/work $B_SHA refs/heads/m1-x $A_SHA\n"   "fast-forward"
 
-echo "=== 3. Findings 1 & 2 + install-hooks.sh + Linked Worktrees ==="
+echo "=== 3. install-hooks.sh + Linked Worktrees (child bash -euo pipefail) ==="
 WT_BASE="$TMP_ROOT/Dictation App"
 mkdir -p "$WT_BASE"
 git init -q --bare "$WT_BASE/remote.git"
 git clone -q "$WT_BASE/remote.git" "$WT_BASE/main-wt" 2>/dev/null
-(
+# Run in a separate `bash -euo pipefail` process (not a `( ... ) &&` subshell,
+# which would disable `set -e` across intermediate checks). Also use explicit
+# `die` helpers instead of bare `[[ a && b ]]`, because macOS `/bin/bash` 3.2
+# suppresses `errexit` on `&&` inside `[[ ... ]]`.
+if ROOT="$ROOT" WT_BASE="$WT_BASE" bash -euo pipefail <<'SEC3'; then
+  die() { echo "sec3 fail: $*" >&2; exit 1; }
+  assert_rc_contains() {
+    local got_rc="$1" want_rc="$2" text="$3" needle="$4" label="$5"
+    [ "$got_rc" -eq "$want_rc" ] || die "$label: want rc $want_rc, got $got_rc ($text)"
+    case "$text" in
+      *"$needle"*) ;;
+      *) die "$label: missing '$needle' in: $text" ;;
+    esac
+  }
+  assert_not_contains() {
+    local text="$1" needle="$2" label="$3"
+    case "$text" in
+      *"$needle"*) die "$label: unexpected '$needle' in: $text" ;;
+    esac
+  }
+
   cd "$WT_BASE/main-wt"
   git config user.email "tester@example.com"
   git config user.name "Tester"
@@ -106,7 +154,8 @@ git clone -q "$WT_BASE/remote.git" "$WT_BASE/main-wt" 2>/dev/null
   ./scripts/install-hooks.sh >/dev/null
 
   thooks="$(git rev-parse --path-format=absolute --git-common-dir)/hooks"
-  [ -x "$thooks/guard-push.sh" ] && [ -x "$thooks/pre-push" ]
+  [ -x "$thooks/guard-push.sh" ]
+  [ -x "$thooks/pre-push" ]
   cmp -s "$thooks/guard-push.sh" scripts/guard-push.sh
 
   # Verify lefthook install / lefthook run leaves pre-push and guard-push.sh intact
@@ -133,7 +182,9 @@ YAML
   # Linked worktree WITHOUT scripts/ (simulating pre-M0.2 branch)
   git worktree add -q --detach "$WT_BASE/m01-wt" origin/m0.1-sim
   cd "$WT_BASE/m01-wt"
-  echo "report" > report.md && git add report.md && git commit -qm "test: report" 2>/dev/null
+  echo "report" > report.md
+  git add report.md
+  git commit -qm "test: report" 2>/dev/null
 
   git push --dry-run origin HEAD:refs/heads/m0.1-sim >/dev/null 2>&1
   git push origin HEAD:refs/heads/m0.1-sim >/dev/null 2>&1
@@ -141,26 +192,26 @@ YAML
   git push --dry-run origin HEAD:refs/heads/m1-new >/dev/null 2>&1
 
   rc=0; out=$(git push --dry-run origin HEAD:main 2>&1) || rc=$?
-  [[ "$rc" -eq 1 && "$out" == *"guard-push: refused: pushing to main"* ]]
+  assert_rc_contains "$rc" 1 "$out" "guard-push: refused: pushing to main" "m01-wt push to main"
 
   git commit -q --amend -m "amended" 2>/dev/null
   rc=0; out=$(git push --dry-run --force origin HEAD:refs/heads/m0.1-sim 2>&1) || rc=$?
-  [[ "$rc" -eq 1 && "$out" == *"guard-push: refused: force push"* ]]
+  assert_rc_contains "$rc" 1 "$out" "guard-push: refused: force push" "m01-wt force push"
 
   rc=0; out=$(git push --dry-run origin --delete m0.1-sim 2>&1) || rc=$?
-  [[ "$rc" -eq 1 && "$out" == *"guard-push: refused: deleting"* ]]
+  assert_rc_contains "$rc" 1 "$out" "guard-push: refused: deleting" "m01-wt branch delete"
 
   git tag t1 HEAD~1
   git push -q origin t1
   git tag -f t1 HEAD >/dev/null
   rc=0; out=$(git push --dry-run --force origin t1 2>&1) || rc=$?
-  [[ "$rc" -eq 1 && "$out" == *"guard-push: refused: moving existing tag"* ]]
+  assert_rc_contains "$rc" 1 "$out" "guard-push: refused: moving existing tag" "m01-wt tag move"
 
   # Fail-closed when installed guard copy is missing
   mv "$thooks/guard-push.sh" "$WT_BASE/gp.bak"
   rc=0; out=$(git push --dry-run origin HEAD:refs/heads/m1-new 2>&1) || rc=$?
   mv "$WT_BASE/gp.bak" "$thooks/guard-push.sh"
-  [[ "$rc" -eq 1 && "$out" == *"missing; push refused"* ]]
+  assert_rc_contains "$rc" 1 "$out" "missing; push refused" "missing guard-push.sh fail-closed"
 
   # Linked worktree WITH scripts/pre-push: verify chaining, diff note, no-op skip, and early refuse
   cd "$WT_BASE/main-wt"
@@ -172,16 +223,22 @@ YAML
   git commit -qm "instrument" 2>/dev/null
 
   out=$(git push origin m0.2-linked 2>&1)
-  [[ "$out" == *"CHECKOUT_PRE_PUSH_RAN"* && "$out" == *"pre-push: note:"* ]]
+  assert_rc_contains 0 0 "$out" "CHECKOUT_PRE_PUSH_RAN" "linked pre-push ran"
+  assert_rc_contains 0 0 "$out" "pre-push: note:" "linked drift note"
 
   out_noop=$(git push origin m0.2-linked 2>&1)
-  [[ "$out_noop" != *"CHECKOUT_PRE_PUSH_RAN"* ]]
+  assert_not_contains "$out_noop" "CHECKOUT_PRE_PUSH_RAN" "linked no-op skip"
 
   rc=0; out_refuse=$(git push --dry-run origin HEAD:main 2>&1) || rc=$?
-  [[ "$rc" -eq 1 && "$out_refuse" == *"guard-push: refused: pushing to main"* && "$out_refuse" != *"CHECKOUT_PRE_PUSH_RAN"* ]]
-) && pass "install-hooks.sh + old/new linked worktree push matrix" || fail "install-hooks.sh + linked worktree push matrix"
+  assert_rc_contains "$rc" 1 "$out_refuse" "guard-push: refused: pushing to main" "linked main refuse"
+  assert_not_contains "$out_refuse" "CHECKOUT_PRE_PUSH_RAN" "linked main early stop"
+SEC3
+  pass "install-hooks.sh + old/new linked worktree push matrix"
+else
+  fail "install-hooks.sh + linked worktree push matrix"
+fi
 
-echo "=== 4. Criterion 3 & Findings 3 & 4: .claude/hooks/guard-git.sh ==="
+echo "=== 4. Criterion 3 & Review Round 1 Regressions: .claude/hooks/guard-git.sh ==="
 check_git_hook() {
   local want="$1" cmd="$2"
   local rc=0
@@ -190,6 +247,17 @@ check_git_hook() {
     pass "guard-git [exit $rc] $cmd"
   else
     fail "guard-git [want $want, got $rc] $cmd"
+  fi
+}
+
+check_git_hook_raw() {
+  local want="$1" raw_in="$2" label="$3"
+  local rc=0
+  printf '%s' "$raw_in" | "$ROOT/.claude/hooks/guard-git.sh" >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -eq "$want" ]; then
+    pass "guard-git raw [$label] -> exit $rc"
+  else
+    fail "guard-git raw [$label] -> want $want, got $rc"
   fi
 }
 
@@ -206,7 +274,7 @@ check_git_hook 0 "git push origin m0.2-agent-docs"
 check_git_hook 0 "git commit -m msg"
 check_git_hook 0 "gh pr create"
 
-# Finding 3: path-qualified git, subshells, continuations, quoted main
+# Run-1 Finding 3: path-qualified git, subshells, continuations, quoted main
 check_git_hook 2 "/usr/bin/git push --force"
 check_git_hook 2 "/opt/homebrew/bin/git push -f"
 check_git_hook 2 "(git push --force)"
@@ -223,7 +291,7 @@ check_git_hook 2 $'git push \\\n  --force origin x'
 check_git_hook 2 "/usr/bin/git commit -n -m msg"
 check_git_hook 0 "git push origin main:m1-feature"
 
-# Finding 4: quoted message/body/title blanking + anti-bypass
+# Run-1 Finding 4: quoted message/body/title blanking + anti-bypass
 check_git_hook 0 'git commit -m "fix -n flag"'
 check_git_hook 0 'git commit -m "mention main" && git push origin m0.2-agent-docs'
 check_git_hook 0 'git commit -m "mention main branch" && git push origin m0.2-agent-docs'
@@ -242,8 +310,118 @@ check_git_hook 2 'git commit -m "x"; git push origin main'
 check_git_hook 2 'bash -c "echo -m '"'"'"; git push --force; echo "'"'"'"'
 check_git_hook 2 $'git commit -m $\'\\\'; git push --force #\''
 
+# Review Major 1: fail closed on missing tools, empty/malformed/non-object JSON, non-string command, or grep error
+check_git_hook_raw 2 ''                                           "empty stdin"
+check_git_hook_raw 2 '   '                                        "whitespace-only stdin"
+check_git_hook_raw 2 '{bad'                                       "malformed JSON"
+check_git_hook_raw 2 '[1,2]'                                      "JSON array root"
+check_git_hook_raw 2 '"git push --force"'                         "JSON string root"
+check_git_hook_raw 2 '{} {"tool_input":{"command":"git push -f"}}' "multiple JSON values"
+check_git_hook_raw 2 '{"tool_input":{"command":5}}'               "non-string command"
+check_git_hook_raw 2 '{"tool_input":"x"}'                         "non-object tool_input"
+check_git_hook_raw 0 '{"tool_input":{"command":""}}'              "empty string command"
+check_git_hook_raw 0 '{"tool_input":{"command":null}}'            "null command"
+check_git_hook_raw 0 '{}'                                         "missing tool_input"
+
+rc_nojq=0
+printf '%s' '{"tool_input":{"command":"git status"}}' | PATH=/bin /bin/bash "$ROOT/.claude/hooks/guard-git.sh" >/dev/null 2>&1 || rc_nojq=$?
+if [ "$rc_nojq" -eq 2 ]; then pass "guard-git fails closed when jq missing (exit 2)"; else fail "guard-git no-jq want 2, got $rc_nojq"; fi
+
+mkdir -p "$TMP_ROOT/bad-grep"
+printf '#!/bin/sh\nexit 2\n' > "$TMP_ROOT/bad-grep/grep"
+chmod +x "$TMP_ROOT/bad-grep/grep"
+rc_badgrep=0
+printf '%s' '{"tool_input":{"command":"git status"}}' | PATH="$TMP_ROOT/bad-grep:$PATH" "$ROOT/.claude/hooks/guard-git.sh" >/dev/null 2>&1 || rc_badgrep=$?
+if [ "$rc_badgrep" -eq 2 ]; then pass "guard-git fails closed when grep exits >=2 (exit 2)"; else fail "guard-git bad-grep want 2, got $rc_badgrep"; fi
+
+# Review Major 2: git options with quoted/escaped spaces or embedded newlines before push
+check_git_hook 2 'git -C "/tmp/My Repo/dictation-app" push --force'
+check_git_hook 2 'git -C "/tmp/My Repo/dictation-app" push origin main'
+check_git_hook 2 'git -c user.name="A B" push origin main'
+check_git_hook 2 'git --git-dir="/x y/.git" push --force'
+check_git_hook 2 "git --git-dir='/x y/.git' push --force"
+check_git_hook 2 'git --git-dir "/x y/.git" --work-tree "/x y" push origin main'
+check_git_hook 2 'git -C /a\ b/c push --force'
+check_git_hook 2 'git -c user.name="A \" B" push --force'
+check_git_hook 2 $'git -c user.name="A\nB" push --force'
+check_git_hook 0 'git -C "/tmp/My Repo/dictation-app" push origin m0.2-agent-docs'
+check_git_hook 0 'git -C "/tmp/My Repo/dictation-app" status'
+check_git_hook 0 'git push origin HEAD:m0.2-agent-docs'
+
+# Review Major 3: case-insensitive core.hooksPath, LEFTHOOK=false/LEFTHOOK_*, lefthook-local, .GIT/HOOKS, git-path, git alias
+check_git_hook 2 'git config core.hookspath /tmp/empty'
+check_git_hook 2 'git config --local Core.HooksPath /dev/null'
+check_git_hook 2 'git -c core.hookspath=/tmp/empty commit -m "x"'
+check_git_hook 2 'git -c CORE.HOOKSPATH=/tmp/empty push origin m0.2-agent-docs'
+check_git_hook 2 "printf '[core]\\n\\thooksPath = /dev/null\\n' >> .git/config"
+check_git_hook 2 'LEFTHOOK=false git commit -m x'
+check_git_hook 2 "LEFTHOOK='0' git commit -m x"
+check_git_hook 2 'export LEFTHOOK=FALSE; git commit -m x'
+check_git_hook 2 'LEFTHOOK_EXCLUDE=gate git push origin m1'
+check_git_hook 2 'lefthook uninstall'
+check_git_hook 2 'echo "pre-push: {skip: true}" > lefthook-local.yml'
+check_git_hook 2 'cp x .lefthook-local.yml'
+check_git_hook 2 'rm .GIT/HOOKS/pre-push'
+check_git_hook 2 'rm "$(git rev-parse --git-path hooks)/pre-push"'
+check_git_hook 2 'git -c alias.p=push p --force'
+check_git_hook 2 "git config --global alias.p 'push --force'"
+
+# Review Major 4: gh global flags, path-qualified gh, GraphQL merge/ref mutations, query file, gh alias
+check_git_hook 2 'gh -R gargankit90/dictation-app pr merge 2 --merge'
+check_git_hook 2 'gh --repo gargankit90/dictation-app pr merge 2'
+check_git_hook 2 'gh --repo=o/r pr merge 2'
+check_git_hook 2 'gh pr -R o/r merge 2'
+check_git_hook 2 '/opt/homebrew/bin/gh -R o/r pr merge 2'
+check_git_hook 2 "bash -c 'gh -R o/r pr merge 2'"
+for gql_mut in mergePullRequest enablePullRequestAutoMerge createRef updateRef deleteRef updateRefs createCommitOnBranch mergeBranch enqueuePullRequest; do
+  check_git_hook 2 "gh api graphql -f query='mutation { $gql_mut(input:{}) { clientMutationId } }'"
+done
+check_git_hook 2 $'gh api graphql -f query=\'\nmutation($id: ID!) {\n  mergePullRequest(input: {pullRequestId: $id}) { clientMutationId }\n}\' -f id=x'
+check_git_hook 2 'gh api graphql -F query=@merge.graphql'
+check_git_hook 2 'gh api graphql --input q.json'
+check_git_hook 2 'gh -R o/r api repos/o/r/pulls/2/merge'
+check_git_hook 2 "gh alias set m 'pr merge'"
+check_git_hook 2 'gh -R o/r repo edit --default-branch x'
+check_git_hook 0 'gh -R gargankit90/dictation-app pr view 2'
+check_git_hook 0 'gh --repo gargankit90/dictation-app pr comment 2 --body-file /tmp/c.md'
+check_git_hook 0 'gh -R o/r pr comment 2 --body "please do not gh pr merge yet"'
+check_git_hook 0 "gh api graphql -f query='query { repository(owner:\"o\", name:\"r\") { pullRequest(number: 2) { mergeable } } }'"
+check_git_hook 0 'gh alias list'
+
+# Minor #16: < and > redirections right after message flag clear pending flag
+check_git_hook 2 'git commit -m > scripts/guard-push.sh'
+check_git_hook 2 'git commit -m>scripts/guard-push.sh'
+check_git_hook 2 'gh pr comment 2 --body > .claude/hooks/guard-git.sh'
+check_git_hook 0 'git commit -m "x > y"'
+check_git_hook 0 'git commit -m "notes on scripts/guard-push.sh > ok"'
+
+# Minor #18: expanded guard self-tamper check (subshells, relative paths, .claude/hooks/*, patches, 2>&1 / >/dev/null)
+check_git_hook 2 '(rm scripts/guard-push.sh)'
+check_git_hook 2 '(cp /dev/null scripts/pre-push)'
+check_git_hook 2 'cp /dev/null .claude/hooks/other.sh'
+check_git_hook 2 'rm -rf .claude/hooks'
+check_git_hook 2 'rm -rf .claude'
+check_git_hook 2 'rm -rf scripts'
+check_git_hook 2 'cd scripts && cp /dev/null pre-push'
+check_git_hook 2 'cd .claude && cp x settings.local.json'
+check_git_hook 2 'patch -p1 < fix.patch'
+check_git_hook 2 "bash -c 'patch -p1 < x.diff'"
+check_git_hook 2 'git apply guard-fixes-2.patch'
+check_git_hook 2 'git apply --check x.patch && git apply x.patch'
+check_git_hook 2 'git am 0001-x.patch'
+check_git_hook 2 'sed -E -i "" s/x/y/ scripts/guard-push.sh'
+check_git_hook 2 'unlink scripts/pre-push'
+check_git_hook 2 'echo x 2>&1 > scripts/guard-push.sh'
+check_git_hook 2 'echo x >/dev/null > scripts/install-hooks.sh'
+check_git_hook 0 'git apply --check guard-fixes-2.patch'
+check_git_hook 0 'patch --dry-run -p1 < x.patch'
+check_git_hook 0 'git stash apply'
+check_git_hook 0 'cat scripts/guard-push.sh 2>&1'
+check_git_hook 0 'scripts/install-hooks.sh 2>&1 | tail -3'
+check_git_hook 0 'lefthook run pre-push-gate > /tmp/gate.log'
+
 # 20,000-character cutoff behaviour and timing (< 500 ms budget)
-python3 - <<'PY' && pass "guard-git 20,000-char cutoff behaviour and latency (<500 ms)" || fail "guard-git 20,000-char cutoff check"
+if python3 - <<'PY'; then
 import json, subprocess, sys, time
 
 hook = ".claude/hooks/guard-git.sh"
@@ -261,9 +439,13 @@ for length, want_rc in [(20000, 0), (20001, 2)]:
         print(f"len={length} rc={res.returncode} (want {want_rc}) elapsed={elapsed_ms:.1f}ms", file=sys.stderr)
         sys.exit(1)
 PY
+  pass "guard-git 20,000-char cutoff behaviour and latency (<500 ms)"
+else
+  fail "guard-git 20,000-char cutoff check"
+fi
 
 echo "=== 5. Criterion 4: Milestone specs M0.3 through M-W.3 ==="
-python3 - <<'PY' && pass "all 23 milestone specs (M0.3..M-W.3) valid" || fail "milestone specs validation"
+if python3 - <<'PY'; then
 import os, re, sys
 
 milestones = [
@@ -293,6 +475,10 @@ for m in milestones:
     if any(not re.match(r"^`\[(auto|manual)\]`\s+\S", b) for _, b in items):
         sys.exit(1)
 PY
+  pass "all 23 milestone specs (M0.3..M-W.3) valid"
+else
+  fail "milestone specs validation"
+fi
 
 echo ""
 echo "test-m02-guards: $passed passed, $failed failed"
