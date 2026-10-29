@@ -47,13 +47,40 @@ scripts/install-hooks.sh               # once per clone: git hooks incl. the pus
 cargo build --workspace
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace          # from M0.3
+cargo nextest run --workspace
 npm ci && npm run build
 npm run tauri dev                      # run the app
+scripts/make-dev-cert.sh               # once per Mac: the signing certificate
 npm run tauri build -- --debug --bundles app
 ```
 
-From M0.3, `lefthook run pre-push` runs the whole quality gate.
+The quality gate (`docs/ENGINEERING.md`) is `scripts/gate.sh`. git's
+pre-push hook runs it after the push guard, through
+`lefthook run pre-push-gate`, and CI runs it on every PR. Run it before you
+push:
+
+```sh
+lefthook run pre-push-gate             # the whole gate, as pre-push runs it
+scripts/gate.sh                        # the same, without lefthook
+```
+
+It runs, stopping at the first failure:
+
+```sh
+cargo fmt --all --check
+npx prettier --check .
+cargo clippy --workspace --all-targets -- -D warnings
+cargo deny check
+cargo machete
+cargo nextest run --workspace
+cargo test --workspace --doc
+scripts/coverage.sh                    # core, transcribe >= 85%; app >= 70%
+npx tsc -b --noEmit
+npx eslint . --max-warnings 0
+npx vitest run
+typos
+scripts/test-guards.sh                 # push guard and Claude hook cases
+```
 
 ## Workflow: every change goes through a pull request
 
