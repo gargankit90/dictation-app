@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Pre-push guard (run by scripts/pre-push). GitHub Free can't protect branches on a
-# private repo, so main is protected here: no pushes to main, no force pushes,
-# no deleting branches or moving tags. Milestones reach main only by PR merge.
+# Pre-push guard. git's pre-push hook runs the copy that scripts/install-hooks.sh
+# installs next to it, and scripts/pre-push runs this one. GitHub Free can't
+# protect branches on a private repo, so main is protected here: no pushes to
+# main, no force pushes, no deleting branches or moving tags. Milestones reach
+# main only by PR merge.
 set -euo pipefail
 
 zero=0000000000000000000000000000000000000000
@@ -12,7 +14,12 @@ refuse() {
   status=1
 }
 
-while read -r local_ref local_sha remote_ref remote_sha; do
+# `|| [ -n ... ]` also checks a last line that has no newline.
+while read -r local_ref local_sha remote_ref remote_sha || [ -n "${local_ref:-}" ]; do
+  # Nothing to push: git sends no lines, which scripts/pre-push passes on as
+  # one blank line.
+  [ -n "${local_ref:-}" ] || continue
+
   case "$remote_ref" in
     refs/heads/main)
       refuse "pushing to main. Open a pull request; the Tester merges it."
