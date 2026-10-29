@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Run by git's pre-push hook (installed by scripts/install-hooks.sh) after the
+# hook has run its own installed copy of the push guard, if this checkout has
+# this file. Runs this checkout's push guard, then the quality gate once M0.3
+# adds it.
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel)
+refs=$(cat)
+
+printf '%s\n' "$refs" | "$root/scripts/guard-push.sh" "$@"

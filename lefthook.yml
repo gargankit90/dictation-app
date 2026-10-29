@@ -1,0 +1,8 @@
+# Git hooks managed by lefthook. M0.3 adds the pre-commit checks and a
+# `pre-push-gate` hook that scripts/pre-push runs.
+#
+# pre-push is NOT managed here: lefthook skips pre-push jobs when it finds no
+# changed files, which would let a push to main through. scripts/install-hooks.sh
+# writes git's pre-push hook itself, plus a copy of scripts/guard-push.sh next
+# to it. The hook always runs that copy (and refuses the push without it), then
+# runs the checkout's scripts/pre-push if the checkout has one.

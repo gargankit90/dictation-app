@@ -11,6 +11,7 @@ focus. Mac first, then Windows. Built with Tauri 2, Rust and React.
 ## Develop
 
 ```sh
+scripts/install-hooks.sh   # once per clone
 npm ci
 npm run tauri dev
 ```
