@@ -58,6 +58,15 @@ skip = [
     { crate = "indexmap@1.9.3", reason = "schemars 0.8 (tauri-utils, tauri-build)" },
     { crate = "miniz_oxide@0.8.9", reason = "png 0.18 (ico via tauri-codegen, muda)" },
     { crate = "syn@2.0.119", reason = "most proc-macros are still on syn 2" },
+    # handy-keys 0.3's Windows backend is on windows 0.58 (tauri: 0.62). We
+    # depend on handy-keys only on macOS, but deny checks every edge against
+    # all `targets`. Revisit with Windows (M-W.1).
+    { crate = "windows@0.58.0", reason = "handy-keys 0.3 (Windows backend)" },
+    { crate = "windows-core@0.58.0", reason = "handy-keys 0.3 (Windows backend)" },
+    { crate = "windows-implement@0.58.0", reason = "handy-keys 0.3 (Windows backend)" },
+    { crate = "windows-interface@0.58.0", reason = "handy-keys 0.3 (Windows backend)" },
+    { crate = "windows-result@0.2.0", reason = "handy-keys 0.3 (Windows backend)" },
+    { crate = "windows-strings@0.1.0", reason = "handy-keys 0.3 (Windows backend)" },
 ]
 
 [sources]

@@ -1,0 +1,9 @@
+dictation-app
+
+This product includes or depends on the following third-party software.
+
+handy-keys 0.3.4 (https://github.com/handy-computer/handy-keys)
+  Global keyboard listener behind the macOS hotkey
+  (crates/platform/src/hotkey/macos.rs). Used as a dependency; no code
+  copied.
+  MIT License, Copyright (c) 2026 handy-computer

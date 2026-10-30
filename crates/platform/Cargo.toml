@@ -19,5 +19,8 @@ dictation-core.workspace = true
 dictation-ports.workspace = true
 hound = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+handy-keys.workspace = true
+
 [dev-dependencies]
 hound.workspace = true
