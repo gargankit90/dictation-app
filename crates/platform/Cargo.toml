@@ -9,4 +9,10 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Fakes of every port for tests in other crates (`fakes`). Never enabled in
+# release builds.
+testing = []
+
 [dependencies]
+dictation-ports.workspace = true
