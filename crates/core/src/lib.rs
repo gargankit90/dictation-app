@@ -2,3 +2,5 @@
 
 #![forbid(unsafe_code)]
 #![warn(clippy::pedantic)]
+
+pub mod error;
