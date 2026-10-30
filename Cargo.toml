@@ -22,6 +22,7 @@ dictation-ports = { path = "crates/ports" }
 tauri = { version = "2.12.5", features = [] }
 tauri-build = { version = "2.7.4", features = [] }
 thiserror = "2.0.21"
+hound = "3.5.1"
 proptest = "1.12.0"
 
 # Every crate opts in with `[lints] workspace = true`. Tests may unwrap

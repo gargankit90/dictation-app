@@ -2,6 +2,7 @@
 //! `transcribe`). Each is cheap to clone; clones share state, so a test keeps
 //! one handle to script or inspect the fake while the pipeline owns another.
 
+mod audio;
 mod clipboard;
 mod clock;
 mod hotkey;
@@ -11,6 +12,7 @@ mod secrets;
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+pub use audio::FileAudioSource;
 pub use clipboard::MemClipboard;
 pub use clock::FakeClock;
 pub use hotkey::FakeHotkey;
