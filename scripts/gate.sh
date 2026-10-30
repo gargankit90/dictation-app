@@ -20,9 +20,9 @@ step cargo clippy --workspace --all-targets -- -D warnings
 step cargo deny check
 step cargo machete
 
-# Rust tests and coverage. `--no-tests=warn` until the first milestone with
-# Rust tests; nextest otherwise fails a workspace with none.
-step cargo nextest run --workspace --no-tests=warn ${NEXTEST_PROFILE:+--profile "$NEXTEST_PROFILE"}
+# Rust tests and coverage. nextest fails a run that finds no tests, so a
+# filter or `#[cfg]` that hides them all can't pass quietly.
+step cargo nextest run --workspace ${NEXTEST_PROFILE:+--profile "$NEXTEST_PROFILE"}
 step cargo test --workspace --doc
 step scripts/coverage.sh
 

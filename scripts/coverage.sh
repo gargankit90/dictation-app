@@ -30,6 +30,8 @@ for entry in "${crates[@]}"; do
 
   cargo llvm-cov clean --workspace >/dev/null 2>&1
   # Test failures fail the script here, before any report is made.
+  # `--no-tests=pass` while `transcribe` and `app` have no tests yet (#29);
+  # the workspace nextest run in gate.sh already fails on zero tests.
   cargo llvm-cov nextest --no-report -p "$package" --no-tests=pass --status-level fail
 
   if ! cargo llvm-cov report -p "$package" --json --summary-only >"$report" 2>"$report.err"; then
