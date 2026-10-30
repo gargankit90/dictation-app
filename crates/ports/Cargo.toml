@@ -10,3 +10,5 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+dictation-core.workspace = true
+thiserror.workspace = true
