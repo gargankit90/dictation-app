@@ -12,7 +12,7 @@
 use std::collections::VecDeque;
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -23,20 +23,54 @@ use dictation_platform::fakes::{
     FakeClock, FakeHotkey, FakeInserter, FakePermissions, FileAudioSource,
 };
 use dictation_ports::{
-    Audio, HotkeyError, HotkeyEvent, InsertError, Permission, PermissionStatus, TranscribeError,
-    Transcriber,
+    Audio, HotkeyError, HotkeyEvent, InsertError, Permission, PermissionStatus, TextInserter,
+    TranscribeError, Transcriber,
 };
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::{Notify, Semaphore};
 
 const HOLD: Duration = Duration::from_millis(500);
 const WAIT: Duration = Duration::from_secs(5);
 
 /// The test-only transcriber (the real mock is M3.1): replies with queued
-/// results, then with fixed text, and records the audio it was given.
-#[derive(Clone, Default)]
+/// results, then with fixed text, and records the audio it was given. The
+/// next transcription can also be made to panic, or to wait for `open()`.
+#[derive(Clone)]
 struct FixedTranscriber {
     replies: Arc<Mutex<VecDeque<Result<String, TranscribeError>>>>,
     calls: Arc<Mutex<Vec<Audio>>>,
+    crash_next: Arc<AtomicBool>,
+    hold_next: Arc<AtomicBool>,
+    gate: Arc<Semaphore>,
+    /// Notified when a held transcription starts waiting.
+    started: Arc<Notify>,
+    /// Held transcriptions dropped before they answered.
+    dropped: Arc<AtomicUsize>,
+}
+
+impl Default for FixedTranscriber {
+    fn default() -> Self {
+        Self {
+            replies: Arc::default(),
+            calls: Arc::default(),
+            crash_next: Arc::default(),
+            hold_next: Arc::default(),
+            gate: Arc::new(Semaphore::new(0)),
+            started: Arc::default(),
+            dropped: Arc::default(),
+        }
+    }
+}
+
+/// Counts a held transcription as dropped unless it answered.
+struct Unanswered(Option<Arc<AtomicUsize>>);
+
+impl Drop for Unanswered {
+    fn drop(&mut self) {
+        if let Some(dropped) = self.0.take() {
+            dropped.fetch_add(1, Ordering::SeqCst);
+        }
+    }
 }
 
 impl FixedTranscriber {
@@ -49,6 +83,31 @@ impl FixedTranscriber {
 
     fn calls(&self) -> Vec<Audio> {
         self.calls.lock().unwrap().clone()
+    }
+
+    /// The next transcription panics, as a crash in an HTTP library would.
+    fn crash_next(&self) {
+        self.crash_next.store(true, Ordering::SeqCst);
+    }
+
+    /// The next transcription waits for `open()` before it answers.
+    fn hold_next(&self) {
+        self.hold_next.store(true, Ordering::SeqCst);
+    }
+
+    /// Waits until the held transcription is waiting.
+    async fn wait_until_held(&self) {
+        tokio::time::timeout(WAIT, self.started.notified())
+            .await
+            .expect("the transcription never started");
+    }
+
+    fn open(&self) {
+        self.gate.add_permits(1);
+    }
+
+    fn dropped(&self) -> usize {
+        self.dropped.load(Ordering::SeqCst)
     }
 }
 
@@ -64,7 +123,39 @@ impl Transcriber for FixedTranscriber {
             .unwrap()
             .pop_front()
             .unwrap_or_else(|| Ok("fixed text".to_owned()));
-        async move { reply }
+        let crash = self.crash_next.swap(false, Ordering::SeqCst);
+        let hold = self.hold_next.swap(false, Ordering::SeqCst);
+        let (gate, started, dropped) = (
+            Arc::clone(&self.gate),
+            Arc::clone(&self.started),
+            Arc::clone(&self.dropped),
+        );
+        async move {
+            assert!(!crash, "the transcriber crashed (on purpose)");
+            if hold {
+                let mut unanswered = Unanswered(Some(dropped));
+                started.notify_one();
+                gate.acquire().await.unwrap().forget();
+                unanswered.0 = None;
+            }
+            reply
+        }
+    }
+}
+
+/// A `FakeInserter` whose next insert can be made to panic.
+struct CrashingInserter {
+    fake: FakeInserter,
+    crash_next: Arc<AtomicBool>,
+}
+
+impl TextInserter for CrashingInserter {
+    fn insert(&self, text: &str) -> Result<(), InsertError> {
+        assert!(
+            !self.crash_next.swap(false, Ordering::SeqCst),
+            "the inserter crashed (on purpose)"
+        );
+        self.fake.insert(text)
     }
 }
 
@@ -104,6 +195,7 @@ struct Harness {
     hotkey: FakeHotkey,
     clock: FakeClock,
     inserter: FakeInserter,
+    crash_insert: Arc<AtomicBool>,
     transcriber: FixedTranscriber,
     permissions: FakePermissions,
     pipeline: Pipeline,
@@ -137,13 +229,17 @@ impl Harness {
         let hotkey = FakeHotkey::new();
         let clock = FakeClock::at(Duration::from_secs(100));
         let inserter = FakeInserter::new();
+        let crash_insert = Arc::new(AtomicBool::new(false));
         let transcriber = FixedTranscriber::default();
         let audio = FileAudioSource::new(setup.audio_path.unwrap_or_else(|| wav.0.clone()));
         let ports = Ports {
             hotkey: hotkey.clone(),
             audio,
             transcriber: transcriber.clone(),
-            inserter: inserter.clone(),
+            inserter: CrashingInserter {
+                fake: inserter.clone(),
+                crash_next: Arc::clone(&crash_insert),
+            },
             permissions: setup.permissions.clone(),
             clock: clock.clone(),
         };
@@ -152,6 +248,7 @@ impl Harness {
             hotkey,
             clock,
             inserter,
+            crash_insert,
             transcriber,
             permissions: setup.permissions,
             pipeline,
@@ -454,4 +551,139 @@ async fn a_hotkey_that_fails_to_start_fails_spawn() {
     };
     let error = Pipeline::spawn(ports, Config::default()).err();
     assert_eq!(error, Some(HotkeyError::PermissionDenied));
+}
+
+#[tokio::test]
+async fn a_transcriber_that_panics_is_an_error_and_the_next_dictation_works() {
+    let mut harness = Harness::start();
+    harness.transcriber.crash_next();
+    harness.dictate();
+    assert_eq!(
+        harness.until_idle().await,
+        [
+            UiEvent::StateChanged(Recording),
+            UiEvent::StateChanged(Transcribing),
+            UiEvent::Error(DictationError::TranscriptionFailed {
+                reason: "the transcriber crashed".into()
+            }),
+            UiEvent::StateChanged(Idle),
+        ]
+    );
+    harness.dictate();
+    assert_eq!(
+        harness.until_idle().await,
+        states(&[Recording, Transcribing, Inserting, Idle])
+    );
+    let (inserter, _) = harness.finish().await;
+    assert_eq!(inserter.inserted(), ["fixed text"]);
+}
+
+#[tokio::test]
+async fn an_inserter_that_panics_is_an_error_and_the_next_dictation_works() {
+    let mut harness = Harness::start();
+    harness.crash_insert.store(true, Ordering::SeqCst);
+    harness.transcriber.reply(Ok("lost"));
+    harness.dictate();
+    assert_eq!(
+        harness.until_idle().await,
+        [
+            UiEvent::StateChanged(Recording),
+            UiEvent::StateChanged(Transcribing),
+            UiEvent::StateChanged(Inserting),
+            UiEvent::Error(DictationError::InsertFailed {
+                reason: "the inserter crashed".into()
+            }),
+            UiEvent::StateChanged(Idle),
+        ]
+    );
+    harness.dictate();
+    harness.until_idle().await;
+    let (inserter, _) = harness.finish().await;
+    assert_eq!(inserter.inserted(), ["fixed text"]);
+}
+
+#[tokio::test]
+async fn shutdown_drops_a_transcription_in_flight_and_inserts_nothing() {
+    let mut harness = Harness::start();
+    harness.transcriber.hold_next();
+    harness.dictate();
+    assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+    assert_eq!(harness.next().await, UiEvent::StateChanged(Transcribing));
+    harness.transcriber.wait_until_held().await;
+
+    let (inserter, transcriber) = harness.finish().await;
+    // Dropped (its request cancelled), not left running.
+    assert_eq!(transcriber.dropped(), 1);
+    transcriber.open();
+    tokio::task::yield_now().await;
+    assert!(inserter.inserted().is_empty());
+}
+
+#[tokio::test]
+async fn a_transcript_that_is_ready_at_shutdown_is_never_inserted() {
+    // Each round, the transcript and the shutdown wake the pipeline task
+    // together. Repeated, because an unbiased select would pick either.
+    for _ in 0..16 {
+        let mut harness = Harness::start();
+        harness.transcriber.hold_next();
+        harness.dictate();
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Transcribing));
+        harness.transcriber.wait_until_held().await;
+
+        harness.transcriber.open();
+        // finish() also checks no Inserting (or any other) UI event came.
+        let (inserter, _) = harness.finish().await;
+        assert!(inserter.inserted().is_empty());
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_queued_tap_comes_before_a_tick_even_five_minutes_later() {
+    // The press and release were stamped 50 ms apart, but the pipeline
+    // task only gets to them when the clock is past the 5-minute limit,
+    // after an idle gap that left a Tick overdue. Repeated, because an
+    // unbiased select would pick that Tick half the time.
+    for _ in 0..16 {
+        let mut harness = Harness::start();
+        tokio::time::advance(Duration::from_secs(1)).await;
+        harness.press();
+        harness.release_after(Duration::from_millis(50));
+        harness.clock.advance(Duration::from_secs(6 * 60));
+        assert_eq!(harness.until_idle().await, states(&[Recording, Idle]));
+        let (inserter, transcriber) = harness.finish().await;
+        assert!(transcriber.calls().is_empty());
+        assert!(inserter.inserted().is_empty());
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_first_tick_comes_a_full_interval_after_the_recording_starts() {
+    let mut harness = Harness::start();
+    // The press reaches the pipeline task when the clock is already past
+    // the limit, so any Tick would end the recording.
+    harness.press();
+    harness.clock.advance(Duration::from_secs(6 * 60));
+    assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+    // No tokio time has passed, so no Tick has come: Esc still cancels.
+    assert!(harness.hotkey.emit(HotkeyEvent::CancelPressed));
+    assert_eq!(harness.next().await, UiEvent::StateChanged(Idle));
+    let (_, transcriber) = harness.finish().await;
+    assert!(transcriber.calls().is_empty());
+}
+
+#[tokio::test]
+async fn a_zero_tick_interval_still_runs() {
+    let mut harness = Harness::with(Setup {
+        config: Config {
+            tick_interval: Duration::ZERO,
+        },
+        ..Setup::default()
+    });
+    harness.dictate();
+    assert_eq!(
+        harness.until_idle().await,
+        states(&[Recording, Transcribing, Inserting, Idle])
+    );
+    harness.finish().await;
 }
