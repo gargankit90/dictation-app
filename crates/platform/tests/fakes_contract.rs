@@ -17,8 +17,9 @@ use dictation_platform::fakes::{
     MemSecretStore,
 };
 use dictation_ports::{
-    AudioError, AudioSource, Clipboard, Clock, HotkeyEvent, HotkeySink, HotkeySource, InsertError,
-    Permission, PermissionStatus, Permissions, Secret, SecretStore, TextInserter,
+    AudioError, AudioSource, Clipboard, ClipboardMarkers, Clock, HotkeyEvent, HotkeySink,
+    HotkeySource, InsertError, Permission, PermissionStatus, Permissions, Secret, SecretStore,
+    TextInserter,
 };
 
 // Helpers sit in a `cfg(test)` module so clippy's allow-unwrap-in-tests
@@ -397,4 +398,128 @@ fn fakes_fit_the_ports_as_trait_objects() {
     let _: Box<dyn Permissions> = Box::new(FakePermissions::new());
     let _: Box<dyn Clock> = Box::new(FakeClock::new());
     let _ = boxed(FakeHotkey::new());
+}
+
+// --- Run 2: review round 1 fixes ----------------------------------------------
+
+/// A 16 kHz mono PCM WAV with a hand-written header claiming
+/// `bits_per_sample`, which hound won't write itself.
+#[cfg(test)]
+fn pcm_header_wav(bits_per_sample: u16) -> TempFile {
+    let block_align = bits_per_sample.div_ceil(8).max(1);
+    let data = vec![0u8; usize::from(block_align) * 2];
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&u32::try_from(36 + data.len()).unwrap().to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&16_000u32.to_le_bytes());
+    bytes.extend_from_slice(&(16_000 * u32::from(block_align)).to_le_bytes());
+    bytes.extend_from_slice(&block_align.to_le_bytes());
+    bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
+    bytes.extend_from_slice(&data);
+    TempFile::bytes(&bytes)
+}
+
+#[test]
+fn unsupported_sample_widths_are_an_error_not_a_panic() {
+    for bits in [0, 33, 64] {
+        let wav = pcm_header_wav(bits);
+        let mut source = FileAudioSource::new(&wav.0);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| source.start()));
+        let result = result.unwrap_or_else(|_| panic!("{bits}-bit header panicked"));
+        assert!(result.is_err(), "{bits}-bit header was accepted");
+        assert!(
+            !source.is_recording(),
+            "{bits}-bit header left it recording"
+        );
+    }
+}
+
+#[test]
+fn audio_clones_share_state_across_threads() {
+    let wav = TempFile::wav(int_spec(1, 16), &[16_384i16]);
+    let mut source = FileAudioSource::new(&wav.0);
+    let mut handle = source.clone();
+    thread::spawn(move || handle.start().unwrap())
+        .join()
+        .unwrap();
+    assert!(source.is_recording());
+    assert_eq!(source.stop().unwrap().samples, [0.5]);
+    assert!(!source.is_recording());
+}
+
+/// The paste flow through the port trait only.
+#[cfg(test)]
+fn dictate(
+    clipboard: &dyn Clipboard,
+    text: &str,
+) -> (Option<String>, dictation_ports::SessionMarker) {
+    let previous = clipboard.read_text().unwrap();
+    (previous, clipboard.write_dictation(text).unwrap())
+}
+
+#[test]
+fn dictation_write_is_marked_and_restored_when_untouched() {
+    let clipboard = MemClipboard::with_text("user's text");
+    let handle = clipboard.clone();
+    let (previous, session) = dictate(&handle, "hello");
+    assert_eq!(clipboard.markers(), ClipboardMarkers::DICTATION);
+    assert_eq!(clipboard.session().as_ref(), Some(&session));
+    assert_eq!(clipboard.read_text(), Ok(Some("hello".into())));
+
+    let restored =
+        thread::spawn(move || handle.restore_if_unchanged(&session, previous.as_deref()))
+            .join()
+            .unwrap();
+    assert_eq!(restored, Ok(true));
+    assert_eq!(clipboard.read_text(), Ok(Some("user's text".into())));
+    assert_eq!(clipboard.markers(), ClipboardMarkers::NONE);
+    assert_eq!(clipboard.session(), None);
+}
+
+#[test]
+fn restore_skipped_when_user_copied_in_between() {
+    let clipboard = MemClipboard::with_text("old");
+    let (previous, session) = dictate(&clipboard, "hello");
+    clipboard.user_copies("new copy");
+    assert_eq!(
+        clipboard.restore_if_unchanged(&session, previous.as_deref()),
+        Ok(false)
+    );
+    assert_eq!(clipboard.read_text(), Ok(Some("new copy".into())));
+    assert_eq!(clipboard.markers(), ClipboardMarkers::NONE);
+}
+
+#[test]
+fn restore_skipped_after_a_plain_write_text() {
+    let clipboard = MemClipboard::with_text("old");
+    let (previous, session) = dictate(&clipboard, "hello");
+    clipboard.write_text("hello").unwrap();
+    assert_eq!(clipboard.session(), None);
+    assert_eq!(
+        clipboard.restore_if_unchanged(&session, previous.as_deref()),
+        Ok(false)
+    );
+    assert_eq!(clipboard.read_text(), Ok(Some("hello".into())));
+}
+
+#[test]
+fn a_session_restores_only_once() {
+    let clipboard = MemClipboard::with_text("old");
+    let (previous, session) = dictate(&clipboard, "hello");
+    assert_eq!(
+        clipboard.restore_if_unchanged(&session, previous.as_deref()),
+        Ok(true)
+    );
+    clipboard.user_copies("later");
+    assert_eq!(
+        clipboard.restore_if_unchanged(&session, previous.as_deref()),
+        Ok(false)
+    );
+    assert_eq!(clipboard.read_text(), Ok(Some("later".into())));
 }
