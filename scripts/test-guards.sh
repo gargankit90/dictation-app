@@ -4,7 +4,16 @@
 # Part of the quality gate. Needs git and jq; touches nothing outside a temp dir.
 set -euo pipefail
 
-root=$(git rev-parse --show-toplevel)
+# Found from this file, not from git: the repo variables below are cleared.
+root=$(cd "$(dirname "$0")/.." && pwd -P)
+
+# git's pre-push hook exports GIT_DIR (and from a linked worktree it is an
+# absolute path), and an inherited GIT_DIR beats `git -C <scratch>`: the
+# scratch-repo commands below would then rewrite the real repo. Clear every
+# repo-local variable git knows about, once, before any git command runs.
+# shellcheck disable=SC2046 # word splitting is wanted: one name per word
+unset $(git rev-parse --local-env-vars)
+
 guard="$root/scripts/guard-push.sh"
 pre_push="$root/scripts/pre-push"
 hook="$root/.claude/hooks/guard-git.sh"
@@ -24,11 +33,16 @@ check() { # name expected-exit actual-exit
 
 # --- push guard -----------------------------------------------------------
 
-tmp=$(mktemp -d)
+tmp=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$tmp"' EXIT
 
 g() { git -C "$tmp" -c user.name=test -c user.email=test@example.invalid "$@"; }
 g init -q -b work
+# Refuse to go on unless git really is working in the scratch repo.
+if [ "$(g rev-parse --absolute-git-dir)" != "$tmp/.git" ]; then
+  echo "test-guards: scratch repo resolves to $(g rev-parse --absolute-git-dir), not $tmp/.git; stopping before it touches a real repo" >&2
+  exit 1
+fi
 g commit -q --allow-empty -m a
 a=$(g rev-parse HEAD)
 g commit -q --allow-empty -m b
@@ -63,7 +77,7 @@ push "one bad ref refuses the push" 1 \
 # allowed one would go on to run the full gate, which runs this script.
 pre_push_refuses() { # name refs-line
   local code=0
-  printf '%s\n' "$2" | "$pre_push" origin git@example.invalid:r.git 2>/dev/null || code=$?
+  (cd "$root" && printf '%s\n' "$2" | "$pre_push" origin git@example.invalid:r.git) 2>/dev/null || code=$?
   check "pre-push: $1" 1 "$code"
 }
 pre_push_refuses "push to main is refused" "refs/heads/x $zero refs/heads/main $zero"
@@ -138,6 +152,31 @@ allowed "cat lefthook.yml"
 allowed "gh pr create --base main --head m1-x"
 allowed "gh pr comment 3 --body 'Tester: PASS'"
 allowed "cargo clippy --workspace --all-targets -- -D warnings"
+
+# --- isolation from an inherited GIT_DIR ----------------------------------
+
+# Run this script again the way git's pre-push hook does from a linked
+# worktree: GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE exported, here pointing
+# at a throwaway repo. The run must pass and leave that repo exactly as it was.
+if [ -z "${TEST_GUARDS_NESTED:-}" ]; then
+  bait="$tmp/inherited"
+  git init -q -b bait "$bait"
+  git -C "$bait" -c user.name=test -c user.email=test@example.invalid commit -q --allow-empty -m bait
+  snapshot() {
+    git -C "$bait" symbolic-ref HEAD
+    git -C "$bait" rev-parse HEAD
+    git -C "$bait" for-each-ref --format='%(refname) %(objectname)'
+    git -C "$bait" config --local --list
+    git -C "$bait" count-objects
+  }
+  before=$(snapshot)
+  code=0
+  TEST_GUARDS_NESTED=1 GIT_DIR="$bait/.git" GIT_WORK_TREE="$bait" GIT_INDEX_FILE="$bait/.git/index" \
+    "$root/scripts/test-guards.sh" >/dev/null 2>&1 || code=$?
+  check "isolation: run with an inherited GIT_DIR passes" 0 "$code"
+  if [ "$(snapshot)" = "$before" ]; then same=0; else same=1; fi
+  check "isolation: the inherited GIT_DIR's repo is untouched" 0 "$same"
+fi
 
 echo "test-guards: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
