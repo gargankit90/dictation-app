@@ -46,6 +46,9 @@ step no_tauri_in_pipeline
 # Rust tests and coverage. nextest fails a run that finds no tests, so a
 # filter or `#[cfg]` that hides them all can't pass quietly.
 step cargo nextest run --workspace ${NEXTEST_PROFILE:+--profile "$NEXTEST_PROFILE"}
+# Platform's black-box tests of the fakes need feature `testing` (#35).
+# The workspace run gets it only through app's dev-dependency, so name it.
+step cargo nextest run -p dictation-platform --features testing ${NEXTEST_PROFILE:+--profile "$NEXTEST_PROFILE"}
 step cargo test --workspace --doc
 # Fakes only with feature `testing` (M1.2). `app` dev-depends on platform
 # with it, which turns it on for the workspace run above, so check the
