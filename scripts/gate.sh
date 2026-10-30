@@ -38,8 +38,12 @@ step cargo clippy --workspace --all-targets -- -D warnings
 step cargo deny check
 step cargo machete
 # The pipeline holds no Tauri types (docs/ENGINEERING.md, M1.3).
+# The tree is captured first, so a cargo tree failure fails the step
+# instead of being negated by the `!` (#43).
 no_tauri_in_pipeline() {
-  ! cargo tree -p dictation-pipeline -e normal,build --prefix none | grep -q '^tauri'
+  local tree
+  tree=$(cargo tree -p dictation-pipeline -e normal,build --prefix none)
+  ! grep -q '^tauri' <<<"$tree"
 }
 step no_tauri_in_pipeline
 
