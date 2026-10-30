@@ -4,13 +4,17 @@
 //! Times are [`Duration`]s since an arbitrary monotonic origin chosen by the
 //! app layer (its `Clock`), so the coordinator never reads a clock itself.
 
+use std::fmt;
 use std::time::Duration;
 
 use crate::coordinator::Phase;
 use crate::error::{DictationError, Permission};
 
 /// Something that happened, reported to the coordinator by the app layer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Debug` shows a transcript's length, never its text, so events can be
+/// logged (`docs/ENGINEERING.md`).
+#[derive(Clone, PartialEq, Eq)]
 pub enum Event {
     /// The dictation hotkey went down at this time.
     HotkeyPressed(Duration),
@@ -34,12 +38,15 @@ pub enum Event {
     InsertDone,
     /// Inserting failed; `reason` is a short, user-safe summary.
     InsertFailed(String),
-    /// A hotkey press found a permission missing, so recording must not start.
+    /// A required permission is missing: on a hotkey press, so recording
+    /// must not start, or revoked while recording, which discards it.
     PermissionMissing(Permission),
 }
 
 /// Something the app layer must do, emitted by the coordinator.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Debug` shows the length of text to insert, never the text.
+#[derive(Clone, PartialEq, Eq)]
 pub enum Command {
     /// Start capturing audio from the microphone.
     StartRecording,
@@ -55,4 +62,95 @@ pub enum Command {
     ShowError(DictationError),
     /// The coordinator moved to this phase (for the UI and tray).
     StateChanged(Phase),
+}
+
+impl fmt::Debug for Event {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Event::HotkeyPressed(at) => f.debug_tuple("HotkeyPressed").field(at).finish(),
+            Event::HotkeyReleased(at) => f.debug_tuple("HotkeyReleased").field(at).finish(),
+            Event::CancelPressed => f.write_str("CancelPressed"),
+            Event::Tick(now) => f.debug_tuple("Tick").field(now).finish(),
+            Event::AudioCaptured => f.write_str("AudioCaptured"),
+            Event::TranscriptReady(text) => f
+                .debug_struct("TranscriptReady")
+                .field("len", &text.len())
+                .finish(),
+            Event::TranscriptionFailed(reason) => {
+                f.debug_tuple("TranscriptionFailed").field(reason).finish()
+            }
+            Event::InsertDone => f.write_str("InsertDone"),
+            Event::InsertFailed(reason) => f.debug_tuple("InsertFailed").field(reason).finish(),
+            Event::PermissionMissing(permission) => f
+                .debug_tuple("PermissionMissing")
+                .field(permission)
+                .finish(),
+        }
+    }
+}
+
+impl fmt::Debug for Command {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Command::StartRecording => f.write_str("StartRecording"),
+            Command::StopRecording => f.write_str("StopRecording"),
+            Command::DiscardRecording => f.write_str("DiscardRecording"),
+            Command::Transcribe => f.write_str("Transcribe"),
+            Command::Insert(text) => f.debug_struct("Insert").field("len", &text.len()).finish(),
+            Command::ShowError(error) => f.debug_tuple("ShowError").field(error).finish(),
+            Command::StateChanged(phase) => f.debug_tuple("StateChanged").field(phase).finish(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_shows_transcript_length_not_text() {
+        let event = format!("{:?}", Event::TranscriptReady("secret words".into()));
+        let command = format!("{:?}", Command::Insert("secret words".into()));
+        assert_eq!(event, "TranscriptReady { len: 12 }");
+        assert_eq!(command, "Insert { len: 12 }");
+    }
+
+    #[test]
+    fn debug_of_other_variants_is_unchanged() {
+        let ms = Duration::from_millis(5);
+        let events = [
+            (Event::HotkeyPressed(ms), "HotkeyPressed(5ms)"),
+            (Event::HotkeyReleased(ms), "HotkeyReleased(5ms)"),
+            (Event::CancelPressed, "CancelPressed"),
+            (Event::Tick(ms), "Tick(5ms)"),
+            (Event::AudioCaptured, "AudioCaptured"),
+            (
+                Event::TranscriptionFailed("x".into()),
+                "TranscriptionFailed(\"x\")",
+            ),
+            (Event::InsertDone, "InsertDone"),
+            (Event::InsertFailed("x".into()), "InsertFailed(\"x\")"),
+            (
+                Event::PermissionMissing(Permission::Microphone),
+                "PermissionMissing(Microphone)",
+            ),
+        ];
+        for (event, debug) in events {
+            assert_eq!(format!("{event:?}"), debug);
+        }
+        let commands = [
+            (Command::StartRecording, "StartRecording"),
+            (Command::StopRecording, "StopRecording"),
+            (Command::DiscardRecording, "DiscardRecording"),
+            (Command::Transcribe, "Transcribe"),
+            (
+                Command::ShowError(DictationError::EmptyTranscript),
+                "ShowError(EmptyTranscript)",
+            ),
+            (Command::StateChanged(Phase::Idle), "StateChanged(Idle)"),
+        ];
+        for (command, debug) in commands {
+            assert_eq!(format!("{command:?}"), debug);
+        }
+    }
 }

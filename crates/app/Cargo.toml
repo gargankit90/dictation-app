@@ -10,3 +10,12 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+dictation-core.workspace = true
+dictation-ports.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+dictation-platform = { workspace = true, features = ["testing"] }
+hound.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "test-util"] }

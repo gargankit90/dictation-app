@@ -37,11 +37,27 @@ step npx prettier --check .
 step cargo clippy --workspace --all-targets -- -D warnings
 step cargo deny check
 step cargo machete
+# The pipeline holds no Tauri types (docs/ENGINEERING.md, M1.3).
+# The tree is captured first, so a cargo tree failure fails the step
+# instead of being negated by the `!` (#43).
+no_tauri_in_pipeline() {
+  local tree
+  tree=$(cargo tree -p dictation-pipeline -e normal,build --prefix none)
+  ! grep -q '^tauri' <<<"$tree"
+}
+step no_tauri_in_pipeline
 
 # Rust tests and coverage. nextest fails a run that finds no tests, so a
 # filter or `#[cfg]` that hides them all can't pass quietly.
 step cargo nextest run --workspace ${NEXTEST_PROFILE:+--profile "$NEXTEST_PROFILE"}
+# Platform's black-box tests of the fakes need feature `testing` (#35).
+# The workspace run gets it only through app's dev-dependency, so name it.
+step cargo nextest run -p dictation-platform --features testing ${NEXTEST_PROFILE:+--profile "$NEXTEST_PROFILE"}
 step cargo test --workspace --doc
+# Fakes only with feature `testing` (M1.2). `app` dev-depends on platform
+# with it, which turns it on for the workspace run above, so check the
+# platform crate on its own, where its compile_fail doctest runs.
+step cargo test -p dictation-platform --doc
 step scripts/coverage.sh
 
 # TypeScript
