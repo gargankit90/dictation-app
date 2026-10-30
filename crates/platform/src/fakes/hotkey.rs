@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use dictation_ports::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};
@@ -8,6 +9,10 @@ use super::lock;
 /// as soon as it starts, and [`emit`](Self::emit) sends more while it
 /// listens. Unlike a real source, the sink runs on the caller's thread
 /// (inside `start` or `emit`).
+///
+/// The sink is called without the fake's lock held, so it may call back
+/// into the fake: `is_listening`, `stop`, or `emit` (that event is queued
+/// and delivered, in order, after the current one returns).
 #[derive(Clone, Default)]
 pub struct FakeHotkey {
     state: Arc<Mutex<State>>,
@@ -16,7 +21,11 @@ pub struct FakeHotkey {
 #[derive(Default)]
 struct State {
     script: Vec<HotkeyEvent>,
+    listening: bool,
+    /// `None` while listening only during a sink call (it is taken out).
     sink: Option<HotkeySink>,
+    queue: VecDeque<HotkeyEvent>,
+    delivering: bool,
     fail_start: Option<HotkeyError>,
 }
 
@@ -38,13 +47,15 @@ impl FakeHotkey {
     /// Sends `event` to the sink. Returns whether anyone was listening; like
     /// a real key press, an event while stopped is lost.
     pub fn emit(&self, event: HotkeyEvent) -> bool {
-        match lock(&self.state).sink.as_mut() {
-            Some(sink) => {
-                sink(event);
-                true
+        {
+            let mut state = lock(&self.state);
+            if !state.listening {
+                return false;
             }
-            None => false,
+            state.queue.push_back(event);
         }
+        self.deliver();
+        true
     }
 
     /// Makes the next [`start`](HotkeySource::start) fail with `error`.
@@ -55,28 +66,67 @@ impl FakeHotkey {
     /// Whether the source is listening.
     #[must_use]
     pub fn is_listening(&self) -> bool {
-        lock(&self.state).sink.is_some()
+        lock(&self.state).listening
+    }
+
+    /// Sends queued events to the sink, one at a time, with the lock
+    /// released during each call. A nested call (from inside the sink)
+    /// returns at once; the outer one delivers what it queued.
+    fn deliver(&self) {
+        let mut state = lock(&self.state);
+        if state.delivering {
+            return;
+        }
+        state.delivering = true;
+        while state.listening {
+            let Some(event) = state.queue.pop_front() else {
+                break;
+            };
+            let Some(mut sink) = state.sink.take() else {
+                break;
+            };
+            drop(state);
+            sink(event);
+            state = lock(&self.state);
+            // Not if the sink stopped the source (or restarted it with a
+            // new sink).
+            if state.listening && state.sink.is_none() {
+                state.sink = Some(sink);
+            }
+        }
+        state.queue.clear();
+        state.delivering = false;
     }
 }
 
 impl HotkeySource for FakeHotkey {
-    fn start(&mut self, mut sink: HotkeySink) -> Result<(), HotkeyError> {
-        let mut state = lock(&self.state);
-        if state.sink.is_some() {
-            return Err(HotkeyError::AlreadyStarted);
+    fn start(&mut self, sink: HotkeySink) -> Result<(), HotkeyError> {
+        {
+            let mut state = lock(&self.state);
+            if state.listening {
+                return Err(HotkeyError::AlreadyStarted);
+            }
+            if let Some(error) = state.fail_start.take() {
+                return Err(error);
+            }
+            let script = std::mem::take(&mut state.script);
+            state.queue.extend(script);
+            state.listening = true;
+            state.sink = Some(sink);
         }
-        if let Some(error) = state.fail_start.take() {
-            return Err(error);
-        }
-        for event in std::mem::take(&mut state.script) {
-            sink(event);
-        }
-        state.sink = Some(sink);
+        self.deliver();
         Ok(())
     }
 
     fn stop(&mut self) {
-        lock(&self.state).sink = None;
+        let sink = {
+            let mut state = lock(&self.state);
+            state.listening = false;
+            state.queue.clear();
+            state.sink.take()
+        };
+        // Dropped without the lock, in case dropping it calls back in.
+        drop(sink);
     }
 }
 
@@ -154,5 +204,42 @@ mod tests {
         let mut hotkey = FakeHotkey::new();
         hotkey.stop();
         assert!(!hotkey.is_listening());
+    }
+
+    #[test]
+    fn the_sink_can_call_back_into_the_fake() {
+        let mut hotkey = FakeHotkey::scripted([Pressed]);
+        let handle = hotkey.clone();
+        let (tx, rx) = mpsc::channel();
+        hotkey
+            .start(Box::new(move |event| {
+                // Neither call deadlocks: the lock isn't held here.
+                let _ = tx.send((event, handle.is_listening()));
+                if event == Pressed {
+                    assert!(handle.emit(Released));
+                }
+            }))
+            .unwrap();
+        assert!(hotkey.emit(CancelPressed));
+        assert_eq!(
+            rx.try_iter().collect::<Vec<_>>(),
+            [(Pressed, true), (Released, true), (CancelPressed, true)]
+        );
+    }
+
+    #[test]
+    fn stop_from_inside_the_sink_drops_the_rest() {
+        let mut hotkey = FakeHotkey::scripted([Pressed, Released]);
+        let mut handle = hotkey.clone();
+        let (tx, rx) = mpsc::channel();
+        hotkey
+            .start(Box::new(move |event| {
+                let _ = tx.send(event);
+                handle.stop();
+            }))
+            .unwrap();
+        assert!(!hotkey.is_listening());
+        assert!(!hotkey.emit(Pressed));
+        assert_eq!(rx.try_iter().collect::<Vec<_>>(), [Pressed]);
     }
 }
