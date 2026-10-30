@@ -15,3 +15,4 @@
 pub mod fakes;
 
 pub mod hotkey;
+pub mod permissions;
