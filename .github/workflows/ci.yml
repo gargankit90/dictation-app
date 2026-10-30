@@ -17,9 +17,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Linux while nothing in the gate is Mac-specific: macOS minutes cost 10x and
-  # often queue for a runner. A macOS job (and later Windows, M-W.1) is added in
-  # the first milestone with #[cfg(target_os)] code or a Mac-only gate step.
+  # The full gate runs on Linux: macOS minutes cost 10x and often queue for a
+  # runner. The `macos` job below covers the #[cfg(target_os = "macos")] code
+  # in crates/platform, which Linux compiles out. Windows comes with M-W.1.
   gate:
     name: Quality gate (Linux)
     runs-on: ubuntu-24.04
@@ -57,3 +57,29 @@ jobs:
 
       - name: Quality gate
         run: scripts/gate.sh
+
+  # The Mac-only code in dictation-platform (hotkey, Accessibility, Secure
+  # Input): build, lint and test it where it compiles (#10).
+  macos:
+    name: Platform crate (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      NEXTEST_PROFILE: ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install # reads rust-toolchain.toml
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-nextest@0.9.149
+
+      - run: cargo build -p dictation-platform --all-targets --all-features
+      - run: cargo clippy -p dictation-platform --all-targets --all-features -- -D warnings
+      - run: cargo nextest run -p dictation-platform --all-features --profile ci
+      - run: cargo test -p dictation-platform --doc --all-features
