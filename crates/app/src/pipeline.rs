@@ -337,3 +337,140 @@ where
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::future::{Future, pending};
+
+    use dictation_platform::fakes::{FakeClock, FakeHotkey, FakeInserter, FakePermissions};
+
+    use super::*;
+
+    /// Captures nothing, instantly.
+    struct SilentAudio(bool);
+
+    impl AudioSource for SilentAudio {
+        fn start(&mut self) -> Result<(), AudioError> {
+            self.0 = true;
+            Ok(())
+        }
+
+        fn stop(&mut self) -> Result<Audio, AudioError> {
+            self.0 = false;
+            Ok(Audio {
+                sample_rate: 16_000,
+                samples: Vec::new(),
+            })
+        }
+
+        fn discard(&mut self) {
+            self.0 = false;
+        }
+
+        fn is_recording(&self) -> bool {
+            self.0
+        }
+    }
+
+    /// Never answers, so the only transcription results are the ones the
+    /// test sends.
+    struct SilentTranscriber;
+
+    impl Transcriber for SilentTranscriber {
+        fn transcribe(
+            &self,
+            _audio: &Audio,
+        ) -> impl Future<Output = Result<String, TranscribeError>> + Send {
+            pending()
+        }
+    }
+
+    type TestRunner = Runner<
+        FakeHotkey,
+        SilentAudio,
+        SilentTranscriber,
+        FakeInserter,
+        FakePermissions,
+        FakeClock,
+    >;
+
+    fn runner(inserter: &FakeInserter) -> (TestRunner, mpsc::UnboundedReceiver<JobResult>) {
+        let (ui, _) = mpsc::unbounded_channel();
+        let (results_tx, results) = mpsc::unbounded_channel();
+        let runner = Runner {
+            state: State::Idle,
+            hotkey: FakeHotkey::new(),
+            audio: SilentAudio(false),
+            transcriber: Arc::new(SilentTranscriber),
+            inserter: Arc::new(inserter.clone()),
+            permissions: FakePermissions::all_granted(),
+            clock: Arc::new(FakeClock::new()),
+            ui,
+            results_tx,
+            captured: None,
+            job: 0,
+            pending: VecDeque::new(),
+        };
+        (runner, results)
+    }
+
+    fn key(runner: &mut TestRunner, key: HotkeyEvent, at_ms: u64) {
+        if let Some(event) = runner.key_event(key, Duration::from_millis(at_ms)) {
+            runner.feed(event);
+        }
+    }
+
+    fn deliver(runner: &mut TestRunner, result: JobResult) {
+        if let Some(event) = runner.job_event(result) {
+            runner.feed(event);
+        }
+    }
+
+    async fn next_insert(results: &mut mpsc::UnboundedReceiver<JobResult>) -> JobResult {
+        tokio::time::timeout(Duration::from_secs(5), results.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_late_transcript_from_an_earlier_dictation_is_never_inserted() {
+        let inserter = FakeInserter::new();
+        let (mut runner, mut results) = runner(&inserter);
+
+        // Dictation 1 (job 1) completes.
+        key(&mut runner, HotkeyEvent::Pressed, 0);
+        key(&mut runner, HotkeyEvent::Released, 500);
+        assert_eq!(runner.job, 1);
+        deliver(&mut runner, JobResult::Transcribed(1, Ok("first".into())));
+        let inserted = next_insert(&mut results).await;
+        deliver(&mut runner, inserted);
+        assert_eq!(runner.state, State::Idle);
+
+        // Dictation 2 is cancelled; dictation 3 is transcribing (job 3).
+        key(&mut runner, HotkeyEvent::Pressed, 1_000);
+        key(&mut runner, HotkeyEvent::CancelPressed, 1_100);
+        assert_eq!(runner.state, State::Idle);
+        key(&mut runner, HotkeyEvent::Pressed, 2_000);
+        key(&mut runner, HotkeyEvent::Released, 2_500);
+        assert_eq!((runner.state, runner.job), (State::Transcribing, 3));
+
+        // A late copy of job 1's transcript arrives while the coordinator
+        // would accept a transcript: the job id drops it.
+        deliver(&mut runner, JobResult::Transcribed(1, Ok("stale".into())));
+        assert_eq!(runner.state, State::Transcribing);
+
+        // A late insert result can't end the current dictation either.
+        deliver(
+            &mut runner,
+            JobResult::Inserted(2, Err(InsertError::SecureInput)),
+        );
+        assert_eq!(runner.state, State::Transcribing);
+
+        deliver(&mut runner, JobResult::Transcribed(3, Ok("third".into())));
+        let inserted = next_insert(&mut results).await;
+        deliver(&mut runner, inserted);
+        assert_eq!(runner.state, State::Idle);
+        assert_eq!(inserter.inserted(), ["first", "third"]);
+    }
+}
