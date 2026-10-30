@@ -44,7 +44,7 @@ mod secrets;
 mod transcribe;
 
 pub use audio::{Audio, AudioError, AudioSource};
-pub use clipboard::{Clipboard, ClipboardError};
+pub use clipboard::{Clipboard, ClipboardError, ClipboardMarkers, SessionMarker};
 pub use clock::Clock;
 pub use dictation_core::error::Permission;
 pub use hotkey::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};

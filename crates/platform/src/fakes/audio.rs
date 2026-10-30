@@ -1,19 +1,22 @@
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use dictation_ports::{Audio, AudioError, AudioSource};
+
+use super::lock;
 
 /// An [`AudioSource`] that "records" a WAV file: [`start`](AudioSource::start)
 /// reads the file and [`stop`](AudioSource::stop) returns its audio, mixed
 /// down to mono, as `-1.0..=1.0` samples at the file's own sample rate (no
-/// resampling).
+/// resampling). Clones share the recording, like the other fakes.
 ///
-/// A missing file is [`AudioError::NoDevice`]; an unreadable one is
-/// [`AudioError::Device`].
+/// A missing file is [`AudioError::NoDevice`]; an unreadable one, or one
+/// with an unsupported sample width, is [`AudioError::Device`].
 #[derive(Debug, Clone)]
 pub struct FileAudioSource {
-    path: PathBuf,
-    captured: Option<Audio>,
+    path: Arc<PathBuf>,
+    captured: Arc<Mutex<Option<Audio>>>,
 }
 
 impl FileAudioSource {
@@ -22,31 +25,32 @@ impl FileAudioSource {
     #[must_use]
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self {
-            path: path.into(),
-            captured: None,
+            path: Arc::new(path.into()),
+            captured: Arc::new(Mutex::new(None)),
         }
     }
 }
 
 impl AudioSource for FileAudioSource {
     fn start(&mut self) -> Result<(), AudioError> {
-        if self.captured.is_some() {
+        let mut captured = lock(&self.captured);
+        if captured.is_some() {
             return Err(AudioError::AlreadyRecording);
         }
-        self.captured = Some(read_wav(&self.path)?);
+        *captured = Some(read_wav(&self.path)?);
         Ok(())
     }
 
     fn stop(&mut self) -> Result<Audio, AudioError> {
-        self.captured.take().ok_or(AudioError::NotRecording)
+        lock(&self.captured).take().ok_or(AudioError::NotRecording)
     }
 
     fn discard(&mut self) {
-        self.captured = None;
+        *lock(&self.captured) = None;
     }
 
     fn is_recording(&self) -> bool {
-        self.captured.is_some()
+        lock(&self.captured).is_some()
     }
 }
 
@@ -62,6 +66,15 @@ fn read_wav(path: &Path) -> Result<Audio, AudioError> {
             .collect::<Result<_, _>>()
             .map_err(|error| device_error(path, &error))?,
         hound::SampleFormat::Int => {
+            // hound accepts headers it can't decode into i32 (e.g. 64-bit
+            // PCM); check before shifting so they error instead of panicking.
+            if !(1..=32).contains(&spec.bits_per_sample) {
+                return Err(AudioError::Device(format!(
+                    "cannot read {}: unsupported {}-bit samples",
+                    path.display(),
+                    spec.bits_per_sample
+                )));
+            }
             let full_scale = f64::from(1u32 << (spec.bits_per_sample - 1));
             reader
                 .into_samples::<i32>()
@@ -233,5 +246,70 @@ mod tests {
         let mut source = FileAudioSource::new(&path);
         assert!(matches!(source.start(), Err(AudioError::Device(_))));
         assert!(!source.is_recording());
+    }
+
+    /// A 16 kHz mono PCM WAV with a hand-written header, so it can claim
+    /// sample widths hound won't write.
+    fn raw_pcm_wav(bits_per_sample: u16, block_align: u16, data: &[u8]) -> TempWav {
+        let mut bytes = Vec::new();
+        let riff_len = u32::try_from(36 + data.len()).unwrap();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&riff_len.to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // mono
+        bytes.extend_from_slice(&16_000u32.to_le_bytes());
+        bytes.extend_from_slice(&(16_000 * u32::from(block_align)).to_le_bytes());
+        bytes.extend_from_slice(&block_align.to_le_bytes());
+        bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
+        bytes.extend_from_slice(data);
+        let wav = TempWav(TempWav::path());
+        fs::write(&wav.0, bytes).unwrap();
+        wav
+    }
+
+    #[test]
+    fn samples_wider_than_32_bits_are_a_device_error_not_a_panic() {
+        let wav = raw_pcm_wav(64, 8, &[0; 16]);
+        let mut source = FileAudioSource::new(&wav.0);
+        assert!(matches!(source.start(), Err(AudioError::Device(_))));
+        assert!(!source.is_recording());
+    }
+
+    #[test]
+    fn zero_bit_samples_are_a_device_error_not_a_panic() {
+        let wav = raw_pcm_wav(0, 1, &[0; 4]);
+        let mut source = FileAudioSource::new(&wav.0);
+        assert!(matches!(source.start(), Err(AudioError::Device(_))));
+        assert!(!source.is_recording());
+    }
+
+    #[test]
+    fn a_hand_written_16_bit_header_reads_like_hounds_own() {
+        let wav = raw_pcm_wav(16, 2, &[0x00, 0x40, 0x00, 0xC0]);
+        let mut source = FileAudioSource::new(&wav.0);
+        source.start().unwrap();
+        assert_eq!(source.stop().unwrap().samples, [0.5, -0.5]);
+    }
+
+    #[test]
+    fn clones_share_the_recording() {
+        let wav = TempWav::int16(16_000, 1, &[16_384]);
+        let mut source = FileAudioSource::new(&wav.0);
+        let mut handle = source.clone();
+
+        source.start().unwrap();
+        assert!(handle.is_recording());
+        assert_eq!(handle.start(), Err(AudioError::AlreadyRecording));
+        assert_eq!(handle.stop().unwrap().samples, [0.5]);
+        assert!(!source.is_recording());
+        assert_eq!(source.stop(), Err(AudioError::NotRecording));
+
+        handle.start().unwrap();
+        source.discard();
+        assert!(!handle.is_recording());
     }
 }

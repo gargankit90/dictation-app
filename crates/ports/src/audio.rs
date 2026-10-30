@@ -53,8 +53,11 @@ pub enum AudioError {
 ///
 /// Threading: methods take `&mut self`, so one owner (the pipeline) drives
 /// the source. Implementations capture on their own thread or OS callback and
-/// must never block that callback; the methods here return quickly (well
-/// under 100 ms) and may be called from an async task.
+/// must never block that callback. `start` and `stop` may block briefly
+/// (tens of milliseconds: opening the device, or reading a file in the
+/// file-backed fake), so callers on an async runtime run them on a
+/// blocking thread or accept that short stall. Anything slower, such as a
+/// Bluetooth route switch, implementations do on their own thread.
 pub trait AudioSource: Send {
     /// Starts capturing.
     ///
@@ -67,7 +70,7 @@ pub trait AudioSource: Send {
     /// is recording.
     ///
     /// Threading: returns once the stream is running, without waiting for
-    /// audio; safe to call from an async task.
+    /// audio; may block briefly (see the trait docs).
     fn start(&mut self) -> Result<(), AudioError>;
 
     /// Stops capturing and returns everything captured since
@@ -79,14 +82,14 @@ pub trait AudioSource: Send {
     /// [`AudioError::Device`] if the device failed mid-capture. Either way,
     /// nothing is recording afterwards.
     ///
-    /// Threading: drains what the capture thread buffered and returns; safe
-    /// to call from an async task.
+    /// Threading: drains what the capture thread buffered and returns; may
+    /// block briefly (see the trait docs).
     fn stop(&mut self) -> Result<Audio, AudioError>;
 
     /// Stops capturing, if running, and drops the audio.
     ///
     /// Errors: none, so a cancel can't leave the microphone on. Threading:
-    /// returns quickly; safe to call from an async task.
+    /// returns quickly.
     fn discard(&mut self);
 
     /// Whether a capture is running.
