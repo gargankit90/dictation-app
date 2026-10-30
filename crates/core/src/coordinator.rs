@@ -387,3 +387,133 @@ mod tests {
         assert_eq!(State::default(), State::Idle);
     }
 }
+
+#[cfg(test)]
+mod proptests {
+    use proptest::prelude::*;
+
+    use super::*;
+    use crate::error::Permission;
+
+    /// An event with the time gap since the previous one, so times only go
+    /// forward (presses, releases and Ticks share one clock).
+    fn event_strategy() -> impl Strategy<Value = (u64, EventKind)> {
+        (0u64..400_000, any::<EventKind>())
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum EventKind {
+        Pressed,
+        Released,
+        Cancel,
+        Tick,
+        AudioCaptured,
+        TranscriptReady,
+        TranscriptEmpty,
+        TranscriptionFailed,
+        InsertDone,
+        InsertFailed,
+        PermissionMissing,
+    }
+
+    impl Arbitrary for EventKind {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with((): ()) -> Self::Strategy {
+            prop_oneof![
+                Just(EventKind::Pressed),
+                Just(EventKind::Released),
+                Just(EventKind::Cancel),
+                Just(EventKind::Tick),
+                Just(EventKind::AudioCaptured),
+                Just(EventKind::TranscriptReady),
+                Just(EventKind::TranscriptEmpty),
+                Just(EventKind::TranscriptionFailed),
+                Just(EventKind::InsertDone),
+                Just(EventKind::InsertFailed),
+                Just(EventKind::PermissionMissing),
+            ]
+            .boxed()
+        }
+    }
+
+    fn event(kind: EventKind, now: Duration) -> Event {
+        match kind {
+            EventKind::Pressed => Event::HotkeyPressed(now),
+            EventKind::Released => Event::HotkeyReleased(now),
+            EventKind::Cancel => Event::CancelPressed,
+            EventKind::Tick => Event::Tick(now),
+            EventKind::AudioCaptured => Event::AudioCaptured,
+            EventKind::TranscriptReady => Event::TranscriptReady("hello".into()),
+            EventKind::TranscriptEmpty => Event::TranscriptReady(String::new()),
+            EventKind::TranscriptionFailed => Event::TranscriptionFailed("failed".into()),
+            EventKind::InsertDone => Event::InsertDone,
+            EventKind::InsertFailed => Event::InsertFailed("failed".into()),
+            EventKind::PermissionMissing => Event::PermissionMissing(Permission::Microphone),
+        }
+    }
+
+    /// Steps the machine and checks the invariants that hold after every
+    /// event. `recording` tracks whether the app layer's recorder is on.
+    fn checked_step(state: State, event: Event, recording: &mut bool) -> State {
+        let (next, commands) = step(state, event);
+        for command in &commands {
+            match command {
+                Command::StartRecording => {
+                    assert!(!*recording, "started a second recording");
+                    *recording = true;
+                }
+                Command::StopRecording | Command::DiscardRecording => {
+                    assert!(*recording, "stopped a recording that wasn't running");
+                    *recording = false;
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            *recording,
+            matches!(next, State::Recording { .. }),
+            "recorder on/off doesn't match the state"
+        );
+        let changes: Vec<_> = commands
+            .iter()
+            .filter(|c| matches!(c, Command::StateChanged(_)))
+            .collect();
+        if next.phase() == state.phase() {
+            assert!(changes.is_empty(), "StateChanged without a change");
+        } else {
+            assert_eq!(changes, [&Command::StateChanged(next.phase())]);
+            assert_eq!(commands.last(), Some(&Command::StateChanged(next.phase())));
+        }
+        next
+    }
+
+    proptest! {
+        #[test]
+        fn criterion_8_random_sequences_settle_in_idle_with_no_recording_left(
+            events in prop::collection::vec(event_strategy(), 0..64)
+        ) {
+            let mut state = State::Idle;
+            let mut recording = false;
+            let mut now = Duration::ZERO;
+            for (gap, kind) in events {
+                now += Duration::from_millis(gap);
+                state = checked_step(state, event(kind, now), &mut recording);
+            }
+
+            // Finish whatever is in flight: release a held key, then let
+            // the transcriber and inserter succeed.
+            now += MAX_RECORDING;
+            for event in [
+                Event::HotkeyReleased(now),
+                Event::TranscriptReady("done".into()),
+                Event::InsertDone,
+            ] {
+                state = checked_step(state, event, &mut recording);
+            }
+            prop_assert_eq!(state, State::Idle);
+            prop_assert!(!recording);
+        }
+    }
+}
