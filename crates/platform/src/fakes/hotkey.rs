@@ -92,6 +92,11 @@ impl FakeHotkey {
             // new sink).
             if state.listening && state.sink.is_none() {
                 state.sink = Some(sink);
+            } else {
+                // Dropped without the lock, as in `stop` (#44).
+                drop(state);
+                drop(sink);
+                state = lock(&self.state);
             }
         }
         state.queue.clear();
@@ -241,5 +246,30 @@ mod tests {
         assert!(!hotkey.is_listening());
         assert!(!hotkey.emit(Pressed));
         assert_eq!(rx.try_iter().collect::<Vec<_>>(), [Pressed]);
+    }
+
+    /// Calls back into the fake when dropped.
+    struct TouchOnDrop(FakeHotkey, mpsc::Sender<bool>);
+
+    impl Drop for TouchOnDrop {
+        fn drop(&mut self) {
+            let _ = self.1.send(self.0.is_listening());
+        }
+    }
+
+    #[test]
+    fn a_sink_stopped_from_inside_is_dropped_without_the_lock() {
+        let mut hotkey = FakeHotkey::scripted([Pressed]);
+        let mut handle = hotkey.clone();
+        let (tx, rx) = mpsc::channel();
+        let touch = TouchOnDrop(hotkey.clone(), tx);
+        hotkey
+            .start(Box::new(move |_| {
+                let _ = &touch;
+                handle.stop();
+            }))
+            .unwrap();
+        // Dropping the sink called `is_listening` without deadlocking.
+        assert_eq!(rx.try_iter().collect::<Vec<_>>(), [false]);
     }
 }
