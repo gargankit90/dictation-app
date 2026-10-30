@@ -662,6 +662,10 @@ version = "0.1.0"
 [[package]]
 name = "dictation-ports"
 version = "0.1.0"
+dependencies = [
+ "dictation-core",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "dictation-transcribe"
