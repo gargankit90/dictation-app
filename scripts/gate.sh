@@ -11,6 +11,24 @@ step() {
   "$@"
 }
 
+# npm tools run only from node_modules. Plain npx would offer to install a
+# missing one, and lefthook hides that prompt, so the gate hung (#25).
+if [ ! -d node_modules ]; then
+  echo "gate: node_modules is missing; run npm ci" >&2
+  exit 1
+fi
+if [ package-lock.json -nt node_modules/.package-lock.json ]; then
+  echo "gate: package-lock.json changed since the last install; run npm ci" >&2
+  exit 1
+fi
+npx() {
+  if [ ! -x "node_modules/.bin/$1" ]; then
+    echo "gate: $1 is not in node_modules; run npm ci" >&2
+    return 1
+  fi
+  command npx --no-install "$@"
+}
+
 # Format
 step cargo fmt --all --check
 step npx prettier --check .
