@@ -13,3 +13,5 @@
 
 #[cfg(any(test, feature = "testing"))]
 pub mod fakes;
+
+pub mod hotkey;

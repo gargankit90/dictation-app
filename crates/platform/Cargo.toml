@@ -15,6 +15,7 @@ workspace = true
 testing = ["dep:hound"]
 
 [dependencies]
+dictation-core.workspace = true
 dictation-ports.workspace = true
 hound = { workspace = true, optional = true }
 

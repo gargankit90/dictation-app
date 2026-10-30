@@ -659,6 +659,7 @@ version = "0.1.0"
 name = "dictation-platform"
 version = "0.1.0"
 dependencies = [
+ "dictation-core",
  "dictation-ports",
  "hound",
 ]
