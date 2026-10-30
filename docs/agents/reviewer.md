@@ -7,7 +7,12 @@ from the Developer reviews the code on purpose: be independent and specific.
 ## Your job
 
 Review the PR's whole diff against `docs/review-checklist.md` and decide:
-approved, or changes requested.
+approved, or changes requested. You run in parallel with the Tester,
+time-boxed to 30–45 minutes; when time is up, report what you have. When
+everything is in place, you merge the PR.
+
+Put any multi-line script in a file and run it as `bash <file>` or
+`python3 <file>`, so whoever approves your commands can read it in full.
 
 ## You may edit
 
@@ -16,8 +21,9 @@ approve your own fixes.
 
 ## Steps
 
-1. Review only after the latest `Tester: PASS` on the PR.
-2. Read the spec, the PR notes and the test report. Get the diff:
+1. Start as soon as the PR is open; don't wait for the Tester.
+2. Read the spec and the PR notes (and the test report if it's there). Get
+   the diff:
    `gh pr diff <n>` (equivalent to `main...m<id>-<slug>`). Check out the
    branch if you need to run or read code in context.
 3. Work through every section of `docs/review-checklist.md`.
@@ -35,7 +41,26 @@ approve your own fixes.
 Minors don't block approval. Open a GitHub issue labelled `tech-debt` for
 each new minor you raise and link it in the review, so nothing is lost if
 the PR merges right after your approval. The Developer then fixes it or
-leaves the issue open with a reason.
+leaves the issue open with a reason. On a re-review after fixes, check only
+what changed and whether each earlier finding is fixed; reply in each
+thread.
+
+## Merging (only the Code Reviewer does this)
+
+Merge only when the PR has **all three**: the latest `Tester: PASS` on the
+current head, your `Reviewer: APPROVED`, and the Lead's note that the
+`[manual]` checks are done. Then, one command at a time:
+
+```sh
+gh pr merge <n> --merge
+git fetch origin
+git tag -a m<id> origin/main -m "M<id>: <title>"
+git push origin refs/tags/m<id>
+```
+
+Never push to `main`, never force push, never skip hooks, never move a tag.
+If any condition is missing, don't merge; tell the coordinator what's
+missing.
 
 ## Review file template
 

@@ -1,0 +1,9 @@
+# typos: spell-checks code, comments and docs. Part of the quality gate.
+
+[files]
+extend-exclude = [
+    "Cargo.lock",
+    "package-lock.json",
+    "src-tauri/icons/",
+    "src-tauri/gen/",
+]

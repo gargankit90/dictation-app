@@ -7,11 +7,13 @@ alike. Read this first, then your role file:
 | --- | --- | --- |
 | Lead / coordinator | the owner + Claude Code, Orca coordinator in the `main` worktree | this file |
 | Developer | Claude Code, Orca worker | `.claude/agents/developer.md` |
-| Tester | Antigravity (Gemini), Orca worker | `docs/agents/tester.md` |
-| Code Reviewer | Antigravity (Gemini), Orca worker | `docs/agents/reviewer.md` |
+| Tester | Claude Code, Orca worker | `docs/agents/tester.md` |
+| Code Reviewer | Antigravity (Gemini), Orca worker; also merges | `docs/agents/reviewer.md` |
 
-Fallback: if Antigravity struggles as Tester, Claude Code takes the Tester
-role and Antigravity stays Code Reviewer.
+Claude Code runs unattended inside its guard hook and deny rules, so the
+Tester needs no approvals. The Reviewer is a different model family on
+purpose, for independence; its read-only commands are pre-approved and only
+writes, pushes and the merge need the owner's (or the Lead's) approval.
 
 ## The app
 
@@ -47,13 +49,40 @@ scripts/install-hooks.sh               # once per clone: git hooks incl. the pus
 cargo build --workspace
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace          # from M0.3
+cargo nextest run --workspace
 npm ci && npm run build
 npm run tauri dev                      # run the app
+scripts/make-dev-cert.sh               # once per Mac: the signing certificate
 npm run tauri build -- --debug --bundles app
 ```
 
-From M0.3, `lefthook run pre-push` runs the whole quality gate.
+The quality gate (`docs/ENGINEERING.md`) is `scripts/gate.sh`. git's
+pre-push hook runs it after the push guard, through
+`lefthook run pre-push-gate`, and CI runs it on every PR. Run it before you
+push:
+
+```sh
+lefthook run pre-push-gate             # the whole gate, as pre-push runs it
+scripts/gate.sh                        # the same, without lefthook
+```
+
+It runs, stopping at the first failure:
+
+```sh
+cargo fmt --all --check
+npx prettier --check .
+cargo clippy --workspace --all-targets -- -D warnings
+cargo deny check
+cargo machete
+cargo nextest run --workspace
+cargo test --workspace --doc
+scripts/coverage.sh                    # core, transcribe >= 85%; app >= 70%
+npx tsc -b --noEmit
+npx eslint . --max-warnings 0
+npx vitest run
+typos
+scripts/test-guards.sh                 # push guard and Claude hook cases
+```
 
 ## Workflow: every change goes through a pull request
 
@@ -62,19 +91,29 @@ From M0.3, `lefthook run pre-push` runs the whole quality gate.
 2. **Developer** works on branch `m<id>-<slug>` in its own worktree, makes
    small Conventional Commits, runs the gate, pushes, and opens a PR to `main`
    with detailed notes (template in `.claude/agents/developer.md`).
-3. **Tester** reviews and tests the PR, writes `test-reports/<id>-run<k>.md`,
-   and posts a PR comment starting `Tester: PASS` or `Tester: FAIL`.
-4. On a fail, the Developer pushes fixes to the same PR and the Tester runs
-   again. After 3 failed rounds, the Lead steps in.
-5. **Code Reviewer** reviews the PR diff with `docs/review-checklist.md`,
-   comments inline, writes `reviews/<id>-round<k>.md`, and posts a PR comment
-   starting `Reviewer: APPROVED` or `Reviewer: CHANGES REQUESTED`. Blocker or
-   major findings go back to the Developer, then the Tester runs again, then
-   the Reviewer reviews again. After 3 rounds, the Lead steps in.
-6. The **Lead** does the `[manual]` checks and notes them on the PR.
-7. The **Tester merges** the PR (merge commit) once `Tester: PASS`,
-   `Reviewer: APPROVED` and the Lead's manual checks are all on it, then tags
-   `m<id>`.
+3. As soon as the PR is open, the **Tester** and the **Code Reviewer** start
+   in parallel, each time-boxed to 30–45 minutes (report what you have when
+   time is up):
+   - **Tester** checks each acceptance criterion and runs e2e tests, writes
+     `test-reports/<id>-run<k>.md`, and posts a PR comment starting
+     `Tester: PASS` or `Tester: FAIL`. CI and lefthook already run the gate;
+     write a custom test harness only when a criterion needs one.
+   - **Code Reviewer** reviews the diff with `docs/review-checklist.md`,
+     comments inline, writes `reviews/<id>-round<k>.md`, and posts a PR
+     comment starting `Reviewer: APPROVED` or `Reviewer: CHANGES REQUESTED`.
+4. On a fail or changes requested, the Developer fixes **all** blocker and
+   major findings from both in one round and pushes, then the Tester and
+   Reviewer re-check only what changed. After 2 rounds, the Lead steps in.
+   Minors never block: each becomes a `tech-debt` issue.
+5. The **Lead** does the `[manual]` checks and notes them on the PR. The next
+   milestone's Developer may start while this PR is in review.
+6. The **Code Reviewer merges** the PR (merge commit) once `Tester: PASS`,
+   its own `Reviewer: APPROVED` and the Lead's manual checks are all on it,
+   then tags `m<id>`.
+
+The Lead sends the owner one status line per stage change (PR opened,
+PASS/FAIL, APPROVED/CHANGES REQUESTED, merged). The owner's to-dos are GitHub
+issues labelled `owner`.
 
 All agents use the owner's GitHub account through `gh`. GitHub won't let an
 account approve its own PR, so the `Tester:` and `Reviewer:` comments are the
@@ -90,7 +129,11 @@ record of approval.
 - **Never edit the guards**: `scripts/guard-push.sh`, `scripts/pre-push`,
   `scripts/install-hooks.sh`, `lefthook.yml`, `.claude/settings.json`,
   `.claude/hooks/`. Only the owner changes them.
-- Only the Tester merges, and only when step 7's conditions hold.
+- Only the Code Reviewer merges, and only when step 6's conditions hold.
+- The guards change only when they block legitimate work or miss a
+  dangerous case that git's pre-push guard doesn't also stop. A way around
+  `.claude/hooks/guard-git.sh` that the pre-push guard stops is a
+  `tech-debt` issue, not a reason to hold a PR.
 - Stay inside your role's "may edit" list.
 - **Computer use happens only inside the Lume VM** (`cua-vm` MCP server),
   never on the owner's own screen.

@@ -1,0 +1,15 @@
+# cargo-nextest settings. `cargo nextest run --workspace` uses the default
+# profile; CI passes `--profile ci`.
+
+[profile.default]
+# Unit tests take milliseconds; anything slower is a bug or needs a fake Clock.
+slow-timeout = { period = "30s", terminate-after = 2 }
+fail-fast = false
+
+[profile.ci]
+retries = 0
+failure-output = "immediate-final"
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"
