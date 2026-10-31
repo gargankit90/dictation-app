@@ -14,6 +14,11 @@
 //!
 //! A release build treats them like any other unknown flag: logged and
 //! ignored.
+//!
+//! `--transcriber <name>` picks the speech-to-text engine. It's a normal flag
+//! in every build: it only affects the process that starts with it (a
+//! forwarded second launch can't switch the running app's engine), and the
+//! only engine so far, `mock`, needs no network, key or permission.
 
 use std::path::PathBuf;
 
@@ -25,6 +30,46 @@ use dictation_ports::HotkeyEvent;
 /// Whether this build acts on the test hooks.
 pub const TEST_FLAGS: bool = cfg!(debug_assertions);
 
+/// `--transcriber <name>` or `--transcriber=<name>`.
+pub const TRANSCRIBER_FLAG: &str = "--transcriber";
+
+/// The speech-to-text engine to run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TranscriberChoice {
+    /// `transcribe::mock::MockTranscriber`: fixed text, no network. The
+    /// default until a real engine lands (M3.2).
+    #[default]
+    Mock,
+}
+
+impl TranscriberChoice {
+    /// Every engine, for the "known engines" warning.
+    pub const ALL: [Self; 1] = [Self::Mock];
+
+    /// The known engine names, comma-separated.
+    #[must_use]
+    pub fn known_names() -> String {
+        Self::ALL.map(Self::name).join(", ")
+    }
+
+    /// The engine called `name` on the command line.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "mock" => Some(Self::Mock),
+            _ => None,
+        }
+    }
+
+    /// The name `--transcriber` takes for this engine.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Mock => "mock",
+        }
+    }
+}
+
 /// What a launch's arguments ask for.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct LaunchFlags {
@@ -35,6 +80,10 @@ pub struct LaunchFlags {
     pub audio_file: Option<PathBuf>,
     /// Save every recording as a WAV (debug builds only).
     pub save_audio: bool,
+    /// The engine `--transcriber` asked for; the last one wins.
+    pub transcriber: Option<TranscriberChoice>,
+    /// Engine names `--transcriber` was given that no engine has.
+    pub unknown_engines: Vec<String>,
     /// Arguments this build doesn't act on, for a warning.
     pub ignored: Vec<String>,
 }
@@ -65,8 +114,18 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
             other if test_flags && audio_file_value(other).is_some() => {
                 flags.audio_file = audio_file_value(other).map(PathBuf::from);
             }
+            TRANSCRIBER_FLAG => match args.next() {
+                Some(name) => flags.transcriber(name),
+                None => flags.ignored.push(TRANSCRIBER_FLAG.to_owned()),
+            },
             psn if psn.starts_with("-psn_") => {}
-            other => flags.ignored.push(other.to_owned()),
+            other => match other
+                .strip_prefix(TRANSCRIBER_FLAG)
+                .and_then(|rest| rest.strip_prefix('='))
+            {
+                Some(name) => flags.transcriber(name),
+                None => flags.ignored.push(other.to_owned()),
+            },
         }
     }
     flags
@@ -77,6 +136,15 @@ fn audio_file_value(arg: &str) -> Option<&str> {
     arg.strip_prefix(DEBUG_AUDIO_FILE_FLAG)?
         .strip_prefix('=')
         .filter(|value| !value.is_empty())
+}
+
+impl LaunchFlags {
+    fn transcriber(&mut self, name: &str) {
+        match TranscriberChoice::from_name(name) {
+            Some(choice) => self.transcriber = Some(choice),
+            None => self.unknown_engines.push(name.to_owned()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -119,6 +187,48 @@ mod tests {
         assert_eq!(parse(&argv(&[]), true), LaunchFlags::default());
         // Even a program path that looks like a flag.
         assert_eq!(parse(&["--press".to_owned()], true), LaunchFlags::default());
+    }
+
+    #[test]
+    fn transcriber_flag_picks_the_engine_in_every_build() {
+        for test_flags in [true, false] {
+            for args in [&["--transcriber", "mock"][..], &["--transcriber=mock"]] {
+                let flags = parse(&argv(args), test_flags);
+                assert_eq!(flags.transcriber, Some(TranscriberChoice::Mock), "{args:?}");
+                assert!(flags.ignored.is_empty());
+            }
+        }
+        assert_eq!(parse(&argv(&[]), true).transcriber, None);
+    }
+
+    #[test]
+    fn unknown_or_missing_engine_is_ignored() {
+        let flags = parse(&argv(&["--transcriber", "whisper", "--press"]), true);
+        assert_eq!(flags.transcriber, None);
+        assert_eq!(flags.unknown_engines, ["whisper"]);
+        assert!(flags.ignored.is_empty());
+        // The value is consumed even when unknown, so the next flag still counts.
+        assert_eq!(flags.events, [Pressed]);
+
+        let flags = parse(&argv(&["--transcriber=", "--transcriber"]), true);
+        assert_eq!(flags.transcriber, None);
+        assert_eq!(flags.unknown_engines, [""]);
+        assert_eq!(flags.ignored, ["--transcriber"]);
+
+        let flags = parse(&argv(&["--transcriberx=mock"]), true);
+        assert_eq!(flags.ignored, ["--transcriberx=mock"]);
+    }
+
+    #[test]
+    fn engine_names_round_trip() {
+        let choice = TranscriberChoice::default();
+        assert_eq!(choice, TranscriberChoice::Mock);
+        assert_eq!(TranscriberChoice::from_name(choice.name()), Some(choice));
+        assert_eq!(TranscriberChoice::from_name("Mock"), None);
+        assert_eq!(TranscriberChoice::known_names(), "mock");
+        for choice in TranscriberChoice::ALL {
+            assert_eq!(TranscriberChoice::from_name(choice.name()), Some(choice));
+        }
     }
 
     #[test]

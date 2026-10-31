@@ -24,9 +24,7 @@ use dictation_pipeline::debug_audio::SavingAudio;
 #[cfg(not(debug_assertions))]
 use dictation_pipeline::hotkey::PermissionTolerantHotkey;
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
-use dictation_pipeline::stand_ins::{
-    DiscardingInserter, FixedTranscriber, GrantedPermissions, MicrophoneOnly,
-};
+use dictation_pipeline::stand_ins::{DiscardingInserter, GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
 #[cfg(debug_assertions)]
 use dictation_pipeline::test_hooks::SyntheticHotkey;
@@ -35,6 +33,7 @@ use dictation_platform::clock::SystemClock;
 use dictation_platform::hotkey::SystemHotkey;
 use dictation_platform::permissions::SystemPermissions;
 use dictation_ports::{AudioSource, Permission, PermissionError, PermissionStatus, Permissions};
+use dictation_transcribe::mock::MockTranscriber;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Manager, RunEvent};
@@ -44,6 +43,9 @@ const QUIT_ID: &str = "quit";
 const SETTINGS_ID: &str = "settings";
 const TRAY_ID: &str = "main";
 const TOOLTIP: &str = "dictation-app";
+/// Where a launch's flags came from, for the log.
+const THIS_LAUNCH: &str = "this launch";
+const SECOND_LAUNCH: &str = "a second launch";
 
 /// The running pipeline, taken out on Quit to shut it down.
 struct RunningPipeline(Mutex<Option<Pipeline>>);
@@ -141,11 +143,11 @@ pub fn run() {
                 let launch = flags::parse(&argv, flags::TEST_FLAGS);
                 if launch.configure_audio() {
                     tracing::warn!(
-                        from = "a second launch",
+                        from = SECOND_LAUNCH,
                         "ignoring the debug audio flags; they only work on the first launch"
                     );
                 }
-                handle_flags(forward.as_ref(), launch, "a second launch");
+                handle_flags(forward.as_ref(), launch, SECOND_LAUNCH);
             },
         ))
         .setup(move |app| {
@@ -184,6 +186,14 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
 
     let argv: Vec<String> = std::env::args().collect();
     let launch = flags::parse(&argv, flags::TEST_FLAGS);
+    // Only one engine so far; an enum that delegates comes with the second.
+    let flags::TranscriberChoice::Mock = launch.transcriber.unwrap_or_default();
+    let transcriber = MockTranscriber::default();
+    tracing::info!(
+        transcriber = flags::TranscriberChoice::Mock.name(),
+        "engine"
+    );
+
     let recordings = app
         .path()
         .app_data_dir()
@@ -193,7 +203,7 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
     let ports = Ports {
         hotkey,
         audio,
-        transcriber: FixedTranscriber,
+        transcriber,
         inserter: DiscardingInserter,
         permissions,
         clock: SystemClock::new(),
@@ -206,13 +216,28 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
     tauri::async_runtime::spawn(show_ui_events(app.handle().clone(), ui_events));
     tracing::info!(hotkey = %HotkeySpec::default(), "ready");
 
-    handle_flags(injector, launch, "this launch");
+    handle_flags(injector, launch, THIS_LAUNCH);
     Ok(())
 }
 
-/// Acts on a launch's hotkey flags: injects the test flags (debug builds
-/// only) and warns about the unknown ones.
+/// Acts on a launch's flags: injects the test flags (debug builds only) and
+/// warns about the rest.
 fn handle_flags(injector: Option<&Injector>, flags: flags::LaunchFlags, from: &str) {
+    if from == SECOND_LAUNCH && flags.transcriber.is_some() {
+        tracing::warn!(
+            from,
+            "--transcriber only applies when the app starts; ignored"
+        );
+    }
+    for engine in &flags.unknown_engines {
+        tracing::warn!(
+            %engine,
+            known = %flags::TranscriberChoice::known_names(),
+            default = flags::TranscriberChoice::default().name(),
+            from,
+            "unknown --transcriber engine; using the default"
+        );
+    }
     for flag in &flags.ignored {
         tracing::warn!(%flag, from, "ignoring an unknown flag");
     }
