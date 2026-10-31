@@ -13,3 +13,7 @@
 
 #[cfg(any(test, feature = "testing"))]
 pub mod fakes;
+
+pub mod hotkey;
+pub mod permissions;
+pub mod secure_input;
