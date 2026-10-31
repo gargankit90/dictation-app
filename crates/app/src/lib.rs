@@ -3,3 +3,4 @@
 #![forbid(unsafe_code)]
 
 pub mod pipeline;
+pub mod test_hooks;
