@@ -244,7 +244,8 @@ fn the_warm_device_closes_once_idle_long_enough() {
     let _pump = device.pump(16_000, 1, false);
     record(&mut mic, 160);
     wait_until("the warm close", || !mic.is_open());
-    assert!(!device.fake.is_streaming());
+    // The timer closes the stream just after taking it out.
+    wait_until("the stream to stop", || !device.fake.is_streaming());
 }
 
 #[test]
