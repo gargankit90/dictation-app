@@ -12,7 +12,7 @@ use tracing_subscriber::prelude::*;
 /// The log files' name; the date is appended (`dictation-app.log.2026-10-31`).
 pub const LOG_FILE_PREFIX: &str = "dictation-app.log";
 
-/// Rotated files kept besides today's.
+/// Log files kept in all, today's included (`max_log_files` counts it).
 const KEEP_FILES: usize = 7;
 
 /// Starts logging into `dir`.
