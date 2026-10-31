@@ -1,5 +1,10 @@
 //! M1.5 edge cases for the `--press`/`--release` test flags (Tester, run 1):
 //! a stray `--release` with nothing recording, and a double `--press`.
+//!
+//! No wall-clock "nothing happened" timeouts (#58): the pipeline reads key
+//! events in FIFO order on one task, so an ignored event queued ahead of a
+//! valid one shows up as the valid one's event coming next, and after
+//! `shutdown` the closed UI channel (`None`) proves nothing else was sent.
 
 #![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
 
@@ -15,8 +20,8 @@ use dictation_platform::fakes::{FakeClock, FakeHotkey};
 use dictation_ports::HotkeyError;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+/// Only a guard against a hung pipeline; a passing test never waits on it.
 const WAIT: Duration = Duration::from_secs(5);
-const QUIET: Duration = Duration::from_millis(300);
 
 type Ui = UnboundedReceiver<UiEvent>;
 
@@ -43,33 +48,33 @@ fn launch(injector: &Injector, flag: &str) {
     }
 }
 
-async fn next(ui: &mut Ui) -> UiEvent {
-    tokio::time::timeout(WAIT, ui.recv())
-        .await
-        .unwrap()
-        .unwrap()
+async fn next(ui: &mut Ui) -> Option<UiEvent> {
+    tokio::time::timeout(WAIT, ui.recv()).await.unwrap()
 }
 
-async fn assert_quiet(ui: &mut Ui) {
-    let got = tokio::time::timeout(QUIET, ui.recv()).await;
-    assert!(got.is_err(), "expected no UI event, got {got:?}");
+async fn finish(pipeline: Pipeline, clock: &FakeClock, injector: &Injector, ui: &mut Ui) {
+    clock.advance(MIN_HOLD * 2);
+    launch(injector, "--release");
+    for phase in [Phase::Transcribing, Phase::Inserting, Phase::Idle] {
+        assert_eq!(next(ui).await, Some(UiEvent::StateChanged(phase)));
+    }
+    pipeline.shutdown().await;
+    assert_eq!(next(ui).await, None, "no UI event after Idle");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn release_without_press_changes_nothing_and_a_later_press_works() {
     let (pipeline, mut ui, injector, clock) = spawn();
 
+    // Queued ahead of the press: if it changed anything, its event would
+    // come before Recording.
     launch(&injector, "--release");
-    assert_quiet(&mut ui).await;
-
     launch(&injector, "--press");
-    assert_eq!(next(&mut ui).await, UiEvent::StateChanged(Phase::Recording));
-    clock.advance(MIN_HOLD * 2);
-    launch(&injector, "--release");
-    for phase in [Phase::Transcribing, Phase::Inserting, Phase::Idle] {
-        assert_eq!(next(&mut ui).await, UiEvent::StateChanged(phase));
-    }
-    pipeline.shutdown().await;
+    assert_eq!(
+        next(&mut ui).await,
+        Some(UiEvent::StateChanged(Phase::Recording))
+    );
+    finish(pipeline, &clock, &injector, &mut ui).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -77,15 +82,12 @@ async fn double_press_records_once_and_one_release_finishes() {
     let (pipeline, mut ui, injector, clock) = spawn();
 
     launch(&injector, "--press");
-    assert_eq!(next(&mut ui).await, UiEvent::StateChanged(Phase::Recording));
+    assert_eq!(
+        next(&mut ui).await,
+        Some(UiEvent::StateChanged(Phase::Recording))
+    );
+    // Queued ahead of the release: if it changed anything, its event would
+    // come before Transcribing.
     launch(&injector, "--press");
-    assert_quiet(&mut ui).await;
-
-    clock.advance(MIN_HOLD * 2);
-    launch(&injector, "--release");
-    for phase in [Phase::Transcribing, Phase::Inserting, Phase::Idle] {
-        assert_eq!(next(&mut ui).await, UiEvent::StateChanged(phase));
-    }
-    assert_quiet(&mut ui).await;
-    pipeline.shutdown().await;
+    finish(pipeline, &clock, &injector, &mut ui).await;
 }
