@@ -208,3 +208,97 @@ async fn groq_tls_handshake_and_dummy_key_is_invalid_key() {
         Err(TranscribeError::InvalidKey)
     );
 }
+
+// Run 2: `Retry-After` as an HTTP date, end to end (124871d).
+
+fn date_in(seconds: u64) -> String {
+    httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_secs(seconds))
+}
+
+#[tokio::test]
+async fn retry_after_http_date_is_honoured() {
+    let server = MockServer::start().await;
+    let date = date_in(10);
+    mount(
+        &server,
+        ResponseTemplate::new(429).insert_header("retry-after", date.as_str()),
+        Some(1),
+    )
+    .await;
+    mount(&server, ok(), None).await;
+    let (engine, wait) = engine(config(&server, 3));
+    assert_eq!(engine.transcribe(&audio()).await.unwrap(), "ok");
+    let waits = wait.0.lock().unwrap().clone();
+    // Whole-second dates: between 8 and 10 s from now, never the backoff.
+    assert_eq!(waits.len(), 1);
+    assert!(
+        waits[0] >= Duration::from_secs(8) && waits[0] <= Duration::from_secs(10),
+        "{waits:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_past_http_date_retries_at_once() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        ResponseTemplate::new(503).insert_header("retry-after", "Wed, 21 Oct 2015 07:28:00 GMT"),
+        Some(1),
+    )
+    .await;
+    mount(&server, ok(), None).await;
+    let (engine, wait) = engine(config(&server, 3));
+    assert_eq!(engine.transcribe(&audio()).await.unwrap(), "ok");
+    assert_eq!(*wait.0.lock().unwrap(), [Duration::ZERO]);
+}
+
+#[tokio::test]
+async fn an_http_date_beyond_the_cap_gives_up_at_once() {
+    let server = MockServer::start().await;
+    let date = date_in(MAX_RETRY_AFTER.as_secs() + 60);
+    mount(
+        &server,
+        ResponseTemplate::new(429).insert_header("retry-after", date.as_str()),
+        None,
+    )
+    .await;
+    let (engine, wait) = engine(config(&server, 3));
+    assert_eq!(
+        engine.transcribe(&audio()).await,
+        Err(TranscribeError::RateLimited)
+    );
+    assert_eq!(requests(&server).await, 1);
+    assert!(wait.0.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn seconds_beyond_the_cap_give_up_and_garbage_uses_the_backoff() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        ResponseTemplate::new(429).insert_header("retry-after", "31"),
+        None,
+    )
+    .await;
+    let (engine_a, wait_a) = engine(config(&server, 3));
+    assert_eq!(
+        engine_a.transcribe(&audio()).await,
+        Err(TranscribeError::RateLimited)
+    );
+    assert!(wait_a.0.lock().unwrap().is_empty());
+
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        ResponseTemplate::new(429).insert_header("retry-after", "in a bit"),
+        Some(2),
+    )
+    .await;
+    mount(&server, ok(), None).await;
+    let (engine_b, wait_b) = engine(config(&server, 3));
+    assert_eq!(engine_b.transcribe(&audio()).await.unwrap(), "ok");
+    assert_eq!(
+        *wait_b.0.lock().unwrap(),
+        [Duration::from_millis(100), Duration::from_millis(200)]
+    );
+}
