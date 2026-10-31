@@ -23,6 +23,16 @@ vm_ip() {
     jq -r 'if type=="array" then .[0] else . end | .ipAddress // empty'
 }
 
+# Quotes each argument for the VM's login shell and joins them with spaces,
+# so paths and arguments with spaces or shell characters arrive intact.
+q() {
+  local out=() arg
+  for arg in "$@"; do
+    out+=("$(printf '%q' "$arg")")
+  done
+  printf '%s' "${out[*]-}"
+}
+
 # Runs a command in the VM (as the GUI user, but outside the GUI session:
 # GUI apps must be started with `open`, which LaunchServices runs in it).
 vm() {
@@ -60,31 +70,33 @@ wait_for_vm() {
 install_app() {
   local app=$1
   log "installing $(basename "$app") in the VM"
-  vm "mkdir -p ~/Applications && rm -rf '$VM_APP'"
+  vm "mkdir -p ~/Applications && rm -rf $(q "$VM_APP")"
   tar -C "$(dirname "$app")" -cf - "$(basename "$app")" | vm "tar -C ~/Applications -xf -"
-  vm "codesign --verify --deep '$VM_APP'" || die "the app's signature didn't survive the copy"
+  vm "codesign --verify --deep $(q "$VM_APP")" || die "the app's signature didn't survive the copy"
 }
 
 # Quits every running copy of the app and clears its logs.
 fresh_app_state() {
-  vm "pkill -x $APP_NAME; sleep 1; pkill -9 -x $APP_NAME; rm -rf '$VM_LOG_DIR'" || true
+  local name
+  name=$(q "$APP_NAME")
+  vm "pkill -x $name; sleep 1; pkill -9 -x $name; rm -rf $(q "$VM_LOG_DIR")" || true
 }
 
 # Launches the app in the VM's GUI session with `args` as its arguments.
 # -n starts a new process even if one runs (as a second launch from the
 # command line would); the single-instance plugin then forwards and exits.
 launch() {
-  vm "open -n '$VM_APP' --args $*"
+  vm "open -n $(q "$VM_APP") --args $(q "$@")"
 }
 
 app_count() {
-  vm "pgrep -x $APP_NAME | wc -l" | tr -d ' '
+  vm "pgrep -x $(q "$APP_NAME") | wc -l" | tr -d ' '
 }
 
 # The app's log so far (all rotated files, oldest first).
 app_log() {
   # sh, not the login shell (zsh), so a glob with no log yet isn't an error.
-  vm "sh -c 'cat \"\$0\"/$APP_NAME.log* 2>/dev/null' '$VM_LOG_DIR'" || true
+  vm "sh -c 'cat \"\$0\"/\"\$1\".log* 2>/dev/null' $(q "$VM_LOG_DIR" "$APP_NAME")" || true
 }
 
 # Waits up to `timeout` seconds for an extended regex to appear in the log.
