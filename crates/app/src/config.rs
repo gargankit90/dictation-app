@@ -266,7 +266,7 @@ mod tests {
         // Alternate short and long models so an overlapping write would
         // leave the tail of the longer document behind.
         let variant = |thread: usize| Settings {
-            model: "x".repeat(if thread % 2 == 0 { 1 } else { 90 } + thread),
+            model: "x".repeat(if thread.is_multiple_of(2) { 1 } else { 90 } + thread),
             ..Settings::default()
         };
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(THREADS));
