@@ -7,8 +7,9 @@
 //! `no_speech_prob` for the hallucination filter.
 //!
 //! Rate limits (429), server errors (5xx), timeouts and network errors are
-//! retried under a [`RetryPolicy`]; a `Retry-After` header (seconds) on a
-//! 429 or 503 replaces the backoff, up to [`MAX_RETRY_AFTER`]. A rejected
+//! retried under a [`RetryPolicy`]; a `Retry-After` header (delay seconds or
+//! an HTTP date) on a 429 or 5xx replaces the backoff, up to
+//! [`MAX_RETRY_AFTER`]. A rejected
 //! key (401, 403), any other 4xx and an unreadable reply are not retried.
 //!
 //! Privacy: the key is a [`Secret`] and goes only into the `Authorization`
@@ -18,7 +19,7 @@
 
 use std::future::Future;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use dictation_core::retry::{RetryPolicy, SplitMix64};
 use dictation_core::wav;
@@ -321,8 +322,7 @@ impl Failure {
         let retry_after = headers
             .get(RETRY_AFTER)
             .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.trim().parse::<u64>().ok())
-            .map(Duration::from_secs);
+            .and_then(|v| parse_retry_after(v, SystemTime::now()));
         match status {
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
                 Self::fatal(TranscribeError::InvalidKey)
@@ -355,6 +355,19 @@ impl Failure {
             )
         }
     }
+}
+
+/// A `Retry-After` value (RFC 9110): delay seconds, or an HTTP date turned
+/// into the wait from `now` (zero if it's already past). `None` if it's
+/// neither, so the backoff applies. The [`MAX_RETRY_AFTER`] cap is applied
+/// by the caller.
+fn parse_retry_after(value: &str, now: SystemTime) -> Option<Duration> {
+    let value = value.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let at = httpdate::parse_http_date(value).ok()?;
+    Some(at.duration_since(now).unwrap_or(Duration::ZERO))
 }
 
 #[derive(Deserialize)]
@@ -464,15 +477,47 @@ mod tests {
         );
         let f = Failure::from_status(StatusCode::BAD_GATEWAY, &none);
         assert!(f.retryable && f.retry_after.is_none());
-        // An HTTP-date Retry-After isn't understood; the backoff applies.
+        // A date long past means retry at once; garbage means the backoff.
         headers.insert(
             RETRY_AFTER,
-            HeaderValue::from_static("Wed, 21 Oct 2026 07:28:00 GMT"),
+            HeaderValue::from_static("Wed, 21 Oct 2015 07:28:00 GMT"),
         );
+        assert_eq!(
+            Failure::from_status(StatusCode::SERVICE_UNAVAILABLE, &headers).retry_after,
+            Some(Duration::ZERO)
+        );
+        headers.insert(RETRY_AFTER, HeaderValue::from_static("soon"));
         assert_eq!(
             Failure::from_status(StatusCode::SERVICE_UNAVAILABLE, &headers).retry_after,
             None
         );
+    }
+
+    #[test]
+    fn retry_after_parses_seconds_and_http_dates() {
+        let now = httpdate::parse_http_date("Sat, 31 Oct 2026 12:00:00 GMT").unwrap();
+        let parse = |v| parse_retry_after(v, now);
+        assert_eq!(parse("120"), Some(Duration::from_secs(120)));
+        assert_eq!(parse(" 0 "), Some(Duration::ZERO));
+        // All three RFC 9110 date forms.
+        for date in [
+            "Sat, 31 Oct 2026 12:00:05 GMT",
+            "Saturday, 31-Oct-26 12:00:05 GMT",
+            "Sat Oct 31 12:00:05 2026",
+        ] {
+            assert_eq!(parse(date), Some(Duration::from_secs(5)), "{date}");
+        }
+        // Past, or exactly now: no wait.
+        assert_eq!(parse("Sat, 31 Oct 2026 11:59:00 GMT"), Some(Duration::ZERO));
+        assert_eq!(parse("Sat, 31 Oct 2026 12:00:00 GMT"), Some(Duration::ZERO));
+        // A far date parses; the 30 s cap is the caller's.
+        assert_eq!(
+            parse("Sat, 31 Oct 2026 13:00:00 GMT"),
+            Some(Duration::from_secs(3_600))
+        );
+        for bad in ["", "-5", "1.5", "tomorrow", "Sat, 32 Oct 2026 12:00:00 GMT"] {
+            assert_eq!(parse(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

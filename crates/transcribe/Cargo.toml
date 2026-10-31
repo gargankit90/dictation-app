@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 dictation-core.workspace = true
 dictation-ports.workspace = true
+httpdate.workspace = true
 reqwest = { workspace = true, features = ["multipart", "rustls-no-provider"] }
 rustls.workspace = true
 rustls-platform-verifier.workspace = true
