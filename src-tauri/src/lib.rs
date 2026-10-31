@@ -104,6 +104,12 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
     logging::init(&log_dir).context("could not start logging")?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), log_dir = %log_dir.display(), "starting");
 
+    // A menu-bar app: no Dock icon. LSUIElement (src-tauri/Info.plist) alone
+    // isn't enough, since Tauri applies its own Regular policy at launch.
+    // The one cfg(target_os) outside `platform`: the Tauri API exists only
+    // on macOS and must be called on the App, before the event loop runs.
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     build_tray(app).context("could not create the tray icon")?;
 
     let ports = Ports {
