@@ -7,6 +7,8 @@ use dictation_ports::{Permission, PermissionError, PermissionStatus, Permissions
 use objc2::runtime::Bool;
 use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio};
 
+// SAFETY: these declarations match the C signatures in ApplicationServices
+// (AXUIElement.h); each call site's `unsafe` block upholds its contract.
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXIsProcessTrusted() -> bool;
@@ -21,6 +23,9 @@ struct CallBacks {
     _private: [u8; 0],
 }
 
+// SAFETY: these declarations match the C signatures in CoreFoundation
+// (CFDictionary.h, CFNumber.h, CFBase.h); each call site's `unsafe` block
+// upholds its contract.
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
     static kCFBooleanTrue: *const c_void;
