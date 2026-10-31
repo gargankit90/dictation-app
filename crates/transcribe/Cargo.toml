@@ -10,3 +10,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+dictation-ports.workspace = true
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "time", "test-util"] }

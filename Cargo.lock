@@ -809,6 +809,7 @@ dependencies = [
  "dictation-pipeline",
  "dictation-platform",
  "dictation-ports",
+ "dictation-transcribe",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
@@ -860,6 +861,10 @@ dependencies = [
 [[package]]
 name = "dictation-transcribe"
 version = "0.1.0"
+dependencies = [
+ "dictation-ports",
+ "tokio",
+]
 
 [[package]]
 name = "digest"

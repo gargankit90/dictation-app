@@ -20,6 +20,7 @@ dictation-core = { path = "crates/core" }
 dictation-ports = { path = "crates/ports" }
 dictation-platform = { path = "crates/platform" }
 dictation-pipeline = { path = "crates/app" }
+dictation-transcribe = { path = "crates/transcribe" }
 
 tauri = { version = "2.12.5", features = [] }
 tauri-build = { version = "2.7.4", features = [] }
