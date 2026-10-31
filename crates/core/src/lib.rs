@@ -9,4 +9,5 @@ pub mod error;
 pub mod events;
 pub mod hotkey_spec;
 pub mod retry;
+pub mod settings;
 pub mod wav;
