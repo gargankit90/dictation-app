@@ -11,6 +11,7 @@
 //! release builds ignore them and have no way to inject key events or
 //! audio.
 
+pub mod commands;
 mod flags;
 mod logging;
 
@@ -150,6 +151,7 @@ pub fn run() {
                 handle_flags(forward.as_ref(), launch, SECOND_LAUNCH);
             },
         ))
+        .invoke_handler(commands::builder().invoke_handler())
         .setup(move |app| {
             setup(app, hotkey, injector.as_ref())?;
             Ok(())
@@ -213,6 +215,15 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
         tauri::async_runtime::block_on(async { Pipeline::spawn(ports, Config::default()) })
             .context("could not start the pipeline")?;
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
+
+    // Settings and API keys for the commands (M3.3); the settings UI is M3.4.
+    let config_dir = app.path().app_config_dir().context("no config directory")?;
+    let config = dictation_pipeline::config::Config::new(
+        &config_dir,
+        dictation_platform::secrets::KeychainSecretStore::new(),
+    );
+    tracing::info!(path = %config.path().display(), "settings file");
+    app.manage(commands::AppConfig(std::sync::Arc::new(config)));
     tauri::async_runtime::spawn(show_ui_events(app.handle().clone(), ui_events));
     tracing::info!(hotkey = %HotkeySpec::default(), "ready");
 

@@ -13,6 +13,11 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # paste is unmaintained, with no known vulnerability. It's a build-time
+    # proc-macro under specta (tauri-specta, M3.3). Owner-approved 2026-10-31.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained, no vulnerability; build-time proc-macro via specta" },
+]
 
 [licenses]
 version = 2
@@ -42,6 +47,9 @@ exceptions = [
     { allow = ["MPL-2.0"], crate = "dtoa-short" },
     { allow = ["MPL-2.0"], crate = "selectors" },
     { allow = ["MPL-2.0"], crate = "option-ext" },
+    # BSD-2-Clause is permissive; Inflector is a build-time dependency of the
+    # specta-macros proc-macro (tauri-specta, M3.3). Owner-approved 2026-10-31.
+    { allow = ["BSD-2-Clause"], crate = "Inflector" },
 ]
 
 [licenses.private]
