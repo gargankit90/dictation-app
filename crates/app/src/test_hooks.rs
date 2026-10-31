@@ -10,7 +10,8 @@
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use dictation_ports::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};
+use dictation_core::error::DictationError;
+use dictation_ports::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource, Permission};
 
 /// The flag that injects [`HotkeyEvent::Pressed`].
 pub const PRESS_FLAG: &str = "--press";
@@ -103,8 +104,16 @@ impl<H: HotkeySource> HotkeySource for SyntheticHotkey<H> {
                 }
             }))
             .err();
-        if let Some(error) = &self.real_error {
-            tracing::warn!(%error, "the hotkey is off; only the --press/--release test hooks work");
+        match &self.real_error {
+            None => {}
+            Some(HotkeyError::PermissionDenied) => tracing::warn!(
+                error = %DictationError::PermissionMissing(Permission::Accessibility),
+                "PermissionMissing: the hotkey is off; only the --press/--release test hooks work"
+            ),
+            Some(error) => tracing::warn!(
+                %error,
+                "the hotkey is off; only the --press/--release test hooks work"
+            ),
         }
         Ok(())
     }
