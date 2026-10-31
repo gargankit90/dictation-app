@@ -19,3 +19,6 @@ lcov.info
 
 # macOS
 .DS_Store
+
+# e2e run output
+/tests/e2e/out/

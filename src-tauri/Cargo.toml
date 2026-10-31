@@ -17,4 +17,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { workspace = true }
 
 [dependencies]
-tauri = { workspace = true }
+anyhow.workspace = true
+dictation-core.workspace = true
+dictation-pipeline.workspace = true
+dictation-platform.workspace = true
+dictation-ports.workspace = true
+tauri = { workspace = true, features = ["tray-icon"] }
+tauri-plugin-single-instance.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
