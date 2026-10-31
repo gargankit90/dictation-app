@@ -28,7 +28,6 @@ tauri-plugin-single-instance.workspace = true
 tauri-specta.workspace = true
 specta.workspace = true
 specta-typescript.workspace = true
-serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
