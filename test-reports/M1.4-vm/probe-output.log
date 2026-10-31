@@ -1,0 +1,37 @@
+=== run A (fresh VM) 17:46:58
+PermissionMissing: Accessibility permission is missing.
+Grant it to this terminal in System Settings > Privacy & Security > Accessibility; waiting...
+=== run B (Terminal relaunched after grant) 17:52:20
+listening for RightAlt; press Ctrl+C to stop
+--- check 3a: Right Option, Terminal frontmost 17:52:47
+Pressed
+Released
+--- check 3b: Left Option (expect nothing) (time not recorded)
+--- check 3c: Esc (expect CancelPressed) (time not recorded)
+CancelPressed
+--- check 3d: Right Option, Notes frontmost 17:56:52
+Pressed
+Released
+--- check 3d: Left Option, Notes frontmost (expect nothing) 17:56:54
+--- check 3e: Right Option, Safari frontmost 17:57:02
+Pressed
+Released
+--- check 3e: Esc, Safari frontmost 17:57:04
+CancelPressed
+--- check 5a: sudo prompt opened in a second Terminal window 17:57:20
+WARNING: Secure Input is on (a password field has focus); only modifier-only hotkeys work
+--- check 5b: Right Option with Secure Input on 17:57:26
+Pressed
+Released
+--- check 5c: leave the field (Safari to front) 17:57:28
+Secure Input is off
+Pressed
+Released
+=== run C (after tccutil reset Accessibility com.apple.Terminal, Terminal relaunched) 17:57:48
+PermissionMissing: Accessibility permission is missing.
+Grant it to this terminal in System Settings > Privacy & Security > Accessibility; waiting...
+=== run D (Terminal relaunched after re-grant) 17:59:33
+listening for RightAlt; press Ctrl+C to stop
+--- check 4e: Right Option after re-grant 17:59:40
+Pressed
+Released
