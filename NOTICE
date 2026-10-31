@@ -26,3 +26,19 @@ Ideas only, no code: Handy (MIT) for keeping the microphone open briefly
 between dictations; Muesli (MIT) for never waiting on CoreAudio from the
 thread that drives the UI and for treating route changes as a reason to
 reopen the device.
+
+Handy (https://github.com/cjpais/Handy), src-tauri/src/input.rs at commit
+9e57a0d
+  Adapted: the Carbon/CoreFoundation declarations and the UCKeyTranslate
+  scan that finds the key typing "v" with Command in the current keyboard
+  layout (crates/platform/src/insert/macos.rs, module `layout`).
+  MIT License, Copyright (c) 2025 CJ Pais
+
+objc2-app-kit, objc2-foundation, objc2-core-graphics
+(https://github.com/madsmtm/objc2)
+  NSPasteboard access and the paste key events
+  (crates/platform/src/insert/macos.rs). Used as dependencies.
+  Zlib OR Apache-2.0 OR MIT.
+
+Ideas only, no code: Muesli (MIT), PasteShortcut.swift, for resolving the
+paste key from the layout at paste time with Command held.

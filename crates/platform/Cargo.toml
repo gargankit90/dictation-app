@@ -32,6 +32,15 @@ objc2-av-foundation = { workspace = true, features = [
     "AVCaptureDevice",
     "AVMediaFormat",
 ] }
+objc2-app-kit = { workspace = true, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
+objc2-core-graphics = { workspace = true, features = [
+    "std",
+    "CGEvent",
+    "CGEventSource",
+    "CGEventTypes",
+    "CGRemoteOperation",
+] }
+objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSString"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # Its fake microphone drives the real capture engine (ring buffer,
