@@ -1,0 +1,5 @@
+2026-10-31T05:22:17.138163Z  INFO dictation_app_lib: starting version="0.1.0" log_dir=/Users/lume/Library/Logs/com.dictationapp.desktop
+2026-10-31T05:22:17.154540Z  WARN dictation_pipeline::test_hooks: PermissionMissing: the hotkey is off; only the --press/--release test hooks work error=Accessibility permission is missing.
+2026-10-31T05:22:17.154661Z  INFO dictation_app_lib: ready hotkey=RightAlt
+2026-10-31T05:22:18.427106Z  INFO dictation_app_lib: test hook event=Pressed from="a second launch" delivered=true
+2026-10-31T05:22:18.427305Z  INFO dictation_app_lib: state changed phase=Recording
