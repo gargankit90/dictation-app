@@ -1,9 +1,11 @@
-//! [`Permissions`] on macOS. Accessibility only for now; Microphone comes
-//! with the audio adapter.
+//! [`Permissions`] on macOS: Accessibility and Microphone.
 
 use std::ffi::c_void;
 
+use block2::RcBlock;
 use dictation_ports::{Permission, PermissionError, PermissionStatus, Permissions};
+use objc2::runtime::Bool;
+use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio};
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
@@ -78,7 +80,47 @@ fn prompt_for_accessibility() -> Result<bool, PermissionError> {
     Ok(trusted)
 }
 
+/// The microphone (TCC) status, without prompting.
+fn microphone_status() -> PermissionStatus {
+    match handy_recorder::permission_status() {
+        handy_recorder::Permission::Granted => PermissionStatus::Granted,
+        handy_recorder::Permission::Denied => PermissionStatus::Denied,
+        // NotDetermined, or no answer: `request` can still prompt.
+        _ => PermissionStatus::NotDetermined,
+    }
+}
+
+/// Shows the system microphone prompt if the user hasn't answered yet (it
+/// does nothing after that) and returns without waiting for the answer.
+///
+/// The app's Info.plist must have `NSMicrophoneUsageDescription`, or macOS
+/// kills the process here.
+fn request_microphone() -> Result<(), PermissionError> {
+    // SAFETY: AVMediaTypeAudio is an immutable framework constant, valid for
+    // the life of the process.
+    let Some(audio) = (unsafe { AVMediaTypeAudio }) else {
+        return Err(PermissionError::RequestFailed(
+            "AVMediaTypeAudio is missing".into(),
+        ));
+    };
+    // The answer arrives on an arbitrary queue; `check` reads it later.
+    let handler = RcBlock::new(|granted: Bool| {
+        tracing::info!(granted = granted.as_bool(), "microphone prompt answered");
+    });
+    // SAFETY: `audio` is AVMediaTypeAudio, one of the two media types the
+    // method accepts (others throw). The block is retained (copied) by
+    // AVFoundation for as long as it needs it, so ours may drop after the
+    // call; it captures nothing and is safe to call from any queue.
+    unsafe { AVCaptureDevice::requestAccessForMediaType_completionHandler(audio, &handler) };
+    Ok(())
+}
+
 /// macOS permissions.
+///
+/// Microphone: [`check`](Permissions::check) reads the TCC status and
+/// [`request`](Permissions::request) shows the system prompt the first
+/// time; after a refusal only System Settings › Privacy & Security ›
+/// Microphone can grant it.
 ///
 /// macOS can't say whether Accessibility was refused or never asked for, so
 /// an untrusted app reports [`PermissionStatus::NotDetermined`]: callers
@@ -102,17 +144,15 @@ impl Permissions for MacPermissions {
     fn check(&self, permission: Permission) -> PermissionStatus {
         match permission {
             Permission::Accessibility if is_accessibility_trusted() => PermissionStatus::Granted,
-            // Microphone isn't checked until the audio adapter lands.
-            Permission::Accessibility | Permission::Microphone => PermissionStatus::NotDetermined,
+            Permission::Accessibility => PermissionStatus::NotDetermined,
+            Permission::Microphone => microphone_status(),
         }
     }
 
     fn request(&self, permission: Permission) -> Result<(), PermissionError> {
         match permission {
             Permission::Accessibility => prompt_for_accessibility().map(|_| ()),
-            Permission::Microphone => Err(PermissionError::RequestFailed(
-                "microphone permission is not supported yet".into(),
-            )),
+            Permission::Microphone => request_microphone(),
         }
     }
 }
@@ -136,13 +176,18 @@ mod tests {
         );
     }
 
+    // Depends on the machine too; never `request` here: a test binary has
+    // no usage description, so macOS would kill it.
     #[test]
-    fn microphone_is_not_supported_yet() {
-        let permissions = MacPermissions::new();
+    fn microphone_check_matches_the_tcc_status() {
+        let expected = match handy_recorder::permission_status() {
+            handy_recorder::Permission::Granted => PermissionStatus::Granted,
+            handy_recorder::Permission::Denied => PermissionStatus::Denied,
+            _ => PermissionStatus::NotDetermined,
+        };
         assert_eq!(
-            permissions.check(Permission::Microphone),
-            PermissionStatus::NotDetermined
+            MacPermissions::new().check(Permission::Microphone),
+            expected
         );
-        assert!(permissions.request(Permission::Microphone).is_err());
     }
 }

@@ -6,5 +6,9 @@
 	     policy). Tauri merges this into the bundle's Info.plist. -->
 	<key>LSUIElement</key>
 	<true/>
+	<!-- Shown in the microphone permission prompt. Without it macOS kills
+	     the app the moment it asks for the microphone. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>dictation-app records your voice while you hold the dictation hotkey, to turn it into text.</string>
 </dict>
 </plist>
