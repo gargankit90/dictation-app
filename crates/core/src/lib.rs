@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 #![warn(clippy::pedantic)]
 
+pub mod audio_math;
 pub mod coordinator;
 pub mod error;
 pub mod events;
