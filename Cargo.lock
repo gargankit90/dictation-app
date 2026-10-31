@@ -808,6 +808,7 @@ dependencies = [
  "dictation-core",
  "dictation-pipeline",
  "dictation-platform",
+ "dictation-ports",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",

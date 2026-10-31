@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod hotkey;
 pub mod pipeline;
 pub mod stand_ins;
 pub mod test_hooks;
