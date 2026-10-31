@@ -143,7 +143,6 @@ fn a_cap_below_the_base_wins() {
 /// at 5597cc5: `Duration::mul_f64` panics converting ~2^64 s back from f64.
 /// Un-ignore once `delay_after` saturates (Tester M3.1 run 1, finding 1).
 #[test]
-#[ignore = "M3.1 run 1 finding 1: delay_after panics with max_delay = Duration::MAX"]
 fn a_huge_cap_does_not_panic_when_jitter_is_applied() {
     let p = RetryPolicy {
         multiplier: u32::MAX,
@@ -160,7 +159,6 @@ fn a_huge_cap_does_not_panic_when_jitter_is_applied() {
 /// A NaN jitter (or a source that returns NaN) should not panic either.
 /// Fails at 5597cc5: `f64::clamp` passes NaN through to `mul_f64`.
 #[test]
-#[ignore = "M3.1 run 1 finding 1: delay_after panics on NaN jitter"]
 fn nan_jitter_does_not_panic() {
     let p = policy(3, f64::NAN);
     let result = std::panic::catch_unwind(|| p.delay_after(1, &mut Fixed(0.5)));

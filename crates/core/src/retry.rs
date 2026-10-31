@@ -62,7 +62,7 @@ pub struct RetryPolicy {
     /// The longest wait, before jitter.
     pub max_delay: Duration,
     /// The fraction of a wait that may be taken off at random, `0.0..=1.0`
-    /// (clamped). 0 means no jitter.
+    /// (clamped). 0 means no jitter, and so does NaN.
     pub jitter: f64,
 }
 
@@ -81,7 +81,10 @@ impl Default for RetryPolicy {
 
 impl RetryPolicy {
     /// The wait before the retry that follows failure number `failure`
-    /// (from 1), without jitter. Saturates at [`max_delay`](Self::max_delay).
+    /// (from 1), without jitter: `base_delay * multiplier^(failure - 1)`,
+    /// capped at [`max_delay`](Self::max_delay). Failure 0 counts as 1, and
+    /// any overflow (huge failure numbers or multipliers) gives the cap, so
+    /// it never panics.
     #[must_use]
     pub fn backoff(&self, failure: u32) -> Duration {
         let exponent = failure.saturating_sub(1);
@@ -91,16 +94,34 @@ impl RetryPolicy {
             .map_or(self.max_delay, |d| d.min(self.max_delay))
     }
 
-    /// The wait after failure number `failure` with jitter applied, or
-    /// `None` if that failure used up the last attempt.
+    /// The wait after failure number `failure` (from 1): the
+    /// [`backoff`](Self::backoff) shortened at random by up to `jitter` of
+    /// itself, so it lies in `(1 - jitter) * backoff ..= backoff`. `None` if
+    /// that failure used up the last attempt (`failure >= max_attempts`,
+    /// with `max_attempts` 0 counting as 1).
+    ///
+    /// Never panics: a NaN `jitter` or random value counts as 0 (no cut), and
+    /// a wait too large for the float maths (a cap near `Duration::MAX`)
+    /// stays at the backoff.
     pub fn delay_after(&self, failure: u32, rng: &mut impl RandomSource) -> Option<Duration> {
         if failure >= self.max_attempts.max(1) {
             return None;
         }
         let backoff = self.backoff(failure);
-        let cut = self.jitter.clamp(0.0, 1.0) * rng.next_unit().clamp(0.0, 1.0);
-        Some(backoff.mul_f64(1.0 - cut))
+        let cut = unit(self.jitter) * unit(rng.next_unit());
+        if cut == 0.0 {
+            return Some(backoff);
+        }
+        // Not `Duration::mul_f64`, which panics when the result doesn't fit.
+        let wait =
+            Duration::try_from_secs_f64(backoff.as_secs_f64() * (1.0 - cut)).unwrap_or(backoff);
+        Some(wait.min(backoff))
     }
+}
+
+/// `x` clamped to `0.0..=1.0`, with NaN as 0.
+fn unit(x: f64) -> f64 {
+    if x.is_nan() { 0.0 } else { x.clamp(0.0, 1.0) }
 }
 
 /// What to do after a failure.
@@ -135,7 +156,12 @@ impl Retry {
         self.failures
     }
 
-    /// Records a failure at `now` and says whether and when to try again.
+    /// Records a failure at `now` (the caller's clock) and says whether to
+    /// try again: [`RetryDecision::RetryAt`] `now` plus
+    /// [`RetryPolicy::delay_after`] (saturating at `Duration::MAX`), or
+    /// [`RetryDecision::GiveUp`] once `max_attempts` attempts have failed.
+    /// With `max_attempts` 0 or 1 the first failure gives up. Once given up,
+    /// every later call gives up too.
     pub fn failed(&mut self, now: Duration, rng: &mut impl RandomSource) -> RetryDecision {
         self.failures = self.failures.saturating_add(1);
         match self.policy.delay_after(self.failures, rng) {
@@ -291,6 +317,33 @@ mod tests {
         };
         assert_eq!(run(42), run(42));
         assert_ne!(run(42), run(43));
+    }
+
+    #[test]
+    fn nan_means_no_cut_and_a_huge_cap_never_panics() {
+        let nan_jitter = RetryPolicy {
+            jitter: f64::NAN,
+            ..policy()
+        };
+        assert_eq!(nan_jitter.delay_after(2, &mut Fixed(0.7)), Some(ms(200)));
+        assert_eq!(policy().delay_after(2, &mut Fixed(f64::NAN)), Some(ms(200)));
+
+        let huge = RetryPolicy {
+            max_attempts: 50,
+            multiplier: u32::MAX,
+            max_delay: Duration::MAX,
+            ..policy()
+        };
+        assert_eq!(huge.delay_after(40, &mut Fixed(0.0)), Some(Duration::MAX));
+        let wait = huge.delay_after(40, &mut Fixed(0.5)).unwrap();
+        // Jitter 0.5 x random 0.5 cuts a quarter: about 3/4 of the cap, give
+        // or take f64's resolution at this size (~1000 s).
+        let expected = Duration::MAX / 4 * 3;
+        let slack = Duration::from_secs(4_096);
+        assert!(
+            wait <= expected + slack && wait + slack >= expected,
+            "{wait:?}"
+        );
     }
 
     #[test]
