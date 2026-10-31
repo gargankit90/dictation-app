@@ -98,6 +98,26 @@ pub trait AudioSource: Send {
     fn is_recording(&self) -> bool;
 }
 
+/// A boxed source is a source, so a caller can pick one at run time (the
+/// shell: the microphone, or a file for a test hook).
+impl<A: AudioSource + ?Sized> AudioSource for Box<A> {
+    fn start(&mut self) -> Result<(), AudioError> {
+        (**self).start()
+    }
+
+    fn stop(&mut self) -> Result<Audio, AudioError> {
+        (**self).stop()
+    }
+
+    fn discard(&mut self) {
+        (**self).discard();
+    }
+
+    fn is_recording(&self) -> bool {
+        (**self).is_recording()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -120,5 +140,42 @@ mod tests {
             samples: vec![0.0; 10],
         };
         assert_eq!(audio.duration(), Duration::ZERO);
+    }
+
+    /// Records a fixed clip.
+    struct OneClip(bool);
+
+    impl AudioSource for OneClip {
+        fn start(&mut self) -> Result<(), AudioError> {
+            self.0 = true;
+            Ok(())
+        }
+
+        fn stop(&mut self) -> Result<Audio, AudioError> {
+            self.0 = false;
+            Ok(Audio {
+                sample_rate: 16_000,
+                samples: vec![0.5],
+            })
+        }
+
+        fn discard(&mut self) {
+            self.0 = false;
+        }
+
+        fn is_recording(&self) -> bool {
+            self.0
+        }
+    }
+
+    #[test]
+    fn a_boxed_source_forwards_every_call() {
+        let mut audio: Box<dyn AudioSource> = Box::new(OneClip(false));
+        audio.start().unwrap();
+        assert!(audio.is_recording());
+        assert_eq!(audio.stop().unwrap().samples, [0.5]);
+        audio.start().unwrap();
+        audio.discard();
+        assert!(!audio.is_recording());
     }
 }
