@@ -21,7 +21,6 @@ use dictation_ports::SecretStore;
 
 const DUMMY: &str = "dummy-value-for-the-keychain-test";
 
-#[cfg(target_os = "macos")]
 #[test]
 #[ignore = "touches the real keychain; run by hand (M3.3 criterion 4)"]
 fn criterion_4_real_keychain_round_trip() {
