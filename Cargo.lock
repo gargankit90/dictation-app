@@ -860,6 +860,10 @@ dependencies = [
 [[package]]
 name = "dictation-transcribe"
 version = "0.1.0"
+dependencies = [
+ "dictation-ports",
+ "tokio",
+]
 
 [[package]]
 name = "digest"
