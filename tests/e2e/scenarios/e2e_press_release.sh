@@ -18,7 +18,7 @@ e2e_press_release() {
   log "  phases logged: $phases"
   expect "the full state sequence is logged in order" \
     test "$phases" = "Recording Transcribing Inserting Idle"
-  # FIXED_TRANSCRIPT in crates/app/src/stand_ins.rs.
+  # mock::DEFAULT_TEXT in crates/transcribe/src/mock.rs (the default engine).
   expect "the transcript is not in the log" \
     sh -c "! printf '%s' \"\$1\" | grep -q 'This is a test dictation'" _ "$(app_log)"
   expect "one app is running" test "$(app_count)" = 1

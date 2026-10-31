@@ -17,14 +17,13 @@ use dictation_core::hotkey_spec::HotkeySpec;
 #[cfg(not(debug_assertions))]
 use dictation_pipeline::hotkey::PermissionTolerantHotkey;
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
-use dictation_pipeline::stand_ins::{
-    DiscardingInserter, FixedTranscriber, GrantedPermissions, SilentAudio,
-};
+use dictation_pipeline::stand_ins::{DiscardingInserter, GrantedPermissions, SilentAudio};
 use dictation_pipeline::test_hooks::Injector;
 #[cfg(debug_assertions)]
 use dictation_pipeline::test_hooks::SyntheticHotkey;
 use dictation_platform::clock::SystemClock;
 use dictation_platform::hotkey::SystemHotkey;
+use dictation_transcribe::mock::MockTranscriber;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Manager, RunEvent};
@@ -32,6 +31,9 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 const QUIT_ID: &str = "quit";
 const SETTINGS_ID: &str = "settings";
+/// Where a launch's flags came from, for the log.
+const THIS_LAUNCH: &str = "this launch";
+const SECOND_LAUNCH: &str = "a second launch";
 
 /// The running pipeline, taken out on Quit to shut it down.
 struct RunningPipeline(Mutex<Option<Pipeline>>);
@@ -75,7 +77,11 @@ pub fn run() {
         // First, so a second launch exits before setting anything else up.
         .plugin(tauri_plugin_single_instance::init(
             move |_app, argv, _cwd| {
-                handle_flags(forward.as_ref(), &argv, "a second launch");
+                handle_flags(
+                    forward.as_ref(),
+                    flags::parse(&argv, flags::TEST_FLAGS),
+                    SECOND_LAUNCH,
+                );
             },
         ))
         .setup(move |app| {
@@ -112,10 +118,20 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
     app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     build_tray(app).context("could not create the tray icon")?;
 
+    let argv: Vec<String> = std::env::args().collect();
+    let launch = flags::parse(&argv, flags::TEST_FLAGS);
+    // Only one engine so far; an enum that delegates comes with the second.
+    let flags::TranscriberChoice::Mock = launch.transcriber.unwrap_or_default();
+    let transcriber = MockTranscriber::default();
+    tracing::info!(
+        transcriber = flags::TranscriberChoice::Mock.name(),
+        "engine"
+    );
+
     let ports = Ports {
         hotkey,
         audio: SilentAudio::default(),
-        transcriber: FixedTranscriber,
+        transcriber,
         inserter: DiscardingInserter,
         permissions: GrantedPermissions,
         clock: SystemClock::new(),
@@ -128,15 +144,19 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
     tauri::async_runtime::spawn(log_ui_events(ui_events));
     tracing::info!(hotkey = %HotkeySpec::default(), "ready");
 
-    let argv: Vec<String> = std::env::args().collect();
-    handle_flags(injector, &argv, "this launch");
+    handle_flags(injector, launch, THIS_LAUNCH);
     Ok(())
 }
 
 /// Acts on a launch's flags: injects the test flags (debug builds only) and
 /// warns about the rest.
-fn handle_flags(injector: Option<&Injector>, argv: &[String], from: &str) {
-    let flags = flags::parse(argv, flags::TEST_FLAGS);
+fn handle_flags(injector: Option<&Injector>, flags: flags::LaunchFlags, from: &str) {
+    if from == SECOND_LAUNCH && flags.transcriber.is_some() {
+        tracing::warn!(
+            from,
+            "--transcriber only applies when the app starts; ignored"
+        );
+    }
     for flag in &flags.ignored {
         tracing::warn!(%flag, from, "ignoring an unknown flag");
     }
