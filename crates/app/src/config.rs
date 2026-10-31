@@ -6,8 +6,11 @@
 //! stored and their presence checked, but nothing here hands one back to
 //! the UI: [`Config::set_api_key`] is write-only.
 
-use std::io::ErrorKind;
+use std::fs::OpenOptions;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use dictation_core::settings::{self, Provider, Settings, SettingsError};
 use dictation_ports::{Secret, SecretError, SecretStore};
@@ -46,6 +49,9 @@ pub enum ConfigError {
 pub struct Config<S> {
     path: PathBuf,
     secrets: S,
+    /// Held across a whole save (write, sync, rename), so saves through one
+    /// `Config` never overlap.
+    save_lock: Mutex<()>,
 }
 
 impl<S: SecretStore> Config<S> {
@@ -55,6 +61,7 @@ impl<S: SecretStore> Config<S> {
         Self {
             path: dir.as_ref().join(SETTINGS_FILE),
             secrets,
+            save_lock: Mutex::new(()),
         }
     }
 
@@ -79,21 +86,42 @@ impl<S: SecretStore> Config<S> {
         }
     }
 
-    /// Validates and saves `settings`, replacing the file in one step (a
-    /// temporary file, then a rename), so a crash never leaves half a file.
+    /// Validates and saves `settings`, replacing the file in one step: the
+    /// JSON goes to a uniquely named temporary file next to it, which is
+    /// synced and then renamed over the settings file. Readers see the old
+    /// or the new file, never a mix. Saves through one `Config` are
+    /// serialized, and the temporary names never collide between `Config`s or
+    /// processes. The file is synced before the rename, but the directory
+    /// isn't, so a power cut right after a save may keep the previous
+    /// settings.
     ///
     /// # Errors
     ///
     /// [`ConfigError::Settings`] if they're invalid (nothing is written),
     /// and [`ConfigError::Io`] if the file can't be written.
     pub fn save_settings(&self, settings: &Settings) -> Result<(), ConfigError> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+
         let json = settings::to_json(settings)?;
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| self.io_error(&e))?;
+        // A poisoned lock only means another save panicked; the file is
+        // still whole, because each save replaces it atomically.
+        let _saving = self
+            .save_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = self.path.parent().unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(dir).map_err(|e| self.io_error(&e))?;
+        let temporary = dir.join(format!(
+            ".{SETTINGS_FILE}.{}.{}.tmp",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let written = write_new(&temporary, json.as_bytes())
+            .and_then(|()| std::fs::rename(&temporary, &self.path));
+        if let Err(error) = written {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(self.io_error(&error));
         }
-        let temporary = self.path.with_extension("json.tmp");
-        std::fs::write(&temporary, json).map_err(|e| self.io_error(&e))?;
-        std::fs::rename(&temporary, &self.path).map_err(|e| self.io_error(&e))?;
         tracing::info!(path = %self.path.display(), "settings saved");
         Ok(())
     }
@@ -147,6 +175,14 @@ impl<S: SecretStore> Config<S> {
             reason: error.to_string(),
         }
     }
+}
+
+/// Writes `bytes` to a new file at `path` (failing if it exists) and syncs
+/// it to disk.
+fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 #[cfg(test)]
@@ -204,7 +240,75 @@ mod tests {
         };
         config.save_settings(&settings).unwrap();
         assert_eq!(config.settings().unwrap(), settings);
-        assert!(!config.path().with_extension("json.tmp").exists());
+        assert_eq!(
+            files_in(config.path().parent().unwrap()),
+            [SETTINGS_FILE],
+            "no temporary file is left behind"
+        );
+    }
+
+    fn files_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn concurrent_saves_of_different_lengths_leave_one_whole_file() {
+        const THREADS: usize = 8;
+        const ROUNDS: usize = 25;
+        let dir = TempDir::new();
+        let (config, _) = config(&dir);
+        let config = std::sync::Arc::new(config);
+        // Alternate short and long models so an overlapping write would
+        // leave the tail of the longer document behind.
+        let variant = |thread: usize| Settings {
+            model: "x".repeat(if thread % 2 == 0 { 1 } else { 90 } + thread),
+            ..Settings::default()
+        };
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(THREADS));
+        let handles: Vec<_> = (0..THREADS)
+            .map(|thread| {
+                let (config, barrier) = (config.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    let settings = variant(thread);
+                    (0..ROUNDS)
+                        .map(|_| {
+                            barrier.wait();
+                            config.save_settings(&settings)
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for handle in handles {
+            for result in handle.join().unwrap() {
+                assert_eq!(result, Ok(()));
+            }
+        }
+        let saved = config.settings().expect("the file parses");
+        assert!(
+            (0..THREADS).any(|thread| saved == variant(thread)),
+            "the file holds one of the saved values"
+        );
+        assert_eq!(files_in(config.path().parent().unwrap()), [SETTINGS_FILE]);
+    }
+
+    #[test]
+    fn a_failed_save_leaves_no_temporary_file() {
+        let dir = TempDir::new();
+        let (config, _) = config(&dir);
+        std::fs::create_dir_all(config.path()).unwrap(); // rename onto a directory fails
+        let error = config.save_settings(&Settings::default()).unwrap_err();
+        assert!(matches!(error, ConfigError::Io { .. }), "{error}");
+        assert_eq!(
+            files_in(config.path().parent().unwrap()),
+            [SETTINGS_FILE],
+            "only the directory standing in for the file"
+        );
     }
 
     #[test]
