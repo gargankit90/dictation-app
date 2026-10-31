@@ -659,6 +659,7 @@ dependencies = [
 name = "dictation-core"
 version = "0.1.0"
 dependencies = [
+ "hound",
  "proptest",
  "thiserror 2.0.21",
 ]

@@ -13,4 +13,5 @@ workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+hound.workspace = true
 proptest.workspace = true
