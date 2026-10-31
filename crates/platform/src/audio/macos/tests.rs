@@ -222,6 +222,7 @@ fn a_warm_device_is_reused_by_the_next_recording() {
     record(&mut mic, 160);
     assert_eq!(device.opens(), 1);
     assert!(mic.is_open());
+    assert!(mic.device_name().is_some());
 }
 
 #[test]
@@ -231,6 +232,7 @@ fn without_warm_time_the_device_closes_after_each_recording() {
     let _pump = device.pump(16_000, 1, false);
     record(&mut mic, 160);
     assert!(!mic.is_open());
+    assert_eq!(mic.device_name(), None);
     record(&mut mic, 160);
     assert_eq!(device.opens(), 2);
 }

@@ -185,6 +185,14 @@ impl MacMicrophone {
         self.last_first_audio
     }
 
+    /// The name of the open device; `None` while closed.
+    #[must_use]
+    pub fn device_name(&self) -> Option<String> {
+        lock(&self.shared.open)
+            .as_ref()
+            .map(|open| open.recorder.info().device.name.clone())
+    }
+
     /// Whether the device is open (recording, or warm).
     #[must_use]
     pub fn is_open(&self) -> bool {

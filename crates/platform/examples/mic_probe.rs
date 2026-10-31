@@ -3,12 +3,14 @@
 //!
 //! ```sh
 //! cargo run -p dictation-platform --example mic_probe                  # 3 x 2 s
+//! cargo run -p dictation-platform --example mic_probe -- 1 2           # 2 x 1 s
 //! cargo run -p dictation-platform --example mic_probe -- 5 1           # 1 x 5 s
 //! cargo run -p dictation-platform --example mic_probe -- 2 1 out.wav   # and save it
 //! ```
 //!
 //! Microphone access is granted to the app the probe runs in (Terminal,
-//! iTerm, …). Prints only timings, length and loudness, never the audio;
+//! iTerm, …). Prints only the device name, timings, length and loudness,
+//! never the audio;
 //! nothing is saved unless a path is given.
 
 #[cfg(target_os = "macos")]
@@ -59,9 +61,10 @@ fn main() -> std::process::ExitCode {
             || "none".to_owned(),
             |d| format!("{:.1} ms", d.as_secs_f64() * 1_000.0),
         );
+        let device = mic.device_name().unwrap_or_else(|| "closed".to_owned());
         let rms = audio_math::rms(&audio.samples);
         println!(
-            "take {take} ({}): start() {start_ms:.1} ms, first audio {first_audio}, {:?} at {} Hz, RMS {rms:.4}{}",
+            "take {take} ({}, {device}): start() {start_ms:.1} ms, first audio {first_audio}, {:?} at {} Hz, RMS {rms:.4}{}",
             if take == 1 { "cold" } else { "warm" },
             audio.duration(),
             audio.sample_rate,
