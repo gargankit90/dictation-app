@@ -27,6 +27,8 @@ from the VM.
    The golden image is only cloned, never started or changed.
 3. **Install:** the `.app` is copied with `tar` over ssh into
    `~/Applications` in the VM, and its signature is checked there.
+   `tests/e2e/fixtures/` (a 1.5 s 440 Hz tone, 16 kHz mono 16-bit; no voice)
+   goes to `~/e2e-fixtures` in the VM.
 4. **Scenarios:** each one quits any running copy of the app, clears its log
    (`~/Library/Logs/com.dictationapp.desktop/` in the VM), launches the app
    with `open -n …/dictation-app.app --args <flags>`, and checks the log and
@@ -34,8 +36,9 @@ from the VM.
 
 | Scenario | Criterion | Checks |
 | -------- | --------- | ------ |
-| `e2e_startup` | M1.5 #1 | The app starts (`ready` in the log) and one copy runs. A second launch with `--press` is forwarded (`test hook event=Pressed from="a second launch"`) and the pipeline starts recording. Still only one process; the app was set up once. |
-| `e2e_press_release` | M1.5 #2 | A first launch with `--press`, a second with `--release` a second later. The log shows `Recording Transcribing Inserting Idle` in that order, and the stand-in transcript isn't in it. |
+| `e2e_startup` | M1.5 #1 | The app starts (first launch with `--debug-audio-file`, so the press needs no mic permission) (`ready` in the log) and one copy runs. A second launch with `--press` is forwarded (`test hook event=Pressed from="a second launch"`) and the pipeline starts recording. Still only one process; the app was set up once. |
+| `e2e_press_release` | M1.5 #2, M2.2 #1 | A first launch with `--debug-audio-file ~/e2e-fixtures/tone-16k.wav --press`, a second with `--release` a second later. The app records the fixture, not the mic; the log shows `Recording Transcribing Inserting Idle` in that order, and the stand-in transcript isn't in it. |
+| `e2e_real_mic` | M2.2 | Skipped unless `E2E_REAL_MIC=1`. `--press`, then `--release`, recording the VM's real microphone: no permission error or microphone failure, and the full state sequence. Needs the mic granted in the golden image and an input device in the VM. |
 
 ## Requirements on the host
 
@@ -75,8 +78,13 @@ from the VM.
   password sheet that refuses synthetic keys (see
   `test-reports/M1.4-run2-vm.md`), so tests that need the real hotkey grant
   it through the VM's own VNC display, not the host screen.
-- **Microphone / paste:** M1.5 runs stand-ins (`crates/app/src/stand_ins.rs`),
-  so neither prompt appears.
+- **Microphone:** since M2.2 the app records the real microphone. The
+  scenarios pass `--debug-audio-file` on the first launch, so they need no
+  microphone permission and no prompt appears. Without that flag the first
+  press shows the macOS microphone prompt and, until it's allowed, logs
+  `Microphone permission is missing.` (`e2e_real_mic`).
+- **Paste:** still a stand-in (`crates/app/src/stand_ins.rs`), so no
+  Accessibility prompt.
 
 ## Adding a scenario
 

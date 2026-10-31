@@ -1,10 +1,12 @@
 # M1.5 criterion 1: the app launches; a second launch with --press forwards
-# the flag to it and doesn't leave a second app running.
+# the flag to it and doesn't leave a second app running. The first launch
+# records a fixture WAV instead of the microphone (M2.2), so the press needs
+# no microphone permission.
 
 e2e_startup() {
   fresh_app_state
 
-  launch
+  launch --debug-audio-file "$VM_TONE"
   expect "the app starts and logs ready" wait_for_log 'INFO .*ready'
   expect "one app is running" test "$(app_count)" = 1
   # Not a check: the flags work either way. Says whether the VM had granted

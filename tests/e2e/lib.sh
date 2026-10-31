@@ -11,6 +11,11 @@ APP_NAME=dictation-app
 # Where the app lives in the VM, and where it logs (Tauri's app_log_dir).
 VM_APP="/Users/$VM_USER/Applications/$APP_NAME.app"
 VM_LOG_DIR="/Users/$VM_USER/Library/Logs/com.dictationapp.desktop"
+# Test audio (tests/e2e/fixtures/) in the VM. The scenarios record this file
+# instead of the microphone (--debug-audio-file, debug builds only), so they
+# need no microphone permission or input device.
+VM_FIXTURES="/Users/$VM_USER/e2e-fixtures"
+VM_TONE="$VM_FIXTURES/tone-16k.wav"
 
 log() { printf '[e2e %s] %s\n' "$(date +%T)" "$*" >&2; }
 die() {
@@ -73,6 +78,14 @@ install_app() {
   vm "mkdir -p ~/Applications && rm -rf $(q "$VM_APP")"
   tar -C "$(dirname "$app")" -cf - "$(basename "$app")" | vm "tar -C ~/Applications -xf -"
   vm "codesign --verify --deep $(q "$VM_APP")" || die "the app's signature didn't survive the copy"
+}
+
+# Copies tests/e2e/fixtures/ into the VM at $VM_FIXTURES.
+install_fixtures() {
+  local dir=$1
+  log "installing the audio fixtures in the VM"
+  vm "rm -rf $(q "$VM_FIXTURES") && mkdir -p $(q "$VM_FIXTURES")"
+  tar -C "$dir" -cf - . | vm "tar -C $(q "$VM_FIXTURES") -xf -"
 }
 
 # Quits every running copy of the app and clears its logs.
