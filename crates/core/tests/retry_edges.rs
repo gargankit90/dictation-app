@@ -169,3 +169,50 @@ fn nan_jitter_does_not_panic() {
         "delay_after panicked with a NaN random source"
     );
 }
+
+// Run 2: the fix for finding 1 keeps every wait within the backoff for any
+// cap up to `Duration::MAX` and any jitter or random value, NaN and
+// infinities included, and NaN means no cut.
+proptest::proptest! {
+    #[test]
+    fn waits_never_exceed_the_backoff_for_any_cap_or_jitter(
+        base_s in 0u64..=u64::MAX,
+        cap_s in 0u64..=u64::MAX,
+        multiplier in 0u32..=u32::MAX,
+        failure in 1u32..200,
+        jitter in proptest::prop_oneof![
+            proptest::num::f64::ANY,
+            proptest::strategy::Just(f64::NAN),
+            proptest::strategy::Just(f64::INFINITY),
+            proptest::strategy::Just(f64::NEG_INFINITY),
+        ],
+        unit in proptest::num::f64::ANY,
+    ) {
+        let p = RetryPolicy {
+            max_attempts: 500,
+            base_delay: Duration::from_secs(base_s),
+            multiplier,
+            max_delay: Duration::from_secs(cap_s),
+            jitter,
+        };
+        let backoff = p.backoff(failure);
+        proptest::prop_assert!(backoff <= p.max_delay);
+        let wait = p.delay_after(failure, &mut Fixed(unit)).unwrap();
+        proptest::prop_assert!(wait <= backoff, "{wait:?} > {backoff:?}");
+        if jitter.is_nan() || unit.is_nan() {
+            proptest::prop_assert_eq!(wait, backoff);
+        }
+    }
+}
+
+#[test]
+fn nan_counts_as_no_jitter_at_the_largest_cap() {
+    let p = RetryPolicy {
+        multiplier: u32::MAX,
+        max_delay: Duration::MAX,
+        ..policy(50, f64::NAN)
+    };
+    assert_eq!(p.delay_after(40, &mut Fixed(0.9)), Some(Duration::MAX));
+    let full = RetryPolicy { jitter: 1.0, ..p };
+    assert_eq!(full.delay_after(40, &mut Fixed(1.0)), Some(Duration::ZERO));
+}
