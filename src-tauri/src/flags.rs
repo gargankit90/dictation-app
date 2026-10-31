@@ -31,6 +31,15 @@ pub enum TranscriberChoice {
 }
 
 impl TranscriberChoice {
+    /// Every engine, for the "known engines" warning.
+    pub const ALL: [Self; 1] = [Self::Mock];
+
+    /// The known engine names, comma-separated.
+    #[must_use]
+    pub fn known_names() -> String {
+        Self::ALL.map(Self::name).join(", ")
+    }
+
     /// The engine called `name` on the command line.
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
@@ -56,6 +65,8 @@ pub struct LaunchFlags {
     pub events: Vec<HotkeyEvent>,
     /// The engine `--transcriber` asked for; the last one wins.
     pub transcriber: Option<TranscriberChoice>,
+    /// Engine names `--transcriber` was given that no engine has.
+    pub unknown_engines: Vec<String>,
     /// Arguments this build doesn't act on, for a warning.
     pub ignored: Vec<String>,
 }
@@ -91,7 +102,7 @@ impl LaunchFlags {
     fn transcriber(&mut self, name: &str) {
         match TranscriberChoice::from_name(name) {
             Some(choice) => self.transcriber = Some(choice),
-            None => self.ignored.push(format!("{TRANSCRIBER_FLAG} {name}")),
+            None => self.unknown_engines.push(name.to_owned()),
         }
     }
 }
@@ -154,13 +165,15 @@ mod tests {
     fn unknown_or_missing_engine_is_ignored() {
         let flags = parse(&argv(&["--transcriber", "whisper", "--press"]), true);
         assert_eq!(flags.transcriber, None);
-        assert_eq!(flags.ignored, ["--transcriber whisper"]);
+        assert_eq!(flags.unknown_engines, ["whisper"]);
+        assert!(flags.ignored.is_empty());
         // The value is consumed even when unknown, so the next flag still counts.
         assert_eq!(flags.events, [Pressed]);
 
         let flags = parse(&argv(&["--transcriber=", "--transcriber"]), true);
         assert_eq!(flags.transcriber, None);
-        assert_eq!(flags.ignored, ["--transcriber ", "--transcriber"]);
+        assert_eq!(flags.unknown_engines, [""]);
+        assert_eq!(flags.ignored, ["--transcriber"]);
 
         let flags = parse(&argv(&["--transcriberx=mock"]), true);
         assert_eq!(flags.ignored, ["--transcriberx=mock"]);
@@ -172,6 +185,10 @@ mod tests {
         assert_eq!(choice, TranscriberChoice::Mock);
         assert_eq!(TranscriberChoice::from_name(choice.name()), Some(choice));
         assert_eq!(TranscriberChoice::from_name("Mock"), None);
+        assert_eq!(TranscriberChoice::known_names(), "mock");
+        for choice in TranscriberChoice::ALL {
+            assert_eq!(TranscriberChoice::from_name(choice.name()), Some(choice));
+        }
     }
 
     #[test]

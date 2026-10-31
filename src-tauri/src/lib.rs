@@ -157,6 +157,15 @@ fn handle_flags(injector: Option<&Injector>, flags: flags::LaunchFlags, from: &s
             "--transcriber only applies when the app starts; ignored"
         );
     }
+    for engine in &flags.unknown_engines {
+        tracing::warn!(
+            %engine,
+            known = %flags::TranscriberChoice::known_names(),
+            default = flags::TranscriberChoice::default().name(),
+            from,
+            "unknown --transcriber engine; using the default"
+        );
+    }
     for flag in &flags.ignored {
         tracing::warn!(%flag, from, "ignoring an unknown flag");
     }
