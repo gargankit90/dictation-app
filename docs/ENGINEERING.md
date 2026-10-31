@@ -109,8 +109,13 @@ Tauri is a thin layer on top.
   show a warning while Secure Input is on.
 - **Overlay:** a non-activating panel that never takes focus
   (`tauri-nspanel`), or the paste lands in the overlay.
-- **Recording length:** maximum 5 minutes (16 kHz mono WAV ≈ 1.9 MB/min, under
-  Groq's upload limit; confirm the limit in M3.2).
+- **Recording length:** maximum 5 minutes (16 kHz mono WAV ≈ 1.9 MB/min, so
+  about 9.6 MB, under Groq's upload limit).
+- **Groq upload limit** (checked 2026-10-31 at
+  <https://console.groq.com/docs/speech-to-text>): a direct file upload may
+  be up to 25 MB on the free tier and 100 MB on the dev (paid) tier; larger
+  files must be passed by URL instead. Requests shorter than 10 s are billed
+  as 10 s. We upload directly, so we plan for the 25 MB free-tier limit.
 
 ## Tests
 

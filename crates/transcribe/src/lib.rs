@@ -2,4 +2,6 @@
 
 #![forbid(unsafe_code)]
 
+mod http;
 pub mod mock;
+pub mod openai_compat;
