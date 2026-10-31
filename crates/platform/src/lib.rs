@@ -14,6 +14,7 @@
 #[cfg(any(test, feature = "testing"))]
 pub mod fakes;
 
+pub mod audio;
 pub mod clock;
 pub mod hotkey;
 pub mod permissions;

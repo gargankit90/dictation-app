@@ -1,5 +1,7 @@
 //! Stand-ins for the ports that have no real adapter yet, so the shell can
-//! run the pipeline end to end (M1.5): audio, transcription and paste.
+//! run the pipeline end to end (M1.5): transcription and paste, and audio
+//! for tests. M2.2 brought the real microphone; [`MicrophoneOnly`] checks
+//! its permission while paste is still a stand-in.
 //! Each is replaced by its real adapter in a later milestone. Unlike the
 //! `platform` fakes they can't be scripted; they just let a dictation run.
 
@@ -93,6 +95,28 @@ impl Permissions for GrantedPermissions {
     }
 }
 
+/// Checks only the microphone with the real `P`; reports Accessibility
+/// granted, since the stand-in inserter doesn't paste. Replaced by the real
+/// permissions once the real inserter lands.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct MicrophoneOnly<P>(pub P);
+
+impl<P: Permissions> Permissions for MicrophoneOnly<P> {
+    fn check(&self, permission: Permission) -> PermissionStatus {
+        match permission {
+            Permission::Microphone => self.0.check(permission),
+            Permission::Accessibility => PermissionStatus::Granted,
+        }
+    }
+
+    fn request(&self, permission: Permission) -> Result<(), PermissionError> {
+        match permission {
+            Permission::Microphone => self.0.request(permission),
+            Permission::Accessibility => Ok(()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,5 +157,26 @@ mod tests {
             );
             assert_eq!(GrantedPermissions.request(permission), Ok(()));
         }
+    }
+
+    #[test]
+    fn microphone_only_checks_and_requests_just_the_microphone() {
+        use dictation_platform::fakes::FakePermissions;
+
+        let real = FakePermissions::new();
+        real.set(Permission::Microphone, PermissionStatus::Denied);
+        let permissions = MicrophoneOnly(real.clone());
+        assert_eq!(
+            permissions.check(Permission::Microphone),
+            PermissionStatus::Denied
+        );
+        assert_eq!(
+            permissions.check(Permission::Accessibility),
+            PermissionStatus::Granted
+        );
+        permissions.request(Permission::Accessibility).unwrap();
+        assert!(real.requests().is_empty());
+        permissions.request(Permission::Microphone).unwrap();
+        assert_eq!(real.requests(), [Permission::Microphone]);
     }
 }

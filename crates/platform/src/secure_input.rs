@@ -94,6 +94,8 @@ impl Drop for SecureInputWatcher {
     }
 }
 
+// SAFETY: these declarations match the C signatures in Carbon
+// (HIToolbox); each call site's `unsafe` block upholds its contract.
 #[cfg(target_os = "macos")]
 #[link(name = "Carbon", kind = "framework")]
 unsafe extern "C" {

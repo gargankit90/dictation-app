@@ -2,27 +2,37 @@
 //!
 //! M1.5: a menu-bar app with a tray menu (Settings, disabled for now, and
 //! Quit) that runs the pipeline with the real hotkey and the stand-ins for
-//! audio, transcription and paste. A second launch forwards its flags to
-//! the running app through the single-instance plugin and exits. Debug
-//! builds act on the `--press`/`--release` test flags (see [`flags`]);
-//! release builds ignore them and have no way to inject key events.
+//! transcription and paste. M2.2: it records from the real microphone, and
+//! a dictation error (such as a missing microphone permission) shows as the
+//! tray's title and tooltip until the next recording. A second launch
+//! forwards its flags to the running app through the single-instance
+//! plugin and exits. Debug builds act on the test flags (`--press`,
+//! `--release`, `--debug-audio-file`, `--debug-save-audio`; see [`flags`]);
+//! release builds ignore them and have no way to inject key events or
+//! audio.
 
 mod flags;
 mod logging;
 
+use std::path::Path;
 use std::sync::Mutex;
 
 use anyhow::Context as _;
+use dictation_core::coordinator::Phase;
 use dictation_core::hotkey_spec::HotkeySpec;
+use dictation_pipeline::debug_audio::SavingAudio;
 #[cfg(not(debug_assertions))]
 use dictation_pipeline::hotkey::PermissionTolerantHotkey;
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
-use dictation_pipeline::stand_ins::{DiscardingInserter, GrantedPermissions, SilentAudio};
+use dictation_pipeline::stand_ins::{DiscardingInserter, GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
 #[cfg(debug_assertions)]
 use dictation_pipeline::test_hooks::SyntheticHotkey;
+use dictation_platform::audio::{FileAudioSource, SystemMicrophone};
 use dictation_platform::clock::SystemClock;
 use dictation_platform::hotkey::SystemHotkey;
+use dictation_platform::permissions::SystemPermissions;
+use dictation_ports::{AudioSource, Permission, PermissionError, PermissionStatus, Permissions};
 use dictation_transcribe::mock::MockTranscriber;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -31,6 +41,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 const QUIT_ID: &str = "quit";
 const SETTINGS_ID: &str = "settings";
+const TRAY_ID: &str = "main";
+const TOOLTIP: &str = "dictation-app";
 /// Where a launch's flags came from, for the log.
 const THIS_LAUNCH: &str = "this launch";
 const SECOND_LAUNCH: &str = "a second launch";
@@ -46,6 +58,57 @@ type ShellHotkey = SyntheticHotkey<SystemHotkey>;
 /// logged and not fatal; any other hotkey error stops startup.
 #[cfg(not(debug_assertions))]
 type ShellHotkey = PermissionTolerantHotkey<SystemHotkey>;
+
+/// The permissions the pipeline checks on each press: the real microphone
+/// permission (Accessibility isn't needed while paste is a stand-in), or
+/// none when a debug audio file stands in for the microphone.
+enum ShellPermissions {
+    Microphone(MicrophoneOnly<SystemPermissions>),
+    None(GrantedPermissions),
+}
+
+impl Permissions for ShellPermissions {
+    fn check(&self, permission: Permission) -> PermissionStatus {
+        match self {
+            Self::Microphone(permissions) => permissions.check(permission),
+            Self::None(permissions) => permissions.check(permission),
+        }
+    }
+
+    fn request(&self, permission: Permission) -> Result<(), PermissionError> {
+        match self {
+            Self::Microphone(permissions) => permissions.request(permission),
+            Self::None(permissions) => permissions.request(permission),
+        }
+    }
+}
+
+/// The audio source for this launch's flags: the microphone, or (debug
+/// builds, `--debug-audio-file`) a WAV file; with `--debug-save-audio`
+/// (debug builds) every recording is also saved under `recordings`.
+fn shell_audio(
+    launch: &flags::LaunchFlags,
+    recordings: &Path,
+) -> (Box<dyn AudioSource>, ShellPermissions) {
+    let (audio, permissions): (Box<dyn AudioSource>, _) = match &launch.audio_file {
+        Some(path) => {
+            tracing::info!(path = %path.display(), "test hook: recording a file, not the microphone");
+            (
+                Box::new(FileAudioSource::new(path)),
+                ShellPermissions::None(GrantedPermissions),
+            )
+        }
+        None => (
+            Box::new(SystemMicrophone::new()),
+            ShellPermissions::Microphone(MicrophoneOnly(SystemPermissions::new())),
+        ),
+    };
+    if launch.save_audio {
+        tracing::info!(dir = %recordings.display(), "debug mode: saving every recording");
+        return (Box::new(SavingAudio::new(audio, recordings)), permissions);
+    }
+    (audio, permissions)
+}
 
 /// The hotkey for this build, and the injector for the test flags (debug
 /// builds only).
@@ -77,11 +140,14 @@ pub fn run() {
         // First, so a second launch exits before setting anything else up.
         .plugin(tauri_plugin_single_instance::init(
             move |_app, argv, _cwd| {
-                handle_flags(
-                    forward.as_ref(),
-                    flags::parse(&argv, flags::TEST_FLAGS),
-                    SECOND_LAUNCH,
-                );
+                let launch = flags::parse(&argv, flags::TEST_FLAGS);
+                if launch.configure_audio() {
+                    tracing::warn!(
+                        from = SECOND_LAUNCH,
+                        "ignoring the debug audio flags; they only work on the first launch"
+                    );
+                }
+                handle_flags(forward.as_ref(), launch, SECOND_LAUNCH);
             },
         ))
         .setup(move |app| {
@@ -128,12 +194,18 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
         "engine"
     );
 
+    let recordings = app
+        .path()
+        .app_data_dir()
+        .context("no data directory")?
+        .join("debug-recordings");
+    let (audio, permissions) = shell_audio(&launch, &recordings);
     let ports = Ports {
         hotkey,
-        audio: SilentAudio::default(),
+        audio,
         transcriber,
         inserter: DiscardingInserter,
-        permissions: GrantedPermissions,
+        permissions,
         clock: SystemClock::new(),
     };
     // Pipeline::spawn needs to run inside the tokio runtime Tauri owns.
@@ -141,7 +213,7 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
         tauri::async_runtime::block_on(async { Pipeline::spawn(ports, Config::default()) })
             .context("could not start the pipeline")?;
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
-    tauri::async_runtime::spawn(log_ui_events(ui_events));
+    tauri::async_runtime::spawn(show_ui_events(app.handle().clone(), ui_events));
     tracing::info!(hotkey = %HotkeySpec::default(), "ready");
 
     handle_flags(injector, launch, THIS_LAUNCH);
@@ -179,8 +251,8 @@ fn build_tray(app: &App) -> tauri::Result<()> {
     let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", false, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit dictation-app", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&settings, &quit])?;
-    let mut tray = TrayIconBuilder::with_id("main")
-        .tooltip("dictation-app")
+    let mut tray = TrayIconBuilder::with_id(TRAY_ID)
+        .tooltip(TOOLTIP)
         .menu(&menu)
         .on_menu_event(|app, event| {
             if event.id() == QUIT_ID {
@@ -195,13 +267,38 @@ fn build_tray(app: &App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Logs each state change; never the transcript.
-async fn log_ui_events(mut events: UnboundedReceiver<UiEvent>) {
+/// Logs each state change (never the transcript) and shows a dictation
+/// error as the tray's title and tooltip until the next recording starts.
+/// The overlay replaces this in the UI milestones.
+async fn show_ui_events(app: AppHandle, mut events: UnboundedReceiver<UiEvent>) {
     while let Some(event) = events.recv().await {
         match event {
-            UiEvent::StateChanged(phase) => tracing::info!(?phase, "state changed"),
-            UiEvent::Error(error) => tracing::info!(%error, "shown to the user"),
+            UiEvent::StateChanged(phase) => {
+                tracing::info!(?phase, "state changed");
+                if phase == Phase::Recording {
+                    show_in_tray(&app, None);
+                }
+            }
+            UiEvent::Error(error) => {
+                tracing::info!(%error, "shown to the user");
+                show_in_tray(&app, Some(&error.to_string()));
+            }
         }
+    }
+}
+
+/// Puts `error` in the tray's title (next to the icon) and tooltip, or
+/// clears it.
+fn show_in_tray(app: &AppHandle, error: Option<&str>) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+    let tooltip = error.map_or_else(|| TOOLTIP.to_owned(), |error| format!("{TOOLTIP}: {error}"));
+    if let Err(error) = tray
+        .set_title(error)
+        .and_then(|()| tray.set_tooltip(Some(tooltip)))
+    {
+        tracing::warn!(%error, "could not update the tray");
     }
 }
 

@@ -16,7 +16,7 @@ for scenario_file in "$E2E_DIR"/scenarios/*.sh; do
   . "$scenario_file"
 done
 
-ALL_SCENARIOS=(e2e_startup e2e_press_release)
+ALL_SCENARIOS=(e2e_startup e2e_press_release e2e_real_mic)
 APP_PATH=target/debug/bundle/macos/$APP_NAME.app
 build=1
 reset=1
@@ -59,13 +59,17 @@ else
   wait_for_vm
 fi
 install_app "$APP_PATH"
+install_fixtures "$E2E_DIR/fixtures"
 
 failed=()
 for scenario in "${scenarios[@]}"; do
   log "scenario $scenario"
   SCENARIO_FAILED=0
+  SCENARIO_SKIPPED=0
   "$scenario"
-  if [ "$SCENARIO_FAILED" = 1 ]; then
+  if [ "$SCENARIO_SKIPPED" = 1 ]; then
+    log "scenario $scenario: SKIPPED"
+  elif [ "$SCENARIO_FAILED" = 1 ]; then
     failed+=("$scenario")
     log "scenario $scenario: FAIL"
   else

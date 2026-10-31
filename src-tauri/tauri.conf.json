@@ -34,7 +34,8 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "signingIdentity": "dictation-app Dev"
+      "signingIdentity": "dictation-app Dev",
+      "entitlements": "./Entitlements.plist"
     }
   }
 }

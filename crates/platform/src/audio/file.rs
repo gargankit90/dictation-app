@@ -1,3 +1,6 @@
+//! [`FileAudioSource`]: "records" a WAV file. A fake for tests, and the
+//! source behind the shell's debug-only `--debug-audio-file` test hook.
+
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

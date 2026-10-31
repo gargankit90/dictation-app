@@ -1,21 +1,33 @@
 //! A launch's command-line flags, from this process or forwarded by the
 //! single-instance plugin from a second launch.
 //!
-//! `--press` and `--release` are test hooks and exist only in debug builds
-//! ([`TEST_FLAGS`]): the single-instance socket accepts any local process,
-//! so in a release build a forwarded `--press` would let any process start
-//! dictation (and later paste) with this app's permissions. A release build
-//! treats them like any other unknown flag: logged and ignored.
+//! The test hooks exist only in debug builds ([`TEST_FLAGS`]):
+//!
+//! - `--press` and `--release` inject hotkey events. The single-instance
+//!   socket accepts any local process, so in a release build a forwarded
+//!   `--press` would let any process start dictation (and later paste) with
+//!   this app's permissions.
+//! - `--debug-audio-file <wav>` records that file instead of the
+//!   microphone, and `--debug-save-audio` saves every recording as a WAV
+//!   (debug mode). Both choose how the pipeline is built, so only the first
+//!   launch's count; a second launch's are logged and ignored.
+//!
+//! A release build treats them like any other unknown flag: logged and
+//! ignored.
 //!
 //! `--transcriber <name>` picks the speech-to-text engine. It's a normal flag
 //! in every build: it only affects the process that starts with it (a
 //! forwarded second launch can't switch the running app's engine), and the
 //! only engine so far, `mock`, needs no network, key or permission.
 
-use dictation_pipeline::test_hooks::{PRESS_FLAG, RELEASE_FLAG};
+use std::path::PathBuf;
+
+use dictation_pipeline::test_hooks::{
+    DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, PRESS_FLAG, RELEASE_FLAG,
+};
 use dictation_ports::HotkeyEvent;
 
-/// Whether this build acts on `--press` and `--release`.
+/// Whether this build acts on the test hooks.
 pub const TEST_FLAGS: bool = cfg!(debug_assertions);
 
 /// `--transcriber <name>` or `--transcriber=<name>`.
@@ -63,12 +75,25 @@ impl TranscriberChoice {
 pub struct LaunchFlags {
     /// Synthetic hotkey events to inject, in order (debug builds only).
     pub events: Vec<HotkeyEvent>,
+    /// The WAV to record instead of the microphone (debug builds only); the
+    /// last one given wins.
+    pub audio_file: Option<PathBuf>,
+    /// Save every recording as a WAV (debug builds only).
+    pub save_audio: bool,
     /// The engine `--transcriber` asked for; the last one wins.
     pub transcriber: Option<TranscriberChoice>,
     /// Engine names `--transcriber` was given that no engine has.
     pub unknown_engines: Vec<String>,
     /// Arguments this build doesn't act on, for a warning.
     pub ignored: Vec<String>,
+}
+
+impl LaunchFlags {
+    /// Whether these flags would change how the pipeline is built, which
+    /// only the first launch can do.
+    pub fn configure_audio(&self) -> bool {
+        self.audio_file.is_some() || self.save_audio
+    }
 }
 
 /// Sorts `argv` (program path first) into what to act on and what to
@@ -81,6 +106,14 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
         match arg.as_str() {
             PRESS_FLAG if test_flags => flags.events.push(HotkeyEvent::Pressed),
             RELEASE_FLAG if test_flags => flags.events.push(HotkeyEvent::Released),
+            DEBUG_SAVE_AUDIO_FLAG if test_flags => flags.save_audio = true,
+            DEBUG_AUDIO_FILE_FLAG if test_flags => match args.next() {
+                Some(path) => flags.audio_file = Some(PathBuf::from(path)),
+                None => flags.ignored.push(arg.clone()),
+            },
+            other if test_flags && audio_file_value(other).is_some() => {
+                flags.audio_file = audio_file_value(other).map(PathBuf::from);
+            }
             TRANSCRIBER_FLAG => match args.next() {
                 Some(name) => flags.transcriber(name),
                 None => flags.ignored.push(TRANSCRIBER_FLAG.to_owned()),
@@ -96,6 +129,13 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
         }
     }
     flags
+}
+
+/// `wav` in `--debug-audio-file=wav`.
+fn audio_file_value(arg: &str) -> Option<&str> {
+    arg.strip_prefix(DEBUG_AUDIO_FILE_FLAG)?
+        .strip_prefix('=')
+        .filter(|value| !value.is_empty())
 }
 
 impl LaunchFlags {
@@ -194,5 +234,62 @@ mod tests {
     #[test]
     fn test_flags_follow_the_build() {
         assert_eq!(TEST_FLAGS, cfg!(debug_assertions));
+    }
+
+    #[test]
+    fn debug_builds_take_the_audio_flags_in_either_form() {
+        let flags = parse(
+            &argv(&[
+                "--debug-audio-file",
+                "/tmp/a.wav",
+                "--debug-save-audio",
+                "--press",
+            ]),
+            true,
+        );
+        assert_eq!(flags.audio_file, Some(PathBuf::from("/tmp/a.wav")));
+        assert!(flags.save_audio);
+        assert_eq!(flags.events, [Pressed]);
+        assert!(flags.ignored.is_empty());
+        assert!(flags.configure_audio());
+
+        let flags = parse(&argv(&["--debug-audio-file=/tmp/b c.wav"]), true);
+        assert_eq!(flags.audio_file, Some(PathBuf::from("/tmp/b c.wav")));
+        assert!(!flags.save_audio);
+    }
+
+    #[test]
+    fn a_debug_audio_file_flag_without_a_path_is_ignored() {
+        let flags = parse(&argv(&["--debug-audio-file"]), true);
+        assert_eq!(flags.audio_file, None);
+        assert_eq!(flags.ignored, ["--debug-audio-file"]);
+        let flags = parse(&argv(&["--debug-audio-file="]), true);
+        assert_eq!(flags.ignored, ["--debug-audio-file="]);
+        assert!(!flags.configure_audio());
+    }
+
+    #[test]
+    fn release_builds_ignore_the_audio_flags() {
+        let flags = parse(
+            &argv(&[
+                "--debug-audio-file",
+                "/tmp/a.wav",
+                "--debug-save-audio",
+                "--debug-audio-file=x.wav",
+            ]),
+            false,
+        );
+        assert_eq!(flags.audio_file, None);
+        assert!(!flags.save_audio);
+        // The path after the flag is just another unknown argument.
+        assert_eq!(
+            flags.ignored,
+            [
+                "--debug-audio-file",
+                "/tmp/a.wav",
+                "--debug-save-audio",
+                "--debug-audio-file=x.wav"
+            ]
+        );
     }
 }

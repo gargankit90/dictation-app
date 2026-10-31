@@ -2,7 +2,6 @@
 //! `transcribe`). Each is cheap to clone; clones share state, so a test keeps
 //! one handle to script or inspect the fake while the pipeline owns another.
 
-mod audio;
 mod clipboard;
 mod clock;
 mod hotkey;
@@ -12,7 +11,9 @@ mod secrets;
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-pub use audio::FileAudioSource;
+/// Lives in [`crate::audio`] now, since the shell's `--debug-audio-file`
+/// test hook uses it outside tests; still here for the tests that use it.
+pub use crate::audio::FileAudioSource;
 pub use clipboard::MemClipboard;
 pub use clock::FakeClock;
 pub use hotkey::FakeHotkey;

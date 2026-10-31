@@ -1,6 +1,7 @@
 //! Test hooks: the `--press` and `--release` command-line flags, which feed
 //! synthetic hotkey events into the pipeline so e2e scripts can drive a
-//! running app without a keyboard.
+//! running app without a keyboard, and `--debug-audio-file <wav>`, which
+//! records that file instead of the microphone ([`debug_audio_file`]).
 //!
 //! [`SyntheticHotkey`] wraps the real [`HotkeySource`] and adds an
 //! [`Injector`]; the shell parses each launch's flags with [`hook_events`]
@@ -8,6 +9,7 @@
 //! them. These are test hooks, not a feature: nothing else sends synthetic
 //! keys.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use dictation_core::error::DictationError;
@@ -17,6 +19,38 @@ use dictation_ports::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource, Permis
 pub const PRESS_FLAG: &str = "--press";
 /// The flag that injects [`HotkeyEvent::Released`].
 pub const RELEASE_FLAG: &str = "--release";
+/// `--debug-audio-file <wav>` (or `=<wav>`): record that WAV instead of the
+/// microphone.
+pub const DEBUG_AUDIO_FILE_FLAG: &str = "--debug-audio-file";
+/// `--debug-save-audio`: save every recording as a WAV (debug mode).
+pub const DEBUG_SAVE_AUDIO_FLAG: &str = "--debug-save-audio";
+
+/// The WAV `--debug-audio-file` names in `args`, if any; the last one wins.
+/// A flag without a value names nothing.
+#[must_use]
+pub fn debug_audio_file<I, S>(args: I) -> Option<PathBuf>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut path = None;
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        let arg = arg.as_ref();
+        if arg == DEBUG_AUDIO_FILE_FLAG {
+            if let Some(value) = args.next() {
+                path = Some(PathBuf::from(value.as_ref()));
+            }
+        } else if let Some(value) = arg
+            .strip_prefix(DEBUG_AUDIO_FILE_FLAG)
+            .and_then(|rest| rest.strip_prefix('='))
+            .filter(|value| !value.is_empty())
+        {
+            path = Some(PathBuf::from(value));
+        }
+    }
+    path
+}
 
 /// The hotkey events `args` ask for, in order. Every other argument (the
 /// program path, macOS's `-psn_…`, anything unknown) is ignored, so a launch
@@ -176,6 +210,31 @@ mod tests {
         assert!(hook_events(Vec::<String>::new()).is_empty());
         // Exact match only.
         assert!(hook_events(["--PRESS", "--press=1", "press", "-press"]).is_empty());
+    }
+
+    #[test]
+    fn finds_the_debug_audio_file_in_either_form() {
+        assert_eq!(
+            debug_audio_file(["app", "--debug-audio-file", "/tmp/a.wav", "--press"]),
+            Some(PathBuf::from("/tmp/a.wav"))
+        );
+        assert_eq!(
+            debug_audio_file(["app", "--debug-audio-file=/tmp/b c.wav"]),
+            Some(PathBuf::from("/tmp/b c.wav"))
+        );
+        // The last one wins.
+        assert_eq!(
+            debug_audio_file([
+                "--debug-audio-file=one.wav",
+                "--debug-audio-file",
+                "two.wav"
+            ]),
+            Some(PathBuf::from("two.wav"))
+        );
+        assert_eq!(debug_audio_file(["app", "--press"]), None);
+        assert_eq!(debug_audio_file(["app", "--debug-audio-file"]), None);
+        assert_eq!(debug_audio_file(["app", "--debug-audio-file="]), None);
+        assert_eq!(debug_audio_file(["--debug-audio-files=x.wav"]), None);
     }
 
     #[test]

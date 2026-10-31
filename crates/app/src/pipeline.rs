@@ -1,10 +1,16 @@
 //! Runs the core coordinator against the ports on tokio.
 //!
-//! One task owns the coordinator [`State`] and the audio source. It turns
-//! hotkey presses, clock ticks and finished transcriptions and inserts into
-//! core [`Event`]s, feeds them to [`step`], and carries out the returned
-//! [`Command`]s through the ports. State changes and errors go to the UI as
-//! [`UiEvent`]s on a channel.
+//! One task owns the coordinator [`State`]. It turns hotkey presses, clock
+//! ticks and finished transcriptions and inserts into core [`Event`]s, feeds
+//! them to [`step`], and carries out the returned [`Command`]s through the
+//! ports. State changes and errors go to the UI as [`UiEvent`]s on a
+//! channel.
+//!
+//! The audio source lives in a task of its own whose calls run on the
+//! blocking pool (see [`AudioWorker`]), because a real microphone's `start`
+//! and `stop` block (opening a Bluetooth device can take seconds) and must
+//! not stall this task: a Cancel is handled while the microphone is still
+//! opening.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -17,7 +23,7 @@ use dictation_ports::{
     Audio, AudioError, AudioSource, Clock, HotkeyError, HotkeyEvent, HotkeySource, InsertError,
     Permission, PermissionStatus, Permissions, TextInserter, TranscribeError, Transcriber,
 };
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::{self, JoinError, JoinHandle, JoinSet};
 use tokio::time::{Interval, MissedTickBehavior};
 
@@ -118,24 +124,19 @@ impl Pipeline {
 
         let (ui, ui_events) = mpsc::unbounded_channel();
         let (shutdown, shutdown_rx) = watch::channel(false);
-        let runner = Runner {
-            state: State::Idle,
+        let (audio, audio_failures) = AudioWorker::spawn(audio);
+        let runner = Runner::new(
             hotkey,
             audio,
-            transcriber: Arc::new(transcriber),
-            inserter: Arc::new(inserter),
+            transcriber,
+            inserter,
             permissions,
             clock,
             ui,
-            shutdown: shutdown_rx,
+            shutdown_rx,
             ticks,
-            jobs: JoinSet::new(),
-            running: None,
-            captured: None,
-            job: 0,
-            pending: VecDeque::new(),
-        };
-        let task = tokio::spawn(runner.run(keys));
+        );
+        let task = tokio::spawn(runner.run(keys, audio_failures));
         Ok((Self { shutdown, task }, ui_events))
     }
 
@@ -152,6 +153,8 @@ impl Pipeline {
 /// A finished background job, tagged with the job it belongs to.
 enum JobResult {
     Transcribed(u64, Result<String, TranscribeError>),
+    /// The recording the transcription was waiting for failed.
+    AudioFailed(u64, AudioError),
     Inserted(u64, Result<(), InsertError>),
 }
 
@@ -162,10 +165,148 @@ enum Job {
     Insert,
 }
 
-struct Runner<H, A, T, I, P, C> {
+/// What the pipeline task asks of the audio worker, carried out in order.
+enum AudioCommand {
+    /// Start recording `session`.
+    Start(u64),
+    /// Stop and send back what was captured (or why nothing was).
+    Stop(oneshot::Sender<Result<Audio, AudioError>>),
+    /// Stop, if recording, and drop the audio.
+    Discard,
+}
+
+/// A `start` that failed in a way the coordinator must hear about while
+/// still recording: the microphone permission is missing.
+struct StartFailed {
+    session: u64,
+    error: AudioError,
+}
+
+/// Owns the [`AudioSource`] in a task of its own that runs each call on
+/// tokio's blocking pool (`spawn_blocking`), one at a time and in the order
+/// sent, so a slow `start` or `stop` never blocks the pipeline task.
+///
+/// A `start` error other than [`AudioError::PermissionDenied`] is kept and
+/// returned by the next `Stop`, so it reaches the user when the recording
+/// stops. If a call panics the source is gone: later stops report a device
+/// error and the panic message (which could hold anything) isn't logged.
+struct AudioWorker {
+    commands: mpsc::UnboundedSender<AudioCommand>,
+    task: JoinHandle<()>,
+}
+
+impl AudioWorker {
+    /// Starts the task; the receiver gets permission failures from `start`.
+    fn spawn<A: AudioSource + 'static>(audio: A) -> (Self, mpsc::UnboundedReceiver<StartFailed>) {
+        let (commands, inbox) = mpsc::unbounded_channel();
+        let (failures, failed) = mpsc::unbounded_channel();
+        let task = tokio::spawn(Self::run(audio, inbox, failures));
+        (Self { commands, task }, failed)
+    }
+
+    async fn run<A: AudioSource + 'static>(
+        audio: A,
+        mut inbox: mpsc::UnboundedReceiver<AudioCommand>,
+        failures: mpsc::UnboundedSender<StartFailed>,
+    ) {
+        let mut audio = Some(audio);
+        let mut start_error = None;
+        // Ends, with a discard, when the pipeline drops its sender at
+        // shutdown.
+        while let Some(command) = inbox.recv().await {
+            match command {
+                AudioCommand::Start(session) => {
+                    start_error = None;
+                    let result = blocking(&mut audio, A::start).await;
+                    match result {
+                        Ok(()) => {}
+                        Err(AudioError::PermissionDenied) => {
+                            tracing::warn!("audio source failed to start: no permission");
+                            let error = AudioError::PermissionDenied;
+                            let _ = failures.send(StartFailed { session, error });
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "audio source failed to start");
+                            start_error = Some(error);
+                        }
+                    }
+                }
+                AudioCommand::Stop(reply) => {
+                    let captured = match start_error.take() {
+                        Some(error) => Err(error),
+                        None => blocking(&mut audio, A::stop).await,
+                    };
+                    let _ = reply.send(captured);
+                }
+                AudioCommand::Discard => {
+                    start_error = None;
+                    let _ = blocking(&mut audio, |audio| {
+                        audio.discard();
+                        Ok(())
+                    })
+                    .await;
+                }
+            }
+        }
+        let _ = blocking(&mut audio, |audio| {
+            audio.discard();
+            Ok(())
+        })
+        .await;
+    }
+
+    fn send(&self, command: AudioCommand) {
+        // Fails only if the task is gone; a Stop's reply then reports it.
+        let _ = self.commands.send(command);
+    }
+
+    /// Drops any recording and waits for the task to finish what it was
+    /// doing (at most one blocking call) and the final discard.
+    async fn shut_down(self) {
+        let Self { commands, task } = self;
+        drop(commands);
+        let _ = task.await;
+    }
+}
+
+/// Runs `call` on the source on the blocking pool and puts the source back.
+/// Without a source (an earlier call panicked) it's a device error.
+async fn blocking<A, R>(
+    audio: &mut Option<A>,
+    call: impl FnOnce(&mut A) -> Result<R, AudioError> + Send + 'static,
+) -> Result<R, AudioError>
+where
+    A: AudioSource + 'static,
+    R: Send + 'static,
+{
+    let Some(mut source) = audio.take() else {
+        return Err(AudioError::Device("the audio source crashed".into()));
+    };
+    match task::spawn_blocking(move || {
+        let result = call(&mut source);
+        (source, result)
+    })
+    .await
+    {
+        Ok((source, result)) => {
+            *audio = Some(source);
+            result
+        }
+        Err(_) => {
+            tracing::error!("the audio source panicked");
+            Err(AudioError::Device("the audio source crashed".into()))
+        }
+    }
+}
+
+struct Runner<H, T, I, P, C> {
     state: State,
     hotkey: H,
-    audio: A,
+    /// Our side of the audio worker, which owns the source.
+    audio: AudioWorker,
+    /// The recording the last `StartRecording` began, so a late permission
+    /// failure from an earlier one is dropped.
+    session: u64,
     transcriber: Arc<T>,
     inserter: Arc<I>,
     permissions: P,
@@ -181,8 +322,9 @@ struct Runner<H, A, T, I, P, C> {
     /// The task running the current job, to tell whether a task that
     /// panicked was the current job or a stale one.
     running: Option<(task::Id, Job)>,
-    /// What the last `StopRecording` produced, for the `Transcribe` after it.
-    captured: Option<Result<Audio, AudioError>>,
+    /// What the last `StopRecording` will produce, for the `Transcribe`
+    /// after it.
+    captured: Option<oneshot::Receiver<Result<Audio, AudioError>>>,
     /// Bumped for every transcription or insert; a result for any other job
     /// is stale and dropped, so a finished or abandoned dictation can never
     /// insert text later.
@@ -192,16 +334,51 @@ struct Runner<H, A, T, I, P, C> {
     pending: VecDeque<Event>,
 }
 
-impl<H, A, T, I, P, C> Runner<H, A, T, I, P, C>
+impl<H, T, I, P, C> Runner<H, T, I, P, C>
 where
     H: HotkeySource,
-    A: AudioSource,
     T: Transcriber + 'static,
     I: TextInserter + 'static,
     P: Permissions,
     C: Clock,
 {
-    async fn run(mut self, mut keys: mpsc::UnboundedReceiver<(HotkeyEvent, Duration)>) {
+    #[allow(clippy::too_many_arguments, reason = "the ports and channels, once")]
+    fn new(
+        hotkey: H,
+        audio: AudioWorker,
+        transcriber: T,
+        inserter: I,
+        permissions: P,
+        clock: Arc<C>,
+        ui: mpsc::UnboundedSender<UiEvent>,
+        shutdown: watch::Receiver<bool>,
+        ticks: Interval,
+    ) -> Self {
+        Self {
+            state: State::Idle,
+            hotkey,
+            audio,
+            session: 0,
+            transcriber: Arc::new(transcriber),
+            inserter: Arc::new(inserter),
+            permissions,
+            clock,
+            ui,
+            shutdown,
+            ticks,
+            jobs: JoinSet::new(),
+            running: None,
+            captured: None,
+            job: 0,
+            pending: VecDeque::new(),
+        }
+    }
+
+    async fn run(
+        mut self,
+        mut keys: mpsc::UnboundedReceiver<(HotkeyEvent, Duration)>,
+        mut audio_failures: mpsc::UnboundedReceiver<StartFailed>,
+    ) {
         loop {
             let recording = matches!(self.state, State::Recording { .. });
             // Biased, in this order: shutdown wins over anything else that
@@ -211,6 +388,7 @@ where
                 biased;
                 _ = self.shutdown.changed() => break,
                 Some((key, at)) = keys.recv() => self.key_event(key, at),
+                Some(failed) = audio_failures.recv() => self.start_failed(&failed),
                 Some(joined) = self.jobs.join_next_with_id() => self.job_event(joined),
                 _ = self.ticks.tick(), if recording => Some(Event::Tick(self.clock.now())),
             };
@@ -220,7 +398,19 @@ where
         }
         self.jobs.abort_all();
         self.hotkey.stop();
-        self.audio.discard();
+        self.audio.shut_down().await;
+    }
+
+    /// The microphone permission was missing when the recording started.
+    /// Only the current recording, still running, hears about it.
+    fn start_failed(&self, failed: &StartFailed) -> Option<Event> {
+        let current =
+            failed.session == self.session && matches!(self.state, State::Recording { .. });
+        if !current {
+            tracing::debug!(error = %failed.error, "dropping a stale start failure");
+            return None;
+        }
+        Some(Event::PermissionMissing(Permission::Microphone))
     }
 
     fn shutting_down(&self) -> bool {
@@ -274,7 +464,12 @@ where
                 Ok(()) => Event::InsertDone,
                 Err(error) => Event::InsertFailed(error.to_string()),
             }),
-            JobResult::Transcribed(job, _) | JobResult::Inserted(job, _) => {
+            JobResult::AudioFailed(job, error) if job == self.job => Some(
+                Event::TranscriptionFailed(format!("the microphone failed ({error})")),
+            ),
+            JobResult::Transcribed(job, _)
+            | JobResult::Inserted(job, _)
+            | JobResult::AudioFailed(job, _) => {
                 tracing::debug!(job, current = self.job, "dropping a stale result");
                 None
             }
@@ -321,24 +516,18 @@ where
                 // The first Tick comes a full interval from now, never at
                 // once, ahead of keys that are still on their way.
                 self.ticks.reset();
-                if let Err(error) = self.audio.start() {
-                    tracing::warn!(%error, "audio source failed to start");
-                    match error {
-                        AudioError::PermissionDenied => self
-                            .pending
-                            .push_back(Event::PermissionMissing(Permission::Microphone)),
-                        // Reported when the recording stops (see Transcribe).
-                        error => self.captured = Some(Err(error)),
-                    }
-                }
+                self.session += 1;
+                self.audio.send(AudioCommand::Start(self.session));
             }
             Command::StopRecording => {
                 if self.captured.is_none() {
-                    self.captured = Some(self.audio.stop());
+                    let (reply, captured) = oneshot::channel();
+                    self.audio.send(AudioCommand::Stop(reply));
+                    self.captured = Some(captured);
                 }
             }
             Command::DiscardRecording => {
-                self.audio.discard();
+                self.audio.send(AudioCommand::Discard);
                 self.captured = None;
             }
             Command::Transcribe => self.transcribe(),
@@ -355,25 +544,27 @@ where
 
     fn transcribe(&mut self) {
         self.job += 1;
-        let audio = match self.captured.take() {
-            Some(Ok(audio)) => audio,
-            Some(Err(error)) => {
-                self.pending.push_back(Event::TranscriptionFailed(format!(
-                    "the microphone failed ({error})"
-                )));
-                return;
-            }
-            None => {
-                self.pending.push_back(Event::TranscriptionFailed(
-                    "no audio was captured".to_owned(),
-                ));
-                return;
-            }
+        let Some(captured) = self.captured.take() else {
+            self.pending.push_back(Event::TranscriptionFailed(
+                "no audio was captured".to_owned(),
+            ));
+            return;
         };
-        tracing::debug!(job = self.job, duration = ?audio.duration(), "transcribing");
         let job = self.job;
         let transcriber = Arc::clone(&self.transcriber);
+        // The job waits for the audio worker's stop, then transcribes.
         let task = self.jobs.spawn(async move {
+            let audio = match captured.await {
+                Ok(Ok(audio)) => audio,
+                Ok(Err(error)) => return JobResult::AudioFailed(job, error),
+                Err(_) => {
+                    return JobResult::AudioFailed(
+                        job,
+                        AudioError::Device("the audio worker stopped".into()),
+                    );
+                }
+            };
+            tracing::debug!(job, duration = ?audio.duration(), "transcribing");
             JobResult::Transcribed(job, transcriber.transcribe(&audio).await)
         });
         self.running = Some((task.id(), Job::Transcribe));
@@ -444,35 +635,24 @@ mod tests {
         }
     }
 
-    type TestRunner = Runner<
-        FakeHotkey,
-        SilentAudio,
-        SilentTranscriber,
-        FakeInserter,
-        FakePermissions,
-        FakeClock,
-    >;
+    type TestRunner =
+        Runner<FakeHotkey, SilentTranscriber, FakeInserter, FakePermissions, FakeClock>;
 
     fn runner(inserter: &FakeInserter) -> (TestRunner, watch::Sender<bool>) {
         let (ui, _) = mpsc::unbounded_channel();
         let (shutdown, shutdown_rx) = watch::channel(false);
-        let runner = Runner {
-            state: State::Idle,
-            hotkey: FakeHotkey::new(),
-            audio: SilentAudio(false),
-            transcriber: Arc::new(SilentTranscriber),
-            inserter: Arc::new(inserter.clone()),
-            permissions: FakePermissions::all_granted(),
-            clock: Arc::new(FakeClock::new()),
+        let (audio, _) = AudioWorker::spawn(SilentAudio(false));
+        let runner = Runner::new(
+            FakeHotkey::new(),
+            audio,
+            SilentTranscriber,
+            inserter.clone(),
+            FakePermissions::all_granted(),
+            Arc::new(FakeClock::new()),
             ui,
-            shutdown: shutdown_rx,
-            ticks: tokio::time::interval(Duration::from_millis(250)),
-            jobs: JoinSet::new(),
-            running: None,
-            captured: None,
-            job: 0,
-            pending: VecDeque::new(),
-        };
+            shutdown_rx,
+            tokio::time::interval(Duration::from_millis(250)),
+        );
         (runner, shutdown)
     }
 
@@ -577,5 +757,273 @@ mod tests {
         let crashed = other.join_next().await.unwrap().unwrap_err();
         assert_eq!(runner.job_event(Err(crashed)), None);
         assert_eq!(runner.state, State::Transcribing);
+    }
+}
+
+#[cfg(test)]
+mod audio_worker_tests {
+    use std::sync::Mutex;
+    use std::sync::mpsc as std_mpsc;
+
+    use dictation_core::coordinator::Phase::{Idle, Recording, Transcribing};
+    use dictation_platform::fakes::{FakeClock, FakeHotkey, FakeInserter, FakePermissions};
+
+    use super::*;
+    use crate::stand_ins::FixedTranscriber;
+
+    const WAIT: Duration = Duration::from_secs(5);
+
+    /// How [`ScriptedAudio`]'s next `start` behaves.
+    enum OnStart {
+        Succeed,
+        /// Blocks until the sender is dropped or sends.
+        Block(std_mpsc::Receiver<()>),
+        Fail(AudioError),
+    }
+
+    /// An audio source whose `start` can block, fail or let `stop` panic,
+    /// and that logs every call.
+    #[derive(Clone)]
+    struct ScriptedAudio {
+        on_start: Arc<Mutex<Vec<OnStart>>>,
+        panic_on_stop: bool,
+        calls: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl ScriptedAudio {
+        fn new(on_start: Vec<OnStart>) -> Self {
+            Self {
+                on_start: Arc::new(Mutex::new(on_start)),
+                panic_on_stop: false,
+                calls: Arc::default(),
+            }
+        }
+
+        fn calls(&self) -> Vec<&'static str> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl AudioSource for ScriptedAudio {
+        fn start(&mut self) -> Result<(), AudioError> {
+            let next = {
+                let mut script = self.on_start.lock().unwrap();
+                if script.is_empty() {
+                    OnStart::Succeed
+                } else {
+                    script.remove(0)
+                }
+            };
+            let result = match next {
+                OnStart::Succeed => Ok(()),
+                OnStart::Block(gate) => {
+                    let _ = gate.recv();
+                    Ok(())
+                }
+                OnStart::Fail(error) => Err(error),
+            };
+            self.calls.lock().unwrap().push("start");
+            result
+        }
+
+        fn stop(&mut self) -> Result<Audio, AudioError> {
+            self.calls.lock().unwrap().push("stop");
+            assert!(!self.panic_on_stop, "scripted panic");
+            Ok(Audio {
+                sample_rate: 16_000,
+                samples: vec![0.25; 4_000],
+            })
+        }
+
+        fn discard(&mut self) {
+            self.calls.lock().unwrap().push("discard");
+        }
+
+        fn is_recording(&self) -> bool {
+            false
+        }
+    }
+
+    struct Harness {
+        hotkey: FakeHotkey,
+        clock: FakeClock,
+        pipeline: Pipeline,
+        ui: mpsc::UnboundedReceiver<UiEvent>,
+    }
+
+    impl Harness {
+        fn start(audio: ScriptedAudio) -> Self {
+            let hotkey = FakeHotkey::new();
+            let clock = FakeClock::new();
+            let ports = Ports {
+                hotkey: hotkey.clone(),
+                audio,
+                transcriber: FixedTranscriber,
+                inserter: FakeInserter::new(),
+                permissions: FakePermissions::all_granted(),
+                clock: clock.clone(),
+            };
+            let (pipeline, ui) = Pipeline::spawn(ports, Config::default()).unwrap();
+            Self {
+                hotkey,
+                clock,
+                pipeline,
+                ui,
+            }
+        }
+
+        fn emit(&self, event: HotkeyEvent) {
+            assert!(self.hotkey.emit(event));
+        }
+
+        async fn next(&mut self) -> UiEvent {
+            tokio::time::timeout(WAIT, self.ui.recv())
+                .await
+                .expect("no UI event in time")
+                .expect("pipeline stopped")
+        }
+
+        async fn dictate(&mut self) -> Vec<UiEvent> {
+            self.emit(HotkeyEvent::Pressed);
+            self.clock.advance(Duration::from_millis(500));
+            self.emit(HotkeyEvent::Released);
+            let mut events = Vec::new();
+            loop {
+                let event = self.next().await;
+                let idle = event == UiEvent::StateChanged(Idle);
+                events.push(event);
+                if idle {
+                    return events;
+                }
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn issue_40_a_blocking_start_does_not_stall_cancel() {
+        let (release, gate) = std_mpsc::channel();
+        let audio = ScriptedAudio::new(vec![OnStart::Block(gate)]);
+        let mut harness = Harness::start(audio.clone());
+
+        harness.emit(HotkeyEvent::Pressed);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+        harness.emit(HotkeyEvent::CancelPressed);
+        // Handled while `start` is still blocked.
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Idle));
+        assert_eq!(audio.calls(), Vec::<&str>::new(), "start is still running");
+
+        release.send(()).unwrap();
+        harness.pipeline.shutdown().await;
+        // In order: the discard ran after the start it cancels.
+        assert_eq!(audio.calls(), ["start", "discard", "discard"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_dictation_after_a_blocked_start_gets_its_audio() {
+        let (release, gate) = std_mpsc::channel();
+        let audio = ScriptedAudio::new(vec![OnStart::Block(gate)]);
+        let mut harness = Harness::start(audio.clone());
+
+        harness.emit(HotkeyEvent::Pressed);
+        harness.clock.advance(Duration::from_millis(500));
+        harness.emit(HotkeyEvent::Released);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Transcribing));
+        // The transcription waits for the stop, which waits for the start.
+        release.send(()).unwrap();
+        assert_eq!(
+            harness.next().await,
+            UiEvent::StateChanged(dictation_core::coordinator::Phase::Inserting)
+        );
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Idle));
+        harness.pipeline.shutdown().await;
+        assert_eq!(audio.calls(), ["start", "stop", "discard"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_missing_microphone_permission_at_start_is_shown_at_once() {
+        let audio = ScriptedAudio::new(vec![OnStart::Fail(AudioError::PermissionDenied)]);
+        let mut harness = Harness::start(audio.clone());
+
+        harness.emit(HotkeyEvent::Pressed);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+        // No release needed: the failure ends the recording.
+        assert_eq!(
+            harness.next().await,
+            UiEvent::Error(DictationError::PermissionMissing(Permission::Microphone))
+        );
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Idle));
+        harness.pipeline.shutdown().await;
+        assert_eq!(audio.calls(), ["start", "discard", "discard"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn another_start_error_is_reported_when_the_recording_stops() {
+        let audio = ScriptedAudio::new(vec![OnStart::Fail(AudioError::NoDevice)]);
+        let mut harness = Harness::start(audio.clone());
+        assert_eq!(
+            harness.dictate().await,
+            [
+                UiEvent::StateChanged(Recording),
+                UiEvent::StateChanged(Transcribing),
+                UiEvent::Error(DictationError::TranscriptionFailed {
+                    reason: "the microphone failed (no microphone found)".into()
+                }),
+                UiEvent::StateChanged(Idle),
+            ]
+        );
+        // The failed start's error isn't returned twice.
+        assert!(matches!(
+            harness.dictate().await[2],
+            UiEvent::StateChanged(dictation_core::coordinator::Phase::Inserting)
+        ));
+        harness.pipeline.shutdown().await;
+        assert_eq!(audio.calls(), ["start", "start", "stop", "discard"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_panicking_source_fails_dictations_but_not_the_pipeline() {
+        let mut audio = ScriptedAudio::new(Vec::new());
+        audio.panic_on_stop = true;
+        let mut harness = Harness::start(audio.clone());
+        let crashed = UiEvent::Error(DictationError::TranscriptionFailed {
+            reason: "the microphone failed (audio device error: the audio source crashed)".into(),
+        });
+        assert_eq!(harness.dictate().await[2], crashed);
+        // The source is gone; the next dictation fails the same way.
+        assert_eq!(harness.dictate().await[2], crashed);
+        harness.pipeline.shutdown().await;
+        assert_eq!(audio.calls(), ["start", "stop"]);
+    }
+
+    #[tokio::test]
+    async fn a_start_failure_from_an_earlier_recording_is_dropped() {
+        let (ui, _ui) = mpsc::unbounded_channel();
+        let (_shutdown, shutdown_rx) = watch::channel(false);
+        let (audio, _) = AudioWorker::spawn(ScriptedAudio::new(Vec::new()));
+        let mut runner = Runner::new(
+            FakeHotkey::new(),
+            audio,
+            FixedTranscriber,
+            FakeInserter::new(),
+            FakePermissions::all_granted(),
+            Arc::new(FakeClock::new()),
+            ui,
+            shutdown_rx,
+            tokio::time::interval(Duration::from_millis(250)),
+        );
+        let failed = |session| StartFailed {
+            session,
+            error: AudioError::PermissionDenied,
+        };
+        // Idle: nothing is recording.
+        assert_eq!(runner.start_failed(&failed(0)), None);
+        runner.feed(Event::HotkeyPressed(Duration::ZERO));
+        assert_eq!(runner.session, 1);
+        assert_eq!(runner.start_failed(&failed(0)), None);
+        assert_eq!(
+            runner.start_failed(&failed(1)),
+            Some(Event::PermissionMissing(Permission::Microphone))
+        );
     }
 }

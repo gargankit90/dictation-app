@@ -7,3 +7,22 @@ handy-keys 0.3.4 (https://github.com/handy-computer/handy-keys)
   (crates/platform/src/hotkey/macos.rs). Used as a dependency; no code
   copied.
   MIT License, Copyright (c) 2026 handy-computer
+
+handy-recorder 0.1.0 (https://github.com/handy-computer/handy-recorder)
+  Microphone capture behind the macOS audio adapter
+  (crates/platform/src/audio/macos.rs): the CoreAudio callback, lock-free
+  ring buffer, mono mix and resampling to 16 kHz. Used as a dependency; no
+  code copied. Its own dependencies include handy-cpal 0.18.2
+  (Apache-2.0), rubato 5.0.0 and rtrb 0.4.1 (MIT OR Apache-2.0).
+  MIT License, Copyright (c) 2026 handy-computer
+
+objc2, block2, objc2-av-foundation (https://github.com/madsmtm/objc2)
+  The macOS microphone permission check and prompt
+  (crates/platform/src/permissions/macos.rs). Used as dependencies.
+  MIT License (objc2, block2); objc2-av-foundation under
+  Zlib OR Apache-2.0 OR MIT.
+
+Ideas only, no code: Handy (MIT) for keeping the microphone open briefly
+between dictations; Muesli (MIT) for never waiting on CoreAudio from the
+thread that drives the UI and for treating route changes as a reason to
+reopen the device.
