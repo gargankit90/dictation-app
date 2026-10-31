@@ -53,21 +53,31 @@ impl MockTranscriber {
         }
     }
 
-    /// Waits `delay` before answering (or failing).
+    /// Waits `delay` before answering (or failing), on tokio's clock, so a
+    /// test with paused time doesn't really wait. Applies to every later
+    /// call, on this mock and its clones; returns the same mock for chaining.
     #[must_use]
     pub fn with_delay(self, delay: Duration) -> Self {
         self.lock().delay = delay;
         self
     }
 
-    /// Fails the next calls with `errors`, in order, then answers again.
+    /// Fails the next calls with `errors`, one per call in order, then
+    /// answers with the text again (or the [`always_failing`] error). Adds
+    /// to any errors already queued; shared with clones; returns the same
+    /// mock for chaining.
+    ///
+    /// [`always_failing`]: Self::always_failing
     #[must_use]
     pub fn failing_next(self, errors: impl IntoIterator<Item = TranscribeError>) -> Self {
         self.lock().queued.extend(errors);
         self
     }
 
-    /// Fails every call with `error` (after any queued errors).
+    /// Fails every call with `error` once the queued errors from
+    /// [`failing_next`](Self::failing_next) are used up, instead of
+    /// answering. Replaces an earlier `always_failing` error; shared with
+    /// clones; returns the same mock for chaining.
     #[must_use]
     pub fn always_failing(self, error: TranscribeError) -> Self {
         self.lock().always = Some(error);
@@ -80,6 +90,9 @@ impl MockTranscriber {
         self.lock().calls
     }
 
+    // A test that panics while holding the lock poisons it; recovering the
+    // guard keeps the mock usable for the rest of the run instead of turning
+    // one failure into many. The state is plain data, valid at any point.
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
