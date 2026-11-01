@@ -121,6 +121,8 @@ pub async fn save_settings(
 }
 
 /// Stores `key` as `provider`'s API key in the keychain. Write-only.
+// Bounded: a keychain that never answers gives an error after
+// `engine::KEY_READ_TIMEOUT`, and a retry doesn't start another write.
 #[tauri::command]
 #[specta::specta]
 pub async fn set_api_key(
@@ -129,11 +131,26 @@ pub async fn set_api_key(
     provider: Provider,
     key: String,
 ) -> Result<(), String> {
-    let live = engine.inner().clone();
-    on_config(&state, move |config| {
-        engine::changed(config, &live, |config| config.set_api_key(provider, &key))
-    })
-    .await
+    save_key(&state.0, engine.inner(), provider, key).await
+}
+
+/// Writes the key through the engine's bounded writes (T3, #113): a keychain
+/// that never answers is an error at the deadline, which the form shows,
+/// not a save that never ends.
+async fn save_key<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    live: &LiveEngine,
+    provider: Provider,
+    key: String,
+) -> Result<(), String> {
+    let (config, live) = (Arc::clone(config), live.clone());
+    tauri::async_runtime::spawn_blocking(move || live.write_key(&config, provider, key))
+        .await
+        .map_err(|_| "the settings task crashed".to_owned())?
+        .map_err(|error| {
+            tracing::warn!(%error, "saving the API key failed");
+            error.to_string()
+        })
 }
 
 /// Whether `provider` has an API key stored.
@@ -663,6 +680,204 @@ mod tests {
             };
             assert!(save_with_login(&config, &LiveEngine::fixed(), &login, bad).is_err());
             let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    /// T3, #113: saving a key can't leave Settings waiting for ever.
+    mod key_save {
+        use std::sync::mpsc;
+        use std::sync::{Condvar, Mutex};
+        use std::time::Duration;
+
+        use dictation_platform::fakes::MemSecretStore;
+        use dictation_ports::{Secret, SecretError};
+
+        use super::super::*;
+
+        /// Obviously fake; the errors are checked not to hold them.
+        const FIRST: &str = "first-key-NOT-REAL-0c1d2e3f";
+        const NEWER: &str = "newer-key-NOT-REAL-4a5b6c7d";
+        /// Failure bound only; the tests finish long before it.
+        const LIMIT: Duration = Duration::from_secs(20);
+        /// The deadline the stuck saves get.
+        const SHORT: Duration = Duration::from_millis(150);
+
+        /// A keychain whose first write doesn't answer until it is opened;
+        /// it records every key it is asked to write and says when a write
+        /// has landed.
+        #[derive(Clone)]
+        struct StuckStore {
+            inner: MemSecretStore,
+            open: Arc<(Mutex<bool>, Condvar)>,
+            asked: Arc<Mutex<Vec<String>>>,
+            landed: Arc<Mutex<mpsc::Sender<()>>>,
+        }
+
+        impl StuckStore {
+            fn new() -> (Self, mpsc::Receiver<()>) {
+                let (landed, writes) = mpsc::channel();
+                let store = Self {
+                    inner: MemSecretStore::new(),
+                    open: Arc::default(),
+                    asked: Arc::default(),
+                    landed: Arc::new(Mutex::new(landed)),
+                };
+                (store, writes)
+            }
+
+            fn open(&self) {
+                *self.open.0.lock().unwrap() = true;
+                self.open.1.notify_all();
+            }
+
+            fn asked(&self) -> Vec<String> {
+                self.asked.lock().unwrap().clone()
+            }
+
+            fn stored(&self) -> Option<String> {
+                self.inner
+                    .get(Provider::Groq.key_name())
+                    .unwrap()
+                    .map(|key| key.expose().to_owned())
+            }
+        }
+
+        impl SecretStore for StuckStore {
+            fn get(&self, name: &str) -> Result<Option<Secret>, SecretError> {
+                self.inner.get(name)
+            }
+
+            fn set(&self, name: &str, secret: &Secret) -> Result<(), SecretError> {
+                let first = {
+                    let mut asked = self.asked.lock().unwrap();
+                    asked.push(secret.expose().to_owned());
+                    asked.len() == 1
+                };
+                if first {
+                    let mut open = self.open.0.lock().unwrap();
+                    while !*open {
+                        open = self.open.1.wait(open).unwrap();
+                    }
+                }
+                self.inner.set(name, secret)?;
+                let _ = self.landed.lock().unwrap().send(());
+                Ok(())
+            }
+
+            fn delete(&self, name: &str) -> Result<(), SecretError> {
+                self.inner.delete(name)
+            }
+        }
+
+        fn rig() -> (Arc<Config<StuckStore>>, StuckStore, mpsc::Receiver<()>) {
+            let (store, landed) = StuckStore::new();
+            let dir = std::env::temp_dir().join("dictation-key-save-unused");
+            (Arc::new(Config::new(dir, store.clone())), store, landed)
+        }
+
+        /// A keychain write that never answers ends in an error at the
+        /// deadline, every time the user retries, through the one write in
+        /// flight; nothing claims the key is saved meanwhile, the settings
+        /// file isn't written, and once the keychain answers the late write
+        /// lands and saving works again.
+        #[tokio::test]
+        async fn blocked_key_save_returns_actionable_outcome() {
+            let (config, store, landed) = rig();
+            let live = LiveEngine::fixed();
+            let quick = live.clone().with_key_timeout(SHORT);
+
+            for attempt in 1..=3 {
+                let error = tokio::time::timeout(
+                    LIMIT,
+                    save_key(&config, &quick, Provider::Groq, FIRST.into()),
+                )
+                .await
+                .expect("the save never returned")
+                .unwrap_err();
+                assert!(
+                    error.contains("no answer from the keychain"),
+                    "{attempt}: {error}"
+                );
+                assert!(error.contains("may not be saved"), "{error}");
+                assert!(!error.contains(FIRST));
+                assert_eq!(has_key(&config, &live, Provider::Groq).await, Ok(false));
+            }
+            assert_eq!(
+                store.asked(),
+                [FIRST],
+                "retries start no write of their own"
+            );
+            assert!(!config.path().exists(), "no settings file written");
+
+            store.open();
+            landed
+                .recv_timeout(LIMIT)
+                .expect("the late write never landed");
+            assert_eq!(has_key(&config, &live, Provider::Groq).await, Ok(true));
+            assert_eq!(
+                save_key(&config, &live, Provider::Groq, NEWER.into()).await,
+                Ok(())
+            );
+            assert_eq!(store.stored().as_deref(), Some(NEWER));
+        }
+
+        /// A save made while an earlier one is still stuck waits for it and
+        /// writes after it, so the earlier key landing late can't replace
+        /// the newer one.
+        #[tokio::test]
+        async fn late_key_save_cannot_overwrite_a_newer_choice() {
+            let (config, store, landed) = rig();
+            let live = LiveEngine::fixed();
+            let quick = live.clone().with_key_timeout(SHORT);
+            assert!(
+                save_key(&config, &quick, Provider::Groq, FIRST.into())
+                    .await
+                    .is_err()
+            );
+
+            let newer = tokio::spawn({
+                let (config, live) = (Arc::clone(&config), live.clone());
+                async move { save_key(&config, &live, Provider::Groq, NEWER.into()).await }
+            });
+            let writes = live.writes().clone();
+            let queued = tokio::task::spawn_blocking(move || writes.wait_queued(1, LIMIT))
+                .await
+                .unwrap();
+            assert!(queued, "the newer save didn't wait for the stuck one");
+            assert_eq!(
+                store.asked(),
+                [FIRST],
+                "not written while the first is stuck"
+            );
+
+            store.open();
+            let saved = tokio::time::timeout(LIMIT, newer)
+                .await
+                .expect("the newer save never returned")
+                .unwrap();
+            assert_eq!(saved, Ok(()));
+            for _ in 0..2 {
+                landed.recv_timeout(LIMIT).unwrap();
+            }
+            assert_eq!(store.asked(), [FIRST, NEWER]);
+            assert_eq!(store.stored().as_deref(), Some(NEWER));
+        }
+
+        #[tokio::test]
+        async fn a_key_that_cant_be_a_key_never_waits_behind_a_stuck_write() {
+            let (config, store, _landed) = rig();
+            let live = LiveEngine::fixed().with_key_timeout(SHORT);
+            assert!(
+                save_key(&config, &live, Provider::Groq, FIRST.into())
+                    .await
+                    .is_err()
+            );
+            let error = save_key(&config, &live, Provider::Groq, "two words".into())
+                .await
+                .unwrap_err();
+            assert!(error.contains("contains spaces"), "{error}");
+            assert_eq!(store.asked(), [FIRST]);
+            store.open();
         }
     }
 

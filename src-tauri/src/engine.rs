@@ -32,6 +32,8 @@ use dictation_pipeline::config::{Config, ConfigError};
 use dictation_ports::{Secret, SecretError, SecretStore, TranscribeError};
 use dictation_transcribe::engine::{Engine, Transcribers};
 
+use crate::key_writes::KeyWrites;
+
 /// How long a keychain read may take before the key counts as unreadable.
 /// Long enough for a person to answer an access prompt.
 pub const KEY_READ_TIMEOUT: Duration = Duration::from_secs(15);
@@ -56,6 +58,8 @@ pub struct LiveEngine {
     key_timeout: Duration,
     /// The one keychain read allowed in flight, shared by every clone.
     reads: KeyReads,
+    /// The one keychain write allowed in flight, shared by every clone (T3).
+    writes: KeyWrites,
 }
 
 impl LiveEngine {
@@ -67,6 +71,7 @@ impl LiveEngine {
             base_url: None,
             key_timeout: KEY_READ_TIMEOUT,
             reads: KeyReads::default(),
+            writes: KeyWrites::default(),
         }
     }
 
@@ -78,6 +83,7 @@ impl LiveEngine {
             base_url: None,
             key_timeout: KEY_READ_TIMEOUT,
             reads: KeyReads::default(),
+            writes: KeyWrites::default(),
         }
     }
 
@@ -108,7 +114,40 @@ impl LiveEngine {
         self.reads.read(config, provider, self.key_timeout)
     }
 
-    /// Gives up on a keychain read after `timeout` instead of
+    /// Saves `key` as `provider`'s API key and rebuilds the engine from it
+    /// (T3, #113). Bounded like the reads: the keychain gets
+    /// [`KEY_READ_TIMEOUT`], and at most one write is in flight app-wide, so
+    /// a keychain that never answers gives an error at the deadline and
+    /// costs one parked thread however often the user saves again. A save
+    /// behind a write that is still running waits for it, so the newest key
+    /// is written last. Blocks: call it from a blocking task.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::InvalidKey`] before anything is written, the keychain's
+    /// error, or that it didn't answer in time (the key may then still be
+    /// saved later; see [`KeyWrites`]).
+    pub fn write_key<S: SecretStore + 'static>(
+        &self,
+        config: &Arc<Config<S>>,
+        provider: Provider,
+        key: String,
+    ) -> Result<(), ConfigError> {
+        // Refused here, so a typo never waits behind a stuck write.
+        dictation_pipeline::config::validate_key(&key)?;
+        let (config, live) = (Arc::clone(config), self.clone());
+        self.writes.write(self.key_timeout, move || {
+            changed(&config, &live, |config| config.set_api_key(provider, &key))
+        })
+    }
+
+    /// The keychain writes, so a test can see a save queue.
+    #[cfg(test)]
+    pub(crate) fn writes(&self) -> &KeyWrites {
+        &self.writes
+    }
+
+    /// Gives up on a keychain read or write after `timeout` instead of
     /// [`KEY_READ_TIMEOUT`]; only tests need it short.
     #[cfg(test)]
     #[must_use]
@@ -658,6 +697,7 @@ mod tests {
             base_url: Some(format!("http://127.0.0.1:{port}")),
             key_timeout: WAIT,
             reads: rig.live.reads.clone(),
+            writes: rig.live.writes.clone(),
         };
         changed(&rig.config, &dead, |c| c.set_api_key(Provider::Groq, KEY)).unwrap();
         assert_eq!(

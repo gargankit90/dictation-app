@@ -36,6 +36,7 @@ mod command_names;
 pub mod commands;
 pub mod engine;
 mod flags;
+mod key_writes;
 mod logging;
 mod overlay;
 

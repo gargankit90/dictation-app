@@ -711,6 +711,49 @@ describe("review round 1", () => {
       expect(locked(screen.getByLabelText("Provider"))).toBe(false);
     });
 
+    // T3 (#113): the app gives up on a keychain that doesn't answer and
+    // says so; the form unlocks, keeps the key for a retry and claims nothing.
+    it("blocked_key_save_reenables_form_without_claiming_key_saved", async () => {
+      const TIMED_OUT =
+        "keychain error: no answer from the keychain after 15 s, so the key may not be saved";
+      await open();
+      expect(screen.getByText(/No key saved yet/)).toBeTruthy();
+      const hold = gate();
+      const handle = backend.handle;
+      let stuck = true;
+      mockIPC(async (command, payload) => {
+        if (command === "set_api_key" && stuck) {
+          backend.calls.push({ command, args: (payload ?? {}) as Record<string, unknown> });
+          await hold.closed;
+          // eslint-disable-next-line @typescript-eslint/only-throw-error
+          throw TIMED_OUT;
+        }
+        return handle(command, payload);
+      });
+      type(/API key/, KEY);
+      type("Language", "fr");
+      click("Save");
+      await screen.findByRole("button", { name: "Saving…" });
+      expect(locked(keyBox())).toBe(true);
+
+      hold.open();
+      expect((await screen.findByRole("alert")).textContent).toBe(TIMED_OUT);
+      expect(locked(keyBox())).toBe(false);
+      expect(locked(screen.getByRole("button", { name: "Save" }))).toBe(false);
+      expect(screen.queryByText("Key saved")).toBeNull();
+      expect(screen.getByText(/No key saved yet/)).toBeTruthy();
+      expect(backend.named("save_settings")).toEqual([]);
+      expect(keyBox().value).toBe(KEY);
+
+      // The keychain answers again: the same Save works.
+      stuck = false;
+      click("Save");
+      await screen.findByText("Settings saved.");
+      expect(screen.getByText("Key saved")).toBeTruthy();
+      expect(backend.named("set_api_key")).toHaveLength(2);
+      expect(backend.settings.language).toBe("fr");
+    });
+
     it("shows the stored provider if the settings come back different", async () => {
       await open();
       type("Provider", "openai");
