@@ -130,10 +130,16 @@ const MAX_SOCKET_PATH: usize = 100;
 /// the socket path too long: the per-user temporary directory.
 #[must_use]
 pub fn default_dir(identifier: &str) -> PathBuf {
-    let preferred = preferred_dir().map(|dir| dir.join(identifier));
-    match preferred {
+    choose_dir(preferred_dir(), std::env::temp_dir(), identifier)
+}
+
+/// [`default_dir`]'s policy, given the roots: `preferred/identifier` when it
+/// exists and its socket path fits, otherwise `temporary/identifier`. Pure,
+/// so tests can check it without changing `HOME` or `TMPDIR`.
+fn choose_dir(preferred: Option<PathBuf>, temporary: PathBuf, identifier: &str) -> PathBuf {
+    match preferred.map(|root| root.join(identifier)) {
         Some(dir) if dir.as_os_str().len() + "/instance.sock".len() <= MAX_SOCKET_PATH => dir,
-        _ => std::env::temp_dir().join(identifier),
+        _ => temporary.join(identifier),
     }
 }
 
@@ -423,5 +429,63 @@ mod tests {
     fn default_dir_falls_back_for_a_long_identifier() {
         let long = "x".repeat(MAX_SOCKET_PATH);
         assert_eq!(default_dir(&long), std::env::temp_dir().join(&long));
+    }
+
+    /// The app's real bundle identifier (`src-tauri/tauri.conf.json`).
+    const APP_ID: &str = "com.dictationapp.desktop";
+
+    /// #129: the socket and lock stay out of the temporary directory, which
+    /// the OS may clean while the app runs, whenever the preferred one fits.
+    #[test]
+    fn default_dir_prefers_stable_user_cache_when_socket_fits() {
+        let caches = PathBuf::from("/Users/someone/Library/Caches");
+        let expected = Path::new("/Users/someone/Library/Caches/com.dictationapp.desktop");
+        for temporary in ["/var/folders/ab/cdef/T", "/tmp", "/a/different/tmp"] {
+            assert_eq!(
+                choose_dir(Some(caches.clone()), PathBuf::from(temporary), APP_ID),
+                expected,
+                "temporary root {temporary}"
+            );
+        }
+        // And `default_dir` uses that policy with this user's real roots
+        // (read, never changed).
+        #[cfg(target_os = "macos")]
+        if let Some(home) = std::env::var_os("HOME") {
+            let expected = Path::new(&home).join("Library/Caches").join(APP_ID);
+            if expected.as_os_str().len() + "/instance.sock".len() <= MAX_SOCKET_PATH {
+                assert_eq!(default_dir(APP_ID), expected);
+            }
+        }
+    }
+
+    /// #129: the temporary directory only when the preferred root is missing
+    /// or would make the socket path too long, with the boundary exact.
+    #[test]
+    fn temporary_fallback_only_when_preferred_unavailable_or_too_long() {
+        let temporary = PathBuf::from("/var/folders/ab/cdef/T");
+        let fallback = Path::new("/var/folders/ab/cdef/T/com.dictationapp.desktop");
+        assert_eq!(choose_dir(None, temporary.clone(), APP_ID), fallback);
+
+        // `<root>/com.dictationapp.desktop/instance.sock` is the root's
+        // length + 1 + 24 + 14 bytes: 100 (the most that fits) for a root of
+        // 61 bytes, 101 for 62.
+        let fits = format!("/{}", "r".repeat(60));
+        assert_eq!(fits.len(), 61);
+        let socket = format!("{fits}/{APP_ID}/instance.sock");
+        assert_eq!(socket.len(), 100);
+        assert_eq!(
+            choose_dir(Some(PathBuf::from(&fits)), temporary.clone(), APP_ID),
+            Path::new(&fits).join(APP_ID)
+        );
+        let too_long = format!("/{}", "r".repeat(61));
+        assert_eq!(
+            choose_dir(Some(PathBuf::from(&too_long)), temporary.clone(), APP_ID),
+            fallback
+        );
+        let far_too_long = format!("/{}", "r".repeat(200));
+        assert_eq!(
+            choose_dir(Some(PathBuf::from(far_too_long)), temporary, APP_ID),
+            fallback
+        );
     }
 }
