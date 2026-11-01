@@ -65,6 +65,52 @@ impl SessionMarker {
     }
 }
 
+/// One item on the clipboard: each representation the copying app offered,
+/// as `(type, bytes)` (on macOS a UTI such as `public.utf8-plain-text` or
+/// `public.png`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ClipboardItem {
+    /// The representations, in the order the clipboard listed them.
+    pub representations: Vec<(String, Vec<u8>)>,
+}
+
+/// Everything on the clipboard, saved before a dictation write so it can be
+/// put back. `Debug` shows only counts, never the contents.
+#[derive(Clone, PartialEq, Eq)]
+pub enum ClipboardSnapshot {
+    /// Only the text, from [`Clipboard::read_text`]: what implementations
+    /// that can't see other types save.
+    Text(Option<String>),
+    /// Every item with every representation.
+    Items(Vec<ClipboardItem>),
+}
+
+impl ClipboardSnapshot {
+    /// The saved text, for the text-only restore. `None` for
+    /// [`Items`](Self::Items): those need an implementation that restores
+    /// items.
+    #[must_use]
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            Self::Text(text) => text.as_deref(),
+            Self::Items(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Debug for ClipboardSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text(text) => write!(
+                f,
+                "Text({} chars)",
+                text.as_ref().map_or(0, |t| t.chars().count())
+            ),
+            Self::Items(items) => write!(f, "Items({} items)", items.len()),
+        }
+    }
+}
+
 /// Plain-text access to the system clipboard.
 ///
 /// Threading: `&self` methods, callable from any thread. Real
@@ -123,6 +169,37 @@ pub trait Clipboard: Send + Sync {
         session: &SessionMarker,
         previous: Option<&str>,
     ) -> Result<bool, ClipboardError>;
+
+    /// Saves what's on the clipboard for
+    /// [`restore_snapshot_if_unchanged`](Self::restore_snapshot_if_unchanged).
+    /// The default saves only the text; implementations that can read every
+    /// type (images, files, rich text) override both.
+    ///
+    /// # Errors
+    ///
+    /// [`ClipboardError::Unavailable`] if the clipboard can't be read.
+    ///
+    /// Threading: may block briefly; call from a blocking task.
+    fn snapshot(&self) -> Result<ClipboardSnapshot, ClipboardError> {
+        self.read_text().map(ClipboardSnapshot::Text)
+    }
+
+    /// [`restore_if_unchanged`](Self::restore_if_unchanged) with a
+    /// [`snapshot`](Self::snapshot): puts everything saved back if the
+    /// clipboard still holds the write that returned `session`.
+    ///
+    /// # Errors
+    ///
+    /// As [`restore_if_unchanged`](Self::restore_if_unchanged).
+    ///
+    /// Threading: may block briefly; call from a blocking task.
+    fn restore_snapshot_if_unchanged(
+        &self,
+        session: &SessionMarker,
+        previous: &ClipboardSnapshot,
+    ) -> Result<bool, ClipboardError> {
+        self.restore_if_unchanged(session, previous.text())
+    }
 }
 
 #[cfg(test)]
@@ -134,6 +211,19 @@ mod tests {
         assert_eq!(ClipboardMarkers::default(), ClipboardMarkers::NONE);
         let all = ClipboardMarkers::DICTATION;
         assert!(all.transient && all.concealed && all.auto_generated);
+    }
+
+    #[test]
+    fn snapshots_expose_text_and_debug_only_counts() {
+        let text = ClipboardSnapshot::Text(Some("secret words".into()));
+        assert_eq!(text.text(), Some("secret words"));
+        assert_eq!(format!("{text:?}"), "Text(12 chars)");
+        assert_eq!(ClipboardSnapshot::Text(None).text(), None);
+        let items = ClipboardSnapshot::Items(vec![ClipboardItem {
+            representations: vec![("public.png".into(), vec![1, 2, 3])],
+        }]);
+        assert_eq!(items.text(), None);
+        assert_eq!(format!("{items:?}"), "Items(1 items)");
     }
 
     #[test]

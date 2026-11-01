@@ -983,7 +983,10 @@ dependencies = [
  "hound",
  "keyring",
  "objc2",
+ "objc2-app-kit",
  "objc2-av-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation",
  "rubato",
  "tracing",
 ]

@@ -25,13 +25,14 @@ use dictation_pipeline::debug_audio::SavingAudio;
 #[cfg(not(debug_assertions))]
 use dictation_pipeline::hotkey::PermissionTolerantHotkey;
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
-use dictation_pipeline::stand_ins::{DiscardingInserter, GrantedPermissions, MicrophoneOnly};
+use dictation_pipeline::stand_ins::{GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
 #[cfg(debug_assertions)]
 use dictation_pipeline::test_hooks::SyntheticHotkey;
 use dictation_platform::audio::{FileAudioSource, SystemMicrophone};
 use dictation_platform::clock::SystemClock;
 use dictation_platform::hotkey::SystemHotkey;
+use dictation_platform::insert::SystemInserter;
 use dictation_platform::permissions::SystemPermissions;
 use dictation_ports::{AudioSource, Permission, PermissionError, PermissionStatus, Permissions};
 use dictation_transcribe::mock::MockTranscriber;
@@ -61,7 +62,8 @@ type ShellHotkey = SyntheticHotkey<SystemHotkey>;
 type ShellHotkey = PermissionTolerantHotkey<SystemHotkey>;
 
 /// The permissions the pipeline checks on each press: the real microphone
-/// permission (Accessibility isn't needed while paste is a stand-in), or
+/// permission (Accessibility isn't checked on press: the paste reports it
+/// as `InsertError::PermissionDenied`, so the test flags work without it), or
 /// none when a debug audio file stands in for the microphone.
 enum ShellPermissions {
     Microphone(MicrophoneOnly<SystemPermissions>),
@@ -206,7 +208,7 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
         hotkey,
         audio,
         transcriber,
-        inserter: DiscardingInserter,
+        inserter: SystemInserter::new(),
         permissions,
         clock: SystemClock::new(),
     };
