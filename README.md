@@ -42,11 +42,12 @@ scripts/gate.sh
 | Rust tests | `cargo nextest run --workspace`, `cargo test --workspace --doc` |
 | Coverage | `scripts/coverage.sh` (`core`, `transcribe` ≥ 85%, `app` ≥ 70%) |
 | TypeScript | `npx tsc -b --noEmit`, `npx eslint . --max-warnings 0`, `npx vitest run` |
+| Licence notice | `scripts/check-licences.sh` (`THIRD-PARTY-LICENSES.txt` is current; regenerate with `scripts/gen-licences.sh THIRD-PARTY-LICENSES.txt`) |
 | Spelling | `typos` |
 | Guards | `scripts/test-guards.sh` |
 
-Tools: `brew install lefthook cargo-deny cargo-nextest cargo-llvm-cov typos-cli`
-and `cargo install cargo-machete`. pre-commit (lefthook) runs the fast checks
+Tools: `brew install lefthook cargo-deny cargo-nextest cargo-llvm-cov typos-cli jq`
+and `cargo install cargo-machete` and `cargo install cargo-about --version 0.9.3 --locked --features cli`. pre-commit (lefthook) runs the fast checks
 on staged files: `cargo fmt --check`, `prettier --check`, `eslint`, `typos`.
 
 ## Layout
