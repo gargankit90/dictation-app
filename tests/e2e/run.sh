@@ -11,12 +11,18 @@ cd "$(git rev-parse --show-toplevel)"
 E2E_DIR=tests/e2e
 # shellcheck source=tests/e2e/lib.sh
 . "$E2E_DIR/lib.sh"
+# shellcheck source=tests/e2e/lib_full.sh
+. "$E2E_DIR/lib_full.sh"
 for scenario_file in "$E2E_DIR"/scenarios/*.sh; do
   # shellcheck source=/dev/null
   . "$scenario_file"
 done
 
-ALL_SCENARIOS=(e2e_startup e2e_press_release e2e_real_mic)
+ALL_SCENARIOS=(
+  e2e_startup e2e_press_release e2e_real_mic
+  e2e_mock_paste e2e_clipboard_restore e2e_silence e2e_rapid
+  e2e_hold_release e2e_held_at_launch
+)
 APP_PATH=target/debug/bundle/macos/$APP_NAME.app
 build=1
 reset=1
@@ -62,6 +68,7 @@ install_app "$APP_PATH"
 install_fixtures "$E2E_DIR/fixtures"
 
 failed=()
+results=()
 for scenario in "${scenarios[@]}"; do
   log "scenario $scenario"
   SCENARIO_FAILED=0
@@ -69,15 +76,20 @@ for scenario in "${scenarios[@]}"; do
   "$scenario"
   if [ "$SCENARIO_SKIPPED" = 1 ]; then
     log "scenario $scenario: SKIPPED"
+    results+=("SKIPPED  $scenario")
   elif [ "$SCENARIO_FAILED" = 1 ]; then
     failed+=("$scenario")
     log "scenario $scenario: FAIL"
+    results+=("FAIL     $scenario")
   else
     log "scenario $scenario: PASS"
+    results+=("PASS     $scenario")
   fi
 done
 fresh_app_state
 
+# One line per scenario, also saved with the run's output.
+printf '%s\n' "${results[@]}" | tee "$OUT_DIR/results.txt" >&2
 log "output in $OUT_DIR"
 if [ ${#failed[@]} -gt 0 ]; then
   die "failed: ${failed[*]}"

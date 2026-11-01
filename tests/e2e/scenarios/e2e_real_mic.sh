@@ -1,11 +1,12 @@
-# M2.2: one dictation from the VM's real microphone. Skipped unless
-# E2E_REAL_MIC=1, since it needs microphone access granted to the app in the
-# golden image and an input device in the VM. Without the grant the app logs
-# "Microphone permission is missing." (M2.2 criterion 6) and this fails.
+# M2.2: one dictation from the VM's real microphone. Needs the microphone
+# granted to the app in the golden image (done in M4.3, issue #92) and an
+# input device in the VM; without the grant the app logs "Microphone
+# permission is missing." (M2.2 criterion 6) and this fails. Skip it with
+# E2E_REAL_MIC=0 on a VM that lacks either.
 
 e2e_real_mic() {
-  if [ "${E2E_REAL_MIC:-0}" != 1 ]; then
-    log "  skipped: set E2E_REAL_MIC=1 to record from the VM's microphone"
+  if [ "${E2E_REAL_MIC:-1}" = 0 ]; then
+    log "  skipped: E2E_REAL_MIC=0"
     SCENARIO_SKIPPED=1
     return 0
   fi
