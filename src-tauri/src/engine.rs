@@ -1017,13 +1017,20 @@ mod tests {
         let transcribers = Transcribers::new(starting());
         let live = LiveEngine::follow(transcribers.clone()).at(&server.uri());
 
-        // Startup's read has the old key in hand, but hasn't answered.
-        let startup = live.rebuild_in_background(config.clone()).unwrap();
+        // Startup's read has the old key in hand, but hasn't answered, and
+        // startup gives up on it.
+        let startup = live
+            .clone()
+            .with_key_timeout(Duration::from_millis(30))
+            .rebuild_in_background(config.clone())
+            .unwrap();
         while store.gets.load(std::sync::atomic::Ordering::SeqCst) == 0 {
             std::thread::sleep(Duration::from_millis(5));
         }
-        // The user saves the right key meanwhile; its rebuild queues behind
-        // the startup one.
+        startup.join().unwrap();
+        assert_eq!(transcribers.name(), "unavailable");
+        // The user saves the right key; its rebuild must not take the
+        // pending read's old answer.
         let saved = {
             let (config, live) = (config.clone(), live.clone());
             std::thread::spawn(move || {
@@ -1032,7 +1039,6 @@ mod tests {
         };
         std::thread::sleep(Duration::from_millis(100));
         store.open(true); // the stale answer arrives
-        startup.join().unwrap();
         saved.join().unwrap();
 
         let audio = dictation_ports::Audio {
