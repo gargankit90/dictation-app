@@ -45,8 +45,19 @@ textedit_fresh() {
     end tell' >/dev/null
   sleep 1
   for i in $(seq 1 20); do
-    vm_osascript 'tell application "System Events" to get name of first process whose frontmost is true' |
-      grep -qx TextEdit && return 0
+    if vm_osascript 'tell application "System Events" to get name of first process whose frontmost is true' |
+      grep -qx TextEdit; then
+      # Once more now that it is in front: after the app quits from its
+      # tray menu, the first `activate` makes TextEdit frontmost without
+      # making its window key, and a paste goes nowhere. A second one, sent
+      # once TextEdit is frontmost, makes the window key. (T2 VM probe:
+      # after a tray Quit, 17 of 17 pastes missed without it, including 3
+      # with no copy of the app running at activation and 3 with 3 s more
+      # wait; 6 of 6 landed with it. With no tray Quit, 8 of 8 landed.)
+      vm_osascript 'tell application "TextEdit" to activate' >/dev/null
+      sleep 1
+      return 0
+    fi
     vm_osascript 'tell application "TextEdit" to activate' >/dev/null
     sleep 0.5
   done
