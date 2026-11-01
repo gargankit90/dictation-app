@@ -315,12 +315,19 @@ fn permission_missing_in_each_state() {
                 ]
             )
         );
-        for busy in [State::Transcribing, State::Inserting] {
-            assert_eq!(
-                step(busy, Event::PermissionMissing(permission)),
-                (busy, Vec::new())
-            );
-        }
+        // Since M2.3 (#81 M2): while transcribing it means the recording's
+        // start had failed for want of the permission, so the dictation fails.
+        assert_eq!(
+            step(State::Transcribing, Event::PermissionMissing(permission)),
+            (
+                State::Idle,
+                vec![error.clone(), Command::StateChanged(Phase::Idle)]
+            )
+        );
+        assert_eq!(
+            step(State::Inserting, Event::PermissionMissing(permission)),
+            (State::Inserting, Vec::new())
+        );
     }
 }
 
