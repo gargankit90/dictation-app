@@ -356,11 +356,11 @@ mod tests {
     use dictation_core::error::DictationError;
     use dictation_core::settings::Provider;
     use dictation_pipeline::pipeline::{Config as PipelineConfig, Pipeline, Ports, UiEvent};
+    use dictation_pipeline::ui_events::UiReceiver;
     use dictation_platform::fakes::{
         FakeClock, FakeHotkey, FakeInserter, FakePermissions, FileAudioSource, MemSecretStore,
     };
     use dictation_ports::{HotkeyEvent, Secret};
-    use tokio::sync::mpsc::UnboundedReceiver;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -406,7 +406,7 @@ mod tests {
         clock: FakeClock,
         inserter: FakeInserter,
         pipeline: Pipeline,
-        ui: UnboundedReceiver<UiEvent>,
+        ui: UiReceiver,
     }
 
     impl Rig {

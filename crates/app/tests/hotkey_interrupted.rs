@@ -18,9 +18,9 @@ use dictation_core::coordinator::MAX_RECORDING;
 use dictation_core::coordinator::Phase::{Idle, Inserting, Recording, Transcribing};
 use dictation_core::error::DictationError;
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
+use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::fakes::{FakeClock, FakeHotkey, FakeInserter, FakePermissions};
 use dictation_ports::{Audio, AudioError, AudioSource, HotkeyEvent, TranscribeError, Transcriber};
-use tokio::sync::mpsc::UnboundedReceiver;
 
 const WAIT: Duration = Duration::from_secs(5);
 /// Long enough for several 1 ms Ticks to reach the coordinator.
@@ -75,7 +75,7 @@ struct Harness {
     audio: CountingAudio,
     transcriber: CountingTranscriber,
     pipeline: Pipeline,
-    ui: UnboundedReceiver<UiEvent>,
+    ui: UiReceiver,
 }
 
 impl Harness {

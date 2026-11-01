@@ -16,14 +16,14 @@ use dictation_pipeline::stand_ins::{
     DiscardingInserter, FixedTranscriber, GrantedPermissions, ToneAudio,
 };
 use dictation_pipeline::test_hooks::{Injector, SyntheticHotkey, hook_events};
+use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::fakes::{FakeClock, FakeHotkey};
 use dictation_ports::HotkeyError;
-use tokio::sync::mpsc::UnboundedReceiver;
 
 /// Only a guard against a hung pipeline; a passing test never waits on it.
 const WAIT: Duration = Duration::from_secs(5);
 
-type Ui = UnboundedReceiver<UiEvent>;
+type Ui = UiReceiver;
 
 fn spawn() -> (Pipeline, Ui, Injector, FakeClock) {
     let real = FakeHotkey::new();

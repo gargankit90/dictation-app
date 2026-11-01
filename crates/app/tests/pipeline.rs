@@ -19,6 +19,7 @@ use std::time::Duration;
 use dictation_core::coordinator::Phase::{Idle, Inserting, Recording, Transcribing};
 use dictation_core::error::DictationError;
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
+use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::fakes::{
     FakeClock, FakeHotkey, FakeInserter, FakePermissions, FileAudioSource,
 };
@@ -26,7 +27,6 @@ use dictation_ports::{
     Audio, HotkeyError, HotkeyEvent, InsertError, Permission, PermissionStatus, TextInserter,
     TranscribeError, Transcriber,
 };
-use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{Notify, Semaphore};
 
 const HOLD: Duration = Duration::from_millis(500);
@@ -213,7 +213,7 @@ struct Harness {
     transcriber: FixedTranscriber,
     permissions: FakePermissions,
     pipeline: Pipeline,
-    ui: UnboundedReceiver<UiEvent>,
+    ui: UiReceiver,
     _wav: TempWav,
 }
 
