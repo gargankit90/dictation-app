@@ -316,6 +316,16 @@ async fn issue_40_cancel_during_a_blocked_start_then_a_fresh_dictation_works() {
         next(&mut run.ui).await,
         UiEvent::StateChanged(Phase::Recording)
     );
+    // Wait until the device open has begun: since M2.3 (#81 B1) a cancel
+    // that reaches the audio worker first drops the Start instead.
+    let deadline = std::time::Instant::now() + WAIT;
+    while starts.load(Ordering::SeqCst) == 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the start never began"
+        );
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
     // Cancel while start is still blocked: handled at once.
     assert!(run.injector.inject(HotkeyEvent::CancelPressed));
     assert_eq!(next(&mut run.ui).await, UiEvent::StateChanged(Phase::Idle));

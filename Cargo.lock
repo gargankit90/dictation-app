@@ -703,8 +703,6 @@ checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
 [[package]]
 name = "coreaudio-rs"
 version = "0.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5d7dca3ebcf65a035582c9ad4385371a9d9ee6537474d2a278f4e1e475bb58"
 dependencies = [
  "bitflags 2.13.2",
  "libc",
@@ -982,6 +980,7 @@ dependencies = [
  "block2",
  "dictation-core",
  "dictation-ports",
+ "handy-cpal",
  "handy-keys",
  "handy-recorder",
  "hound",
@@ -991,6 +990,7 @@ dependencies = [
  "objc2-av-foundation",
  "objc2-core-graphics",
  "objc2-foundation",
+ "rubato",
  "tracing",
 ]
 
