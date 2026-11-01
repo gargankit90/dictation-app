@@ -1,10 +1,9 @@
 # Shared helpers for the e2e scenarios; sourced by run.sh.
 #
-# Everything talks to the Lume VM `dictation-vm` over ssh. The golden image
+# Everything talks to one Lume VM over ssh: $VM, `dictation-vm` or, with
+# E2E_VM=dictation-vm-2, the second one (lib_vm.sh). The golden image
 # `dictation-vm-golden` is only ever cloned, never started or changed.
 
-VM=dictation-vm
-GOLDEN=dictation-vm-golden
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/dictation_vm_ed25519}"
 VM_USER=lume
 APP_NAME=dictation-app
@@ -22,6 +21,9 @@ die() {
   log "ERROR: $*"
   exit 1
 }
+
+# shellcheck source=tests/e2e/lib_vm.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_vm.sh"
 
 vm_ip() {
   lume get "$VM" -f json 2>/dev/null |
@@ -45,13 +47,15 @@ vm() {
     "$VM_USER@$VM_IP" "$@"
 }
 
-# Stops and deletes dictation-vm, clones it fresh from the golden image and
-# boots it headless. Waits until ssh answers.
+# Stops and deletes $VM, clones it fresh from the golden image, sets its
+# memory and CPUs and boots it headless. Waits until ssh answers.
 reset_vm() {
   log "resetting $VM from $GOLDEN"
+  refuse_third_vm
   lume stop "$VM" >/dev/null 2>&1 || true
   lume delete "$VM" --force >/dev/null 2>&1 || true
-  lume clone "$GOLDEN" "$VM" >/dev/null || die "lume clone failed"
+  clone_golden
+  set_vm_resources
   lume run "$VM" --no-display --detach >/dev/null || die "lume run failed"
   wait_for_vm
 }

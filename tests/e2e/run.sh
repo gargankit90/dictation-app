@@ -57,8 +57,10 @@ for tool in lume jq ssh tar; do
   command -v "$tool" >/dev/null || die "$tool is not installed"
 done
 [ -f "$SSH_KEY" ] || die "no VM ssh key at $SSH_KEY"
+ensure_host_key_alias
 
-OUT_DIR=$E2E_DIR/out/$(date +%Y%m%d-%H%M%S)
+# The VM's name is in the output dir, so two runs (one per VM) don't share one.
+OUT_DIR=$E2E_DIR/out/$(date +%Y%m%d-%H%M%S)-$VM
 mkdir -p "$OUT_DIR"
 
 if [ $build = 1 ]; then
@@ -67,6 +69,11 @@ if [ $build = 1 ]; then
     die "build failed; see $OUT_DIR/build.log"
 fi
 [ -d "$APP_PATH" ] || die "no app at $APP_PATH; run without --no-build"
+
+# One run per VM at a time, held until the run ends (after the build, which
+# doesn't need the VM).
+arm_run_traps
+vm_lock_take
 
 if [ $reset = 1 ]; then
   reset_vm
@@ -94,6 +101,7 @@ for scenario in "${scenarios[@]}"; do
   SCENARIO_FAILED=0
   SCENARIO_SKIPPED=0
   "$scenario"
+  arm_run_traps # a scenario's own cleanup trap replaced ours
   if [ "$SCENARIO_SKIPPED" = 1 ]; then
     skipped+=("$scenario")
     if is_optional "$scenario"; then
