@@ -10,9 +10,11 @@
 //!    at the start of the field.
 //! 5. The two UTF-16 units before the cursor (two, so a character outside
 //!    the Basic Multilingual Plane is read whole) through the parameterized
-//!    `AXStringForRange`. Apps that don't support it are asked for
-//!    `AXValue`, and only those two units are copied out of it; the string
-//!    is released at once. The text itself is never logged.
+//!    `AXStringForRange`, which asks the app for just that range. An app
+//!    that doesn't support it reads as unknown (no space): the field's whole
+//!    value (`AXValue`) is never requested, and [`copy_attribute`] refuses
+//!    any attribute outside [`READABLE_ATTRIBUTES`]. The text itself is
+//!    never logged.
 //!
 //! Every element gets a messaging timeout of [`AX_TIMEOUT`], so a hung app
 //! costs at most that per call; the pipeline also bounds the whole read.
@@ -31,6 +33,11 @@ pub const AX_TIMEOUT: Duration = Duration::from_millis(100);
 /// UTF-16 units read before the cursor: one character, even a surrogate
 /// pair.
 const UNITS_BEFORE: isize = 2;
+
+/// The only attributes [`copy_attribute`] asks an app for. None of them is
+/// the field's text: that is read only through the bounded
+/// `AXStringForRange`.
+const READABLE_ATTRIBUTES: [&str; 3] = ["AXFocusedUIElement", "AXSubrole", "AXSelectedTextRange"];
 
 type CfTypeRef = *const c_void;
 type AxError = i32;
@@ -106,9 +113,14 @@ unsafe extern "C" {
 struct Cf(CfTypeRef);
 
 impl Cf {
-    /// Takes ownership of `object`; `None` if it's null.
+    /// Takes ownership of `object`; `None` if it's null. Lazy: a null is
+    /// never wrapped, so it is never released.
     fn owned(object: CfTypeRef) -> Option<Self> {
-        (!object.is_null()).then_some(Self(object))
+        if object.is_null() {
+            None
+        } else {
+            Some(Self(object))
+        }
     }
 
     fn type_id(&self) -> usize {
@@ -171,8 +183,12 @@ fn ax_error(code: AxError) -> CursorReadError {
     }
 }
 
-/// The element's `attribute`.
+/// The element's `attribute`, one of [`READABLE_ATTRIBUTES`]; any other
+/// is refused before the app is asked.
 fn copy_attribute(element: &Cf, attribute: &str) -> Result<Cf, CursorReadError> {
+    if !READABLE_ATTRIBUTES.contains(&attribute) {
+        return Err(CursorReadError::Failed(format!("{attribute} is not read")));
+    }
     let name = cf_string(attribute).ok_or(CursorReadError::Failed("CFString".into()))?;
     let mut value: CfTypeRef = std::ptr::null();
     // SAFETY: element and name are valid CF objects for the call; value is
@@ -247,69 +263,95 @@ fn last_char(units: &[u16]) -> Option<char> {
         .and_then(Result::ok)
 }
 
-/// The cursor's offset: the start of `AXSelectedTextRange`.
-fn cursor_offset(element: &Cf) -> Result<isize, CursorReadError> {
-    let value = copy_attribute(element, "AXSelectedTextRange")?;
-    // SAFETY: value is a valid AXValue (checked first).
-    if !value.is_ax_value() || unsafe { AXValueGetType(value.0) } != AX_VALUE_CF_RANGE_TYPE {
-        return Err(CursorReadError::Unavailable);
-    }
-    let mut range = CfRange::default();
-    // SAFETY: the value holds a CFRange (its type, checked above), and
-    // range is a local CFRange to copy it into.
-    let ok = unsafe { AXValueGetValue(value.0, AX_VALUE_CF_RANGE_TYPE, (&raw mut range).cast()) };
-    if ok == 0 || range.location < 0 {
-        return Err(CursorReadError::Unavailable);
-    }
-    Ok(range.location)
+/// What the reader needs from the focused element. The only way to its
+/// text is [`string_for_range`](Self::string_for_range), bounded at the
+/// source, so nothing here can request the whole field.
+trait FocusedField {
+    /// Whether it is a password field.
+    fn is_secure(&self) -> bool;
+    /// The cursor's offset: the start of `AXSelectedTextRange`.
+    fn cursor(&self) -> Result<isize, CursorReadError>;
+    /// At most `range.length` UTF-16 units of `AXStringForRange` for
+    /// `range`.
+    fn string_for_range(&self, range: CfRange) -> Result<Vec<u16>, CursorReadError>;
 }
 
-/// Whether the element is a password field.
-fn is_secure_field(element: &Cf) -> bool {
-    copy_attribute(element, "AXSubrole")
-        .ok()
-        .filter(Cf::is_string)
-        .and_then(|subrole| {
-            // SAFETY: a valid CFString.
-            let length = unsafe { CFStringGetLength(subrole.0) };
-            units(
-                &subrole,
-                CfRange {
-                    location: 0,
-                    length,
-                },
-            )
-        })
-        .is_some_and(|subrole| String::from_utf16_lossy(&subrole) == "AXSecureTextField")
+/// The focused element, over Accessibility.
+struct AxField(Cf);
+
+impl FocusedField for AxField {
+    fn is_secure(&self) -> bool {
+        copy_attribute(&self.0, "AXSubrole")
+            .ok()
+            .filter(Cf::is_string)
+            .and_then(|subrole| {
+                // SAFETY: a valid CFString.
+                let length = unsafe { CFStringGetLength(subrole.0) };
+                units(
+                    &subrole,
+                    CfRange {
+                        location: 0,
+                        length,
+                    },
+                )
+            })
+            .is_some_and(|subrole| String::from_utf16_lossy(&subrole) == "AXSecureTextField")
+    }
+
+    fn cursor(&self) -> Result<isize, CursorReadError> {
+        let value = copy_attribute(&self.0, "AXSelectedTextRange")?;
+        // SAFETY: value is a valid AXValue (checked first).
+        if !value.is_ax_value() || unsafe { AXValueGetType(value.0) } != AX_VALUE_CF_RANGE_TYPE {
+            return Err(CursorReadError::Unavailable);
+        }
+        let mut range = CfRange::default();
+        // SAFETY: the value holds a CFRange (its type, checked above), and
+        // range is a local CFRange to copy it into.
+        let ok =
+            unsafe { AXValueGetValue(value.0, AX_VALUE_CF_RANGE_TYPE, (&raw mut range).cast()) };
+        if ok == 0 || range.location < 0 {
+            return Err(CursorReadError::Unavailable);
+        }
+        Ok(range.location)
+    }
+
+    fn string_for_range(&self, range: CfRange) -> Result<Vec<u16>, CursorReadError> {
+        let string = copy_string_for_range(&self.0, range)?;
+        if !string.is_string() {
+            return Err(CursorReadError::Unavailable);
+        }
+        // Some apps return more than asked for; copy out only the end.
+        // SAFETY: a valid CFString (checked above).
+        let length = unsafe { CFStringGetLength(string.0) };
+        let take = length.min(range.length);
+        units(
+            &string,
+            CfRange {
+                location: length - take,
+                length: take,
+            },
+        )
+        .ok_or(CursorReadError::Unavailable)
+    }
 }
 
-/// The units in `window`, through `AXStringForRange`, or out of `AXValue`
-/// for apps that don't support it.
-fn units_before(element: &Cf, window: CfRange) -> Result<Vec<u16>, CursorReadError> {
-    match copy_string_for_range(element, window) {
-        Ok(string) => {
-            if !string.is_string() {
-                return Err(CursorReadError::Unavailable);
-            }
-            // Some apps return more than asked for; take the end.
-            // SAFETY: a valid CFString (checked above).
-            let length = unsafe { CFStringGetLength(string.0) };
-            let take = length.min(window.length);
-            units(
-                &string,
-                CfRange {
-                    location: length - take,
-                    length: take,
-                },
-            )
-            .ok_or(CursorReadError::Unavailable)
-        }
-        Err(CursorReadError::Unavailable | CursorReadError::Failed(_)) => {
-            let value = copy_attribute(element, "AXValue")?;
-            units(&value, window).ok_or(CursorReadError::Unavailable)
-        }
-        Err(error) => Err(error),
+/// The character before the cursor in `field`: nothing is read from a
+/// password field, and if the bounded range read fails the answer is
+/// unknown (the caller adds no space); there is no other way to the text.
+fn read_field(field: &impl FocusedField) -> Result<BeforeCursor, CursorReadError> {
+    if field.is_secure() {
+        return Err(CursorReadError::SecureField);
     }
+    let cursor = field.cursor()?;
+    if cursor == 0 {
+        return Ok(BeforeCursor::StartOfField);
+    }
+    let window = window_before(cursor);
+    let units = field.string_for_range(window)?;
+    let keep = usize::try_from(window.length).unwrap_or(0).min(units.len());
+    last_char(&units[units.len() - keep..])
+        .map(BeforeCursor::Char)
+        .ok_or(CursorReadError::Unavailable)
 }
 
 /// See the module docs.
@@ -329,22 +371,168 @@ pub(super) fn char_before_cursor() -> Result<BeforeCursor, CursorReadError> {
         return Err(CursorReadError::Unavailable);
     }
     set_timeout(&focused);
-    if is_secure_field(&focused) {
-        return Err(CursorReadError::SecureField);
-    }
-    let cursor = cursor_offset(&focused)?;
-    if cursor == 0 {
-        return Ok(BeforeCursor::StartOfField);
-    }
-    let before = units_before(&focused, window_before(cursor))?;
-    last_char(&before)
-        .map(BeforeCursor::Char)
-        .ok_or(CursorReadError::Unavailable)
+    read_field(&AxField(focused))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     use super::*;
+
+    /// A focused field that answers from `text` (UTF-16) and records every
+    /// request.
+    struct RecordingField {
+        text: Vec<u16>,
+        cursor: Result<isize, CursorReadError>,
+        secure: bool,
+        range_read: Option<CursorReadError>,
+        /// Extra units an app returns around the asked-for range.
+        overshoot: bool,
+        requests: RefCell<Vec<String>>,
+    }
+
+    impl RecordingField {
+        fn new(text: &str, cursor: isize) -> Self {
+            Self {
+                text: text.encode_utf16().collect(),
+                cursor: Ok(cursor),
+                secure: false,
+                range_read: None,
+                overshoot: false,
+                requests: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn requests(&self) -> Vec<String> {
+            self.requests.borrow().clone()
+        }
+    }
+
+    impl FocusedField for RecordingField {
+        fn is_secure(&self) -> bool {
+            self.requests.borrow_mut().push("AXSubrole".into());
+            self.secure
+        }
+
+        fn cursor(&self) -> Result<isize, CursorReadError> {
+            self.requests
+                .borrow_mut()
+                .push("AXSelectedTextRange".into());
+            self.cursor.clone()
+        }
+
+        fn string_for_range(&self, range: CfRange) -> Result<Vec<u16>, CursorReadError> {
+            self.requests.borrow_mut().push(format!(
+                "AXStringForRange {}+{}",
+                range.location, range.length
+            ));
+            if let Some(error) = &self.range_read {
+                return Err(error.clone());
+            }
+            let start = usize::try_from(range.location).unwrap();
+            let end = start + usize::try_from(range.length).unwrap();
+            if self.overshoot {
+                return Ok(self.text.clone());
+            }
+            Ok(self.text[start..end].to_vec())
+        }
+    }
+
+    #[test]
+    fn reads_only_the_two_units_before_the_cursor() {
+        let field = RecordingField::new("hello world", 5);
+        assert_eq!(read_field(&field), Ok(BeforeCursor::Char('o')));
+        assert_eq!(
+            field.requests(),
+            ["AXSubrole", "AXSelectedTextRange", "AXStringForRange 3+2"]
+        );
+    }
+
+    /// B1 (review round 1): an app without AXStringForRange reads as
+    /// unknown, and nothing else (never AXValue, the whole field) is asked.
+    #[test]
+    fn an_unsupported_range_read_is_unknown_and_never_asks_for_the_whole_field() {
+        for error in [
+            CursorReadError::Unavailable,
+            CursorReadError::Failed("AXError -25200".into()),
+            CursorReadError::TimedOut,
+        ] {
+            let mut field = RecordingField::new(&"x".repeat(1_000_000), 999_999);
+            field.range_read = Some(error.clone());
+            assert_eq!(read_field(&field), Err(error));
+            let requests = field.requests();
+            assert_eq!(
+                requests,
+                [
+                    "AXSubrole",
+                    "AXSelectedTextRange",
+                    "AXStringForRange 999997+2"
+                ]
+            );
+            assert!(!requests.iter().any(|r| r.contains("AXValue")));
+        }
+    }
+
+    #[test]
+    fn copy_attribute_refuses_the_fields_text_before_asking_the_app() {
+        // The system-wide element: creating it asks no app anything, and the
+        // refusal comes before any call that would.
+        // SAFETY: no arguments; the result follows the Create rule and Cf
+        // releases it.
+        let system = Cf::owned(unsafe { AXUIElementCreateSystemWide() }).unwrap();
+        for attribute in ["AXValue", "AXSelectedText", "AXNumberOfCharacters"] {
+            assert_eq!(
+                copy_attribute(&system, attribute).err(),
+                Some(CursorReadError::Failed(format!("{attribute} is not read"))),
+                "{attribute}"
+            );
+        }
+        assert!(!READABLE_ATTRIBUTES.contains(&"AXValue"));
+    }
+
+    #[test]
+    fn a_password_field_is_never_read() {
+        let mut field = RecordingField::new("secret", 6);
+        field.secure = true;
+        assert_eq!(read_field(&field), Err(CursorReadError::SecureField));
+        assert_eq!(field.requests(), ["AXSubrole"]);
+    }
+
+    #[test]
+    fn the_start_of_a_field_reads_no_text() {
+        let field = RecordingField::new("hello", 0);
+        assert_eq!(read_field(&field), Ok(BeforeCursor::StartOfField));
+        assert_eq!(field.requests(), ["AXSubrole", "AXSelectedTextRange"]);
+    }
+
+    #[test]
+    fn a_surrogate_pair_before_the_cursor_is_read_whole() {
+        let field = RecordingField::new("a\u{1F600}", 3);
+        assert_eq!(read_field(&field), Ok(BeforeCursor::Char('\u{1F600}')));
+    }
+
+    #[test]
+    fn extra_units_an_app_returns_are_cut_to_the_window() {
+        let mut field = RecordingField::new("abc", 1);
+        field.overshoot = true;
+        // Asked for 0+1, got "abc": only the last asked-for unit counts.
+        assert_eq!(read_field(&field), Ok(BeforeCursor::Char('c')));
+    }
+
+    #[test]
+    fn no_cursor_is_unknown() {
+        let mut field = RecordingField::new("hello", 0);
+        field.cursor = Err(CursorReadError::Unavailable);
+        assert_eq!(read_field(&field), Err(CursorReadError::Unavailable));
+    }
+
+    /// M1 (review round 1): a null result is never wrapped, so it is never
+    /// released (CFRelease(NULL) traps).
+    #[test]
+    fn a_null_object_is_not_owned_and_never_released() {
+        assert!(Cf::owned(std::ptr::null()).is_none());
+    }
 
     #[test]
     fn the_window_is_two_units_before_the_cursor_clamped_at_the_start() {

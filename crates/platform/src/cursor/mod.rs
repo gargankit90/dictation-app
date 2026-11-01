@@ -6,9 +6,9 @@
 //! Elsewhere (until the Windows milestone) it always answers
 //! [`CursorReadError::Unavailable`], so no space is added.
 //!
-//! Privacy (see the port's docs): at most two UTF-16 units before the cursor
-//! are copied out, nothing is kept or logged, and a password field is never
-//! read.
+//! Privacy (see the port's docs): only the two UTF-16 units before the
+//! cursor are ever asked of the app (never the field's whole value),
+//! nothing is kept or logged, and a password field is never read.
 
 #[cfg(target_os = "macos")]
 mod macos;
