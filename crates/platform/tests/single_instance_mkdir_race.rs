@@ -13,13 +13,16 @@ use std::time::Duration;
 
 use dictation_platform::single_instance::{Config, Launch, Message, acquire};
 
+mod common;
+use common::Scratch;
+
 const ROUNDS: usize = 300;
 const LAUNCHES: usize = 8;
 
 #[test]
 fn simultaneous_first_launches_never_fail_creating_the_directory() {
-    let base = std::env::temp_dir().join(format!("si-mkdir-race-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let scratch = Scratch::new("mk");
+    let base = scratch.path();
     let mut errors = Vec::new();
     for round in 0..ROUNDS {
         // Nested and missing, like a first launch ever.
@@ -57,7 +60,6 @@ fn simultaneous_first_launches_never_fail_creating_the_directory() {
         }
         drop(primaries);
     }
-    let _ = std::fs::remove_dir_all(&base);
     assert!(
         errors.is_empty(),
         "{} failures, first: {:?}",

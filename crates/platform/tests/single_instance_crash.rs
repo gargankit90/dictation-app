@@ -10,6 +10,9 @@ use std::time::Duration;
 
 use dictation_platform::single_instance::{Config, Launch, Message, acquire};
 
+mod common;
+use common::Scratch;
+
 const CHILD_DIR: &str = "SI_CRASH_CHILD_DIR";
 
 fn message(arg: &str) -> Message {
@@ -36,11 +39,11 @@ fn crash_child() {
 
 #[test]
 fn a_killed_instance_leaves_a_stale_socket_and_the_next_launch_recovers() {
-    let dir = std::env::temp_dir().join(format!("si-crash-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let scratch = Scratch::new("crash");
+    let dir = scratch.path();
     let mut child = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "crash_child", "--nocapture", "--test-threads=1"])
-        .env(CHILD_DIR, &dir)
+        .env(CHILD_DIR, dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -51,7 +54,7 @@ fn a_killed_instance_leaves_a_stale_socket_and_the_next_launch_recovers() {
         "child never listened"
     );
 
-    let config = Config::in_dir(&dir, "c");
+    let config = Config::in_dir(dir, "c");
     assert!(config.socket_path().exists());
     child.kill().unwrap(); // SIGKILL: no Drop, no cleanup
     child.wait().unwrap();
