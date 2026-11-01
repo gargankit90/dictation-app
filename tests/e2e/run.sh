@@ -83,5 +83,6 @@ run_scenarios "${scenarios[@]}"
 status=$?
 set -e
 fresh_app_state || log "warning: the app was still running at the end of the run"
+rm -f "$E2E_JOB_COUNTER"
 log "output in $OUT_DIR"
 [ "$status" = 0 ] || die "the run failed; see $OUT_DIR/results.txt"
