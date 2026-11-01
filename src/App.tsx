@@ -1,8 +1,6 @@
+import { Settings } from "./Settings";
+
+/** The app's one window is the settings window (opened from the tray). */
 export function App() {
-  return (
-    <main>
-      <h1>dictation-app</h1>
-      <p>Hold a hotkey, speak, release. Coming soon.</p>
-    </main>
-  );
+  return <Settings />;
 }

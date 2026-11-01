@@ -134,20 +134,21 @@ impl<S: SecretStore> Config<S> {
     /// [`ConfigError::InvalidKey`] if it's empty, too long or holds spaces,
     /// and [`ConfigError::Secret`] if the keychain refuses.
     pub fn set_api_key(&self, provider: Provider, key: &str) -> Result<(), ConfigError> {
-        let key = key.trim();
-        if key.is_empty() {
-            return Err(ConfigError::InvalidKey("is empty"));
-        }
-        if key.chars().count() > MAX_KEY_LEN {
-            return Err(ConfigError::InvalidKey("is too long"));
-        }
-        if key.chars().any(|c| c.is_whitespace() || c.is_control()) {
-            return Err(ConfigError::InvalidKey("contains spaces"));
-        }
-        self.secrets
-            .set(provider.key_name(), &Secret::new(key.to_owned()))?;
+        let key = validate_key(key)?;
+        self.secrets.set(provider.key_name(), &key)?;
         tracing::info!(%provider, "API key saved");
         Ok(())
+    }
+
+    /// `provider`'s stored API key, for Rust code that calls the provider
+    /// (the Test key command, later the transcriber). No command hands it
+    /// to the UI.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::Secret`] if the keychain refuses.
+    pub fn api_key(&self, provider: Provider) -> Result<Option<Secret>, ConfigError> {
+        Ok(self.secrets.get(provider.key_name())?)
     }
 
     /// Whether `provider` has an API key stored.
@@ -175,6 +176,26 @@ impl<S: SecretStore> Config<S> {
             reason: error.to_string(),
         }
     }
+}
+
+/// Checks that `key` can be a key and trims the whitespace a paste leaves
+/// around it.
+///
+/// # Errors
+///
+/// [`ConfigError::InvalidKey`] if it's empty, too long or holds spaces.
+pub fn validate_key(key: &str) -> Result<Secret, ConfigError> {
+    let key = key.trim();
+    if key.is_empty() {
+        return Err(ConfigError::InvalidKey("is empty"));
+    }
+    if key.chars().count() > MAX_KEY_LEN {
+        return Err(ConfigError::InvalidKey("is too long"));
+    }
+    if key.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(ConfigError::InvalidKey("contains spaces"));
+    }
+    Ok(Secret::new(key))
 }
 
 /// Writes `bytes` to a new file at `path` (failing if it exists) and syncs
@@ -406,6 +427,22 @@ mod tests {
             }
         }
         assert_eq!(secrets.get("groq-api-key").unwrap(), None);
+    }
+
+    #[test]
+    fn the_stored_key_is_available_to_rust_and_validate_key_trims() {
+        let dir = TempDir::new();
+        let (config, _) = config(&dir);
+        assert_eq!(config.api_key(Provider::Groq).unwrap(), None);
+        config.set_api_key(Provider::Groq, DUMMY_KEY).unwrap();
+        let stored = config.api_key(Provider::Groq).unwrap().unwrap();
+        assert_eq!(stored.expose(), DUMMY_KEY);
+        assert_eq!(config.api_key(Provider::OpenAi).unwrap(), None);
+        assert_eq!(validate_key(" k1\n").unwrap().expose(), "k1");
+        assert_eq!(
+            validate_key("a b"),
+            Err(ConfigError::InvalidKey("contains spaces"))
+        );
     }
 
     #[test]
