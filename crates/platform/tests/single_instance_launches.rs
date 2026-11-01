@@ -26,11 +26,12 @@ use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
+
+mod common;
 
 use dictation_platform::single_instance::{Config, Launch, Message, Rejected, acquire};
 
@@ -244,42 +245,36 @@ fn child_mute(config: &Config) {
 /// waits this long.
 const STARTUP: Duration = Duration::from_secs(30);
 
-/// A fresh short directory, removed afterwards (socket paths are limited to
-/// about 100 bytes).
-struct Scratch(PathBuf);
+/// A fresh short directory (the shared [`common::Scratch`]: unique, not
+/// created, removed afterwards) and the receipts the launches leave in it.
+struct Scratch(common::Scratch);
 
 impl Scratch {
     fn new() -> Self {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let n = NEXT.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("sil-{}-{n}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        Self(dir)
+        Self(common::Scratch::new("sil"))
+    }
+
+    fn path(&self) -> &Path {
+        self.0.path()
     }
 
     fn config(&self) -> Config {
-        Config::in_dir(&self.0, NAME)
+        Config::in_dir(self.path(), NAME)
     }
 
     fn has_receipt(&self, key: &str) -> bool {
-        self.0.join(format!("r-{key}")).exists()
+        self.path().join(format!("r-{key}")).exists()
     }
 
     /// Receipts recorded twice, i.e. messages acted on more than once.
     fn duplicates(&self) -> Vec<String> {
-        let Ok(entries) = std::fs::read_dir(&self.0) else {
+        let Ok(entries) = std::fs::read_dir(self.path()) else {
             return Vec::new();
         };
         entries
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
             .filter(|name| name.starts_with("dup-"))
             .collect()
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -323,7 +318,7 @@ impl Proc {
                 "--test-threads=1",
             ])
             .env(ROLE, role)
-            .env(DIR, &dir.0)
+            .env(DIR, dir.path())
             .env(ARG, arg)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -503,7 +498,7 @@ fn cold_race(round: usize) {
     for contender in &contenders {
         contender.expect("READY");
     }
-    assert!(!dir.0.exists(), "round {round}: not a cold start");
+    assert!(!dir.path().exists(), "round {round}: not a cold start");
     // ...and all are released together.
     for contender in &mut contenders {
         contender.tell("GO");

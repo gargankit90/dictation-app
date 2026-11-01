@@ -13,6 +13,10 @@ export default defineConfig({
   },
   build: {
     target: "safari16",
+    // Two pages: the settings window and the overlay window (M5.1).
+    rolldownOptions: {
+      input: { main: "index.html", overlay: "overlay.html" },
+    },
   },
   test: {
     environment: "jsdom",

@@ -15,18 +15,15 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use dictation_platform::single_instance::{Config, Launch, Message, acquire};
 
+mod common;
+use common::Scratch;
+
 const LAUNCHES: usize = 6;
 
 /// Environment variables that make [`child_launch`] act as one launch.
 const CHILD_DIR: &str = "SINGLE_INSTANCE_CHILD_DIR";
 const CHILD_START_MS: &str = "SINGLE_INSTANCE_CHILD_START_MS";
 const CHILD_ARG: &str = "SINGLE_INSTANCE_CHILD_ARG";
-
-fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("si-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    dir
-}
 
 fn message(arg: &str) -> Message {
     Message {
@@ -44,7 +41,8 @@ fn now_ms() -> u128 {
 
 #[test]
 fn concurrent_launches_in_threads_start_one_instance() {
-    let config = Config::in_dir(temp_dir("threads"), "t");
+    let scratch = Scratch::new("threads");
+    let config = Config::in_dir(scratch.path(), "t");
     let barrier = Arc::new(Barrier::new(LAUNCHES));
     let (tx, rx) = mpsc::channel();
     let launches: Vec<_> = (0..LAUNCHES)
@@ -146,14 +144,15 @@ fn concurrent_launches_in_processes_start_one_instance() {
 /// checks that it doesn't quit before acknowledging the last one (which
 /// would let that launch retry and run a second instance).
 fn race_launches_in_processes(round: usize) {
-    let dir = temp_dir(&format!("procs{round}"));
+    let scratch = Scratch::new(&format!("p{round}"));
+    let dir = scratch.path();
     let exe = std::env::current_exe().unwrap();
     let start = now_ms() + 500;
     let children: Vec<_> = (0..LAUNCHES)
         .map(|i| {
             Command::new(&exe)
                 .args(["--exact", "child_launch", "--nocapture", "--test-threads=1"])
-                .env(CHILD_DIR, &dir)
+                .env(CHILD_DIR, dir)
                 .env(CHILD_START_MS, start.to_string())
                 .env(CHILD_ARG, i.to_string())
                 .stdout(Stdio::piped())
@@ -200,11 +199,10 @@ fn race_launches_in_processes(round: usize) {
     );
 
     // The instance has exited: its socket is gone and the next launch runs.
-    let config = Config::in_dir(&dir, "p");
+    let config = Config::in_dir(dir, "p");
     assert!(!config.socket_path().exists(), "round {round}");
     assert!(matches!(
         acquire(&config, &message("next")).unwrap(),
         Launch::Primary(_)
     ));
-    let _ = std::fs::remove_dir_all(&dir);
 }

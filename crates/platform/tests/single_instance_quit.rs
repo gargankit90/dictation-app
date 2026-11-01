@@ -10,19 +10,19 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use dictation_platform::single_instance::{Config, Launch, Message, acquire};
 
-fn config(tag: &str) -> Config {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("siq-{tag}-{}-{nanos}", std::process::id()));
-    let mut config = Config::in_dir(dir, "t");
+mod common;
+use common::Scratch;
+
+/// The scratch directory goes when the first value is dropped, so bind it.
+fn config(tag: &str) -> (Scratch, Config) {
+    let scratch = Scratch::new(tag);
+    let mut config = Config::in_dir(scratch.path(), "t");
     config.io_timeout = Duration::from_millis(500);
-    config
+    (scratch, config)
 }
 
 fn message(arg: &str) -> Message {
@@ -34,7 +34,7 @@ fn message(arg: &str) -> Message {
 
 #[test]
 fn quitting_with_a_stuck_callback_is_bounded() {
-    let config = config("stuck");
+    let (_scratch, config) = config("stuck");
     let Launch::Primary(mut instance) = acquire(&config, &message("primary")).unwrap() else {
         panic!("not the primary");
     };
@@ -65,7 +65,7 @@ fn quitting_with_a_stuck_callback_is_bounded() {
 #[test]
 fn quitting_during_a_burst_acts_on_each_forward_at_most_once() {
     for round in 0..20 {
-        let config = config(&format!("burst{round}"));
+        let (_scratch, config) = config(&format!("burst{round}"));
         let Launch::Primary(mut instance) = acquire(&config, &message("primary")).unwrap() else {
             panic!("not the primary");
         };

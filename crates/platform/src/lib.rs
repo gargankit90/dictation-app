@@ -19,6 +19,7 @@ pub mod clock;
 pub mod hotkey;
 pub mod insert;
 pub mod launch;
+pub mod overlay;
 pub mod permissions;
 pub mod reveal;
 pub mod secrets;

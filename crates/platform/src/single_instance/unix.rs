@@ -173,6 +173,21 @@ struct Shutdown {
     state: Mutex<ShutdownState>,
     /// Signalled when the last delivery ends.
     idle: Condvar,
+    /// Tests only: told each time [`Server::stop`] is about to block on a
+    /// delivery, so a test can release the callback at that exact point
+    /// instead of guessing with a sleep.
+    #[cfg(test)]
+    wait_started: Mutex<Option<std::sync::mpsc::Sender<StopEvent>>>,
+}
+
+/// What a test learns about [`Server::stop`], in order.
+#[cfg(test)]
+#[derive(Debug, PartialEq, Eq)]
+enum StopEvent {
+    /// `stop` found a delivery in flight and is blocking until it ends.
+    Waiting,
+    /// `stop` returned.
+    Stopped,
 }
 
 #[derive(Debug, Default)]
@@ -213,9 +228,30 @@ impl Shutdown {
     fn wait_for_deliveries(&self, limit: Duration) -> bool {
         let (state, _) = self
             .idle
-            .wait_timeout_while(self.state(), limit, |state| state.delivering > 0)
+            .wait_timeout_while(self.state(), limit, |state| {
+                let blocked = state.delivering > 0;
+                // The state lock is held here and a delivery needs it to
+                // end, so the delivery cannot finish before the wait below
+                // is under way.
+                #[cfg(test)]
+                if blocked {
+                    self.announce_wait();
+                }
+                blocked
+            })
             .unwrap_or_else(PoisonError::into_inner);
         state.delivering == 0
+    }
+
+    #[cfg(test)]
+    fn announce_wait(&self) {
+        let hook = self
+            .wait_started
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(events) = hook.as_ref() {
+            let _ = events.send(StopEvent::Waiting);
+        }
     }
 }
 
@@ -349,16 +385,47 @@ mod tests {
     use super::*;
     use crate::single_instance::{Instance, Launch, acquire};
 
-    /// A fresh, short directory (socket paths are limited to ~100 bytes).
-    fn temp_config() -> Config {
+    /// A [`Config`] in a fresh, short directory (socket paths are limited to
+    /// ~100 bytes) that is removed when the test ends, pass or fail.
+    struct TempConfig {
+        config: Config,
+        dir: PathBuf,
+    }
+
+    impl std::ops::Deref for TempConfig {
+        type Target = Config;
+
+        fn deref(&self) -> &Config {
+            &self.config
+        }
+    }
+
+    impl std::ops::DerefMut for TempConfig {
+        fn deref_mut(&mut self) -> &mut Config {
+            &mut self.config
+        }
+    }
+
+    impl Drop for TempConfig {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// The name is unique among processes (pid and time, which also keeps a
+    /// reused pid from meeting an old leftover) and within this one (counter).
+    fn temp_config() -> TempConfig {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("si-{}-{n}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let mut config = Config::in_dir(dir, "t");
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos();
+        let dir = std::env::temp_dir().join(format!("si-{}-{n}-{nanos}", std::process::id()));
+        let mut config = Config::in_dir(dir.clone(), "t");
         config.forward_timeout = Duration::from_secs(3);
         config.io_timeout = Duration::from_millis(300);
-        config
+        TempConfig { config, dir }
     }
 
     fn message(arg: &str) -> Message {
@@ -642,29 +709,52 @@ mod tests {
 
     #[test]
     fn stopping_waits_for_a_message_being_answered() {
-        let config = temp_config();
+        // Failure bound only; nothing here passes or fails by elapsed time.
+        const BOUND: Duration = Duration::from_secs(30);
+        let mut config = temp_config();
+        config.io_timeout = Duration::from_secs(5);
         let Launch::Primary(mut instance) = acquire(&config, &message("a")).unwrap() else {
             panic!("not the primary");
         };
         let (entered_tx, entered) = mpsc::channel();
+        let (release_tx, release) = mpsc::channel::<()>();
         let handled = Arc::new(AtomicBool::new(false));
         let done = Arc::clone(&handled);
         instance
             .listen(move |_| {
                 entered_tx.send(()).unwrap();
-                std::thread::sleep(Duration::from_millis(200));
+                release.recv().unwrap();
                 done.store(true, Ordering::SeqCst);
             })
             .unwrap();
+        let (events_tx, events) = mpsc::channel();
+        *instance.server.shutdown.wait_started.lock().unwrap() = Some(events_tx.clone());
         let second = {
             let config = config.clone();
             std::thread::spawn(move || acquire(&config, &message("b")))
         };
-        entered.recv().unwrap();
-        // Quitting while the message is being acted on: the lock may go only
+        // The callback is now running and blocked on `release`.
+        entered.recv_timeout(BOUND).unwrap();
+        // Quit while the message is being acted on: the lock may go only
         // once it is answered, or the launch would retry and run itself.
-        drop(instance);
+        let stopper = std::thread::spawn(move || {
+            drop(instance);
+            events_tx.send(StopEvent::Stopped).unwrap();
+        });
+        // `stop` reports `Waiting` from inside its wait on the delivery.
+        // A `stop` that skips the wait reports `Stopped` first, while the
+        // callback is still blocked, whatever the scheduling.
+        assert_eq!(
+            events.recv_timeout(BOUND).unwrap(),
+            StopEvent::Waiting,
+            "stopped mid-delivery"
+        );
+        assert!(!handled.load(Ordering::SeqCst));
+        release_tx.send(()).unwrap();
+        // Only now may `stop` return (extra `Waiting`s are spurious wakeups).
+        while events.recv_timeout(BOUND).unwrap() != StopEvent::Stopped {}
         assert!(handled.load(Ordering::SeqCst), "stopped mid-delivery");
+        stopper.join().unwrap();
         assert!(matches!(second.join().unwrap().unwrap(), Launch::Forwarded));
     }
 
