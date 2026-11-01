@@ -7,7 +7,7 @@
 //! tray's title and tooltip until the next recording. A second launch
 //! forwards its flags to the running app through the single-instance
 //! plugin and exits. Debug builds act on the test flags (`--press`,
-//! `--release`, `--debug-audio-file`, `--debug-save-audio`, `--mock-text`;
+//! `--release`, `--debug-audio-file`, `--debug-save-audio`, `--mock-text`, `--mock-text-sequence`;
 //! see [`flags`]);
 //! release builds ignore them and have no way to inject key events or
 //! audio.
@@ -209,10 +209,13 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
     let launch = flags::parse(&argv, flags::TEST_FLAGS);
     // Only one engine so far; an enum that delegates comes with the second.
     let flags::TranscriberChoice::Mock = launch.transcriber.unwrap_or_default();
-    let transcriber = launch
+    let mut transcriber = launch
         .mock_text
         .clone()
         .map_or_else(MockTranscriber::default, MockTranscriber::new);
+    if let Some(texts) = &launch.mock_text_sequence {
+        transcriber = transcriber.with_texts(texts);
+    }
     tracing::info!(
         transcriber = flags::TranscriberChoice::Mock.name(),
         "engine"
