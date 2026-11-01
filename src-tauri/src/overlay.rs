@@ -65,9 +65,16 @@ impl<R: Runtime> OverlaySurface for Surface<R> {
         ) {
             tracing::warn!(%error, "could not update the overlay");
         }
+        // The state's name only, never an error's text.
         let shown = match view {
-            OverlayView::Hidden => self.window.hide(),
-            _ => self.window.show(),
+            OverlayView::Hidden => {
+                tracing::info!("overlay hidden");
+                self.window.hide()
+            }
+            _ => {
+                tracing::info!(state = Payload::from(view).name(), "overlay shown");
+                self.window.show()
+            }
         };
         if let Err(error) = shown {
             tracing::warn!(%error, "could not show or hide the overlay");
@@ -96,6 +103,18 @@ impl<'a> From<&'a OverlayView> for Payload<'a> {
     }
 }
 
+impl Payload<'_> {
+    /// The `state` it's sent with, for the log.
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Hidden => "hidden",
+            Self::Recording => "recording",
+            Self::Transcribing => "transcribing",
+            Self::Error { .. } => "error",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,11 +135,10 @@ mod tests {
             ),
         ];
         for (view, json) in cases {
-            assert_eq!(
-                serde_json::to_string(&Payload::from(&view)).unwrap(),
-                json,
-                "{view:?}"
-            );
+            let payload = Payload::from(&view);
+            assert_eq!(serde_json::to_string(&payload).unwrap(), json, "{view:?}");
+            // The log names the state the page gets.
+            assert!(json.starts_with(&format!(r#"{{"state":"{}""#, payload.name())));
         }
     }
 }
