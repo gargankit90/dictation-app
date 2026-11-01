@@ -642,17 +642,22 @@ mod tests {
 
     #[test]
     fn stopping_waits_for_a_message_being_answered() {
-        let config = temp_config();
+        let mut config = temp_config();
+        // Ordering, not timing, decides this test: the callback blocks until
+        // the test releases it, so the timeouts only need to outlast a slow
+        // runner (300 ms was close to the old 200 ms callback).
+        config.io_timeout = Duration::from_secs(5);
         let Launch::Primary(mut instance) = acquire(&config, &message("a")).unwrap() else {
             panic!("not the primary");
         };
         let (entered_tx, entered) = mpsc::channel();
+        let (release_tx, release) = mpsc::channel::<()>();
         let handled = Arc::new(AtomicBool::new(false));
         let done = Arc::clone(&handled);
         instance
             .listen(move |_| {
                 entered_tx.send(()).unwrap();
-                std::thread::sleep(Duration::from_millis(200));
+                release.recv().unwrap();
                 done.store(true, Ordering::SeqCst);
             })
             .unwrap();
@@ -661,10 +666,23 @@ mod tests {
             std::thread::spawn(move || acquire(&config, &message("b")))
         };
         entered.recv().unwrap();
+        // Release the callback only once the instance is stopping: `stop`
+        // removes the socket, then waits for the delivery. If it didn't wait
+        // it would return before the release, with `handled` still false.
+        let socket = config.socket_path();
+        let releaser = std::thread::spawn(move || {
+            while socket.exists() {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            // Let `stop` reach its wait.
+            std::thread::sleep(Duration::from_millis(100));
+            release_tx.send(()).unwrap();
+        });
         // Quitting while the message is being acted on: the lock may go only
         // once it is answered, or the launch would retry and run itself.
         drop(instance);
         assert!(handled.load(Ordering::SeqCst), "stopped mid-delivery");
+        releaser.join().unwrap();
         assert!(matches!(second.join().unwrap().unwrap(), Launch::Forwarded));
     }
 
