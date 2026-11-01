@@ -10,10 +10,16 @@ use thiserror::Error;
 pub struct Secret(String);
 
 impl Secret {
-    /// Wraps a secret value.
+    /// Wraps a secret value, and registers it with
+    /// [`dictation_core::redact`] so that the log hides it wherever it
+    /// turns up, even in a message from a library that nothing else
+    /// covers. Every key the app handles is made here (the keychain adapters
+    /// and the settings form), so none escapes the registry.
     #[must_use]
     pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
+        let value = value.into();
+        dictation_core::redact::register_secret(&value);
+        Self(value)
     }
 
     /// The value. Use it only where the secret is needed (an HTTP header),
@@ -87,5 +93,14 @@ mod tests {
         let secret = Secret::new("gsk_live_123");
         assert_eq!(format!("{secret:?}"), "Secret(<redacted>)");
         assert_eq!(secret.expose(), "gsk_live_123");
+    }
+
+    #[test]
+    fn making_a_secret_registers_it_with_the_redactor() {
+        let _secret = Secret::new("an-odd-looking-key-0042");
+        assert_eq!(
+            dictation_core::redact::secrets("error: an-odd-looking-key-0042 rejected"),
+            "error: [key hidden] rejected"
+        );
     }
 }

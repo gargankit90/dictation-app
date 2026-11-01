@@ -11,6 +11,7 @@
 
 use std::borrow::Cow;
 use std::fmt;
+use std::sync::{PoisonError, RwLock};
 
 /// What replaces a key found in text.
 pub const KEY_PLACEHOLDER: &str = "[key hidden]";
@@ -56,11 +57,46 @@ fn looks_like_key(token: &str) -> bool {
     })
 }
 
+/// Keys shorter than this aren't registered: replacing a short string
+/// everywhere would wreck the text, and no real key is this short.
+const MIN_REGISTERED_LEN: usize = 8;
+
+/// Every key the app has read or been given.
+static REGISTERED: RwLock<Vec<String>> = RwLock::new(Vec::new());
+
+/// Remembers `secret` so [`secrets`] hides its exact value wherever it
+/// appears, whatever its shape. Call it wherever a key enters the app: read
+/// from the keychain, saved, or typed into the settings. (This is the one
+/// piece of process-wide state in `core`: a list that only grows.)
+pub fn register_secret(secret: &str) {
+    if secret.len() < MIN_REGISTERED_LEN {
+        return;
+    }
+    let mut known = REGISTERED.write().unwrap_or_else(PoisonError::into_inner);
+    if !known.iter().any(|known| known == secret) {
+        known.push(secret.to_owned());
+    }
+}
+
 /// `text` with every API key replaced by [`KEY_PLACEHOLDER`]: tokens that
-/// look like a Groq or `OpenAI` key, and whatever follows `Bearer `. Borrows
-/// when there is nothing to hide.
+/// look like a Groq or `OpenAI` key, whatever follows `Bearer `, and any key
+/// given to [`register_secret`]. Borrows when there is nothing to hide.
 #[must_use]
 pub fn secrets(text: &str) -> Cow<'_, str> {
+    let shaped = shaped_secrets(text);
+    let known = REGISTERED.read().unwrap_or_else(PoisonError::into_inner);
+    if !known.iter().any(|secret| shaped.contains(secret.as_str())) {
+        return shaped;
+    }
+    let mut text = shaped.into_owned();
+    for secret in known.iter() {
+        text = text.replace(secret.as_str(), KEY_PLACEHOLDER);
+    }
+    Cow::Owned(text)
+}
+
+/// [`secrets`] for the keys that can be recognised by their shape.
+fn shaped_secrets(text: &str) -> Cow<'_, str> {
     let mut out: Option<String> = None;
     let mut copied = 0;
     let mut after_bearer = false;
@@ -189,6 +225,29 @@ mod tests {
         );
         // Not carried over to a later word.
         assert_eq!(secrets("Bearer: nothing"), "Bearer: nothing");
+    }
+
+    #[test]
+    fn registered_keys_are_hidden_whatever_their_shape() {
+        let secret = "plain-looking-secret-value-7f3a";
+        register_secret(secret);
+        register_secret(secret);
+        register_secret("short");
+        assert_eq!(
+            secrets(&format!("a {secret} b {secret}; short stays")),
+            "a [key hidden] b [key hidden]; short stays"
+        );
+        assert_eq!(
+            REGISTERED
+                .read()
+                .unwrap()
+                .iter()
+                .filter(|s| *s == secret)
+                .count(),
+            1,
+            "registered once"
+        );
+        assert_eq!(summary(&format!("x\n{secret}")), "x [key hidden]");
     }
 
     #[test]
