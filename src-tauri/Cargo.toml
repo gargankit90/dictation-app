@@ -23,7 +23,7 @@ dictation-pipeline.workspace = true
 dictation-platform.workspace = true
 dictation-ports.workspace = true
 dictation-transcribe.workspace = true
-tauri = { workspace = true, features = ["tray-icon", "macos-private-api"] }
+tauri = { workspace = true, features = ["tray-icon"] }
 tauri-specta.workspace = true
 serde.workspace = true
 specta.workspace = true
