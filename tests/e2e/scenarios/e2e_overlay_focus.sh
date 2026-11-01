@@ -28,17 +28,29 @@ front_watch_stop() {
   vm "cat $(q "$VM_FRONT_LOG")" | sed -nE 's/.*"LSDisplayName"="([^"]*)".*/\1/p'
 }
 
-# The overlay window is on screen: cua-driver lists an on-screen window of
-# the app that is the overlay (titled "overlay", or its 420x72 size if the
-# title isn't reported).
+# The app's on-screen windows, one JSON object per line ({layer, width,
+# height}), from CGWindowListCopyWindowInfo through JXA (works over ssh; window
+# titles would need Screen Recording, so they aren't used). cua-driver's
+# list_windows leaves out windows above the normal layer, such as the panel.
+app_windows_on_screen() {
+  # shellcheck disable=SC2016 # JavaScript, run in the VM
+  printf '%s\n' \
+    "ObjC.import('CoreGraphics');" \
+    'const all = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0)));' \
+    "all.filter(w => w.kCGWindowOwnerName === '$APP_NAME').forEach(w => console.log(JSON.stringify({layer: w.kCGWindowLayer, width: w.kCGWindowBounds.Width, height: w.kCGWindowBounds.Height})));" |
+    vm "osascript -l JavaScript - 2>&1"
+}
+
+# The overlay panel (420x72 at the status level, 25) is on screen.
 overlay_on_screen() {
   local windows
-  windows=$(vm "~/.local/bin/cua-driver call list_windows '{}'" 2>/dev/null) || return 1
-  windows=$(printf '%s' "$windows" | jq -c --arg app "$APP_NAME" \
-    '[.windows[]? | select(.app_name == $app) | {title, is_on_screen, bounds}]') || return 1
-  log "  app windows: $windows"
-  printf '%s' "$windows" | jq -e '[.[] | select(.is_on_screen == true and
-    (.title == "overlay" or (.bounds.width == 420 and .bounds.height == 72)))] | length > 0' >/dev/null
+  windows=$(app_windows_on_screen) || return 1
+  log "  app windows on screen: $(printf '%s' "$windows" | paste -sd ' ' -)"
+  printf '%s\n' "$windows" | grep -q '"layer":25,"width":420,"height":72'
+}
+
+overlay_off_screen() {
+  ! overlay_on_screen
 }
 
 e2e_overlay_focus() {
@@ -61,6 +73,7 @@ e2e_overlay_focus() {
   expect "the overlay showed Transcribing" wait_for_log 'overlay shown state="?transcribing' 5
   expect "the overlay hides again" wait_for_log 'overlay hidden' 5
   sleep 1
+  expect "the overlay window is off screen again" overlay_off_screen
   local fronts others
   fronts=$(front_watch_stop)
   others=$(printf '%s\n' "$fronts" | grep -vx TextEdit | sort -u | paste -sd ',' - || true)
