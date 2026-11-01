@@ -8,6 +8,9 @@ members = [
     "crates/app",
     "src-tauri",
 ]
+# Vendored, patched dependencies (see [patch.crates-io] below). Not members:
+# they keep their upstream code, lints and tests.
+exclude = ["third_party"]
 
 [workspace.package]
 version = "0.1.0"
@@ -66,3 +69,10 @@ dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
 panic = "deny"
+
+# handy-keys 0.3.4 with the macOS hotkey fixes of M1.6 (#80): modifier
+# direction from the event's flags, a modifier snapshot at start, and a
+# notice when the event tap was disabled. third_party/handy-keys/PATCHES.md
+# lists the changes; drop this once upstream ships them.
+[patch.crates-io]
+handy-keys = { path = "third_party/handy-keys" }

@@ -95,6 +95,12 @@ impl HotkeyMatcher {
         }
     }
 
+    /// Forgets every key it thought was down, as when it was new. For when
+    /// the source may have missed events (a [`HotkeyEvent::Interrupted`]).
+    pub fn reset(&mut self) {
+        *self = Self::new(self.spec);
+    }
+
     /// The event `input` produces, if any.
     pub fn on_input(&mut self, input: KeyInput) -> Option<HotkeyEvent> {
         let mut completes = false;
@@ -355,6 +361,26 @@ mod tests {
             ],
         );
         assert_eq!(events, [CancelPressed, Pressed, CancelPressed, Released]);
+    }
+
+    #[test]
+    fn reset_forgets_a_hold_and_its_keys() {
+        let mut matcher = HotkeyMatcher::new("Ctrl+Space".parse().unwrap());
+        let ctrl = Held::NONE.with(Modifier::Ctrl, Hand::Left);
+        assert_eq!(matcher.on_input(key(ctrl, Key::Space, true)), Some(Pressed));
+        assert_eq!(
+            matcher.on_input(key(Held::NONE, Key::Escape, true)),
+            Some(CancelPressed)
+        );
+        matcher.reset();
+        // Its release, if it ever comes, isn't reported a second time...
+        assert_eq!(matcher.on_input(key(Held::NONE, Key::Space, false)), None);
+        // ...and Esc and the hotkey count as fresh presses.
+        assert_eq!(
+            matcher.on_input(key(Held::NONE, Key::Escape, true)),
+            Some(CancelPressed)
+        );
+        assert_eq!(matcher.on_input(key(ctrl, Key::Space, true)), Some(Pressed));
     }
 
     #[test]

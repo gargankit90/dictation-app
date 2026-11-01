@@ -12,6 +12,15 @@ pub enum HotkeyEvent {
     Released,
     /// The cancel key (Esc) was pressed.
     CancelPressed,
+    /// The source lost track of the keyboard for a while (macOS: its event
+    /// tap was paused and resumed, or a modifier change was missed), so a
+    /// release may never come. Any hold in progress is over: drop what it
+    /// started. The source keeps listening; the next press is a new one.
+    Interrupted,
+    /// The source stopped listening by itself (macOS: the event tap died,
+    /// e.g. after Accessibility was revoked). It is the last event before
+    /// the sink is dropped; [`HotkeySource::start`] works again afterwards.
+    Failed,
 }
 
 /// Receives [`HotkeyEvent`]s. Real sources call it on their own thread (an
@@ -39,15 +48,17 @@ pub enum HotkeyError {
 /// Global keyboard listening for the dictation hotkey and Esc.
 ///
 /// Threading: one owner calls `start` and `stop` (`&mut self`). Events go to
-/// the sink in the order they happened, from `start` until `stop` returns;
-/// see [`HotkeySink`] for which thread calls it.
+/// the sink in the order they happened, from `start` until `stop` returns
+/// or a [`HotkeyEvent::Failed`]; see [`HotkeySink`] for which thread calls
+/// it.
 pub trait HotkeySource: Send {
     /// Starts listening and sends every event to `sink`.
     ///
     /// # Errors
     ///
     /// [`HotkeyError::PermissionDenied`] if the OS refuses the hook,
-    /// [`HotkeyError::AlreadyStarted`] if already listening, and
+    /// [`HotkeyError::AlreadyStarted`] if already listening (not after a
+    /// [`HotkeyEvent::Failed`]: that ends the listening), and
     /// [`HotkeyError::Unavailable`] otherwise. On error the sink is dropped
     /// and never called.
     ///
