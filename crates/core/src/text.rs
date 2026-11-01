@@ -14,9 +14,11 @@
 //!    cursor, if the caller knows it, and starts the text with one space
 //!    when it would otherwise be glued to the word before it.
 //!
-//! The pipeline calls [`clean`] with `preceding: None` today: no adapter
-//! reads the text before the cursor yet (that needs the macOS
-//! Accessibility API), so the rule *when the preceding character is
+//! The pipeline reads that character from the focused app (the
+//! `TextBeforeCursor` port; macOS Accessibility, M5.5a) right after the
+//! transcript arrives. At the start of a field, or when the app doesn't
+//! say (no text cursor, a password field, a read that fails or times out),
+//! it passes `None`, and the rule is *when the preceding character is
 //! unknown: add no space*. A missing space is easy to fix by hand; a stray
 //! one in a fresh field or after a newline is not what the user asked for.
 //!
