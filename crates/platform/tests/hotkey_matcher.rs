@@ -281,6 +281,7 @@ fn random_streams_alternate_pressed_and_released() {
                         assert_eq!(key_input, Some(Key::Escape), "{spec} seed {seed}");
                         assert!(down);
                     }
+                    Some(other) => panic!("{spec} seed {seed}: unexpected {other:?}"),
                     None => {}
                 }
             }

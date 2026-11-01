@@ -25,6 +25,10 @@ tracing.workspace = true
 keyring = { workspace = true, features = ["apple-native"] }
 handy-keys.workspace = true
 handy-recorder.workspace = true
+# Only for the leading delay of handy-recorder's resampler (M2.3).
+rubato.workspace = true
+# Only to read the current default input's id (M2.3).
+cpal.workspace = true
 block2.workspace = true
 objc2.workspace = true
 objc2-av-foundation = { workspace = true, features = [
