@@ -15,6 +15,9 @@ const WAIT: Duration = Duration::from_secs(5);
 /// sample's value says which input frame it came from.
 const RAMP_FRAMES: f32 = 10_000_000.0;
 
+/// handy-recorder's id for every fake device.
+const FAKE_ID: &str = "fake:mic";
+
 struct Device {
     fake: FakeMic,
     opens: Arc<AtomicUsize>,
@@ -34,9 +37,12 @@ impl Device {
         MacMicrophone::with(
             Box::new(move |config, handler| {
                 opens.fetch_add(1, Ordering::SeqCst);
-                fake.open(config, Some(handler), WAIT)
+                let recorder = fake.open(config, Some(handler), WAIT)?;
+                let device = recorder.info().device.id.clone();
+                Ok(Opened { recorder, device })
             }),
             Box::new(move || permission),
+            Box::new(|| Some(FAKE_ID.into())),
             warm_for,
         )
     }
@@ -80,6 +86,93 @@ impl Device {
             running,
             thread: Some(thread),
         }
+    }
+}
+
+/// Plays `fake`, a 16 kHz mono device, at a constant `value` until dropped.
+fn constant_pump(fake: FakeMic, value: f32) -> Pump {
+    let running = Arc::new(AtomicBool::new(true));
+    let keep_going = Arc::clone(&running);
+    let thread = thread::spawn(move || {
+        let block = [value; 160];
+        while keep_going.load(Ordering::Relaxed) {
+            fake.push(&block);
+            thread::sleep(Duration::from_millis(2));
+        }
+    });
+    Pump {
+        running,
+        thread: Some(thread),
+    }
+}
+
+/// Two connected 16 kHz inputs, "A" playing +0.25 and "B" -0.25, and
+/// which one is the default. Opening opens the default, as CoreAudio does.
+struct Route {
+    a: FakeMic,
+    b: FakeMic,
+    /// The default's id; `None`: it can't be read.
+    default: Arc<Mutex<Option<&'static str>>>,
+    /// The devices opened, in order.
+    opened: Arc<Mutex<Vec<&'static str>>>,
+    _pumps: [Pump; 2],
+}
+
+impl Route {
+    fn new() -> Self {
+        let (a, b) = (FakeMic::new(16_000, 1), FakeMic::new(16_000, 1));
+        Self {
+            _pumps: [
+                constant_pump(a.clone(), 0.25),
+                constant_pump(b.clone(), -0.25),
+            ],
+            a,
+            b,
+            default: Arc::new(Mutex::new(Some("A"))),
+            opened: Arc::default(),
+        }
+    }
+
+    fn microphone(&self) -> MacMicrophone {
+        let (a, b) = (self.a.clone(), self.b.clone());
+        let default = Arc::clone(&self.default);
+        let opened = Arc::clone(&self.opened);
+        let current = Arc::clone(&self.default);
+        MacMicrophone::with(
+            Box::new(move |config, handler| {
+                let device = lock(&default).unwrap_or("A");
+                lock(&opened).push(device);
+                let fake = if device == "A" { &a } else { &b };
+                let recorder = fake.open(config, Some(handler), WAIT)?;
+                Ok(Opened {
+                    recorder,
+                    device: device.into(),
+                })
+            }),
+            Box::new(|| Permission::Granted),
+            Box::new(move || lock(&current).map(Into::into)),
+            WAIT * 10,
+        )
+    }
+
+    fn set_default(&self, device: Option<&'static str>) {
+        *lock(&self.default) = device;
+    }
+
+    fn opened(&self) -> Vec<&'static str> {
+        lock(&self.opened).clone()
+    }
+}
+
+/// Which device a clip came from, by its samples.
+fn source_of(audio: &Audio) -> &'static str {
+    assert!(!audio.samples.is_empty());
+    if audio.samples.iter().all(|&s| (s - 0.25).abs() < 1e-6) {
+        "A"
+    } else if audio.samples.iter().all(|&s| (s + 0.25).abs() < 1e-6) {
+        "B"
+    } else {
+        "mixed"
     }
 }
 
@@ -266,6 +359,61 @@ fn criterion_4_a_device_change_while_warm_reopens_at_the_next_start() {
     let audio = record(&mut mic, 1_600);
     assert!(audio.samples.len() >= 1_600);
     assert_eq!(device.opens(), 2);
+}
+
+/// M2.3 criterion 1 (#77 B1): the default input moves to another device
+/// while the old one stays connected and its warm recorder hasn't failed.
+#[test]
+fn m2_3_criterion_1_a_default_only_switch_while_warm_reopens_on_the_new_default() {
+    let route = Route::new();
+    let mut mic = route.microphone();
+    assert_eq!(source_of(&record(&mut mic, 1_600)), "A");
+    assert!(mic.is_open(), "warm");
+
+    route.set_default(Some("B"));
+    assert!(route.a.is_streaming(), "A is still alive and open");
+    assert_eq!(source_of(&record(&mut mic, 1_600)), "B");
+    assert_eq!(route.opened(), ["A", "B"]);
+    wait_until("A to close", || !route.a.is_streaming());
+    // And B stays warm for the next one.
+    assert_eq!(source_of(&record(&mut mic, 1_600)), "B");
+    assert_eq!(route.opened(), ["A", "B"]);
+}
+
+/// The policy for a default change mid-recording: the recording stays on
+/// its device; the next one switches.
+#[test]
+fn a_default_switch_mid_recording_keeps_the_recording_on_its_device() {
+    let route = Route::new();
+    let mut mic = route.microphone();
+    mic.start().unwrap();
+    wait_until("audio", || mic.frames_so_far() >= 800);
+    route.set_default(Some("B"));
+    let before = mic.frames_so_far();
+    wait_until("more audio", || mic.frames_so_far() >= before + 800);
+    assert_eq!(source_of(&mic.stop().unwrap()), "A");
+
+    assert_eq!(source_of(&record(&mut mic, 1_600)), "B");
+    assert_eq!(route.opened(), ["A", "B"]);
+}
+
+#[test]
+fn an_unreadable_default_keeps_the_warm_device() {
+    let route = Route::new();
+    let mut mic = route.microphone();
+    record(&mut mic, 160);
+    route.set_default(None);
+    assert_eq!(source_of(&record(&mut mic, 160)), "A");
+    assert_eq!(route.opened(), ["A"]);
+}
+
+#[test]
+fn the_current_default_input_reads_without_opening() {
+    // Whatever this machine has; on a Mac with an input it's an id in
+    // handy-recorder's form.
+    if let Some(id) = current_default_input() {
+        assert!(id.contains(':'), "{id}");
+    }
 }
 
 #[test]

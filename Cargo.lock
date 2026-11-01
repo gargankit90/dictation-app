@@ -979,6 +979,7 @@ dependencies = [
  "block2",
  "dictation-core",
  "dictation-ports",
+ "handy-cpal",
  "handy-keys",
  "handy-recorder",
  "hound",
