@@ -10,4 +10,5 @@ pub mod events;
 pub mod hotkey_spec;
 pub mod retry;
 pub mod settings;
+pub mod text;
 pub mod wav;

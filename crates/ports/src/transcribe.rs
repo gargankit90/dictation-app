@@ -4,6 +4,8 @@ use std::future::Future;
 
 use thiserror::Error;
 
+use dictation_core::text::Transcript;
+
 use crate::Audio;
 
 /// Why a [`Transcriber::transcribe`] failed. The messages never contain the
@@ -95,6 +97,25 @@ pub trait Transcriber: Send + Sync {
         &self,
         audio: &Audio,
     ) -> impl Future<Output = Result<String, TranscribeError>> + Send;
+
+    /// Like [`transcribe`](Self::transcribe), plus the engine's
+    /// `no_speech_prob`, which the pipeline uses to drop Whisper's stock
+    /// phrases for silence (`dictation_core::text`). The pipeline calls
+    /// this one.
+    ///
+    /// The default reports no probability, so an engine that can't tell
+    /// only implements `transcribe`; the hallucination filter then never
+    /// drops its text. Same errors and threading as `transcribe`.
+    ///
+    /// # Errors
+    ///
+    /// As [`transcribe`](Self::transcribe).
+    fn transcribe_detailed(
+        &self,
+        audio: &Audio,
+    ) -> impl Future<Output = Result<Transcript, TranscribeError>> + Send {
+        async move { self.transcribe(audio).await.map(Transcript::from_text) }
+    }
 }
 
 #[cfg(test)]

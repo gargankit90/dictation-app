@@ -20,6 +20,7 @@
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use dictation_core::settings::Settings;
+use dictation_core::text::Transcript;
 use dictation_ports::{Audio, Secret, SecretError, TranscribeError, Transcriber};
 
 use crate::mock::MockTranscriber;
@@ -99,6 +100,16 @@ impl Transcriber for Engine {
             Self::Unavailable(error) => Err(error.clone()),
         }
     }
+
+    // Forwarded, so the engine's no_speech_prob reaches the pipeline's
+    // hallucination filter.
+    async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
+        match self {
+            Self::Mock(engine) => engine.transcribe_detailed(audio).await,
+            Self::Remote(engine) => engine.transcribe_detailed(audio).await,
+            Self::Unavailable(error) => Err(error.clone()),
+        }
+    }
 }
 
 /// A [`Transcriber`] whose engine can be swapped while the pipeline runs.
@@ -147,6 +158,11 @@ impl Transcriber for Transcribers {
         // Clone the Arc out first: the lock is never held across the await.
         let engine = self.snapshot();
         engine.transcribe(audio).await
+    }
+
+    async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
+        let engine = self.snapshot();
+        engine.transcribe_detailed(audio).await
     }
 }
 

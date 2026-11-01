@@ -304,3 +304,17 @@ async fn concurrent_updates_leave_the_last_one_to_finish_in_place() {
     let text = transcribers.transcribe(&audio()).await.unwrap();
     assert!(text.starts_with("engine "), "{text}");
 }
+
+#[tokio::test]
+async fn the_swappable_engine_passes_no_speech_prob_on_for_the_hallucination_filter() {
+    let mock = MockTranscriber::default().with_no_speech_prob(0.9);
+    let transcribers = Transcribers::new(Engine::Mock(mock));
+    let detailed = transcribers.transcribe_detailed(&audio()).await.unwrap();
+    assert_eq!(detailed.no_speech_prob, Some(0.9));
+    assert_eq!(
+        Engine::Unavailable(TranscribeError::MissingKey)
+            .transcribe_detailed(&audio())
+            .await,
+        Err(TranscribeError::MissingKey)
+    );
+}
