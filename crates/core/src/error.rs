@@ -1,5 +1,7 @@
 //! Errors the coordinator reports to the user.
 
+use std::fmt;
+
 use thiserror::Error;
 
 /// A permission the app needs from the OS before it can dictate.
@@ -11,12 +13,14 @@ pub enum Permission {
     Accessibility,
 }
 
-/// Why a dictation failed. The `Display` text is shown to the user, so it
-/// never contains the transcript or an API key.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+/// Why a dictation failed. The `Display` text is shown to the user and
+/// logged at info level, so it never contains the transcript or an API key:
+/// a `reason` is cut to one short line with any key hidden
+/// ([`crate::redact::summary`]).
+#[derive(Clone, PartialEq, Eq, Error)]
 pub enum DictationError {
     /// The engine returned an error; `reason` is a short, user-safe summary.
-    #[error("Transcription failed: {reason}")]
+    #[error("Transcription failed: {}", crate::redact::summary(.reason))]
     TranscriptionFailed {
         /// What went wrong, without the audio or any key.
         reason: String,
@@ -25,7 +29,7 @@ pub enum DictationError {
     #[error("No speech was recognised.")]
     EmptyTranscript,
     /// The text could not be pasted into the focused app.
-    #[error("Could not insert the text: {reason}")]
+    #[error("Could not insert the text: {}", crate::redact::summary(.reason))]
     InsertFailed {
         /// What went wrong, without the transcript.
         reason: String,
@@ -43,6 +47,30 @@ pub enum DictationError {
         "The dictation hotkey stopped working. Check the Accessibility permission, then restart the app."
     )]
     HotkeyFailed,
+}
+
+/// Like the derived `Debug`, but a `reason` shows as its
+/// [`crate::redact::summary`], so logging `?error` can't leak a key.
+impl fmt::Debug for DictationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TranscriptionFailed { reason } => f
+                .debug_struct("TranscriptionFailed")
+                .field("reason", &crate::redact::summary(reason))
+                .finish(),
+            Self::InsertFailed { reason } => f
+                .debug_struct("InsertFailed")
+                .field("reason", &crate::redact::summary(reason))
+                .finish(),
+            Self::EmptyTranscript => f.write_str("EmptyTranscript"),
+            Self::SecureInput => f.write_str("SecureInput"),
+            Self::PermissionMissing(permission) => f
+                .debug_tuple("PermissionMissing")
+                .field(permission)
+                .finish(),
+            Self::HotkeyFailed => f.write_str("HotkeyFailed"),
+        }
+    }
 }
 
 fn permission_name(permission: Permission) -> &'static str {
@@ -91,6 +119,23 @@ mod tests {
         ];
         for (error, message) in cases {
             assert_eq!(error.to_string(), message);
+        }
+    }
+
+    #[test]
+    fn a_reason_is_cut_to_one_line_without_keys() {
+        let key = "sk-proj-NOTAREALKEY0123456789abcdef";
+        let long = format!("{key}\n{}", "x ".repeat(300));
+        for error in [
+            DictationError::TranscriptionFailed {
+                reason: long.clone(),
+            },
+            DictationError::InsertFailed { reason: long },
+        ] {
+            let text = error.to_string();
+            assert!(!text.contains(key), "{text}");
+            assert!(!text.contains('\n'), "{text}");
+            assert!(text.chars().count() < 260, "{text}");
         }
     }
 }

@@ -9,11 +9,13 @@ use std::time::Duration;
 
 use crate::coordinator::Phase;
 use crate::error::{DictationError, Permission};
+use crate::redact;
 
 /// Something that happened, reported to the coordinator by the app layer.
 ///
-/// `Debug` shows a transcript's length, never its text, so events can be
-/// logged (`docs/ENGINEERING.md`).
+/// `Debug` shows a transcript's length, never its text, and a failure's
+/// reason only as a short key-free summary, so events can be logged at any
+/// level (`docs/ENGINEERING.md`, [`crate::redact`]).
 #[derive(Clone, PartialEq, Eq)]
 pub enum Event {
     /// The dictation hotkey went down at this time.
@@ -90,12 +92,16 @@ impl fmt::Debug for Event {
                 .debug_struct("TranscriptReady")
                 .field("len", &text.len())
                 .finish(),
-            Event::TranscriptionFailed(reason) => {
-                f.debug_tuple("TranscriptionFailed").field(reason).finish()
-            }
+            Event::TranscriptionFailed(reason) => f
+                .debug_tuple("TranscriptionFailed")
+                .field(&redact::summary(reason))
+                .finish(),
             Event::TranscriptDropped => f.write_str("TranscriptDropped"),
             Event::InsertDone => f.write_str("InsertDone"),
-            Event::InsertFailed(reason) => f.debug_tuple("InsertFailed").field(reason).finish(),
+            Event::InsertFailed(reason) => f
+                .debug_tuple("InsertFailed")
+                .field(&redact::summary(reason))
+                .finish(),
             Event::SecureInputBlocked => f.write_str("SecureInputBlocked"),
             Event::PermissionMissing(permission) => f
                 .debug_tuple("PermissionMissing")
@@ -129,6 +135,25 @@ mod tests {
         let command = format!("{:?}", Command::Insert("secret words".into()));
         assert_eq!(event, "TranscriptReady { len: 12 }");
         assert_eq!(command, "Insert { len: 12 }");
+    }
+
+    #[test]
+    fn debug_never_shows_a_key_or_a_long_reason() {
+        let key = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
+        let reason = format!("401 for {key}\n{}", "body ".repeat(100));
+        for debug in [
+            format!("{:?}", Event::TranscriptionFailed(reason.clone())),
+            format!("{:?}", Event::InsertFailed(reason.clone())),
+            format!(
+                "{:?}",
+                Command::ShowError(DictationError::TranscriptionFailed { reason })
+            ),
+        ] {
+            assert!(!debug.contains(key), "{debug}");
+            assert!(debug.contains("[key hidden]"), "{debug}");
+            assert!(debug.len() < 400, "{debug}");
+            assert!(!debug.contains('\n'), "{debug}");
+        }
     }
 
     #[test]
