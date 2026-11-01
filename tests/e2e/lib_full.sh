@@ -124,11 +124,14 @@ real_key() {
 }
 
 # Holds the real Right Option for `seconds`: down, wait, up, all in one
-# script so the hold time is accurate.
+# script so the hold time is accurate. Running it in Terminal brings
+# Terminal to the front, where the paste would land, so it first puts `app`
+# (default TextEdit) back in front with `open -a`, which needs no
+# Automation grant.
 real_key_hold() {
-  local script
+  local script app=${2:-TextEdit}
   script=$(q "$VM_RIGHT_OPTION")
-  vm_terminal "osascript -l JavaScript $script down; sleep $1; osascript -l JavaScript $script up"
+  vm_terminal "open -a $(q "$app"); sleep 1; osascript -l JavaScript $script down; sleep $1; osascript -l JavaScript $script up"
 }
 
 # Closes Terminal and removes its scripts and saved windows.
