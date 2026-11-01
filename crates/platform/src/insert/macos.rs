@@ -8,6 +8,7 @@
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use dictation_ports::{
     Clipboard, ClipboardError, ClipboardItem, ClipboardSnapshot, InsertError, SessionMarker,
@@ -46,6 +47,30 @@ fn is_our_write<S: AsRef<str>>(types: &[S]) -> bool {
     types.iter().any(|t| t.as_ref() == SESSION_TYPE)
 }
 
+/// Serializes this process's pasteboard writes (dictation, text, restore),
+/// so none of ours slips between a restore's check and its write.
+static WRITES: Mutex<()> = Mutex::new(());
+
+fn writing() -> MutexGuard<'static, ()> {
+    // The guarded data is (); a panic elsewhere can't leave it inconsistent.
+    WRITES.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Items built and ready to write.
+type Writers = Retained<NSArray<ProtocolObject<dyn NSPasteboardWriting>>>;
+
+/// Runs between building a restore and its final check (tests only: the
+/// user copying while a large clipboard is rebuilt).
+#[cfg(test)]
+struct BeforeCommit(Box<dyn Fn() + Send + Sync>);
+
+#[cfg(test)]
+impl std::fmt::Debug for BeforeCommit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BeforeCommit")
+    }
+}
+
 fn unavailable(what: &str) -> ClipboardError {
     ClipboardError::Unavailable(what.to_owned())
 }
@@ -60,6 +85,8 @@ pub struct MacPasteboard {
     /// A named pasteboard instead of the general one (tests only, so they
     /// never touch the user's clipboard).
     name: Option<String>,
+    #[cfg(test)]
+    before_commit: Option<BeforeCommit>,
 }
 
 impl MacPasteboard {
@@ -94,17 +121,27 @@ impl MacPasteboard {
         format!("{}-{nanos}-{n}", std::process::id())
     }
 
-    /// Replaces the pasteboard's contents with `items`.
-    fn write_items(pasteboard: &NSPasteboard, items: &[Retained<NSPasteboardItem>]) -> bool {
-        pasteboard.clearContents();
-        if items.is_empty() {
-            return true;
-        }
+    /// The array `writeObjects` takes, built ahead of the write.
+    fn prepare(items: &[Retained<NSPasteboardItem>]) -> Writers {
         let writers: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = items
             .iter()
             .map(|item| ProtocolObject::from_retained(item.clone()))
             .collect();
-        pasteboard.writeObjects(&NSArray::from_retained_slice(&writers))
+        NSArray::from_retained_slice(&writers)
+    }
+
+    /// Replaces the pasteboard's contents with `writers`. Callers hold
+    /// [`writing`].
+    fn commit(pasteboard: &NSPasteboard, writers: &Writers) -> bool {
+        pasteboard.clearContents();
+        writers.count() == 0 || pasteboard.writeObjects(writers)
+    }
+
+    /// Replaces the pasteboard's contents with `items`.
+    fn write_items(pasteboard: &NSPasteboard, items: &[Retained<NSPasteboardItem>]) -> bool {
+        let writers = Self::prepare(items);
+        let _writing = writing();
+        Self::commit(pasteboard, &writers)
     }
 
     /// Whether the pasteboard still holds the write that made `session`:
@@ -199,7 +236,10 @@ impl Clipboard for MacPasteboard {
             &NSString::from_str(SESSION_TYPE),
         );
         let pasteboard = self.pasteboard();
-        if !Self::write_items(&pasteboard, &[item]) {
+        let writers = Self::prepare(&[item]);
+        // Held until the change count is read, so it is this write's.
+        let _writing = writing();
+        if !Self::commit(&pasteboard, &writers) {
             return Err(unavailable("the pasteboard refused the dictation"));
         }
         Ok(SessionMarker::new(format!(
@@ -229,9 +269,12 @@ impl Clipboard for MacPasteboard {
         previous: &ClipboardSnapshot,
     ) -> Result<bool, ClipboardError> {
         let pasteboard = self.pasteboard();
+        // Nothing to build if the clipboard already changed.
         if !Self::holds(&pasteboard, session) {
             return Ok(false);
         }
+        // Build every item (copying a possibly large snapshot into NSData)
+        // before the final check, not between it and the write.
         let items = match previous {
             ClipboardSnapshot::Items(items) => Self::items_from(items),
             ClipboardSnapshot::Text(None) => Vec::new(),
@@ -243,7 +286,22 @@ impl Clipboard for MacPasteboard {
                 vec![item]
             }
         };
-        if Self::write_items(&pasteboard, &items) {
+        let writers = Self::prepare(&items);
+        #[cfg(test)]
+        if let Some(hook) = &self.before_commit {
+            (hook.0)();
+        }
+        // The commit, kept minimal: re-check, then clear and write, holding
+        // our writers' lock so none of this process's writes gets between.
+        // NSPasteboard has no compare-and-swap, so another process can
+        // still copy between this check and clearContents (a few pasteboard
+        // server round trips; its copy is then replaced). AppKit offers no
+        // way to close that window, only to keep it this small.
+        let _writing = writing();
+        if !Self::holds(&pasteboard, session) {
+            return Ok(false);
+        }
+        if Self::commit(&pasteboard, &writers) {
             Ok(true)
         } else {
             Err(unavailable("the pasteboard refused the restore"))
@@ -483,14 +541,7 @@ mod tests {
 
         /// Another app copies one item with these representations.
         fn copy(&self, representations: &[(&str, &[u8])]) {
-            let item = NSPasteboardItem::new();
-            for (pasteboard_type, bytes) in representations {
-                item.setData_forType(
-                    &NSData::with_bytes(bytes),
-                    &NSString::from_str(pasteboard_type),
-                );
-            }
-            assert!(MacPasteboard::write_items(&self.board, &[item]));
+            copy_to(&self.board, representations);
         }
 
         /// Each item's types, in order.
@@ -508,6 +559,17 @@ mod tests {
                 .dataForType(&NSString::from_str(pasteboard_type))
                 .map(|d| d.to_vec())
         }
+    }
+
+    fn copy_to(board: &NSPasteboard, representations: &[(&str, &[u8])]) {
+        let item = NSPasteboardItem::new();
+        for (pasteboard_type, bytes) in representations {
+            item.setData_forType(
+                &NSData::with_bytes(bytes),
+                &NSString::from_str(pasteboard_type),
+            );
+        }
+        assert!(MacPasteboard::write_items(board, &[item]));
     }
 
     impl Drop for TestBoard {
@@ -636,6 +698,30 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(board.data(TEXT).as_deref(), Some(&b"copied meanwhile"[..]));
+    }
+
+    // M1: the user copies while a (large) restore is being built; the
+    // final check sees it and the copy is kept.
+    #[test]
+    fn a_copy_while_the_restore_is_built_is_left_alone() {
+        let board = TestBoard::new();
+        board.copy(&[(TEXT, b"before"), ("public.png", &[0u8; 4096])]);
+        let mut adapter = board.adapter();
+        let saved = adapter.snapshot().unwrap();
+        let session = adapter.write_dictation("dictated").unwrap();
+
+        let name = board.name.clone();
+        adapter.before_commit = Some(BeforeCommit(Box::new(move || {
+            let other_app = NSPasteboard::pasteboardWithName(&NSString::from_str(&name));
+            copy_to(&other_app, &[(TEXT, b"copied meanwhile")]);
+        })));
+        assert!(
+            !adapter
+                .restore_snapshot_if_unchanged(&session, &saved)
+                .unwrap()
+        );
+        assert_eq!(board.data(TEXT).as_deref(), Some(&b"copied meanwhile"[..]));
+        assert_eq!(board.data("public.png"), None);
     }
 
     #[test]
