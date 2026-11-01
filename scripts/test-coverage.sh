@@ -9,6 +9,8 @@ fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
 
 mkdir -p "$fixture/untested/src" "$fixture/tested/src"
+# The repo's toolchain (with llvm-tools), not whatever `stable` is today.
+cp "$root/rust-toolchain.toml" "$fixture/rust-toolchain.toml"
 cat >"$fixture/Cargo.toml" <<'TOML'
 [workspace]
 resolver = "2"
@@ -35,7 +37,8 @@ RS
 
 run() {
   # Its own target dir: the fixture must not touch the repo's coverage data.
-  CARGO_TARGET_DIR="$fixture/target" COVERAGE_ROOT="$fixture" \
+  # No NEXTEST_PROFILE: CI sets `ci`, which the fixture has no config for.
+  env -u NEXTEST_PROFILE CARGO_TARGET_DIR="$fixture/target" COVERAGE_ROOT="$fixture" \
     COVERAGE_CRATES="$1" "$root/scripts/coverage.sh"
 }
 
