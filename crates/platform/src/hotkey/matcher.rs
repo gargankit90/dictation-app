@@ -108,9 +108,14 @@ impl HotkeyMatcher {
             if key == Key::Escape {
                 let first_down = input.down && !self.escape_held;
                 self.escape_held = input.down;
-                return first_down.then_some(HotkeyEvent::CancelPressed);
-            }
-            if Some(key) == self.spec.key() {
+                if first_down {
+                    return Some(HotkeyEvent::CancelPressed);
+                }
+                // The rest of Esc's events (its repeats and its release) fall
+                // through to the check below, so a hotkey whose release was
+                // missed doesn't stay "held" after Esc cancelled it (#47):
+                // the modifiers they carry are the reconciled ones.
+            } else if Some(key) == self.spec.key() {
                 completes = input.down && !self.key_held;
                 self.key_held = input.down;
             }
@@ -361,6 +366,46 @@ mod tests {
             ],
         );
         assert_eq!(events, [CancelPressed, Pressed, CancelPressed, Released]);
+    }
+
+    /// #47: macOS drops a modifier release (an event-tap timeout, Mission
+    /// Control) and the user taps Esc to cancel. The Esc events carry the
+    /// real modifiers, so its release lets the hotkey go, and the next press
+    /// of the hotkey works at once.
+    #[test]
+    fn esc_after_a_missed_modifier_release_clears_the_stuck_state() {
+        let events = run(
+            "RightAlt",
+            &[
+                modifier(RIGHT_ALT, true),
+                // The modifier's release never arrives; Esc cancels.
+                key(Held::NONE, Key::Escape, true),
+                key(Held::NONE, Key::Escape, false),
+                // A fresh press and release must both be seen.
+                modifier(RIGHT_ALT, true),
+                modifier(Held::NONE, false),
+            ],
+        );
+        assert_eq!(
+            events,
+            [Pressed, CancelPressed, Released, Pressed, Released]
+        );
+    }
+
+    #[test]
+    fn esc_while_the_hotkey_is_really_held_does_not_release_it() {
+        let events = run(
+            "RightAlt",
+            &[
+                modifier(RIGHT_ALT, true),
+                key(RIGHT_ALT, Key::Escape, true),
+                // A repeat and the release of Esc, with the hotkey still down.
+                key(RIGHT_ALT, Key::Escape, true),
+                key(RIGHT_ALT, Key::Escape, false),
+                modifier(Held::NONE, false),
+            ],
+        );
+        assert_eq!(events, [Pressed, CancelPressed, Released]);
     }
 
     #[test]
