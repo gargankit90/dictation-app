@@ -8,8 +8,8 @@
 //! the `Debug` of `Event`, `Command` and the error enums), and, as a last
 //! resort, by [`scrub::ScrubbingWriter`], which cleans every line that is
 //! written. Panics are reported through the same log, their message hidden,
-//! instead of by Rust's default hook ([`log_panic`]). `DICTATION_LOG=debug` turns on debug output for our own crates,
-//! for testers who are asked to.
+//! instead of by Rust's default hook ([`log_panic`]). `DICTATION_LOG=debug`
+//! turns on debug output for our own crates, for testers who are asked to.
 
 pub mod rotation;
 pub mod scrub;

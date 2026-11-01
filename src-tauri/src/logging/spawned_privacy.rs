@@ -184,28 +184,31 @@ fn run_child(dir: &Path) -> (String, String) {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+    // Each pipe is read to its end on a thread of its own; both end when the
+    // child exits, which is the signal to collect it. The deadline only turns
+    // a hang into a failure.
+    let (done, ended) = std::sync::mpsc::channel();
     let drain = |mut pipe: Box<dyn std::io::Read + Send>| {
+        let done = done.clone();
         std::thread::spawn(move || {
             let mut text = String::new();
             pipe.read_to_string(&mut text).unwrap();
+            let _ = done.send(());
             text
         })
     };
     let stdout = drain(Box::new(child.stdout.take().unwrap()));
     let stderr = drain(Box::new(child.stderr.take().unwrap()));
     let deadline = Instant::now() + CHILD_DEADLINE;
-    // Polls for the exit; the deadline only turns a hang into a failure.
-    let status = loop {
-        if let Some(status) = child.try_wait().unwrap() {
-            break status;
-        }
-        if Instant::now() > deadline {
+    for _ in 0..2 {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if ended.recv_timeout(left).is_err() {
             let _ = child.kill();
             let _ = child.wait();
             panic!("the child didn't finish in {CHILD_DEADLINE:?}");
         }
-        std::thread::sleep(Duration::from_millis(20));
-    };
+    }
+    let status = child.wait().unwrap();
     let (stdout, stderr) = (stdout.join().unwrap(), stderr.join().unwrap());
     assert!(
         status.success(),
