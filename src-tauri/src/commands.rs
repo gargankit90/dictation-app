@@ -40,7 +40,7 @@ pub struct AppConfig(pub Arc<Config<KeychainSecretStore>>);
 /// message the UI shows (never a key).
 async fn on_config<T: Send + 'static>(
     state: &State<'_, AppConfig>,
-    call: impl FnOnce(&Config<KeychainSecretStore>) -> Result<T, ConfigError> + Send + 'static,
+    call: impl FnOnce(&Arc<Config<KeychainSecretStore>>) -> Result<T, ConfigError> + Send + 'static,
 ) -> Result<T, String> {
     let config = Arc::clone(&state.0);
     tauri::async_runtime::spawn_blocking(move || call(&config))
@@ -56,7 +56,7 @@ async fn on_config<T: Send + 'static>(
 #[tauri::command]
 #[specta::specta]
 pub async fn get_settings(state: State<'_, AppConfig>) -> Result<Settings, String> {
-    on_config(&state, Config::settings).await
+    on_config(&state, |config| config.settings()).await
 }
 
 /// Validates and saves the settings.
@@ -170,6 +170,12 @@ fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
         TranscribeError::Network(_) => KeyTestError::new(
             KeyTestKind::Network,
             format!("Couldn't reach {name}. Check your internet connection and try again."),
+        ),
+        // The key test reads the keychain itself and reports its errors
+        // (`KeyTestKind::Keychain`); these two come from the dictation engine.
+        TranscribeError::KeyPending | TranscribeError::KeychainUnavailable(_) => KeyTestError::new(
+            KeyTestKind::Keychain,
+            "Couldn't read your API key from the Keychain.".to_owned(),
         ),
         TranscribeError::Engine(detail) => KeyTestError::new(
             KeyTestKind::Server,

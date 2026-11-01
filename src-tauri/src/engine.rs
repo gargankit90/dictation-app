@@ -6,13 +6,36 @@
 //! Rust, from the keychain; it goes into the engine and nowhere else: not
 //! into a log, an error message or an IPC reply.
 //!
+//! The keychain can block: a locked login keychain, or one whose access
+//! prompt nobody answers, makes a read hang. So startup never reads it:
+//! the app starts with [`starting`] (dictating says the key is still being
+//! read) and [`LiveEngine::rebuild_in_background`] reads it on a thread of
+//! its own. Every read gives up after [`KEY_READ_TIMEOUT`]; "locked, needs
+//! interaction, denied, timed out" all become a clear message at dictation
+//! time ([`TranscribeError::KeychainUnavailable`]), never a hang.
+//!
 //! `--transcriber mock` pins the mock engine: [`LiveEngine::fixed`] never
 //! rebuilds, so saving settings in a test run can't swap in a real provider.
 
-use dictation_core::settings::Settings;
+use std::sync::Arc;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::time::Duration;
+
+use dictation_core::settings::{Provider, Settings};
 use dictation_pipeline::config::{Config, ConfigError};
-use dictation_ports::{SecretError, SecretStore, TranscribeError};
+use dictation_ports::{Secret, SecretError, SecretStore, TranscribeError};
 use dictation_transcribe::engine::{Engine, Transcribers};
+
+/// How long a keychain read may take before the key counts as unreadable.
+/// Long enough for a person to answer an access prompt.
+pub const KEY_READ_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The engine the app starts with, before the key has been read: dictating
+/// says the key is still being read.
+#[must_use]
+pub fn starting() -> Engine {
+    Engine::Unavailable(TranscribeError::KeyPending)
+}
 
 /// Rebuilds the engine when the settings or a key change. Managed Tauri
 /// state, shared with the commands.
@@ -23,6 +46,8 @@ pub struct LiveEngine {
     /// Where the provider is reached instead of its own endpoint; only
     /// tests set it.
     base_url: Option<String>,
+    /// How long one keychain read may take.
+    key_timeout: Duration,
 }
 
 impl LiveEngine {
@@ -32,6 +57,7 @@ impl LiveEngine {
         Self {
             transcribers: Some(transcribers),
             base_url: None,
+            key_timeout: KEY_READ_TIMEOUT,
         }
     }
 
@@ -41,6 +67,7 @@ impl LiveEngine {
         Self {
             transcribers: None,
             base_url: None,
+            key_timeout: KEY_READ_TIMEOUT,
         }
     }
 
@@ -53,22 +80,58 @@ impl LiveEngine {
         self
     }
 
+    /// Gives up on a keychain read after `timeout` instead of
+    /// [`KEY_READ_TIMEOUT`]; only tests need it short.
+    #[cfg(test)]
+    #[must_use]
+    fn with_key_timeout(mut self, timeout: Duration) -> Self {
+        self.key_timeout = timeout;
+        self
+    }
+
     /// Reads the saved settings and key and makes the matching engine
-    /// current. A no-op for a pinned engine. Reads the keychain, so call it
-    /// from a blocking task.
-    pub fn rebuild<S: SecretStore>(&self, config: &Config<S>) {
+    /// current. A no-op for a pinned engine. Waits for the keychain (at most
+    /// the key timeout), so call it from a blocking task, never from the
+    /// event loop or startup; [`rebuild_in_background`](Self::rebuild_in_background)
+    /// does that for startup.
+    pub fn rebuild<S: SecretStore + 'static>(&self, config: &Arc<Config<S>>) {
         let Some(transcribers) = &self.transcribers else {
             return;
         };
-        transcribers.update(|| engine_from_config(config, self.base_url.as_deref()));
+        transcribers
+            .update(|| engine_from_config(config, self.base_url.as_deref(), self.key_timeout));
         tracing::info!(engine = transcribers.name(), "engine rebuilt");
+    }
+
+    /// [`rebuild`](Self::rebuild) on a thread of its own, so the caller (app
+    /// startup) never waits for the keychain.
+    ///
+    /// # Errors
+    ///
+    /// If the thread can't be started.
+    pub fn rebuild_in_background<S: SecretStore + 'static>(
+        &self,
+        config: Arc<Config<S>>,
+    ) -> std::io::Result<std::thread::JoinHandle<()>> {
+        let live = self.clone();
+        std::thread::Builder::new()
+            .name("engine-startup".to_owned())
+            .spawn(move || live.rebuild(&config))
     }
 }
 
 /// The engine for the saved settings and the saved key of their provider.
 /// Anything that stops one being built becomes [`Engine::Unavailable`], so
 /// dictation reports it.
-pub fn engine_from_config<S: SecretStore>(config: &Config<S>, base_url: Option<&str>) -> Engine {
+///
+/// The keychain is read on a thread of its own and given `key_timeout`; if
+/// it hasn't answered by then the engine says the key couldn't be read (the
+/// stuck read is abandoned, and its answer, if one ever comes, ignored).
+pub fn engine_from_config<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    base_url: Option<&str>,
+    key_timeout: Duration,
+) -> Engine {
     let settings = match config.settings() {
         Ok(settings) => settings,
         Err(error) => {
@@ -78,17 +141,51 @@ pub fn engine_from_config<S: SecretStore>(config: &Config<S>, base_url: Option<&
             )));
         }
     };
-    let key = config
-        .api_key(settings.provider)
-        .map_err(|error| match error {
-            ConfigError::Secret(error) => error,
-            // `api_key` only fails in the keychain; ConfigError never holds a key.
-            other => SecretError::Store(other.to_string()),
-        });
+    let key = read_key(config, settings.provider, key_timeout);
+    if let Err(error) = &key {
+        // The text never holds a key.
+        tracing::warn!(%error, "could not read the API key from the keychain");
+    }
     log_choice(&settings, matches!(key, Ok(Some(_))));
     match base_url {
         Some(url) => Engine::from_settings_at(&settings, key, url),
         None => Engine::from_settings(&settings, key),
+    }
+}
+
+/// `provider`'s key from the keychain, read on its own thread so a read that
+/// never returns (a locked keychain waiting for a person) costs `timeout`
+/// and no more.
+fn read_key<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    provider: Provider,
+    timeout: Duration,
+) -> Result<Option<Secret>, SecretError> {
+    let (send, receive) = mpsc::channel();
+    let reader = Arc::clone(config);
+    let spawned = std::thread::Builder::new()
+        .name("keychain-read".to_owned())
+        .spawn(move || {
+            // The receiver is gone if we gave up; nobody wants the answer then.
+            let _ = send.send(reader.api_key(provider));
+        });
+    if let Err(error) = spawned {
+        return Err(SecretError::Store(format!(
+            "could not start the keychain read: {error}"
+        )));
+    }
+    match receive.recv_timeout(timeout) {
+        Ok(Ok(key)) => Ok(key),
+        Ok(Err(ConfigError::Secret(error))) => Err(error),
+        // `api_key` only fails in the keychain; ConfigError never holds a key.
+        Ok(Err(other)) => Err(SecretError::Store(other.to_string())),
+        Err(RecvTimeoutError::Timeout) => Err(SecretError::Store(format!(
+            "no answer from the keychain after {} s (locked, or waiting for access to be allowed)",
+            timeout.as_secs()
+        ))),
+        Err(RecvTimeoutError::Disconnected) => Err(SecretError::Store(
+            "the keychain read stopped unexpectedly".to_owned(),
+        )),
     }
 }
 
@@ -110,8 +207,8 @@ fn log_choice(settings: &Settings, has_key: bool) {
 /// # Errors
 ///
 /// Whatever `change` returns; nothing is rebuilt then.
-pub fn changed<S: SecretStore, T>(
-    config: &Config<S>,
+pub fn changed<S: SecretStore + 'static, T>(
+    config: &Arc<Config<S>>,
     live: &LiveEngine,
     change: impl FnOnce(&Config<S>) -> Result<T, ConfigError>,
 ) -> Result<T, ConfigError> {
@@ -131,7 +228,7 @@ mod tests {
     use dictation_platform::fakes::{
         FakeClock, FakeHotkey, FakeInserter, FakePermissions, FileAudioSource, MemSecretStore,
     };
-    use dictation_ports::HotkeyEvent;
+    use dictation_ports::{HotkeyEvent, Secret};
     use tokio::sync::mpsc::UnboundedReceiver;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -170,7 +267,7 @@ mod tests {
     /// inserter.
     struct Rig {
         dir: TempDir,
-        config: Config<MemSecretStore>,
+        config: Arc<Config<MemSecretStore>>,
         secrets: MemSecretStore,
         live: LiveEngine,
         server: MockServer,
@@ -187,7 +284,7 @@ mod tests {
         async fn start(key_status: u16) -> Self {
             let dir = TempDir::new(&format!("rig{key_status}"));
             let secrets = MemSecretStore::new();
-            let config = Config::new(dir.0.join("config"), secrets.clone());
+            let config = Arc::new(Config::new(dir.0.join("config"), secrets.clone()));
 
             let server = MockServer::start().await;
             Mock::given(method("POST"))
@@ -210,6 +307,7 @@ mod tests {
             let live = LiveEngine::follow(Transcribers::new(engine_from_config(
                 &config,
                 Some(&server.uri()),
+                WAIT,
             )))
             .at(&server.uri());
             let transcribers = live.transcribers.clone().unwrap();
@@ -320,7 +418,7 @@ mod tests {
     async fn a_key_saved_before_startup_is_used_from_the_first_dictation() {
         let dir = TempDir::new("startup");
         let secrets = MemSecretStore::new();
-        let config = Config::new(dir.0.join("config"), secrets.clone());
+        let config = Arc::new(Config::new(dir.0.join("config"), secrets.clone()));
         config.set_api_key(Provider::Groq, KEY).unwrap();
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -332,7 +430,7 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let engine = engine_from_config(&config, Some(&server.uri()));
+        let engine = engine_from_config(&config, Some(&server.uri()), WAIT);
         assert_eq!(engine.name(), "remote");
         let audio = dictation_ports::Audio {
             sample_rate: 16_000,
@@ -408,6 +506,7 @@ mod tests {
         let dead = LiveEngine {
             transcribers: rig.live.transcribers.clone(),
             base_url: Some(format!("http://127.0.0.1:{port}")),
+            key_timeout: WAIT,
         };
         changed(&rig.config, &dead, |c| c.set_api_key(Provider::Groq, KEY)).unwrap();
         assert_eq!(
@@ -487,7 +586,7 @@ mod tests {
         let UiEvent::Error(DictationError::TranscriptionFailed { reason }) = &events[2] else {
             panic!("{events:?}");
         };
-        assert!(reason.contains("keychain access was denied"), "{reason}");
+        assert!(reason.contains("Couldn't read your API key from the Keychain"));
         assert!(rig.inserter.inserted().is_empty());
 
         rig.secrets.set_access_denied(false);
@@ -505,10 +604,120 @@ mod tests {
     #[tokio::test]
     async fn a_pinned_engine_ignores_saved_settings_and_keys() {
         let dir = TempDir::new("pinned");
-        let config = Config::new(dir.0.join("config"), MemSecretStore::new());
+        let config = Arc::new(Config::new(dir.0.join("config"), MemSecretStore::new()));
         let live = LiveEngine::fixed();
         // Nothing to rebuild: no engine, no keychain read, no panic.
         changed(&config, &live, |c| c.set_api_key(Provider::Groq, KEY)).unwrap();
         live.rebuild(&config);
+    }
+
+    /// A rig whose engine starts as the app does: before the key is read.
+    async fn rig_at_startup() -> Rig {
+        let mut rig = Rig::start(200).await;
+        rig.secrets.set(KEY_NAME, &Secret::new(KEY)).unwrap();
+        rig.live.transcribers.as_ref().unwrap().update(starting);
+        rig.live = rig.live.clone().with_key_timeout(WAIT);
+        rig
+    }
+
+    const KEY_NAME: &str = "groq-api-key";
+
+    fn message(events: &[UiEvent]) -> String {
+        let Some(UiEvent::Error(DictationError::TranscriptionFailed { reason })) = events.get(2)
+        else {
+            panic!("{events:?}");
+        };
+        reason.clone()
+    }
+
+    #[tokio::test]
+    async fn criterion_startup_does_not_wait_for_a_blocked_keychain() {
+        let mut rig = rig_at_startup().await;
+        rig.secrets.set_blocked(true);
+        let started = std::time::Instant::now();
+        let handle = rig.live.rebuild_in_background(rig.config.clone()).unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "starting the read waited for the keychain"
+        );
+        assert!(!handle.is_finished());
+
+        // The app is usable while the keychain is stuck: dictation says
+        // what is going on instead of hanging.
+        let events = rig.dictate().await;
+        assert!(message(&events).contains("Still reading your API key"));
+        assert!(rig.inserter.inserted().is_empty());
+        assert_eq!(rig.requests().await, 0);
+
+        // Allowing access (or unlocking) finishes the read: no restart.
+        rig.secrets.set_blocked(false);
+        handle.join().unwrap();
+        assert_eq!(rig.dictate().await, pasted());
+        assert_eq!(rig.inserter.inserted(), [TRANSCRIPT]);
+        rig.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_keychain_that_never_answers_times_out_into_a_clear_message() {
+        let mut rig = rig_at_startup().await;
+        rig.secrets.set_blocked(true);
+        rig.live = rig
+            .live
+            .clone()
+            .with_key_timeout(Duration::from_millis(200));
+        let started = std::time::Instant::now();
+        let handle = rig.live.rebuild_in_background(rig.config.clone()).unwrap();
+        // The background read gives up on its own (this join would hang
+        // with no timeout).
+        handle.join().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(5));
+
+        let events = rig.dictate().await;
+        let reason = message(&events);
+        assert!(
+            reason.starts_with("Couldn't read your API key from the Keychain"),
+            "{reason}"
+        );
+        assert!(!format!("{events:?}").contains(KEY));
+        assert!(rig.inserter.inserted().is_empty());
+        assert_eq!(rig.requests().await, 0);
+
+        // A save while the keychain is back fixes it without a restart.
+        rig.secrets.set_blocked(false);
+        rig.save_key(KEY);
+        assert_eq!(rig.dictate().await, pasted());
+        rig.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_locked_or_refusing_keychain_is_a_clear_message_not_a_hang() {
+        let mut rig = rig_at_startup().await;
+        rig.secrets
+            .set_failing(Some("User interaction is not allowed."));
+        let handle = rig.live.rebuild_in_background(rig.config.clone()).unwrap();
+        handle.join().unwrap();
+        let reason = message(&rig.dictate().await);
+        assert!(reason.starts_with("Couldn't read your API key from the Keychain"));
+
+        rig.secrets.set_failing(None);
+        rig.secrets.set_access_denied(true);
+        rig.live.rebuild(&rig.config);
+        let reason = message(&rig.dictate().await);
+        assert!(reason.starts_with("Couldn't read your API key from the Keychain"));
+        assert!(rig.inserter.inserted().is_empty());
+        rig.finish().await;
+    }
+
+    #[test]
+    fn engine_from_config_returns_within_the_timeout_when_the_keychain_blocks() {
+        let dir = TempDir::new("blocked");
+        let secrets = MemSecretStore::new();
+        secrets.set_blocked(true);
+        let config = Arc::new(Config::new(dir.0.join("config"), secrets.clone()));
+        let started = std::time::Instant::now();
+        let engine = engine_from_config(&config, None, Duration::from_millis(100));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(engine.name(), "unavailable");
+        secrets.set_blocked(false); // lets the abandoned read thread end
     }
 }

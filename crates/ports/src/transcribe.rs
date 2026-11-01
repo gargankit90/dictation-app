@@ -13,6 +13,15 @@ pub enum TranscribeError {
     /// No API key is stored for the provider.
     #[error("no API key is saved")]
     MissingKey,
+    /// The API key is still being read from the keychain (the app reads it
+    /// off the startup path, so a locked keychain can't block startup).
+    #[error("the API key is still being read from the keychain")]
+    KeyPending,
+    /// The keychain couldn't give the key: it is locked, needs the user to
+    /// allow access, refused, or didn't answer in time. The text says why
+    /// and never holds the key.
+    #[error("couldn't read the API key from the keychain: {0}")]
+    KeychainUnavailable(String),
     /// The provider rejected the API key.
     #[error("the API key is missing or invalid")]
     InvalidKey,
@@ -39,6 +48,12 @@ impl TranscribeError {
     pub fn user_message(&self) -> String {
         match self {
             Self::MissingKey => "Add your API key in Settings.".to_owned(),
+            Self::KeyPending => "Still reading your API key from the Keychain. If a dialog asks, \
+                 allow access, then try again."
+                .to_owned(),
+            Self::KeychainUnavailable(_) => "Couldn't read your API key from the Keychain. Unlock \
+                 the Keychain or allow access, then try again, or enter the key again in Settings."
+                .to_owned(),
             Self::InvalidKey => {
                 "The provider rejected your API key. Check it in Settings.".to_owned()
             }
@@ -107,6 +122,14 @@ mod tests {
                 "Couldn't reach the provider. Check your internet connection.",
             ),
             (
+                TranscribeError::KeyPending,
+                "Still reading your API key from the Keychain. If a dialog asks, allow access, then try again.",
+            ),
+            (
+                TranscribeError::KeychainUnavailable("keychain error: locked".into()),
+                "Couldn't read your API key from the Keychain. Unlock the Keychain or allow access, then try again, or enter the key again in Settings.",
+            ),
+            (
                 TranscribeError::Engine("the provider failed (HTTP 503)".into()),
                 "Something went wrong: the provider failed (HTTP 503).",
             ),
@@ -114,6 +137,16 @@ mod tests {
         for (error, message) in cases {
             assert_eq!(error.user_message(), message, "{error:?}");
         }
+    }
+
+    #[test]
+    fn keychain_details_stay_out_of_the_user_message() {
+        let error = TranscribeError::KeychainUnavailable("keychain error: -25308".into());
+        assert!(!error.user_message().contains("25308"));
+        assert!(
+            error.to_string().contains("25308"),
+            "but the log keeps them"
+        );
     }
 
     #[test]

@@ -228,8 +228,10 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
             engine::LiveEngine::fixed(),
         ),
         flags::TranscriberChoice::Settings => {
-            // Reads the keychain; fine here, the event loop hasn't started.
-            let transcribers = Transcribers::new(engine::engine_from_config(&config, None));
+            // Startup never touches the keychain, which can block on a
+            // locked keychain or an access prompt. The key is read on a
+            // thread of its own once the app is up (below).
+            let transcribers = Transcribers::new(engine::starting());
             (
                 transcribers.clone(),
                 engine::LiveEngine::follow(transcribers),
@@ -261,8 +263,11 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
         tauri::async_runtime::block_on(async { Pipeline::spawn(ports, Config::default()) })
             .context("could not start the pipeline")?;
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
-    app.manage(commands::AppConfig(config));
-    app.manage(live);
+    app.manage(commands::AppConfig(Arc::clone(&config)));
+    app.manage(live.clone());
+    if let Err(error) = live.rebuild_in_background(config) {
+        tracing::error!(%error, "could not start reading the API key");
+    }
     tauri::async_runtime::spawn(show_ui_events(app.handle().clone(), ui_events));
     tracing::info!(hotkey = %HotkeySpec::default(), "ready");
 

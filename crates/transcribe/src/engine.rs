@@ -65,9 +65,7 @@ impl Engine {
             Ok(None) => return Self::Unavailable(TranscribeError::MissingKey),
             Err(error) => {
                 // SecretError's text never holds a secret.
-                return Self::Unavailable(TranscribeError::Engine(format!(
-                    "couldn't read the API key from the keychain: {error}"
-                )));
+                return Self::Unavailable(TranscribeError::KeychainUnavailable(error.to_string()));
             }
         };
         let mut config = Config::from_preset(Preset::for_provider(settings.provider));

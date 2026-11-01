@@ -98,7 +98,7 @@ async fn without_a_key_dictation_fails_at_once_and_sends_nothing() {
 }
 
 #[tokio::test]
-async fn an_unreadable_keychain_is_an_engine_error_that_names_the_keychain() {
+async fn an_unreadable_keychain_is_a_keychain_error_that_says_why() {
     for (denied, words) in [
         (SecretError::AccessDenied, "keychain access was denied"),
         (
@@ -107,11 +107,13 @@ async fn an_unreadable_keychain_is_an_engine_error_that_names_the_keychain() {
         ),
     ] {
         let engine = Engine::from_settings(&Settings::default(), Err(denied));
-        let Err(TranscribeError::Engine(detail)) = engine.transcribe(&audio()).await else {
-            panic!("expected an engine error");
+        let Err(error @ TranscribeError::KeychainUnavailable(_)) =
+            engine.transcribe(&audio()).await
+        else {
+            panic!("expected a keychain error");
         };
-        assert!(detail.contains("keychain"), "{detail}");
-        assert!(detail.contains(words), "{detail}");
+        assert!(error.to_string().contains(words), "{error}");
+        assert!(error.user_message().contains("from the Keychain"));
     }
 }
 
