@@ -22,9 +22,10 @@ for scenario_file in "$E2E_DIR"/scenarios/*.sh; do
 done
 
 ALL_SCENARIOS=(
-  e2e_startup e2e_press_release e2e_real_mic
+  e2e_startup e2e_single_instance_cold_race e2e_press_release e2e_real_mic
   e2e_mock_paste e2e_clipboard_restore e2e_silence e2e_rapid
   e2e_hold_release e2e_held_at_launch
+  e2e_quit_during_recording_then_relaunch e2e_tray_error_clears_on_next_recording
   e2e_error_bad_key e2e_real_groq
   e2e_launch_at_login
 )
