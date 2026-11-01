@@ -214,10 +214,15 @@ err() { echo "$tmp/case-$1/stderr"; }
 calls() { echo "$tmp/case-$1/calls"; }
 
 # A scenario through run_scenario; prints its result as the case's output.
+# With the fast sleep, vm_terminal's default 30 polls are only about 1.5 s,
+# which a job (a bash and fake osascripts) can miss on a busy machine; 400
+# polls (about 20 s) leave room. A case that tests the deadline sets its own
+# (a later env assignment wins).
 scenario_case() {
   local name=$1 scenario=$2
   shift 2
-  run_case "$name" "run_scenario $scenario; echo \"\$SCENARIO_RESULT\"" STUB_FAST_SLEEP=1 "$@"
+  run_case "$name" "run_scenario $scenario; echo \"\$SCENARIO_RESULT\"" \
+    STUB_FAST_SLEEP=1 VM_TERMINAL_TIMEOUT=400 "$@"
 }
 
 # --- vm: the whole command has a deadline --------------------------------------

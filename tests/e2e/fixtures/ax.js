@@ -154,8 +154,8 @@ function describe(element) {
 
 // The items of `menuBarItem`'s menu once it is open (attached to the item,
 // or else an open menu anywhere in the app).
-function openMenuItems(appEl, menuBarItem) {
-  for (let i = 0; i < 30; i++) {
+function openMenuItems(appEl, menuBarItem, polls = 30) {
+  for (let i = 0; i < polls; i++) {
     for (const menu of children(menuBarItem)) {
       const items = children(menu);
       if (items.length > 0) return items;
@@ -176,6 +176,12 @@ function clickMenu(appEl, menuBarItem, itemTitle) {
   const err = press(menuBarItem, 1.0);
   if (err !== 0 && err !== AX_CANNOT_COMPLETE)
     fail("could not open the menu (AX error " + err + ")");
+  return pressMenuItem(appEl, menuBarItem, itemTitle);
+}
+
+// Presses the item of `menuBarItem`'s open menu whose title starts with
+// `itemTitle`; closes the menu and fails if there is none.
+function pressMenuItem(appEl, menuBarItem, itemTitle) {
   const items = openMenuItems(appEl, menuBarItem);
   const titles = items.map((item) => text(item, "AXTitle"));
   const index = titles.findIndex((title) => title !== "" && title.startsWith(itemTitle));
@@ -188,6 +194,48 @@ function clickMenu(appEl, menuBarItem, itemTitle) {
   // Quit ends the app, so its answer may never come; that's fine.
   press(items[index], 2.0);
   return "clicked " + titles[index];
+}
+
+// The status item's window: owned by the app, at the status-bar level (25),
+// in the menu bar at the top of the screen. The overlay shares the level but
+// isn't up there.
+function statusItemCenter(pid) {
+  const list = ObjC.castRefToObject($.CGWindowListCopyWindowInfo(1, 0));
+  for (let i = 0; i < list.count; i++) {
+    const info = list.objectAtIndex(i);
+    if (ObjC.unwrap(info.objectForKey($("kCGWindowOwnerPID"))) !== pid) continue;
+    if (ObjC.unwrap(info.objectForKey($("kCGWindowLayer"))) !== 25) continue;
+    const b = ObjC.deepUnwrap(info.objectForKey($("kCGWindowBounds")));
+    if (b.Y < 5 && b.Height <= 40 && b.Width > 0) {
+      return { x: b.X + b.Width / 2, y: b.Y + b.Height / 2 };
+    }
+  }
+  return fail("the app's status item isn't on screen");
+}
+
+// A real left click at `point`, as a person would: the tray opens its menu
+// from its own mouse-down handler, which an AXPress never reaches.
+function click(point) {
+  for (const type of [1, 2]) {
+    // kCGEventLeftMouseDown, kCGEventLeftMouseUp
+    $.CGEventPost($.kCGHIDEventTap, $.CGEventCreateMouseEvent(null, type, point, 0));
+    delay(0.05);
+  }
+}
+
+// Opens the tray's menu with a real click and presses the item whose title
+// starts with `itemTitle`. The Terminal window this script runs in may still
+// be coming to the front, and an app switch closes the menu again, so a click
+// whose menu doesn't show within a second is retried.
+function clickTray(appEl, pid, itemTitle) {
+  const item = trayItem(appEl).item;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    click(statusItemCenter(pid));
+    if (openMenuItems(appEl, item, 10).length > 0) break;
+    postKey(KEY_ESCAPE, 0);
+    delay(0.5);
+  }
+  return pressMenuItem(appEl, item, itemTitle);
 }
 
 function trayItem(appEl) {
@@ -358,7 +406,7 @@ function run(argv) {
       ].join("\n");
     }
     case "tray-click":
-      return clickMenu(appEl, trayItem(appEl).item, rest[0]);
+      return clickTray(appEl, pidOf(app), rest[0]);
     case "menu-click":
       return clickMenu(appEl, mainMenuItem(appEl, rest[0]), rest[1]);
     case "menu-mark": {
