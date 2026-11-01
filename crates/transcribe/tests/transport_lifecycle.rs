@@ -8,7 +8,11 @@
 //! hundred milliseconds); paused time is used only for the pure sleeper,
 //! because the clock would jump ahead of a real socket.
 
-#![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "test helpers fail the test on purpose"
+)]
 
 use std::future::Future;
 use std::sync::Arc;
