@@ -606,18 +606,60 @@ mod tests {
         }
     }
 
-    /// A short directory (socket paths are length-limited).
-    fn config() -> single_instance::Config {
+    /// A [`single_instance::Config`] in a short directory (socket paths are
+    /// length-limited) inside a scratch directory that is removed with
+    /// everything in it when the test ends, pass or fail (#127). Declare it
+    /// before the instances and threads that use it, so it's dropped last.
+    struct ScratchConfig {
+        config: single_instance::Config,
+        root: std::path::PathBuf,
+    }
+
+    impl std::ops::Deref for ScratchConfig {
+        type Target = single_instance::Config;
+
+        fn deref(&self) -> &single_instance::Config {
+            &self.config
+        }
+    }
+
+    impl Drop for ScratchConfig {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// Unique among processes (pid and time) and within this one (counter).
+    fn config() -> ScratchConfig {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "sh-{}-{}",
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "sh-{}-{}-{nanos}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
-        let mut config = single_instance::Config::in_dir(dir, "t");
+        let mut config = single_instance::Config::in_dir(root.join("d"), "t");
         config.forward_timeout = Duration::from_secs(5);
         config.io_timeout = Duration::from_secs(3);
-        config
+        ScratchConfig { config, root }
+    }
+
+    /// #127: the fixture's lock and socket directory goes with it.
+    #[test]
+    fn the_config_fixture_leaves_nothing_behind() {
+        let config = config();
+        let root = config.root.clone();
+        drop(primary(&config));
+        assert!(config.lock_path().exists());
+        drop(config);
+        assert!(
+            matches!(std::fs::symlink_metadata(&root), Err(error) if error.kind() == std::io::ErrorKind::NotFound),
+            "left {}",
+            root.display()
+        );
     }
 
     fn primary(config: &single_instance::Config) -> Instance {
