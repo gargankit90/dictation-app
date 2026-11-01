@@ -148,6 +148,11 @@ fn preferred_dir() -> Option<PathBuf> {
     None
 }
 
+/// A message the running instance couldn't act on: the second launch is
+/// told, and fails, instead of being reported as handled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rejected;
+
 /// What this launch turned out to be.
 #[derive(Debug)]
 pub enum Launch {
@@ -254,12 +259,39 @@ impl Instance {
     }
 
     /// Calls `on_message` with each later launch's message, one at a time,
-    /// in a background thread, until this instance is dropped.
+    /// in a background thread, until this instance is dropped. Every message
+    /// is acknowledged once `on_message` returns; use
+    /// [`Instance::listen_checked`] when it may not be able to act on one.
     ///
     /// # Errors
     ///
     /// If the thread can't be started, or this instance already listens.
-    pub fn listen(&mut self, on_message: impl FnMut(Message) + Send + 'static) -> io::Result<()> {
+    pub fn listen(
+        &mut self,
+        mut on_message: impl FnMut(Message) + Send + 'static,
+    ) -> io::Result<()> {
+        self.listen_checked(move |message| {
+            on_message(message);
+            Ok(())
+        })
+    }
+
+    /// Like [`Instance::listen`], but acknowledges a message only if
+    /// `on_message` returns `Ok`. On [`Rejected`] the second launch gets a
+    /// negative answer and fails with [`io::ErrorKind::InvalidData`], so a
+    /// message that wasn't acted on is never reported as handled.
+    ///
+    /// Launches that arrive before this call wait for the answer (up to
+    /// [`Config::io_timeout`]), so start listening only once the app can
+    /// act on messages.
+    ///
+    /// # Errors
+    ///
+    /// If the thread can't be started, or this instance already listens.
+    pub fn listen_checked(
+        &mut self,
+        on_message: impl FnMut(Message) -> Result<(), Rejected> + Send + 'static,
+    ) -> io::Result<()> {
         self.server.listen(Box::new(on_message))
     }
 }
@@ -281,6 +313,18 @@ impl Instance {
     ///
     /// Never.
     pub fn listen(&mut self, _on_message: impl FnMut(Message) + Send + 'static) -> io::Result<()> {
+        Ok(())
+    }
+
+    /// Does nothing: this OS can't receive messages yet.
+    ///
+    /// # Errors
+    ///
+    /// Never.
+    pub fn listen_checked(
+        &mut self,
+        _on_message: impl FnMut(Message) -> Result<(), Rejected> + Send + 'static,
+    ) -> io::Result<()> {
         Ok(())
     }
 }

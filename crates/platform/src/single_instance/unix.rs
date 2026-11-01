@@ -9,14 +9,14 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use super::frame::{self, ACK, HEADER, NAK};
-use super::{Config, Forward, Message};
+use super::{Config, Forward, Message, Rejected};
 
 /// The most connections read at once. More are closed unread; their
 /// launches retry. Keeps idle or slow peers from tying up unbounded threads,
 /// while a few of them can't keep a real launch out.
 pub const MAX_READERS: usize = 8;
 
-type Callback = Box<dyn FnMut(Message) + Send>;
+type Callback = Box<dyn FnMut(Message) -> Result<(), Rejected> + Send>;
 
 /// The running instance's socket, bound while the lock is held.
 #[derive(Debug)]
@@ -50,6 +50,7 @@ impl Server {
 
     /// Accepts connections in a background thread, each read in its own
     /// thread, and runs `on_message` for each valid message, one at a time.
+    /// Connections that arrive before this wait in the socket's backlog.
     pub fn listen(&mut self, on_message: Callback) -> io::Result<()> {
         let listener = self
             .listener
@@ -155,15 +156,17 @@ impl Drop for Slot {
 }
 
 /// Reads one message within `io_timeout`, runs the callback and answers
-/// [`ACK`], or answers [`NAK`] to an invalid frame. A peer that's too slow
-/// gets no answer.
+/// [`ACK`] if it took the message, or [`NAK`] if it rejected it or the frame
+/// is invalid. A peer that's too slow gets no answer.
 fn serve(mut stream: UnixStream, io_timeout: Duration, on_message: &Mutex<Callback>) {
     let deadline = Instant::now() + io_timeout;
     let reply = match read_message(&mut stream, deadline) {
         Ok(message) => {
             let mut on_message = on_message.lock().unwrap_or_else(PoisonError::into_inner);
-            on_message(message);
-            ACK
+            match on_message(message) {
+                Ok(()) => ACK,
+                Err(Rejected) => NAK,
+            }
         }
         Err(error) if error.kind() == io::ErrorKind::InvalidData => {
             tracing::debug!(%error, "single-instance: rejected a message");
@@ -235,7 +238,7 @@ pub(super) fn forward(config: &Config, frame: &[u8]) -> Result<(), Forward> {
         Ok(1) if reply[0] == ACK => Ok(()),
         Ok(1) => Err(Forward::Fail(io::Error::new(
             io::ErrorKind::InvalidData,
-            "the running instance rejected this launch's arguments",
+            "the running instance couldn't act on this launch's arguments (it may still be starting up or shutting down)",
         ))),
         // Closed unread: busy, or stopping.
         Ok(_) => Err(Forward::Retry(io::ErrorKind::UnexpectedEof.into())),
@@ -513,7 +516,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
             let mut server = Server::bind(&starting).unwrap();
             server
-                .listen(Box::new(move |message| tx.send(message).unwrap()))
+                .listen(Box::new(move |message| {
+                    tx.send(message).unwrap();
+                    Ok(())
+                }))
                 .unwrap();
             (server, lock)
         });
@@ -565,5 +571,48 @@ mod tests {
             Launch::Forwarded
         ));
         assert_eq!(rx.try_recv().unwrap(), message("after"));
+    }
+
+    #[test]
+    fn a_rejected_callback_nacks_and_fails_the_launch() {
+        let config = temp_config();
+        let Launch::Primary(mut instance) = acquire(&config, &message("a")).unwrap() else {
+            panic!("not the primary");
+        };
+        instance
+            .listen_checked(|message| {
+                if message.args[1] == "no" {
+                    Err(Rejected)
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap();
+        let error = acquire(&config, &message("no")).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(matches!(
+            acquire(&config, &message("yes")).unwrap(),
+            Launch::Forwarded
+        ));
+    }
+
+    #[test]
+    fn a_launch_before_listening_waits_and_is_answered_after() {
+        let config = temp_config();
+        let Launch::Primary(mut instance) = acquire(&config, &message("a")).unwrap() else {
+            panic!("not the primary");
+        };
+        let second = {
+            let config = config.clone();
+            std::thread::spawn(move || acquire(&config, &message("early")))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!second.is_finished(), "answered before anyone listened");
+        let (tx, rx) = mpsc::channel();
+        instance
+            .listen(move |message| tx.send(message).unwrap())
+            .unwrap();
+        assert!(matches!(second.join().unwrap().unwrap(), Launch::Forwarded));
+        assert_eq!(rx.try_recv().unwrap(), message("early"));
     }
 }
