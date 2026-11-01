@@ -27,6 +27,7 @@ ALL_SCENARIOS=(
   e2e_secure_input_blocks_paste
   e2e_hold_release e2e_held_at_launch
   e2e_quit_during_recording_then_relaunch e2e_tray_error_clears_on_next_recording
+  e2e_settings_save_reopen
   e2e_error_bad_key e2e_real_groq
   e2e_launch_at_login
 )
