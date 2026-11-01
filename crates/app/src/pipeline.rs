@@ -460,7 +460,7 @@ where
         match result {
             JobResult::Transcribed(job, result) if job == self.job => Some(match result {
                 Ok(text) => Event::TranscriptReady(text),
-                Err(error) => Event::TranscriptionFailed(error.to_string()),
+                Err(error) => Event::TranscriptionFailed(error.user_message()),
             }),
             JobResult::Inserted(job, result) if job == self.job => Some(match result {
                 Ok(()) => Event::InsertDone,

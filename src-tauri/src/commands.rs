@@ -128,6 +128,10 @@ fn provider_name(provider: Provider) -> &'static str {
 fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
     let name = provider_name(provider);
     match error {
+        TranscribeError::MissingKey => KeyTestError::new(
+            KeyTestKind::NoKey,
+            format!("No {name} API key is saved yet. Paste one first."),
+        ),
         TranscribeError::InvalidKey => KeyTestError::new(
             KeyTestKind::InvalidKey,
             format!(
