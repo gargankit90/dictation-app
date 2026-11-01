@@ -4,13 +4,21 @@
 # Terminal, which has the Accessibility grant), then a dictation of "world"
 # gives "hello world"; at the start of an empty document the same dictation
 # gives "world", and after "hello " (a space already there) no second space
-# is added.
+# is added. macOS capitalizes the typed first word in TextEdit ("Hello"), so
+# the typed documents are compared ignoring case; the spacing is what's
+# checked. TextEdit isn't read between typing and dictating: while its
+# autocorrection is pending, a read can hang until the AppleEvent times out.
 
 VM_TYPE_KEYS="$VM_FIXTURES/type-keys.js"
 
 # Types `text` (a-z and spaces) into TextEdit with real key events.
 type_in_textedit() {
   vm_terminal "open -a TextEdit; sleep 1; osascript -l JavaScript $(q "$VM_TYPE_KEYS") $(q "$1")"
+}
+
+# TextEdit's text in lower case.
+textedit_lower() {
+  textedit_text | tr '[:upper:]' '[:lower:]'
 }
 
 e2e_smart_space() {
@@ -21,12 +29,11 @@ e2e_smart_space() {
   # After a word: one space.
   textedit_fresh
   expect "hello is typed into TextEdit" test "$(type_in_textedit hello)" = "typed 5"
-  expect "TextEdit holds hello" test "$(textedit_text)" = "hello"
   expect "the dictation after a word gets back to Idle" dictate_once 1
   local text
   text=$(textedit_text)
   log "  after a word, TextEdit holds: [$text]"
-  expect "dictating world after hello gives 'hello world'" test "$text" = "hello world"
+  expect "dictating world after hello gives 'hello world'" test "$(textedit_lower)" = "hello world"
 
   # At the start of an empty document: no space.
   textedit_fresh
@@ -41,7 +48,7 @@ e2e_smart_space() {
   expect "the dictation after a space gets back to Idle" dictate_once 1
   text=$(textedit_text)
   log "  after a space, TextEdit holds: [$text]"
-  expect "dictating world after 'hello ' gives 'hello world'" test "$text" = "hello world"
+  expect "dictating world after 'hello ' gives 'hello world'" test "$(textedit_lower)" = "hello world"
 
   expect "the text read before the cursor is not in the log" \
     sh -c "! printf '%s' \"\$1\" | grep -qi 'hello'" _ "$(app_log)"

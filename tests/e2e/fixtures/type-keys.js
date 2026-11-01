@@ -1,7 +1,10 @@
 // Types lowercase ASCII letters and spaces into the frontmost app with real
 // key events (JXA): `osascript -l JavaScript type-keys.js "hello"`. The key
 // codes are the US (ANSI) positions, so the US or ABC layout must be
-// selected. Needs Accessibility for the process that runs it (Terminal in
+// selected. Each event's modifier flags are set to none explicitly: an event
+// made with no source takes the session's current flags, which a synthetic
+// ⌘V posted earlier can leave holding Command (seen in the VM: "hello"
+// typed as ⌘H ⌘E ⌘L…). Needs Accessibility for the process that runs it (Terminal in
 // the VM), else the events are dropped silently, so it checks first.
 ObjC.import("ApplicationServices");
 
@@ -47,6 +50,7 @@ function run(argv) {
     }
     for (const down of [true, false]) {
       const event = $.CGEventCreateKeyboardEvent(null, code, down);
+      $.CGEventSetFlags(event, 0);
       $.CGEventPost($.kCGHIDEventTap, event);
       delay(0.02);
     }

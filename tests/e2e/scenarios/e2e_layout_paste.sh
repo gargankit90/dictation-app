@@ -3,7 +3,9 @@
 # AZERTY (French), Dvorak and Russian. For each, the input source is
 # switched in the VM (fixtures/input-source.js, run in Terminal so the switch
 # reaches the GUI session; enabled first if the clone doesn't have it), a
-# dictation goes into TextEdit, and TextEdit must hold the transcript. On
+# dictation goes into TextEdit, and TextEdit must hold the transcript. The
+# layout is checked again after the dictation, not between bringing TextEdit
+# forward and dictating: a Terminal job would take the front (and the paste). On
 # Dvorak, V is where QWERTY has "." (key 47): a chord sent on QWERTY's V
 # (key 9) is ⌘K there and pastes nothing. The layout the VM started on is
 # put back, and the sources the scenario enabled are disabled again, however
@@ -73,13 +75,13 @@ e2e_layout_paste() {
       continue
     fi
     textedit_fresh
-    current=$(input_source current)
-    expect "$id is still selected with TextEdit in front" test "$current" = "$id"
     count=$((count + 1))
     expect "the dictation on $id gets back to Idle" dictate_once 1
     text=$(textedit_trimmed)
     log "  on $id, TextEdit holds: [$text]"
     expect "the paste on $id put the transcript in TextEdit" test "$text" = "$MOCK_TEXT"
+    current=$(input_source current)
+    expect "$id was still selected after the dictation" test "$current" = "$id"
   done
   expect "every layout was tried" test "$count" = "${#LAYOUTS[@]}"
 
