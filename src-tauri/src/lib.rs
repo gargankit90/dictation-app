@@ -451,6 +451,8 @@ fn shut_down(app: &AppHandle) {
 /// The second-launch path, against the real single-instance transport and
 /// the real injector (debug builds, which have the test flags).
 #[cfg(all(test, debug_assertions))]
+// Clippy's allow-in-tests covers only `#[cfg(test)]` modules, not this `all(..)` one.
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc;
