@@ -5,6 +5,7 @@
 pub mod config;
 pub mod debug_audio;
 pub mod hotkey;
+pub mod overlay;
 pub mod pipeline;
 pub mod stand_ins;
 pub mod test_hooks;
