@@ -7,16 +7,21 @@
 //! that cannot print it (`dictation_core::redact`, `dictation_ports::Secret`,
 //! the `Debug` of `Event`, `Command` and the error enums), and, as a last
 //! resort, by [`scrub::ScrubbingWriter`], which cleans every line that is
-//! written. `DICTATION_LOG=debug` turns on debug output for our own crates,
+//! written. Panics are reported through the same log, their message hidden,
+//! instead of by Rust's default hook ([`log_panic`]). `DICTATION_LOG=debug` turns on debug output for our own crates,
 //! for testers who are asked to.
 
 pub mod rotation;
 pub mod scrub;
+#[cfg(test)]
+mod spawned_privacy;
 
+use std::backtrace::{Backtrace, BacktraceStatus};
 use std::io;
 use std::path::Path;
 use std::str::FromStr;
 
+use dictation_core::redact::Hidden;
 use tracing::Subscriber;
 use tracing_subscriber::filter::{LevelFilter, Targets};
 use tracing_subscriber::fmt::{self, MakeWriter};
@@ -93,15 +98,16 @@ fn app_subscriber<C>(
     dir: &Path,
     level: LevelFilter,
     console: C,
+    limits: Limits,
 ) -> (impl Subscriber + Send + Sync, Option<io::Error>)
 where
     C: for<'a> MakeWriter<'a> + Send + Sync + 'static,
 {
-    let (file, failure) = match RotatingFile::open(dir, LOG_FILE_PREFIX, MAX_FILE_BYTES, KEEP_FILES)
-    {
-        Ok(file) => (Some(ScrubbingWriter::new(file)), None),
-        Err(error) => (None, Some(error)),
-    };
+    let (file, failure) =
+        match RotatingFile::open(dir, LOG_FILE_PREFIX, limits.file_bytes, limits.keep) {
+            Ok(file) => (Some(ScrubbingWriter::new(file)), None),
+            Err(error) => (None, Some(error)),
+        };
     (subscriber(level, file, console), failure)
 }
 
@@ -115,9 +121,31 @@ where
 ///
 /// If a global subscriber is already set.
 pub fn init(dir: &Path) -> anyhow::Result<()> {
+    init_with(dir, Limits::APP)
+}
+
+/// How big a log file gets and how many are kept.
+#[derive(Clone, Copy, Debug)]
+struct Limits {
+    file_bytes: u64,
+    keep: usize,
+}
+
+impl Limits {
+    /// [`MAX_FILE_BYTES`] and [`KEEP_FILES`].
+    const APP: Self = Self {
+        file_bytes: MAX_FILE_BYTES,
+        keep: KEEP_FILES,
+    };
+}
+
+/// [`init`] with other file limits; only tests make them small.
+fn init_with(dir: &Path, limits: Limits) -> anyhow::Result<()> {
     let level = level_from(std::env::var(LEVEL_VARIABLE).ok().as_deref());
-    let (subscriber, failure) = app_subscriber(dir, level, ScrubbingWriter::new(io::stderr()));
+    let (subscriber, failure) =
+        app_subscriber(dir, level, ScrubbingWriter::new(io::stderr()), limits);
     subscriber.try_init()?;
+    std::panic::set_hook(Box::new(log_panic));
     if let Some(error) = failure {
         tracing::warn!(
             %error,
@@ -126,6 +154,27 @@ pub fn init(dir: &Path) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// Reports a panic through the log (file and stderr, both scrubbed) instead
+/// of Rust's default hook, which prints the panic message to stderr as it
+/// is (#124). The message can hold whatever the panicking code had in hand,
+/// a transcript or a key, so, as for a crashed pipeline job, only its length
+/// is logged; where it happened is, and the backtrace if `RUST_BACKTRACE`
+/// asks for one.
+fn log_panic(info: &std::panic::PanicHookInfo<'_>) {
+    let thread = std::thread::current();
+    let thread = thread.name().unwrap_or("unnamed");
+    let location = info
+        .location()
+        .map_or_else(|| "unknown".to_owned(), ToString::to_string);
+    let payload = Hidden(info.payload_as_str().unwrap_or_default());
+    let backtrace = Backtrace::capture();
+    if backtrace.status() == BacktraceStatus::Captured {
+        tracing::error!(thread, %location, %payload, %backtrace, "a thread panicked");
+    } else {
+        tracing::error!(thread, %location, %payload, "a thread panicked");
+    }
 }
 
 #[cfg(test)]
@@ -306,6 +355,7 @@ mod tests {
             &blocker,
             LevelFilter::INFO,
             ScrubbingWriter::new(console.clone()),
+            Limits::APP,
         );
         let failure = failure.expect("the file could not be opened");
         tracing::subscriber::with_default(subscriber, || {

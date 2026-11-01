@@ -91,7 +91,7 @@ impl LiveEngine {
     /// provider's own endpoint.
     #[cfg(test)]
     #[must_use]
-    fn at(mut self, base_url: &str) -> Self {
+    pub(crate) fn at(mut self, base_url: &str) -> Self {
         self.base_url = Some(base_url.to_owned());
         self
     }
