@@ -142,20 +142,18 @@ groq_guard_exit() {
   exit "$status"
 }
 
-# Opens an empty TextEdit document in front, to paste into. Needs the VM's
-# golden image to allow osascript to control TextEdit (M4.3).
+# TextEdit, through M4.3's helpers (lib_full.sh): an empty document in
+# front to paste into, its text, and closing it without saving.
 groq_textedit_new() {
-  vm "osascript -e 'tell application \"TextEdit\"' -e 'activate' -e 'close every document saving no' -e 'make new document' -e 'end tell'"
+  textedit_fresh
 }
 
-# The front TextEdit document's text.
 groq_textedit_text() {
-  vm "osascript -e 'tell application \"TextEdit\" to get text of document 1'"
+  textedit_text
 }
 
-# Quits TextEdit without saving.
 groq_textedit_quit() {
-  vm "osascript -e 'tell application \"TextEdit\" to quit saving no' >/dev/null 2>&1; true"
+  textedit_close
 }
 
 # Lower case, letters and digits only, one space between words.

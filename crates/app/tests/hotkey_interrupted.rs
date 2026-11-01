@@ -40,7 +40,7 @@ impl AudioSource for CountingAudio {
     fn stop(&mut self) -> Result<Audio, AudioError> {
         Ok(Audio {
             sample_rate: 16_000,
-            samples: vec![0.0; 1_600],
+            samples: vec![0.1; 16_000],
         })
     }
 

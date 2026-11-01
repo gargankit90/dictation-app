@@ -67,8 +67,12 @@ impl TempWav {
             sample_format: hound::SampleFormat::Int,
         };
         let mut writer = hound::WavWriter::create(&path, spec).unwrap();
-        for sample in [0i16, 16_384, -16_384] {
-            writer.write_sample(sample).unwrap();
+        // 300 ms of loud square wave: long and loud enough to reach the
+        // transcriber (clips under 200 ms and silence never do, #69, #72).
+        for i in 0..4_800 {
+            writer
+                .write_sample(if i % 2 == 0 { 16_384i16 } else { -16_384 })
+                .unwrap();
         }
         writer.finalize().unwrap();
         Self(path)
