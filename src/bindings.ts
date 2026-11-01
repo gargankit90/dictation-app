@@ -7,9 +7,16 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	/**  The saved settings (the defaults if none were saved). */
+	/**
+	 *  The saved settings (the defaults if none were saved), with
+	 *  `launch_at_login` as the OS reports it: the user may have changed the
+	 *  login item in System Settings since the last save.
+	 */
 	getSettings: () => typedError<Settings_Serialize, string>(__TAURI_INVOKE("get_settings")),
-	/**  Validates and saves the settings. */
+	/**
+	 *  Validates and saves the settings, and applies the launch-at-login choice
+	 *  to the OS.
+	 */
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, string>(__TAURI_INVOKE("save_settings", { settings })),
 	/**  Stores `key` as `provider`'s API key in the keychain. Write-only. */
 	setApiKey: (provider: Provider, key: string) => typedError<null, string>(__TAURI_INVOKE("set_api_key", { provider, key })),
@@ -73,6 +80,12 @@ export type Settings_Deserialize = {
 	language?: string | null,
 	/**  The dictation hotkey, as [`HotkeySpec`] writes it (`RightAlt`). */
 	hotkey?: string,
+	/**
+	 *  Whether the app starts when the user logs in (M5.3). The file keeps
+	 *  the last value applied; what the settings screen shows is the OS's
+	 *  own state, which the user can change in System Settings.
+	 */
+	launch_at_login?: boolean,
 };
 
 /**  What the user can set. Never holds the API key. */
@@ -90,6 +103,12 @@ export type Settings_Serialize = {
 	language: string | null,
 	/**  The dictation hotkey, as [`HotkeySpec`] writes it (`RightAlt`). */
 	hotkey: string,
+	/**
+	 *  Whether the app starts when the user logs in (M5.3). The file keeps
+	 *  the last value applied; what the settings screen shows is the OS's
+	 *  own state, which the user can change in System Settings.
+	 */
+	launch_at_login: boolean,
 };
 
 /* Tauri Specta runtime */

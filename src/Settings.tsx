@@ -52,6 +52,12 @@ export function Settings() {
   const [provider, setProvider] = useState<Provider>("groq");
   const [language, setLanguage] = useState("");
   const [hotkey, setHotkey] = useState("");
+  // What the OS says about the login item, as the app last reported it.
+  const [launchAtLogin, setLaunchAtLogin] = useState(false);
+  // Whether the user has changed the checkbox since. Until then the box
+  // follows the OS, and a save leaves the login item alone: the user may have
+  // changed it in System Settings while this window was hidden.
+  const [launchEdited, setLaunchEdited] = useState(false);
   const [keyInput, setKeyInput] = useState("");
   const [keyStatus, setKeyStatus] = useState<KeyStatus>(CHECKING);
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -98,6 +104,7 @@ export function Settings() {
         setProvider(result.data.provider);
         setLanguage(result.data.language ?? "");
         setHotkey(result.data.hotkey);
+        setLaunchAtLogin(result.data.launch_at_login);
         await checkKeySaved(result.data.provider);
       } catch {
         if (!state.cancelled) setLoadError(BROKEN);
@@ -107,6 +114,34 @@ export function Settings() {
       state.cancelled = true;
     };
   }, [checkKeySaved]);
+
+  // The settings window is hidden, not closed, so it outlives the OS state it
+  // loaded. Whenever it comes back, read the login item again, unless the
+  // user is in the middle of changing it. Nothing else in the form is touched.
+  useEffect(() => {
+    if (launchEdited) return;
+    const state = { cancelled: false };
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      void (async () => {
+        try {
+          const result = await commands.getSettings();
+          if (!state.cancelled && result.status === "ok") {
+            setLaunchAtLogin(result.data.launch_at_login);
+          }
+        } catch {
+          // Keep what is shown; the next focus tries again.
+        }
+      })();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      state.cancelled = true;
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [launchEdited]);
 
   const info = providerInfo(provider);
 
@@ -198,6 +233,13 @@ export function Settings() {
         keyCheck.current += 1; // any lookup still running predates this key
         setKeyStatus({ state: "saved" });
       }
+      // An untouched checkbox follows the OS, so ask it once more: a save of
+      // only the language must not undo a change made in System Settings.
+      let launch = launchAtLogin;
+      if (!launchEdited) {
+        const current = await commands.getSettings();
+        if (current.status === "ok") launch = current.data.launch_at_login;
+      }
       const toSave: Settings_Serialize = {
         ...loaded,
         provider,
@@ -206,10 +248,17 @@ export function Settings() {
         model: provider === loaded.provider ? loaded.model : info.defaultModel,
         language: normalizeLanguage(language),
         hotkey: hotkey.trim(),
+        launch_at_login: launch,
       };
       const saved = await commands.saveSettings(toSave);
       if (saved.status === "error") {
         setNotice({ kind: "error", text: messageOf(saved.error) });
+        // The login item may not have changed (the OS can refuse, or want
+        // the user's approval): show what it really is. Nothing else in the
+        // form is touched.
+        const actual = await commands.getSettings();
+        if (actual.status === "ok") setLaunchAtLogin(actual.data.launch_at_login);
+        setLaunchEdited(false);
         return;
       }
       // Reload, so the form shows what was stored (the canonical hotkey). If
@@ -220,6 +269,8 @@ export function Settings() {
       setProvider(stored.provider);
       setLanguage(stored.language ?? "");
       setHotkey(stored.hotkey);
+      setLaunchAtLogin(stored.launch_at_login);
+      setLaunchEdited(false);
       await checkKeySaved(stored.provider);
       setNotice({ kind: "ok", text: "Settings saved." });
     } catch {
@@ -385,6 +436,28 @@ export function Settings() {
             </p>
             <p id="language-error" role={errors.language ? "alert" : undefined} className="error">
               {errors.language}
+            </p>
+          </div>
+
+          <div className="field">
+            <label className="check" htmlFor="launch-at-login">
+              <input
+                id="launch-at-login"
+                type="checkbox"
+                checked={launchAtLogin}
+                aria-describedby="launch-at-login-hint"
+                onChange={(event) => {
+                  if (saving) return;
+                  setLaunchAtLogin(event.target.checked);
+                  setLaunchEdited(true);
+                  setNotice(null);
+                }}
+              />
+              Launch at login
+            </label>
+            <p id="launch-at-login-hint" className="hint">
+              Starts dictation-app in the menu bar when you log in. Takes effect when you save. You
+              can also change it in System Settings, General, Login Items.
             </p>
           </div>
 

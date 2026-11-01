@@ -23,6 +23,7 @@ class Backend {
     model: "whisper-large-v3-turbo",
     language: null,
     hotkey: "RightAlt",
+    launch_at_login: false,
   };
   keys: Record<Provider, boolean> = { groq: false, openai: false };
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
@@ -408,6 +409,7 @@ describe("criterion 2: settings save and reload", () => {
         model: "whisper-1",
         language: "de",
         hotkey: "Ctrl+Shift+Space",
+        launch_at_login: false,
       },
     });
     expect(screen.getByText("Key saved")).toBeTruthy();
@@ -785,5 +787,107 @@ describe("review round 1", () => {
 
       expect(document.body.textContent).not.toContain("gsk_");
     });
+  });
+});
+
+describe("launch at login", () => {
+  const box = () => screen.getByLabelText<HTMLInputElement>("Launch at login");
+
+  it("shows what the OS says, off by default", async () => {
+    await open();
+    expect(box().checked).toBe(false);
+    cleanup();
+    backend.settings = { ...backend.settings, launch_at_login: true };
+    await open();
+    expect(box().checked).toBe(true);
+  });
+
+  it("sends the choice with the other settings when saved", async () => {
+    await open();
+    fireEvent.click(box());
+    expect(box().checked).toBe(true);
+    // Nothing is sent until Save.
+    expect(backend.named("save_settings")).toHaveLength(0);
+    click("Save");
+    await screen.findByText("Settings saved.");
+    const saved = backend.named("save_settings");
+    expect(saved).toHaveLength(1);
+    expect((saved[0]?.args.settings as Settings_Serialize).launch_at_login).toBe(true);
+    expect(backend.settings.launch_at_login).toBe(true);
+    expect(box().checked).toBe(true);
+  });
+
+  it("shows the real state again when the app could not change it", async () => {
+    await open();
+    fireEvent.click(box());
+    backend.failing.set(
+      "save_settings",
+      "Launch at login needs your approval: open System Settings, General, Login Items, and allow dictation-app.",
+    );
+    click("Save");
+    expect((await screen.findByRole("alert")).textContent).toContain("needs your approval");
+    // The app still has it off, so the box goes back to off.
+    await waitFor(() => {
+      expect(box().checked).toBe(false);
+    });
+  });
+
+  /** The window comes back to the front, as when the tray shows it again. */
+  const refocus = () => {
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+  };
+
+  it("reads the OS again when the hidden window is shown again", async () => {
+    await open();
+    expect(box().checked).toBe(false);
+    // Switched on in System Settings while this window was hidden.
+    backend.settings = { ...backend.settings, launch_at_login: true };
+    refocus();
+    await waitFor(() => {
+      expect(box().checked).toBe(true);
+    });
+    backend.settings = { ...backend.settings, launch_at_login: false };
+    refocus();
+    await waitFor(() => {
+      expect(box().checked).toBe(false);
+    });
+  });
+
+  it("saving only the language leaves a login item changed in System Settings alone", async () => {
+    await open();
+    // On in System Settings; this window has not seen a focus event yet.
+    backend.settings = { ...backend.settings, launch_at_login: true };
+    type("Language", "de");
+    click("Save");
+    await screen.findByText("Settings saved.");
+    const saved = backend.named("save_settings");
+    expect((saved[0]?.args.settings as Settings_Serialize).launch_at_login).toBe(true);
+    expect(backend.settings.launch_at_login).toBe(true);
+    expect(box().checked).toBe(true);
+  });
+
+  it("keeps the user's own change when the window regains focus", async () => {
+    await open();
+    fireEvent.click(box());
+    backend.settings = { ...backend.settings, launch_at_login: false };
+    refocus();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(box().checked).toBe(true);
+    click("Save");
+    await screen.findByText("Settings saved.");
+    const saved = backend.named("save_settings");
+    expect((saved[0]?.args.settings as Settings_Serialize).launch_at_login).toBe(true);
+  });
+
+  it("keeps a typed hotkey when the login item could not change", async () => {
+    await open();
+    fireEvent.click(box());
+    type("Hotkey", "F5");
+    backend.failing.set("save_settings", "Couldn't change launch at login: no bundle");
+    click("Save");
+    await screen.findByText(/no bundle/);
+    expect(screen.getByLabelText<HTMLInputElement>("Hotkey").value).toBe("F5");
   });
 });

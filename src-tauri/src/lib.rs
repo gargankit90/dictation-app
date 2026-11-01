@@ -19,6 +19,10 @@
 //! settings and the keychain at startup and rebuilt whenever they're saved
 //! ([`engine`]); `--transcriber mock` keeps the mock.
 //!
+//! M5.3: logs go to a size-bounded rotating file ([`logging`]), the tray's
+//! "Reveal log" opens its folder, and the settings screen has a "Launch at
+//! login" toggle backed by the OS's own login item (`commands::LoginItem`).
+//!
 //! M3.4: Settings… shows the `main` window, which holds the settings UI; its
 //! close button hides it instead of destroying it, so the tray can show it
 //! again.
@@ -49,6 +53,7 @@ use dictation_platform::audio::{FileAudioSource, SystemMicrophone};
 use dictation_platform::clock::SystemClock;
 use dictation_platform::hotkey::SystemHotkey;
 use dictation_platform::insert::SystemInserter;
+use dictation_platform::launch::SystemLaunchAtLogin;
 use dictation_platform::permissions::SystemPermissions;
 use dictation_platform::single_instance::{self, Instance, Launch, Message, Rejected};
 use dictation_ports::{AudioSource, Permission, PermissionError, PermissionStatus, Permissions};
@@ -61,6 +66,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 const QUIT_ID: &str = "quit";
 const SETTINGS_ID: &str = "settings";
+const REVEAL_LOG_ID: &str = "reveal-log";
 /// The one window: it holds the settings UI (`src/Settings.tsx`).
 const SETTINGS_WINDOW: &str = "main";
 const TRAY_ID: &str = "main";
@@ -68,6 +74,9 @@ const TOOLTIP: &str = "dictation-app";
 /// Where a launch's flags came from, for the log.
 const THIS_LAUNCH: &str = "this launch";
 const SECOND_LAUNCH: &str = "a second launch";
+
+/// The app's log folder, for the tray's "Reveal log".
+struct LogDir(std::path::PathBuf);
 
 /// The running pipeline, taken out on Quit to shut it down.
 struct RunningPipeline(Mutex<Option<Pipeline>>);
@@ -153,14 +162,28 @@ fn shell_hotkey() -> (ShellHotkey, Option<Injector>) {
     }
 }
 
-/// The API key commands (debug builds): stores the Groq API key from stdin
-/// and/or removes it, saying so on stderr. `None` when `argv` has none, so the
-/// app starts normally; otherwise the exit code. The key is never logged or
-/// printed.
+/// The commands that run in a process of their own (debug builds): the API
+/// key commands store the Groq API key from stdin and/or remove it; the
+/// launch-at-login commands set or print the login item. Each says what it
+/// did on stderr. `None` when `argv` has none, so the app starts normally;
+/// otherwise the exit code. The key is never logged or printed.
 fn run_key_commands(argv: &[String], mut stdin: impl std::io::Read) -> Option<i32> {
     let launch = flags::parse(argv, flags::TEST_FLAGS);
-    if launch.key_commands.is_empty() {
+    if launch.key_commands.is_empty() && launch.launch_commands.is_empty() {
         return None;
+    }
+    let login = SystemLaunchAtLogin::new();
+    for command in launch.launch_commands {
+        match dictation_pipeline::test_hooks::run_launch_command(command, &login) {
+            Ok(message) => eprintln!("{message}"),
+            Err(error) => {
+                eprintln!("{error}");
+                return Some(1);
+            }
+        }
+    }
+    if launch.key_commands.is_empty() {
+        return Some(0);
     }
     // No settings are read or written; only the keychain is used.
     let config = dictation_pipeline::config::Config::new(
@@ -259,6 +282,7 @@ fn setup(
     let log_dir = app.path().app_log_dir().context("no log directory")?;
     logging::init(&log_dir).context("could not start logging")?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), log_dir = %log_dir.display(), "starting");
+    app.manage(LogDir(log_dir));
 
     // A menu-bar app: no Dock icon. LSUIElement (src-tauri/Info.plist) alone
     // isn't enough, since Tauri applies its own Regular policy at launch.
@@ -330,6 +354,7 @@ fn setup(
             .context("could not start the pipeline")?;
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
     app.manage(commands::AppConfig(Arc::clone(&config)));
+    app.manage(commands::LoginItem(Arc::new(SystemLaunchAtLogin::new())));
     app.manage(live.clone());
     if let Err(error) = live.rebuild_in_background(config) {
         tracing::error!(%error, "could not start reading the API key");
@@ -430,8 +455,9 @@ fn handle_flags(
 
 fn build_tray(app: &App) -> tauri::Result<()> {
     let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, None::<&str>)?;
+    let reveal = MenuItem::with_id(app, REVEAL_LOG_ID, "Reveal log", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit dictation-app", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&settings, &quit])?;
+    let menu = Menu::with_items(app, &[&settings, &reveal, &quit])?;
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip(TOOLTIP)
         .menu(&menu)
@@ -441,6 +467,8 @@ fn build_tray(app: &App) -> tauri::Result<()> {
                 app.exit(0);
             } else if event.id() == SETTINGS_ID {
                 show_settings(app);
+            } else if event.id() == REVEAL_LOG_ID {
+                reveal_log(app);
             }
         });
     if let Some(icon) = app.default_window_icon() {
@@ -448,6 +476,17 @@ fn build_tray(app: &App) -> tauri::Result<()> {
     }
     tray.build(app)?;
     Ok(())
+}
+
+/// Opens the log folder in the file manager (Finder on macOS).
+fn reveal_log(app: &AppHandle) {
+    let Some(dir) = app.try_state::<LogDir>() else {
+        tracing::warn!("the log folder isn't known yet");
+        return;
+    };
+    if let Err(error) = dictation_platform::reveal::reveal_folder(&dir.0) {
+        tracing::warn!(%error, "could not open the log folder");
+    }
 }
 
 /// Shows the settings window in front, even when it's minimized or hidden.

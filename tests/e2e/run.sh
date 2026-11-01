@@ -26,6 +26,7 @@ ALL_SCENARIOS=(
   e2e_mock_paste e2e_clipboard_restore e2e_silence e2e_rapid
   e2e_hold_release e2e_held_at_launch
   e2e_error_bad_key e2e_real_groq
+  e2e_launch_at_login
 )
 # Scenarios that need something the VM may lack (a microphone, a Groq key):
 # they may SKIP. Any other scenario that SKIPs fails the run.
