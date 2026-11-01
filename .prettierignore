@@ -6,6 +6,8 @@ target/
 coverage/
 src-tauri/gen/
 src-tauri/icons/
+# Vendored upstream code, kept as published.
+third_party/
 # tauri-specta writes it (src-tauri/src/commands.rs).
 src/bindings.ts
 # Prose is wrapped by hand; Prettier would rewrap every paragraph.
