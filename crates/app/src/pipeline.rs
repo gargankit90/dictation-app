@@ -248,11 +248,18 @@ impl AudioWorker {
                 }
             }
         }
-        let _ = blocking(&mut audio, |audio| {
-            audio.discard();
-            Ok(())
-        })
-        .await;
+        // The last call: discard and drop the source on the blocking pool.
+        // Dropping a warm microphone closes the device, which can take
+        // seconds, so it must not happen on this async worker.
+        if let Some(mut source) = audio.take() {
+            let teardown = task::spawn_blocking(move || {
+                source.discard();
+                drop(source);
+            });
+            if teardown.await.is_err() {
+                tracing::error!("the audio source panicked");
+            }
+        }
     }
 
     fn send(&self, command: AudioCommand) {
@@ -261,7 +268,8 @@ impl AudioWorker {
     }
 
     /// Drops any recording and waits for the task to finish what it was
-    /// doing (at most one blocking call) and the final discard.
+    /// doing (at most one blocking call), the final discard and the source's
+    /// drop, both on the blocking pool.
     async fn shut_down(self) {
         let Self { commands, task } = self;
         drop(commands);
@@ -763,7 +771,9 @@ mod tests {
 #[cfg(test)]
 mod audio_worker_tests {
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc as std_mpsc;
+    use std::time::Instant;
 
     use dictation_core::coordinator::Phase::{Idle, Recording, Transcribing};
     use dictation_platform::fakes::{FakeClock, FakeHotkey, FakeInserter, FakePermissions};
@@ -994,6 +1004,66 @@ mod audio_worker_tests {
         assert_eq!(harness.dictate().await[2], crashed);
         harness.pipeline.shutdown().await;
         assert_eq!(audio.calls(), ["start", "stop"]);
+    }
+
+    /// A source whose drop blocks, like a warm microphone closing its
+    /// device, until released or [`WAIT`] runs out.
+    struct SlowTeardown {
+        release: std_mpsc::Receiver<()>,
+        dropped: Arc<AtomicBool>,
+    }
+
+    impl AudioSource for SlowTeardown {
+        fn start(&mut self) -> Result<(), AudioError> {
+            Ok(())
+        }
+
+        fn stop(&mut self) -> Result<Audio, AudioError> {
+            Err(AudioError::NotRecording)
+        }
+
+        fn discard(&mut self) {}
+
+        fn is_recording(&self) -> bool {
+            false
+        }
+    }
+
+    impl Drop for SlowTeardown {
+        fn drop(&mut self) {
+            let _ = self.release.recv_timeout(WAIT);
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// M2.3 criterion 3 (#77 M1). A current-thread runtime: had the source
+    /// been dropped on the executor, the timer couldn't fire until the
+    /// teardown ended.
+    #[tokio::test]
+    async fn m2_3_criterion_3_a_slow_teardown_does_not_stall_the_runtime() {
+        let (release, gate) = std_mpsc::channel();
+        let dropped = Arc::new(AtomicBool::new(false));
+        let (worker, _failed) = AudioWorker::spawn(SlowTeardown {
+            release: gate,
+            dropped: Arc::clone(&dropped),
+        });
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(500));
+            let _ = release.send(());
+        });
+
+        let shutdown = tokio::spawn(worker.shut_down());
+        let timer = Instant::now();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let observed = timer.elapsed();
+
+        shutdown.await.unwrap();
+        releaser.join().unwrap();
+        assert!(dropped.load(Ordering::SeqCst), "the source was dropped");
+        assert!(
+            observed < Duration::from_millis(250),
+            "a 20 ms timer fired after {observed:?}"
+        );
     }
 
     #[tokio::test]
