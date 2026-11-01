@@ -107,7 +107,11 @@ impl TempWav {
             sample_format: hound::SampleFormat::Int,
         };
         let mut writer = hound::WavWriter::create(&path, spec).unwrap();
-        for sample in [0_i16, 16_384, -16_384] {
+        // 300 ms of a 440 Hz tone: long and loud enough to be transcribed.
+        for n in 0..4_800_u32 {
+            let t = f64::from(n) / 16_000.0;
+            #[allow(clippy::cast_possible_truncation)]
+            let sample = (16_384.0 * (2.0 * std::f64::consts::PI * 440.0 * t).sin()) as i16;
             writer.write_sample(sample).unwrap();
         }
         writer.finalize().unwrap();
@@ -303,7 +307,7 @@ async fn a_transcriber_error_then_a_successful_dictation() {
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
             UiEvent::Error(DictationError::TranscriptionFailed {
-                reason: "network error: connection reset".into()
+                reason: TranscribeError::Network("connection reset".into()).user_message()
             }),
             UiEvent::StateChanged(Idle),
         ]

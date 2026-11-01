@@ -12,20 +12,47 @@
 //!   (debug mode). Both choose how the pipeline is built, so only the first
 //!   launch's count; a second launch's are logged and ignored.
 //!
+//! - `--debug-set-api-key-stdin` and `--debug-delete-api-key` store (the key
+//!   comes from stdin, never an argument) and remove the Groq API key through
+//!   the same path as the Settings window, then exit without starting the
+//!   app. They run in their own process, never in a running app, so a
+//!   forwarded second launch ignores them.
+//!
+//! - `--mock-text <text>` makes the mock transcriber answer with that text
+//!   instead of its default, so a test can look for it where it is pasted.
+//!   Like the audio flags it shapes the pipeline, so only the first
+//!   launch's counts.
+//!
+//! - `--mock-text-sequence <a,b,c>` makes the mock answer with those texts,
+//!   one per transcription in order, and then with its usual text. For a test
+//!   that must tell which dictation's text ended up where (the texts can't
+//!   hold a comma). Only the first launch's counts.
+//!
 //! A release build treats them like any other unknown flag: logged and
 //! ignored.
 //!
 //! `--transcriber <name>` picks the speech-to-text engine. It's a normal flag
 //! in every build: it only affects the process that starts with it (a
-//! forwarded second launch can't switch the running app's engine), and the
-//! only engine so far, `mock`, needs no network, key or permission.
+//! forwarded second launch can't switch the running app's engine). `settings`
+//! (the default) is the real provider chosen in the settings, with its key
+//! from the keychain; `mock` needs no network, key or permission and is what
+//! the e2e scenarios run with.
 
 use std::path::PathBuf;
 
 use dictation_pipeline::test_hooks::{
-    DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, PRESS_FLAG, RELEASE_FLAG,
+    DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, KeyCommand, PRESS_FLAG, RELEASE_FLAG,
 };
 use dictation_ports::HotkeyEvent;
+
+/// `--mock-text <text>` (or `=<text>`): what the mock transcriber answers
+/// (debug builds only).
+pub const MOCK_TEXT_FLAG: &str = "--mock-text";
+
+/// `--mock-text-sequence <a,b,c>` (or `=<a,b,c>`): what the mock
+/// transcriber answers to the first dictations, one each, in order (debug
+/// builds only).
+pub const MOCK_TEXT_SEQUENCE_FLAG: &str = "--mock-text-sequence";
 
 /// Whether this build acts on the test hooks.
 pub const TEST_FLAGS: bool = cfg!(debug_assertions);
@@ -36,15 +63,17 @@ pub const TRANSCRIBER_FLAG: &str = "--transcriber";
 /// The speech-to-text engine to run.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TranscriberChoice {
-    /// `transcribe::mock::MockTranscriber`: fixed text, no network. The
-    /// default until a real engine lands (M3.2).
+    /// The provider, model and language from the settings and the provider's
+    /// key from the keychain, rebuilt whenever they're saved (M4.4).
     #[default]
+    Settings,
+    /// `transcribe::mock::MockTranscriber`: fixed text, no network.
     Mock,
 }
 
 impl TranscriberChoice {
     /// Every engine, for the "known engines" warning.
-    pub const ALL: [Self; 1] = [Self::Mock];
+    pub const ALL: [Self; 2] = [Self::Settings, Self::Mock];
 
     /// The known engine names, comma-separated.
     #[must_use]
@@ -56,6 +85,7 @@ impl TranscriberChoice {
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
+            "settings" => Some(Self::Settings),
             "mock" => Some(Self::Mock),
             _ => None,
         }
@@ -65,6 +95,7 @@ impl TranscriberChoice {
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
+            Self::Settings => "settings",
             Self::Mock => "mock",
         }
     }
@@ -80,6 +111,15 @@ pub struct LaunchFlags {
     pub audio_file: Option<PathBuf>,
     /// Save every recording as a WAV (debug builds only).
     pub save_audio: bool,
+    /// The API key commands, in order (debug builds only): done instead of
+    /// starting the app.
+    pub key_commands: Vec<KeyCommand>,
+    /// The text the mock transcriber answers with (debug builds only); the
+    /// last one given wins.
+    pub mock_text: Option<String>,
+    /// The texts the mock transcriber answers the first dictations with (debug
+    /// builds only); the last one given wins.
+    pub mock_text_sequence: Option<Vec<String>>,
     /// The engine `--transcriber` asked for; the last one wins.
     pub transcriber: Option<TranscriberChoice>,
     /// Engine names `--transcriber` was given that no engine has.
@@ -89,11 +129,18 @@ pub struct LaunchFlags {
 }
 
 impl LaunchFlags {
-    /// Whether these flags would change how the pipeline is built, which
-    /// only the first launch can do.
-    pub fn configure_audio(&self) -> bool {
-        self.audio_file.is_some() || self.save_audio
+    /// Whether these flags would change how the pipeline is built (its
+    /// audio or its mock transcript), which only the first launch can do.
+    pub fn configure_pipeline(&self) -> bool {
+        self.audio_file.is_some()
+            || self.save_audio
+            || self.mock_text.is_some()
+            || self.mock_text_sequence.is_some()
     }
+}
+
+fn split_texts(texts: &str) -> Vec<String> {
+    texts.split(',').map(str::to_owned).collect()
 }
 
 /// Sorts `argv` (program path first) into what to act on and what to
@@ -107,12 +154,47 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
             PRESS_FLAG if test_flags => flags.events.push(HotkeyEvent::Pressed),
             RELEASE_FLAG if test_flags => flags.events.push(HotkeyEvent::Released),
             DEBUG_SAVE_AUDIO_FLAG if test_flags => flags.save_audio = true,
+            key_flag if test_flags && KeyCommand::from_flag(key_flag).is_some() => {
+                flags.key_commands.extend(KeyCommand::from_flag(key_flag));
+            }
             DEBUG_AUDIO_FILE_FLAG if test_flags => match args.next() {
                 Some(path) => flags.audio_file = Some(PathBuf::from(path)),
                 None => flags.ignored.push(arg.clone()),
             },
             other if test_flags && audio_file_value(other).is_some() => {
                 flags.audio_file = audio_file_value(other).map(PathBuf::from);
+            }
+            MOCK_TEXT_FLAG if test_flags => match args.next() {
+                Some(text) => flags.mock_text = Some(text.clone()),
+                None => flags.ignored.push(arg.clone()),
+            },
+            other
+                if test_flags
+                    && other
+                        .strip_prefix(MOCK_TEXT_FLAG)
+                        .and_then(|rest| rest.strip_prefix('='))
+                        .is_some() =>
+            {
+                flags.mock_text = other
+                    .strip_prefix(MOCK_TEXT_FLAG)
+                    .and_then(|rest| rest.strip_prefix('='))
+                    .map(str::to_owned);
+            }
+            MOCK_TEXT_SEQUENCE_FLAG if test_flags => match args.next() {
+                Some(texts) => flags.mock_text_sequence = Some(split_texts(texts)),
+                None => flags.ignored.push(arg.clone()),
+            },
+            other
+                if test_flags
+                    && other
+                        .strip_prefix(MOCK_TEXT_SEQUENCE_FLAG)
+                        .and_then(|rest| rest.strip_prefix('='))
+                        .is_some() =>
+            {
+                flags.mock_text_sequence = other
+                    .strip_prefix(MOCK_TEXT_SEQUENCE_FLAG)
+                    .and_then(|rest| rest.strip_prefix('='))
+                    .map(split_texts);
             }
             TRANSCRIBER_FLAG => match args.next() {
                 Some(name) => flags.transcriber(name),
@@ -199,6 +281,8 @@ mod tests {
             }
         }
         assert_eq!(parse(&argv(&[]), true).transcriber, None);
+        let flags = parse(&argv(&["--transcriber", "settings"]), true);
+        assert_eq!(flags.transcriber, Some(TranscriberChoice::Settings));
     }
 
     #[test]
@@ -222,10 +306,10 @@ mod tests {
     #[test]
     fn engine_names_round_trip() {
         let choice = TranscriberChoice::default();
-        assert_eq!(choice, TranscriberChoice::Mock);
+        assert_eq!(choice, TranscriberChoice::Settings, "the real engine");
         assert_eq!(TranscriberChoice::from_name(choice.name()), Some(choice));
         assert_eq!(TranscriberChoice::from_name("Mock"), None);
-        assert_eq!(TranscriberChoice::known_names(), "mock");
+        assert_eq!(TranscriberChoice::known_names(), "settings, mock");
         for choice in TranscriberChoice::ALL {
             assert_eq!(TranscriberChoice::from_name(choice.name()), Some(choice));
         }
@@ -251,7 +335,7 @@ mod tests {
         assert!(flags.save_audio);
         assert_eq!(flags.events, [Pressed]);
         assert!(flags.ignored.is_empty());
-        assert!(flags.configure_audio());
+        assert!(flags.configure_pipeline());
 
         let flags = parse(&argv(&["--debug-audio-file=/tmp/b c.wav"]), true);
         assert_eq!(flags.audio_file, Some(PathBuf::from("/tmp/b c.wav")));
@@ -265,7 +349,110 @@ mod tests {
         assert_eq!(flags.ignored, ["--debug-audio-file"]);
         let flags = parse(&argv(&["--debug-audio-file="]), true);
         assert_eq!(flags.ignored, ["--debug-audio-file="]);
-        assert!(!flags.configure_audio());
+        assert!(!flags.configure_pipeline());
+    }
+
+    #[test]
+    fn debug_builds_take_the_mock_text_in_either_form() {
+        let flags = parse(&argv(&["--mock-text", "hello world", "--press"]), true);
+        assert_eq!(flags.mock_text.as_deref(), Some("hello world"));
+        assert_eq!(flags.events, [Pressed]);
+        assert!(flags.ignored.is_empty());
+        assert!(flags.configure_pipeline());
+
+        let flags = parse(&argv(&["--mock-text=a=b", "--mock-text=last"]), true);
+        assert_eq!(flags.mock_text.as_deref(), Some("last"));
+        // The flag without a value is ignored, and so is nothing else.
+        let flags = parse(&argv(&["--mock-text"]), true);
+        assert_eq!(flags.mock_text, None);
+        assert_eq!(flags.ignored, ["--mock-text"]);
+        assert!(!flags.configure_pipeline());
+    }
+
+    #[test]
+    fn release_builds_ignore_the_mock_text() {
+        let flags = parse(&argv(&["--mock-text", "x", "--mock-text=y"]), false);
+        assert_eq!(flags.mock_text, None);
+        assert_eq!(flags.ignored, ["--mock-text", "x", "--mock-text=y"]);
+    }
+
+    fn strings(texts: &[&str]) -> Vec<String> {
+        texts.iter().map(|&t| t.to_owned()).collect()
+    }
+
+    #[test]
+    fn debug_builds_take_the_mock_text_sequence_in_either_form() {
+        let flags = parse(&argv(&["--mock-text-sequence", "one,two,three"]), true);
+        assert_eq!(
+            flags.mock_text_sequence,
+            Some(strings(&["one", "two", "three"]))
+        );
+        assert_eq!(flags.mock_text, None);
+        assert!(flags.ignored.is_empty());
+        assert!(flags.configure_pipeline());
+
+        let flags = parse(
+            &argv(&["--mock-text-sequence=a=b,c", "--mock-text-sequence=x"]),
+            true,
+        );
+        assert_eq!(flags.mock_text_sequence, Some(strings(&["x"])));
+        // Without a value it is ignored.
+        let flags = parse(&argv(&["--mock-text-sequence"]), true);
+        assert_eq!(flags.mock_text_sequence, None);
+        assert_eq!(flags.ignored, ["--mock-text-sequence"]);
+        assert!(!flags.configure_pipeline());
+    }
+
+    #[test]
+    fn release_builds_ignore_the_mock_text_sequence() {
+        let flags = parse(
+            &argv(&["--mock-text-sequence", "x,y", "--mock-text-sequence=z"]),
+            false,
+        );
+        assert_eq!(flags.mock_text_sequence, None);
+        assert_eq!(
+            flags.ignored,
+            ["--mock-text-sequence", "x,y", "--mock-text-sequence=z"]
+        );
+    }
+
+    #[test]
+    fn debug_builds_take_the_key_commands_in_order() {
+        let flags = parse(
+            &argv(&[
+                "--debug-delete-api-key",
+                "--debug-set-api-key-stdin",
+                "--press",
+            ]),
+            true,
+        );
+        assert_eq!(flags.key_commands, [KeyCommand::Delete, KeyCommand::Set]);
+        assert_eq!(flags.events, [Pressed]);
+        assert!(flags.ignored.is_empty());
+        assert!(parse(&argv(&["--press"]), true).key_commands.is_empty());
+    }
+
+    #[test]
+    fn release_builds_ignore_the_key_commands() {
+        let flags = parse(
+            &argv(&["--debug-set-api-key-stdin", "--debug-delete-api-key"]),
+            false,
+        );
+        assert!(flags.key_commands.is_empty());
+        assert_eq!(
+            flags.ignored,
+            ["--debug-set-api-key-stdin", "--debug-delete-api-key"]
+        );
+    }
+
+    #[test]
+    fn near_miss_key_flags_are_not_commands() {
+        let flags = parse(
+            &argv(&["--debug-set-api-key", "--debug-delete-api-key=1"]),
+            true,
+        );
+        assert!(flags.key_commands.is_empty());
+        assert_eq!(flags.ignored.len(), 2);
     }
 
     #[test]

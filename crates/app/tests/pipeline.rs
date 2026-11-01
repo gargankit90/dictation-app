@@ -191,6 +191,20 @@ impl Drop for TempWav {
     }
 }
 
+/// 300 ms of a 440 Hz tone at half scale: long and loud enough that the
+/// pipeline sends it to the transcriber (shorter or quieter audio doesn't
+/// get that far).
+fn tone() -> Vec<i16> {
+    (0..4_800)
+        .map(|n| {
+            let t = f64::from(n) / 16_000.0;
+            #[allow(clippy::cast_possible_truncation)]
+            let sample = (16_384.0 * (2.0 * std::f64::consts::PI * 440.0 * t).sin()) as i16;
+            sample
+        })
+        .collect()
+}
+
 struct Harness {
     hotkey: FakeHotkey,
     clock: FakeClock,
@@ -225,7 +239,7 @@ impl Harness {
     }
 
     fn with(setup: Setup) -> Self {
-        let wav = TempWav::new(&[0, 16_384, -16_384]);
+        let wav = TempWav::new(&tone());
         let hotkey = FakeHotkey::new();
         let clock = FakeClock::at(Duration::from_secs(100));
         let inserter = FakeInserter::new();
@@ -313,13 +327,11 @@ async fn criterion_1_press_release_inserts_the_transcript() {
     let (inserter, transcriber) = harness.finish().await;
     assert_eq!(inserter.inserted(), ["hello world"]);
     // The pipeline handed the captured audio to the transcriber.
-    assert_eq!(
-        transcriber.calls(),
-        [Audio {
-            sample_rate: 16_000,
-            samples: vec![0.0, 0.5, -0.5],
-        }]
-    );
+    let calls = transcriber.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].sample_rate, 16_000);
+    assert_eq!(calls[0].samples.len(), tone().len());
+    assert!(calls[0].samples.iter().any(|&sample| sample > 0.4));
 }
 
 #[tokio::test]
@@ -344,7 +356,7 @@ async fn criterion_3_transcriber_error_shows_error_and_inserts_nothing() {
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
             UiEvent::Error(DictationError::TranscriptionFailed {
-                reason: "transcription timed out".into()
+                reason: TranscribeError::Timeout.user_message()
             }),
             UiEvent::StateChanged(Idle),
         ]
@@ -395,8 +407,66 @@ async fn a_tap_is_discarded_without_transcribing() {
     assert!(transcriber.calls().is_empty());
 }
 
+/// Dictates `samples` (16 kHz) and expects the pipeline to skip the
+/// transcriber: no request, no paste, no error, straight back to Idle
+/// (issues #69 and #72; M4.2's `TranscriptDropped`).
+async fn assert_not_transcribed(samples: &[i16]) {
+    let wav = TempWav::new(samples);
+    let mut harness = Harness::with(Setup {
+        audio_path: Some(wav.0.clone()),
+        ..Setup::default()
+    });
+    harness.dictate();
+    assert_eq!(
+        harness.until_idle().await,
+        [
+            UiEvent::StateChanged(Recording),
+            UiEvent::StateChanged(Transcribing),
+            UiEvent::StateChanged(Idle),
+        ]
+    );
+    let (inserter, transcriber) = harness.finish().await;
+    assert!(transcriber.calls().is_empty(), "the transcriber was called");
+    assert!(inserter.inserted().is_empty());
+}
+
 #[tokio::test]
-async fn an_empty_transcript_is_an_error_and_inserts_nothing() {
+async fn issue_69_empty_audio_is_not_transcribed() {
+    assert_not_transcribed(&[]).await;
+}
+
+#[tokio::test]
+async fn issue_69_audio_under_200_ms_is_not_transcribed() {
+    let loud: Vec<i16> = tone().into_iter().take(3_000).collect();
+    assert_not_transcribed(&loud).await;
+}
+
+#[tokio::test]
+async fn issue_72_silent_audio_is_not_transcribed() {
+    assert_not_transcribed(&[0; 16_000]).await;
+    // Room noise at about -60 dBFS.
+    let noise: Vec<i16> = tone().into_iter().map(|s| s / 500).collect();
+    assert_not_transcribed(&noise).await;
+}
+
+#[tokio::test]
+async fn issue_72_quiet_speech_level_audio_is_transcribed() {
+    // A -40 dBFS tone, as quiet as the built-in microphone's softest take.
+    let quiet: Vec<i16> = tone().into_iter().map(|s| s / 50).collect();
+    let wav = TempWav::new(&quiet);
+    let mut harness = Harness::with(Setup {
+        audio_path: Some(wav.0.clone()),
+        ..Setup::default()
+    });
+    harness.dictate();
+    harness.until_idle().await;
+    let (inserter, transcriber) = harness.finish().await;
+    assert_eq!(transcriber.calls().len(), 1);
+    assert_eq!(inserter.inserted().len(), 1);
+}
+
+#[tokio::test]
+async fn an_empty_transcript_inserts_nothing_and_shows_no_error() {
     let mut harness = Harness::start();
     harness.transcriber.reply(Ok("  "));
     harness.dictate();
@@ -405,16 +475,54 @@ async fn an_empty_transcript_is_an_error_and_inserts_nothing() {
         [
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
-            UiEvent::Error(DictationError::EmptyTranscript),
             UiEvent::StateChanged(Idle),
         ]
     );
+    // The next dictation works.
+    harness.dictate();
+    harness.until_idle().await;
     let (inserter, _) = harness.finish().await;
-    assert!(inserter.inserted().is_empty());
+    assert_eq!(inserter.inserted(), ["fixed text"]);
+}
+
+#[tokio::test]
+async fn the_transcript_is_trimmed_before_it_is_inserted() {
+    let mut harness = Harness::start();
+    harness.transcriber.reply(Ok("  hello world \n"));
+    harness.dictate();
+    harness.until_idle().await;
+    let (inserter, _) = harness.finish().await;
+    assert_eq!(inserter.inserted(), ["hello world"]);
 }
 
 #[tokio::test]
 async fn an_insert_failure_is_an_error_and_the_next_dictation_works() {
+    let mut harness = Harness::start();
+    harness
+        .inserter
+        .fail_next(InsertError::Failed("no focused app".into()));
+    harness.dictate();
+    assert_eq!(
+        harness.until_idle().await,
+        [
+            UiEvent::StateChanged(Recording),
+            UiEvent::StateChanged(Transcribing),
+            UiEvent::StateChanged(Inserting),
+            UiEvent::Error(DictationError::InsertFailed {
+                reason: "insert failed: no focused app".into()
+            }),
+            UiEvent::StateChanged(Idle),
+        ]
+    );
+    harness.dictate();
+    harness.until_idle().await;
+    let (inserter, _) = harness.finish().await;
+    assert_eq!(inserter.inserted(), ["fixed text"]);
+}
+
+// M4.2 criterion 1: Secure Input on means no paste, an error event, Idle.
+#[tokio::test]
+async fn secure_input_shows_its_message_inserts_nothing_and_the_next_dictation_works() {
     let mut harness = Harness::start();
     harness.inserter.fail_next(InsertError::SecureInput);
     harness.dictate();
@@ -424,15 +532,14 @@ async fn an_insert_failure_is_an_error_and_the_next_dictation_works() {
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
             UiEvent::StateChanged(Inserting),
-            UiEvent::Error(DictationError::InsertFailed {
-                reason: "a password field has focus".into()
-            }),
+            UiEvent::Error(DictationError::SecureInput),
             UiEvent::StateChanged(Idle),
         ]
     );
     harness.dictate();
     harness.until_idle().await;
     let (inserter, _) = harness.finish().await;
+    // Only the second dictation was pasted.
     assert_eq!(inserter.inserted(), ["fixed text"]);
 }
 

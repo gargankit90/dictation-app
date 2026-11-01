@@ -62,11 +62,28 @@ wait_for_vm() {
     VM_IP=$(vm_ip)
     if [ -n "$VM_IP" ] && vm true 2>/dev/null; then
       log "$VM is up at $VM_IP"
+      wait_for_gui
       return 0
     fi
     sleep 2
   done
   die "$VM did not come up with ssh within 3 minutes"
+}
+
+# ssh answers before the GUI session does, and `open` fails in that gap
+# ("Domain does not support specified action"). Waits (up to 2 minutes) for
+# the user's GUI domain and the Dock, then goes on either way: a session that
+# never comes up shows as the first `open` failing, with a better message.
+wait_for_gui() {
+  local i
+  for i in $(seq 1 60); do
+    if vm 'launchctl print "gui/$(id -u)" >/dev/null 2>&1 && pgrep -x Dock >/dev/null' 2>/dev/null; then
+      log "$VM's GUI session is up"
+      return 0
+    fi
+    sleep 2
+  done
+  log "warning: $VM's GUI session did not come up within 2 minutes; continuing"
 }
 
 # Copies the built .app into the VM. tar keeps the bundle's symlinks and
@@ -99,7 +116,16 @@ fresh_app_state() {
 # -n starts a new process even if one runs (as a second launch from the
 # command line would); the single-instance plugin then forwards and exits.
 launch() {
-  vm "open -n $(q "$VM_APP") --args $(q "$@")"
+  # The engine is chosen when the app starts, so only a first launch gets
+  # --transcriber. Scenarios run on the mock (no key, no network) unless
+  # they set E2E_TRANSCRIBER=settings for a real provider (M4.4).
+  local engine=()
+  if [ "$(app_count)" = 0 ]; then
+    engine=(--transcriber "${E2E_TRANSCRIBER:-mock}")
+  fi
+  # -g: don't bring the app to the front, or the paste would miss the
+  # window the scenario put there.
+  vm "open -g -n $(q "$VM_APP") --args $(q ${engine[@]+"${engine[@]}"} "$@")"
 }
 
 app_count() {
@@ -129,11 +155,26 @@ logged_phases() {
   app_log | sed -nE 's/.*state changed phase=([A-Za-z]+).*/\1/p'
 }
 
-# Saves the app log for this scenario into the run's output dir.
+# Saves a screenshot of the VM's desktop (through the cua-driver daemon in
+# the VM) as $OUT_DIR/<name>.png. Never fails a scenario.
+screenshot() {
+  local png="$OUT_DIR/$1.png"
+  if vm "~/.local/bin/cua-driver call get_desktop_state '{}'" 2>/dev/null |
+    jq -r '.screenshot_png_b64 // empty' | base64 -d >"$png" 2>/dev/null && [ -s "$png" ]; then
+    log "screenshot saved to $png"
+  else
+    rm -f "$png"
+    log "no screenshot for $1"
+  fi
+}
+
+# Saves the app log and a screenshot for this scenario into the run's output
+# dir.
 collect_log() {
   local scenario=$1
   app_log >"$OUT_DIR/$scenario.app.log"
   log "app log saved to $OUT_DIR/$scenario.app.log"
+  screenshot "$scenario"
 }
 
 # expect <description> <command...>: records PASS or FAIL for one check.

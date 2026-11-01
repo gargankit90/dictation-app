@@ -23,6 +23,7 @@ use std::time::{Duration, SystemTime};
 
 use dictation_core::retry::{RetryPolicy, SplitMix64};
 use dictation_core::settings::Provider;
+use dictation_core::text::{Transcript, mean_no_speech_prob};
 use dictation_core::wav;
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, RETRY_AFTER};
@@ -81,6 +82,18 @@ pub struct Transcription {
     pub text: String,
     /// The segments, in order; empty if the provider sent none.
     pub segments: Vec<Segment>,
+}
+
+impl Transcription {
+    /// The text with the mean `no_speech_prob` of the segments, for the
+    /// pipeline's silence filter; `None` if the provider sent no segments.
+    #[must_use]
+    pub fn into_transcript(self) -> Transcript {
+        Transcript {
+            no_speech_prob: mean_no_speech_prob(self.segments.iter().map(|s| s.no_speech_prob)),
+            text: self.text,
+        }
+    }
 }
 
 /// One segment of a [`Transcription`].
@@ -292,6 +305,12 @@ impl<W: Wait> Transcriber for OpenAiCompat<W> {
     async fn transcribe(&self, audio: &Audio) -> Result<String, TranscribeError> {
         self.transcribe_verbose(audio).await.map(|t| t.text)
     }
+
+    async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
+        self.transcribe_verbose(audio)
+            .await
+            .map(Transcription::into_transcript)
+    }
 }
 
 impl<W> std::fmt::Debug for OpenAiCompat<W> {
@@ -435,6 +454,21 @@ mod tests {
         assert_eq!(config.base_url, GROQ.base_url);
         assert_eq!(config.timeout, DEFAULT_TIMEOUT);
         assert_eq!(config.language, None);
+    }
+
+    #[test]
+    fn the_transcript_carries_the_mean_no_speech_prob() {
+        let t = parse(
+            br#"{"text":"Thank you.","segments":[{"no_speech_prob":0.8},{"no_speech_prob":0.6}]}"#,
+        )
+        .unwrap()
+        .into_transcript();
+        assert_eq!(t.text, "Thank you.");
+        assert!((t.no_speech_prob.unwrap() - 0.7).abs() < 1e-12);
+
+        // No segments: nothing to judge by, so none.
+        let t = parse(br#"{"text":"hi"}"#).unwrap().into_transcript();
+        assert_eq!(t.no_speech_prob, None);
     }
 
     #[test]

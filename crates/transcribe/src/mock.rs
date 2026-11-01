@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use dictation_ports::{Audio, TranscribeError, Transcriber};
+use dictation_ports::{Audio, TranscribeError, Transcriber, Transcript};
 
 /// The text a [`MockTranscriber::default`] returns.
 pub const DEFAULT_TEXT: &str = "This is a test dictation.";
@@ -24,6 +24,11 @@ pub struct MockTranscriber {
 #[derive(Debug)]
 struct State {
     text: String,
+    /// Answers for the next calls, in order, before `text` again.
+    sequence: VecDeque<String>,
+    /// Reported by `transcribe_detailed`; `None` like an engine that
+    /// doesn't say.
+    no_speech_prob: Option<f64>,
     delay: Duration,
     /// Errors for the next calls, in order, before the text again.
     queued: VecDeque<TranscribeError>,
@@ -45,12 +50,38 @@ impl MockTranscriber {
         Self {
             state: Arc::new(Mutex::new(State {
                 text: text.into(),
+                sequence: VecDeque::new(),
+                no_speech_prob: None,
                 delay: Duration::ZERO,
                 queued: VecDeque::new(),
                 always: None,
                 calls: 0,
             })),
         }
+    }
+
+    /// Answers the next calls with `texts`, one per call in order, then
+    /// with the usual text again (errors from [`failing_next`] still come
+    /// first). For a test that must tell which call's answer ended up where.
+    /// Adds to any texts already queued; shared with clones; returns the
+    /// same mock for chaining.
+    ///
+    /// [`failing_next`]: Self::failing_next
+    #[must_use]
+    pub fn with_texts(self, texts: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.lock()
+            .sequence
+            .extend(texts.into_iter().map(Into::into));
+        self
+    }
+
+    /// Reports `no_speech_prob` with the text from `transcribe_detailed`
+    /// (by default none, like an engine that doesn't say). Shared with
+    /// clones; returns the same mock for chaining.
+    #[must_use]
+    pub fn with_no_speech_prob(self, no_speech_prob: f64) -> Self {
+        self.lock().no_speech_prob = Some(no_speech_prob);
+        self
     }
 
     /// Waits `delay` before answering (or failing), on tokio's clock, so a
@@ -98,14 +129,20 @@ impl MockTranscriber {
     }
 
     /// Takes this call's answer and delay, counting the call.
-    fn next_answer(&self) -> (Duration, Result<String, TranscribeError>) {
+    fn next_answer(&self) -> (Duration, Result<Transcript, TranscribeError>) {
         let mut state = self.lock();
         state.calls += 1;
         let answer = match state.queued.pop_front() {
             Some(error) => Err(error),
             None => match &state.always {
                 Some(error) => Err(error.clone()),
-                None => Ok(state.text.clone()),
+                None => Ok(Transcript {
+                    text: state
+                        .sequence
+                        .pop_front()
+                        .unwrap_or_else(|| state.text.clone()),
+                    no_speech_prob: state.no_speech_prob,
+                }),
             },
         };
         (state.delay, answer)
@@ -113,7 +150,11 @@ impl MockTranscriber {
 }
 
 impl Transcriber for MockTranscriber {
-    async fn transcribe(&self, _audio: &Audio) -> Result<String, TranscribeError> {
+    async fn transcribe(&self, audio: &Audio) -> Result<String, TranscribeError> {
+        self.transcribe_detailed(audio).await.map(|t| t.text)
+    }
+
+    async fn transcribe_detailed(&self, _audio: &Audio) -> Result<Transcript, TranscribeError> {
         let (delay, answer) = self.next_answer();
         if !delay.is_zero() {
             tokio::time::sleep(delay).await;
@@ -136,6 +177,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn detailed_reports_the_configured_no_speech_prob() {
+        let mock = MockTranscriber::new("Thank you.");
+        let plain = mock.transcribe_detailed(&audio()).await.unwrap();
+        assert_eq!(plain, Transcript::from_text("Thank you."));
+
+        let silent = mock.clone().with_no_speech_prob(0.9);
+        let detailed = silent.transcribe_detailed(&audio()).await.unwrap();
+        assert_eq!(detailed.no_speech_prob, Some(0.9));
+        // The plain call still gives just the text, and clones share state.
+        assert_eq!(mock.transcribe(&audio()).await.unwrap(), "Thank you.");
+        assert_eq!(mock.calls(), 3);
+    }
+
+    #[tokio::test]
     async fn returns_its_text() {
         let mock = MockTranscriber::new("hello world");
         assert_eq!(mock.transcribe(&audio()).await.unwrap(), "hello world");
@@ -148,6 +203,28 @@ mod tests {
                 .unwrap(),
             DEFAULT_TEXT
         );
+    }
+
+    #[tokio::test]
+    async fn texts_come_in_order_then_the_usual_text() {
+        let mock = MockTranscriber::new("usual").with_texts(["one", "two"]);
+        for want in ["one", "two", "usual", "usual"] {
+            assert_eq!(mock.transcribe(&audio()).await.unwrap(), want);
+        }
+        assert_eq!(mock.calls(), 4);
+    }
+
+    #[tokio::test]
+    async fn an_error_does_not_use_up_a_queued_text() {
+        let mock = MockTranscriber::new("usual")
+            .with_texts(["one"])
+            .failing_next([TranscribeError::Timeout]);
+        assert_eq!(
+            mock.transcribe(&audio()).await,
+            Err(TranscribeError::Timeout)
+        );
+        assert_eq!(mock.transcribe(&audio()).await.unwrap(), "one");
+        assert_eq!(mock.transcribe(&audio()).await.unwrap(), "usual");
     }
 
     #[tokio::test(start_paused = true)]
