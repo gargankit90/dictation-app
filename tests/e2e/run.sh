@@ -75,57 +75,13 @@ fi
 install_app "$APP_PATH"
 install_fixtures "$E2E_DIR/fixtures"
 
-is_optional() {
-  local name
-  for name in "${OPTIONAL_SCENARIOS[@]}"; do
-    [ "$name" = "$1" ] && return 0
-  done
-  return 1
-}
-
-passed=()
-failed=()
-skipped=()
-bad_skips=()
-results=()
-for scenario in "${scenarios[@]}"; do
-  log "scenario $scenario"
-  SCENARIO_FAILED=0
-  SCENARIO_SKIPPED=0
-  "$scenario"
-  if [ "$SCENARIO_SKIPPED" = 1 ]; then
-    skipped+=("$scenario")
-    if is_optional "$scenario"; then
-      log "scenario $scenario: SKIP (optional)"
-      results+=("SKIP     $scenario (optional)")
-    else
-      bad_skips+=("$scenario")
-      log "scenario $scenario: SKIP (required: this fails the run)"
-      results+=("SKIP     $scenario (REQUIRED: counts as a failure)")
-    fi
-  elif [ "$SCENARIO_FAILED" = 1 ]; then
-    failed+=("$scenario")
-    log "scenario $scenario: FAIL"
-    results+=("FAIL     $scenario")
-  else
-    passed+=("$scenario")
-    log "scenario $scenario: PASS"
-    results+=("PASS     $scenario")
-  fi
-done
-fresh_app_state
-
-# One line per scenario and a total, also saved with the run's output.
-summary="${#passed[@]} passed, ${#failed[@]} failed, ${#skipped[@]} skipped"
-{
-  printf '%s\n' "${results[@]}"
-  echo "$summary"
-} | tee "$OUT_DIR/results.txt" >&2
+# Each scenario runs in a subshell of its own (run_scenario, lib.sh), so one
+# that dies can't end the run or hide the others' results. Outside any
+# condition, or the scenarios' `set -e` would be ignored.
+set +e
+run_scenarios "${scenarios[@]}"
+status=$?
+set -e
+fresh_app_state || log "warning: the app was still running at the end of the run"
 log "output in $OUT_DIR"
-if [ ${#failed[@]} -gt 0 ] || [ ${#bad_skips[@]} -gt 0 ]; then
-  die "$summary; failed: ${failed[*]:-none}; required but skipped: ${bad_skips[*]:-none}"
-fi
-if [ ${#skipped[@]} -gt 0 ]; then
-  log "OK, but skipped: ${skipped[*]} (optional)"
-fi
-log "no scenario failed ($summary)"
+[ "$status" = 0 ] || die "the run failed; see $OUT_DIR/results.txt"
