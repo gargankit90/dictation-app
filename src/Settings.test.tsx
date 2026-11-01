@@ -26,6 +26,8 @@ class Backend {
     launch_at_login: false,
   };
   keys: Record<Provider, boolean> = { groq: false, openai: false };
+  /** What `launch_at_login_supported` answers (false before macOS 13). */
+  launchSupported = true;
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
   testResult: KeyTestError | Error | null = null;
   /** Fails the command named, with the message (a string, as the app sends). */
@@ -51,6 +53,8 @@ class Backend {
     switch (command) {
       case "get_settings":
         return this.settings;
+      case "launch_at_login_supported":
+        return this.launchSupported;
       case "save_settings":
         this.settings = args.settings as Settings_Serialize;
         return null;
@@ -536,6 +540,7 @@ describe("criterion 3: the key is never rendered back", () => {
     expect([...used].sort()).toEqual([
       "get_settings",
       "has_api_key",
+      "launch_at_login_supported",
       "save_settings",
       "set_api_key",
     ]);
@@ -830,6 +835,65 @@ describe("launch at login", () => {
     await waitFor(() => {
       expect(box().checked).toBe(false);
     });
+  });
+
+  /** The window comes back to the front, as when the tray shows it again. */
+  const refocus = () => {
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+  };
+
+  it("reads the OS again when the hidden window is shown again", async () => {
+    await open();
+    expect(box().checked).toBe(false);
+    // Switched on in System Settings while this window was hidden.
+    backend.settings = { ...backend.settings, launch_at_login: true };
+    refocus();
+    await waitFor(() => {
+      expect(box().checked).toBe(true);
+    });
+    backend.settings = { ...backend.settings, launch_at_login: false };
+    refocus();
+    await waitFor(() => {
+      expect(box().checked).toBe(false);
+    });
+  });
+
+  it("saving only the language leaves a login item changed in System Settings alone", async () => {
+    await open();
+    // On in System Settings; this window has not seen a focus event yet.
+    backend.settings = { ...backend.settings, launch_at_login: true };
+    type("Language", "de");
+    click("Save");
+    await screen.findByText("Settings saved.");
+    const saved = backend.named("save_settings");
+    expect((saved[0]?.args.settings as Settings_Serialize).launch_at_login).toBe(true);
+    expect(backend.settings.launch_at_login).toBe(true);
+    expect(box().checked).toBe(true);
+  });
+
+  it("keeps the user's own change when the window regains focus", async () => {
+    await open();
+    fireEvent.click(box());
+    backend.settings = { ...backend.settings, launch_at_login: false };
+    refocus();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(box().checked).toBe(true);
+    click("Save");
+    await screen.findByText("Settings saved.");
+    const saved = backend.named("save_settings");
+    expect((saved[0]?.args.settings as Settings_Serialize).launch_at_login).toBe(true);
+  });
+
+  it("switches the option off with a note where there is no login item", async () => {
+    backend.launchSupported = false;
+    await open();
+    expect(box().disabled).toBe(true);
+    expect(screen.getByText(/needs macOS 13 or later/)).toBeTruthy();
+    type("Language", "de");
+    click("Save");
+    await screen.findByText("Settings saved.");
   });
 
   it("keeps a typed hotkey when the login item could not change", async () => {

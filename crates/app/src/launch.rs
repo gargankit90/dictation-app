@@ -39,6 +39,14 @@ impl From<LaunchAtLoginError> for LaunchProblem {
     }
 }
 
+/// Whether this system has a login item at all. False only when the adapter
+/// says [`LaunchAtLoginError::Unsupported`]; any other failure is
+/// temporary, so the option stays available.
+#[must_use]
+pub fn is_supported(login: &dyn LaunchAtLogin) -> bool {
+    !matches!(login.state(), Err(LaunchAtLoginError::Unsupported))
+}
+
 /// `saved` with `launch_at_login` set to what the OS says. If the OS can't
 /// say, the saved value stays.
 #[must_use]
@@ -121,6 +129,16 @@ mod tests {
         // Awaiting approval is not on.
         login.set_state(LaunchAtLoginState::RequiresApproval);
         assert!(!with_os_state(&login, settings(true)).launch_at_login);
+    }
+
+    #[test]
+    fn only_an_unsupported_system_counts_as_unsupported() {
+        let login = FakeLaunchAtLogin::new();
+        assert!(is_supported(&login));
+        login.fail_with(LaunchAtLoginError::Os("busy".into()));
+        assert!(is_supported(&login), "a failure that may pass is not that");
+        login.fail_with(LaunchAtLoginError::Unsupported);
+        assert!(!is_supported(&login));
     }
 
     #[test]

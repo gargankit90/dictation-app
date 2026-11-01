@@ -14,6 +14,11 @@ export const commands = {
 	 */
 	getSettings: () => typedError<Settings_Serialize, string>(__TAURI_INVOKE("get_settings")),
 	/**
+	 *  Whether this system can start the app at login (macOS 13 and later), so
+	 *  the settings screen can switch the option off with a note.
+	 */
+	launchAtLoginSupported: () => typedError<boolean, string>(__TAURI_INVOKE("launch_at_login_supported")),
+	/**
 	 *  Validates and saves the settings, and applies the launch-at-login choice
 	 *  to the OS.
 	 */

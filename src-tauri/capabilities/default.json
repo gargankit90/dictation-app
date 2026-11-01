@@ -5,6 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "allow-get-settings",
+    "allow-launch-at-login-supported",
     "allow-save-settings",
     "allow-set-api-key",
     "allow-has-api-key",
