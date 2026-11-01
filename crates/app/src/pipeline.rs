@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
+use dictation_core::audio_math::{self, Verdict};
 use dictation_core::coordinator::{Phase, State, step};
 use dictation_core::error::DictationError;
 use dictation_core::events::{Command, Event};
@@ -206,6 +207,9 @@ struct Keys {
 /// A finished background job, tagged with the job it belongs to.
 enum JobResult {
     Transcribed(u64, Result<Transcript, TranscribeError>),
+    /// The audio was empty, too short or silent, so nothing was sent to the
+    /// transcriber (#69, #72).
+    NotTranscribed(u64),
     /// The recording the transcription was waiting for failed.
     AudioFailed(u64, AudioError),
     Inserted(u64, Result<(), InsertError>),
@@ -662,6 +666,8 @@ where
                 Ok(transcript) => cleaned_event(&transcript),
                 Err(error) => Event::TranscriptionFailed(error.to_string()),
             }),
+            // Nothing to paste, and no error to show: straight back to Idle.
+            JobResult::NotTranscribed(job) if job == self.job => Some(Event::TranscriptDropped),
             JobResult::Inserted(job, result) if job == self.job => Some(match result {
                 Ok(()) => Event::InsertDone,
                 Err(InsertError::SecureInput) => Event::SecureInputBlocked,
@@ -676,6 +682,7 @@ where
                 Event::TranscriptionFailed(format!("the microphone failed ({error})")),
             ),
             JobResult::Transcribed(job, _)
+            | JobResult::NotTranscribed(job)
             | JobResult::Inserted(job, _)
             | JobResult::AudioFailed(job, _) => {
                 tracing::debug!(job, current = self.job, "dropping a stale result");
@@ -772,6 +779,17 @@ where
                     );
                 }
             };
+            // Nothing worth sending: no request, no invented words (#69, #72).
+            // The coordinator takes TranscriptDropped (no error) back to Idle.
+            let verdict = audio_math::assess(
+                &audio.samples,
+                audio.sample_rate,
+                audio_math::DEFAULT_SILENCE_THRESHOLD,
+            );
+            if verdict != Verdict::Transcribe {
+                tracing::info!(job, ?verdict, duration = ?audio.duration(), "not transcribing");
+                return JobResult::NotTranscribed(job);
+            }
             tracing::debug!(job, duration = ?audio.duration(), "transcribing");
             JobResult::Transcribed(job, transcriber.transcribe_detailed(&audio).await)
         });
@@ -804,10 +822,12 @@ mod tests {
 
     use super::*;
 
-    /// Captures nothing, instantly.
-    struct SilentAudio(bool);
+    /// Captures 300 ms of constant signal, instantly: long and loud enough
+    /// to reach the transcriber (silence and clips under 200 ms don't, and
+    /// a job that ended at once would race with the results the tests send).
+    struct BurstAudio(bool);
 
-    impl AudioSource for SilentAudio {
+    impl AudioSource for BurstAudio {
         fn start(&mut self) -> Result<(), AudioError> {
             self.0 = true;
             Ok(())
@@ -817,7 +837,7 @@ mod tests {
             self.0 = false;
             Ok(Audio {
                 sample_rate: 16_000,
-                samples: Vec::new(),
+                samples: vec![0.1; 4_800],
             })
         }
 
@@ -849,7 +869,7 @@ mod tests {
     fn runner(inserter: &FakeInserter) -> (TestRunner, watch::Sender<bool>) {
         let (ui, _) = mpsc::unbounded_channel();
         let (shutdown, shutdown_rx) = watch::channel(false);
-        let (audio, _) = AudioWorker::spawn(SilentAudio(false));
+        let (audio, _) = AudioWorker::spawn(BurstAudio(false));
         let runner = Runner::new(
             FakeHotkey::new(),
             audio,

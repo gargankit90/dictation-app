@@ -8,7 +8,7 @@ use std::time::Duration;
 use dictation_core::coordinator::{MIN_HOLD, Phase};
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
 use dictation_pipeline::stand_ins::{
-    DiscardingInserter, FixedTranscriber, GrantedPermissions, SilentAudio,
+    DiscardingInserter, FixedTranscriber, GrantedPermissions, ToneAudio,
 };
 use dictation_pipeline::test_hooks::{SyntheticHotkey, hook_events};
 use dictation_platform::fakes::{FakeClock, FakeHotkey};
@@ -33,7 +33,7 @@ async fn press_then_release_flags_run_the_full_state_sequence() {
     let clock = FakeClock::new();
     let ports = Ports {
         hotkey,
-        audio: SilentAudio::default(),
+        audio: ToneAudio::default(),
         transcriber: FixedTranscriber,
         inserter: DiscardingInserter,
         permissions: GrantedPermissions,

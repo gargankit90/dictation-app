@@ -24,6 +24,8 @@ pub struct MockTranscriber {
 #[derive(Debug)]
 struct State {
     text: String,
+    /// Answers for the next calls, in order, before `text` again.
+    sequence: VecDeque<String>,
     /// Reported by `transcribe_detailed`; `None` like an engine that
     /// doesn't say.
     no_speech_prob: Option<f64>,
@@ -48,6 +50,7 @@ impl MockTranscriber {
         Self {
             state: Arc::new(Mutex::new(State {
                 text: text.into(),
+                sequence: VecDeque::new(),
                 no_speech_prob: None,
                 delay: Duration::ZERO,
                 queued: VecDeque::new(),
@@ -55,6 +58,21 @@ impl MockTranscriber {
                 calls: 0,
             })),
         }
+    }
+
+    /// Answers the next calls with `texts`, one per call in order, then
+    /// with the usual text again (errors from [`failing_next`] still come
+    /// first). For a test that must tell which call's answer ended up where.
+    /// Adds to any texts already queued; shared with clones; returns the
+    /// same mock for chaining.
+    ///
+    /// [`failing_next`]: Self::failing_next
+    #[must_use]
+    pub fn with_texts(self, texts: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.lock()
+            .sequence
+            .extend(texts.into_iter().map(Into::into));
+        self
     }
 
     /// Reports `no_speech_prob` with the text from `transcribe_detailed`
@@ -119,7 +137,10 @@ impl MockTranscriber {
             None => match &state.always {
                 Some(error) => Err(error.clone()),
                 None => Ok(Transcript {
-                    text: state.text.clone(),
+                    text: state
+                        .sequence
+                        .pop_front()
+                        .unwrap_or_else(|| state.text.clone()),
                     no_speech_prob: state.no_speech_prob,
                 }),
             },
@@ -182,6 +203,28 @@ mod tests {
                 .unwrap(),
             DEFAULT_TEXT
         );
+    }
+
+    #[tokio::test]
+    async fn texts_come_in_order_then_the_usual_text() {
+        let mock = MockTranscriber::new("usual").with_texts(["one", "two"]);
+        for want in ["one", "two", "usual", "usual"] {
+            assert_eq!(mock.transcribe(&audio()).await.unwrap(), want);
+        }
+        assert_eq!(mock.calls(), 4);
+    }
+
+    #[tokio::test]
+    async fn an_error_does_not_use_up_a_queued_text() {
+        let mock = MockTranscriber::new("usual")
+            .with_texts(["one"])
+            .failing_next([TranscribeError::Timeout]);
+        assert_eq!(
+            mock.transcribe(&audio()).await,
+            Err(TranscribeError::Timeout)
+        );
+        assert_eq!(mock.transcribe(&audio()).await.unwrap(), "one");
+        assert_eq!(mock.transcribe(&audio()).await.unwrap(), "usual");
     }
 
     #[tokio::test(start_paused = true)]

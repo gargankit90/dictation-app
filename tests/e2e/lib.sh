@@ -129,11 +129,26 @@ logged_phases() {
   app_log | sed -nE 's/.*state changed phase=([A-Za-z]+).*/\1/p'
 }
 
-# Saves the app log for this scenario into the run's output dir.
+# Saves a screenshot of the VM's desktop (through the cua-driver daemon in
+# the VM) as $OUT_DIR/<name>.png. Never fails a scenario.
+screenshot() {
+  local png="$OUT_DIR/$1.png"
+  if vm "~/.local/bin/cua-driver call get_desktop_state '{}'" 2>/dev/null |
+    jq -r '.screenshot_png_b64 // empty' | base64 -d >"$png" 2>/dev/null && [ -s "$png" ]; then
+    log "screenshot saved to $png"
+  else
+    rm -f "$png"
+    log "no screenshot for $1"
+  fi
+}
+
+# Saves the app log and a screenshot for this scenario into the run's output
+# dir.
 collect_log() {
   local scenario=$1
   app_log >"$OUT_DIR/$scenario.app.log"
   log "app log saved to $OUT_DIR/$scenario.app.log"
+  screenshot "$scenario"
 }
 
 # expect <description> <command...>: records PASS or FAIL for one check.
