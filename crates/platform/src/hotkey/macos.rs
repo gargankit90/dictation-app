@@ -269,6 +269,8 @@ fn to_key(key: handy_keys::Key) -> Option<Key> {
 mod tests {
     use std::sync::mpsc;
 
+    use dictation_core::coordinator::{self, MAX_RECORDING, State};
+    use dictation_core::events::{Command, Event};
     use dictation_ports::HotkeyEvent::{CancelPressed, Failed, Interrupted, Pressed, Released};
 
     use super::*;
@@ -459,7 +461,7 @@ mod tests {
         // key was down before the tap started (third_party/handy-keys,
         // dictation_patch_tests). Each case: what it sends, from the start
         // with Option already held, through the next press and release.
-        let cases: [(&str, Vec<KeyEvent>); 3] = [
+        let cases: [(&str, Vec<KeyEvent>); 4] = [
             (
                 "right held",
                 vec![
@@ -485,10 +487,25 @@ mod tests {
                     modifier_event(none(), RIGHT, false),
                 ],
             ),
+            (
+                // Left's press is found on Right's release: a resync
+                // first (#85 review round 1, B1). Idle ignores it.
+                "both held, missed by the start snapshot",
+                vec![
+                    KeyEvent::resync(LEFT),
+                    modifier_event(LEFT, RIGHT, false),
+                    modifier_event(none(), LEFT, false),
+                    modifier_event(RIGHT, RIGHT, true),
+                    modifier_event(none(), RIGHT, false),
+                ],
+            ),
         ];
         for (name, events) in cases {
             let harness = Harness::start();
             harness.send(&events);
+            if events[0].is_resync() {
+                assert_eq!(harness.next(), Interrupted, "{name}");
+            }
             assert_eq!(harness.next(), Pressed, "{name}");
             assert_eq!(harness.next(), Released, "{name}");
             harness.assert_quiet();
@@ -542,6 +559,105 @@ mod tests {
         assert_eq!(harness.next(), Pressed);
         assert_eq!(harness.next(), Interrupted);
         harness.assert_quiet();
+    }
+
+    /// What the coordinator does with what the adapter sent, from Idle, one
+    /// second apart, then at the duration limit.
+    fn coordinate(events: &[dictation_ports::HotkeyEvent]) -> Vec<Command> {
+        let mut state = State::Idle;
+        let mut commands = Vec::new();
+        let mut now = Duration::ZERO;
+        for event in events {
+            now += Duration::from_secs(1);
+            let event = match event {
+                Pressed => Event::HotkeyPressed(now),
+                Released => Event::HotkeyReleased(now),
+                CancelPressed => Event::CancelPressed,
+                Interrupted => Event::HotkeyInterrupted,
+                Failed => Event::HotkeyFailed,
+            };
+            let (next, out) = coordinator::step(state, event);
+            state = next;
+            commands.extend(out);
+        }
+        let (_, out) = coordinator::step(state, Event::Tick(now + MAX_RECORDING));
+        commands.extend(out);
+        commands
+    }
+
+    /// Everything the adapter sends for `keys`, until it goes quiet.
+    fn outputs(keys: &[KeyEvent]) -> Vec<dictation_ports::HotkeyEvent> {
+        let harness = Harness::start();
+        harness.send(keys);
+        let mut out = Vec::new();
+        while let Ok(event) = harness.events.recv_timeout(STOP_POLL * 4) {
+            out.push(event);
+        }
+        out
+    }
+
+    #[test]
+    fn review_b1_missed_release_then_another_modifier_discards() {
+        // What the patched handy-keys sends when Right Option's release is
+        // missed and Shift (Cmd, Caps Lock, Fn) comes next: a resync with
+        // Option gone, then that key's own event (dictation_patch_tests::
+        // a_missed_release_seen_on_another_modifier_sends_a_resync_first).
+        let shift = Modifiers::SHIFT_LEFT;
+        let nexts = [
+            modifier_event(shift, shift, true),
+            modifier_event(Modifiers::SHIFT_RIGHT, Modifiers::SHIFT_RIGHT, true),
+            modifier_event(Modifiers::CMD_RIGHT, Modifiers::CMD_RIGHT, true),
+            key_event(none(), handy_keys::Key::CapsLock, true),
+            modifier_event(Modifiers::FN, Modifiers::FN, true),
+        ];
+        for next in nexts {
+            let out = outputs(&[
+                modifier_event(RIGHT, RIGHT, true),
+                KeyEvent::resync(none()),
+                next,
+                modifier_event(none(), next.changed_modifier.unwrap_or(shift), false),
+            ]);
+            assert_eq!(out, [Pressed, Interrupted], "{next:?}");
+            let commands = coordinate(&out);
+            assert!(
+                commands.contains(&Command::DiscardRecording),
+                "{commands:?}"
+            );
+            assert!(!commands.contains(&Command::StopRecording), "{commands:?}");
+            assert!(!commands.contains(&Command::Transcribe), "{commands:?}");
+        }
+    }
+
+    #[test]
+    fn other_modifiers_and_keys_while_held_do_not_cancel() {
+        let (sl, sr) = (Modifiers::SHIFT_LEFT, Modifiers::SHIFT_RIGHT);
+        let (cl, cr) = (Modifiers::CMD_LEFT, Modifiers::CMD_RIGHT);
+        let fun = Modifiers::FN;
+        let out = outputs(&[
+            modifier_event(RIGHT, RIGHT, true),
+            modifier_event(RIGHT | sl, sl, true),
+            key_event(RIGHT | sl, handy_keys::Key::A, true),
+            key_event(RIGHT | sl, handy_keys::Key::A, false),
+            modifier_event(RIGHT, sl, false),
+            modifier_event(RIGHT | sr, sr, true),
+            modifier_event(RIGHT, sr, false),
+            modifier_event(RIGHT | cl, cl, true),
+            modifier_event(RIGHT, cl, false),
+            modifier_event(RIGHT | cr, cr, true),
+            modifier_event(RIGHT, cr, false),
+            key_event(RIGHT, handy_keys::Key::CapsLock, true),
+            key_event(RIGHT, handy_keys::Key::CapsLock, false),
+            modifier_event(RIGHT | fun, fun, true),
+            modifier_event(RIGHT, fun, false),
+            modifier_event(none(), RIGHT, false),
+        ]);
+        assert_eq!(out, [Pressed, Released]);
+        let commands = coordinate(&out);
+        assert!(commands.contains(&Command::Transcribe), "{commands:?}");
+        assert!(
+            !commands.contains(&Command::DiscardRecording),
+            "{commands:?}"
+        );
     }
 
     #[test]
