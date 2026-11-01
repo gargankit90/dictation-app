@@ -16,6 +16,9 @@
 //! close button hides it instead of destroying it, so the tray can show it
 //! again.
 
+// Only the build script and the capability tests need the list.
+#[cfg(test)]
+mod command_names;
 pub mod commands;
 mod flags;
 mod logging;
