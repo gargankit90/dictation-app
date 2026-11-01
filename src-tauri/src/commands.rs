@@ -72,19 +72,32 @@ pub async fn get_settings(
     .await
 }
 
-/// Saves the settings: the login item first, then the file with whatever the
-/// OS ended up with, then the engine is rebuilt.
+/// Saves the settings: they are checked first, then the login item is
+/// changed, then the file is written with whatever the OS ended up with,
+/// then the engine is rebuilt.
 ///
-/// If the login item couldn't be changed, everything else is still saved and
-/// the error says why (and what to do, if the user has to approve it).
+/// Invalid settings change nothing, not even the login item (T3, #121). If
+/// the login item couldn't be changed, everything else is still saved and
+/// the error says why (and what to do, if the user has to approve it). If
+/// the file can't be written, the login item is put back, so the OS and the
+/// file still agree on the old choice; the error is the file's, even if
+/// putting it back fails too (that is logged), and the form shows the OS's
+/// real state either way.
 fn save_with_login<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
     login: &dyn LaunchAtLogin,
     mut settings: Settings,
 ) -> Result<Option<LaunchProblem>, ConfigError> {
+    settings.validate()?;
+    let before = login.state().ok();
     let problem = launch::apply(login, &mut settings).err();
-    engine::changed(config, live, |config| config.save_settings(&settings))?;
+    if let Err(error) = engine::changed(config, live, |config| config.save_settings(&settings)) {
+        if let Err(undo) = launch::restore(login, before) {
+            tracing::warn!(%undo, "could not put the login item back after a failed save");
+        }
+        return Err(error);
+    }
     Ok(problem)
 }
 
@@ -558,6 +571,86 @@ mod tests {
             assert_eq!(saved.language.as_deref(), Some("de"));
             assert!(!saved.launch_at_login, "not claimed as on");
             let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// #121: a save the settings refuse never reaches the OS, including
+        /// a typo the form's own hotkey check lets through.
+        #[test]
+        fn invalid_settings_never_change_login_item() {
+            for bad in [
+                Settings {
+                    model: String::new(),
+                    ..on()
+                },
+                Settings {
+                    language: Some("EN!".into()),
+                    ..on()
+                },
+                Settings {
+                    hotkey: "Ctrl+Banana".into(),
+                    ..on()
+                },
+            ] {
+                let (config, dir) = config();
+                let login = FakeLaunchAtLogin::new();
+                let error = save_with_login(&config, &LiveEngine::fixed(), &login, bad.clone())
+                    .unwrap_err();
+                assert!(matches!(error, ConfigError::Settings(_)), "{error}");
+                assert!(login.calls().is_empty(), "{bad:?} reached the OS");
+                assert_eq!(login.state(), Ok(LaunchAtLoginState::Disabled));
+                assert!(!config.path().exists(), "nothing written");
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        }
+
+        /// A login item that turns on fine, then refuses to change again.
+        struct OnceLogin(FakeLaunchAtLogin);
+
+        impl LaunchAtLogin for OnceLogin {
+            fn state(&self) -> Result<LaunchAtLoginState, dictation_ports::LaunchAtLoginError> {
+                self.0.state()
+            }
+
+            fn set_enabled(
+                &self,
+                enabled: bool,
+            ) -> Result<(), dictation_ports::LaunchAtLoginError> {
+                if self.0.calls().is_empty() {
+                    self.0.set_enabled(enabled)
+                } else {
+                    Err(dictation_ports::LaunchAtLoginError::Os("refused".into()))
+                }
+            }
+        }
+
+        /// #121: the OS accepted the change but the file couldn't be written.
+        /// The login item is put back, so neither the error nor what the form
+        /// shows next claims the save worked; if it can't be put back, the
+        /// error is still the file's and the form shows what the OS has.
+        #[test]
+        fn failed_settings_write_reports_actual_login_state() {
+            let (config, dir) = config();
+            let _ = std::fs::remove_dir_all(&dir);
+            // A file where the settings directory should be.
+            std::fs::write(&dir, "not a directory").unwrap();
+
+            let login = FakeLaunchAtLogin::new();
+            let error = save_with_login(&config, &LiveEngine::fixed(), &login, on()).unwrap_err();
+            assert!(matches!(error, ConfigError::Io { .. }), "{error}");
+            assert_eq!(login.calls(), [true, false], "turned on, then back off");
+            assert_eq!(login.state(), Ok(LaunchAtLoginState::Disabled));
+            // What the form reads back after the error (Settings.tsx).
+            let shown = launch::with_os_state(&login, Settings::default());
+            assert!(!shown.launch_at_login);
+
+            // Putting it back fails too: the file's error is the one shown,
+            // and the form shows the OS's real state, on.
+            let stuck = OnceLogin(FakeLaunchAtLogin::new());
+            let error = save_with_login(&config, &LiveEngine::fixed(), &stuck, on()).unwrap_err();
+            assert!(matches!(error, ConfigError::Io { .. }), "{error}");
+            assert_eq!(stuck.state(), Ok(LaunchAtLoginState::Enabled));
+            assert!(launch::with_os_state(&stuck, Settings::default()).launch_at_login);
+            let _ = std::fs::remove_file(dir);
         }
 
         #[test]

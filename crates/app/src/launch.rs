@@ -98,6 +98,39 @@ pub fn apply(login: &dyn LaunchAtLogin, settings: &mut Settings) -> Result<(), L
     }
 }
 
+/// Puts the login item back to `before` (what [`LaunchAtLogin::state`] said
+/// before [`apply`]), for a save whose settings file couldn't be written
+/// after the OS was changed (T3, #121): the file and the OS then still agree
+/// on the old choice. Does nothing if the OS is already there, or if `before`
+/// is unknown and the item is off.
+///
+/// # Errors
+///
+/// A [`LaunchProblem`] if the OS refuses or ends up elsewhere; the caller
+/// reports its own error first.
+pub fn restore(
+    login: &dyn LaunchAtLogin,
+    before: Option<LaunchAtLoginState>,
+) -> Result<(), LaunchProblem> {
+    let now = login.state()?;
+    if Some(now) == before || (before.is_none() && !now.is_enabled()) {
+        return Ok(());
+    }
+    // An item that was waiting for approval is registered again, so it
+    // waits again; one the OS couldn't describe was off as far as we know.
+    let enabled = matches!(
+        before,
+        Some(LaunchAtLoginState::Enabled | LaunchAtLoginState::RequiresApproval)
+    );
+    login.set_enabled(enabled)?;
+    let after = login.state()?;
+    if before.map_or(!after.is_enabled(), |before| after == before) {
+        Ok(())
+    } else {
+        Err(LaunchProblem::NotApplied)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use dictation_platform::fakes::FakeLaunchAtLogin;
@@ -231,5 +264,51 @@ mod tests {
         let mut on = settings(true);
         assert_eq!(apply(&login, &mut on), Err(LaunchProblem::NotApplied));
         assert!(!on.launch_at_login);
+    }
+
+    #[test]
+    fn restore_puts_back_the_state_from_before_the_save() {
+        for before in [
+            LaunchAtLoginState::Disabled,
+            LaunchAtLoginState::Enabled,
+            LaunchAtLoginState::RequiresApproval,
+        ] {
+            let login = FakeLaunchAtLogin::new();
+            login.set_state(before);
+            if before == LaunchAtLoginState::RequiresApproval {
+                login.enabling_gives(LaunchAtLoginState::RequiresApproval);
+            }
+            let mut flipped = settings(!before.is_enabled());
+            let _ = apply(&login, &mut flipped);
+            restore(&login, Some(before)).unwrap();
+            assert_eq!(login.state(), Ok(before), "from {before:?}");
+        }
+    }
+
+    #[test]
+    fn restore_leaves_an_os_that_is_already_there_alone() {
+        let login = FakeLaunchAtLogin::new();
+        restore(&login, Some(LaunchAtLoginState::Disabled)).unwrap();
+        restore(&login, None).unwrap();
+        assert!(login.calls().is_empty());
+    }
+
+    #[test]
+    fn restore_reports_an_os_that_refuses_or_ends_up_elsewhere() {
+        let login = FakeLaunchAtLogin::new();
+        login.set_state(LaunchAtLoginState::Enabled);
+        assert_eq!(
+            restore(
+                &RefusingLogin(login.clone()),
+                Some(LaunchAtLoginState::Disabled)
+            ),
+            Err(LaunchProblem::Os("no bundle".into()))
+        );
+        login.set_state(LaunchAtLoginState::Disabled);
+        login.enabling_gives(LaunchAtLoginState::RequiresApproval);
+        assert_eq!(
+            restore(&login, Some(LaunchAtLoginState::Enabled)),
+            Err(LaunchProblem::NotApplied)
+        );
     }
 }
