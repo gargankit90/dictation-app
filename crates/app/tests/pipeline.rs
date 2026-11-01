@@ -467,7 +467,7 @@ async fn issue_72_quiet_speech_level_audio_is_transcribed() {
 }
 
 #[tokio::test]
-async fn an_empty_transcript_is_an_error_and_inserts_nothing() {
+async fn an_empty_transcript_inserts_nothing_and_shows_no_error() {
     let mut harness = Harness::start();
     harness.transcriber.reply(Ok("  "));
     harness.dictate();
@@ -476,16 +476,54 @@ async fn an_empty_transcript_is_an_error_and_inserts_nothing() {
         [
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
-            UiEvent::Error(DictationError::EmptyTranscript),
             UiEvent::StateChanged(Idle),
         ]
     );
+    // The next dictation works.
+    harness.dictate();
+    harness.until_idle().await;
     let (inserter, _) = harness.finish().await;
-    assert!(inserter.inserted().is_empty());
+    assert_eq!(inserter.inserted(), ["fixed text"]);
+}
+
+#[tokio::test]
+async fn the_transcript_is_trimmed_before_it_is_inserted() {
+    let mut harness = Harness::start();
+    harness.transcriber.reply(Ok("  hello world \n"));
+    harness.dictate();
+    harness.until_idle().await;
+    let (inserter, _) = harness.finish().await;
+    assert_eq!(inserter.inserted(), ["hello world"]);
 }
 
 #[tokio::test]
 async fn an_insert_failure_is_an_error_and_the_next_dictation_works() {
+    let mut harness = Harness::start();
+    harness
+        .inserter
+        .fail_next(InsertError::Failed("no focused app".into()));
+    harness.dictate();
+    assert_eq!(
+        harness.until_idle().await,
+        [
+            UiEvent::StateChanged(Recording),
+            UiEvent::StateChanged(Transcribing),
+            UiEvent::StateChanged(Inserting),
+            UiEvent::Error(DictationError::InsertFailed {
+                reason: "insert failed: no focused app".into()
+            }),
+            UiEvent::StateChanged(Idle),
+        ]
+    );
+    harness.dictate();
+    harness.until_idle().await;
+    let (inserter, _) = harness.finish().await;
+    assert_eq!(inserter.inserted(), ["fixed text"]);
+}
+
+// M4.2 criterion 1: Secure Input on means no paste, an error event, Idle.
+#[tokio::test]
+async fn secure_input_shows_its_message_inserts_nothing_and_the_next_dictation_works() {
     let mut harness = Harness::start();
     harness.inserter.fail_next(InsertError::SecureInput);
     harness.dictate();
@@ -495,15 +533,14 @@ async fn an_insert_failure_is_an_error_and_the_next_dictation_works() {
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
             UiEvent::StateChanged(Inserting),
-            UiEvent::Error(DictationError::InsertFailed {
-                reason: "a password field has focus".into()
-            }),
+            UiEvent::Error(DictationError::SecureInput),
             UiEvent::StateChanged(Idle),
         ]
     );
     harness.dictate();
     harness.until_idle().await;
     let (inserter, _) = harness.finish().await;
+    // Only the second dictation was pasted.
     assert_eq!(inserter.inserted(), ["fixed text"]);
 }
 

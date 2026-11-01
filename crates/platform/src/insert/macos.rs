@@ -356,11 +356,21 @@ impl MacPasteKeys {
 /// In an autorelease pool, like [`MacPasteboard`]'s methods.
 impl PasteKeys for MacPasteKeys {
     fn paste(&self) -> Result<(), InsertError> {
+        self.paste_unless(&|| false)
+    }
+
+    /// Does the permission check and the layout lookup first, then asks
+    /// `blocked`, then posts the two key events. What's left between that
+    /// answer and the events reaching the focused app is unavoidable.
+    fn paste_unless(&self, blocked: &dyn Fn() -> bool) -> Result<(), InsertError> {
         autoreleasepool(|_| {
             if !is_accessibility_trusted() {
                 return Err(InsertError::PermissionDenied);
             }
             let chord = paste_chord(Os::MacOs, layout::command_char_lookup());
+            if blocked() {
+                return Err(InsertError::SecureInput);
+            }
             tracing::debug!(key_code = chord.key_code, "pasting");
             Self::post(chord)
         })

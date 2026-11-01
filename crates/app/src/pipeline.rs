@@ -27,6 +27,7 @@ use dictation_core::audio_math::{self, Verdict};
 use dictation_core::coordinator::{Phase, State, step};
 use dictation_core::error::DictationError;
 use dictation_core::events::{Command, Event};
+use dictation_core::text::{Cleaned, Transcript, clean};
 use dictation_ports::{
     Audio, AudioError, AudioSource, Clock, HotkeyError, HotkeyEvent, HotkeySource, InsertError,
     Permission, PermissionStatus, Permissions, TextInserter, TranscribeError, Transcriber,
@@ -169,6 +170,21 @@ impl Pipeline {
     }
 }
 
+/// The event for a transcript once cleaned up (`dictation_core::text`):
+/// the text to insert, or "nothing to paste" (no error). Never logs the
+/// text.
+fn cleaned_event(transcript: &Transcript) -> Event {
+    // No adapter reads the character before the cursor yet, so no smart
+    // leading space (see the `text` module docs).
+    match clean(transcript, None) {
+        Cleaned::Text(text) => Event::TranscriptReady(text),
+        Cleaned::Dropped(why) => {
+            tracing::debug!(?why, "transcript dropped; nothing to paste");
+            Event::TranscriptDropped
+        }
+    }
+}
+
 /// Hotkey events the pipeline task may have unread. The task never blocks,
 /// so a person can't fill this; only a stuck task or a flood of synthetic
 /// events can.
@@ -190,7 +206,7 @@ struct Keys {
 
 /// A finished background job, tagged with the job it belongs to.
 enum JobResult {
-    Transcribed(u64, Result<String, TranscribeError>),
+    Transcribed(u64, Result<Transcript, TranscribeError>),
     /// The recording the transcription was waiting for failed.
     AudioFailed(u64, AudioError),
     Inserted(u64, Result<(), InsertError>),
@@ -644,11 +660,12 @@ where
         };
         match result {
             JobResult::Transcribed(job, result) if job == self.job => Some(match result {
-                Ok(text) => Event::TranscriptReady(text),
+                Ok(transcript) => cleaned_event(&transcript),
                 Err(error) => Event::TranscriptionFailed(error.to_string()),
             }),
             JobResult::Inserted(job, result) if job == self.job => Some(match result {
                 Ok(()) => Event::InsertDone,
+                Err(InsertError::SecureInput) => Event::SecureInputBlocked,
                 Err(error) => Event::InsertFailed(error.to_string()),
             }),
             // The start failed for want of the permission after the release
@@ -769,7 +786,7 @@ where
                 return JobResult::Transcribed(job, Ok(String::new()));
             }
             tracing::debug!(job, duration = ?audio.duration(), "transcribing");
-            JobResult::Transcribed(job, transcriber.transcribe(&audio).await)
+            JobResult::Transcribed(job, transcriber.transcribe_detailed(&audio).await)
         });
         self.running = Some((task.id(), Job::Transcribe));
     }
@@ -924,6 +941,56 @@ mod tests {
         deliver(&mut runner, inserted);
         assert_eq!(runner.state, State::Idle);
         assert_eq!(inserter.inserted(), ["first", "third"]);
+    }
+
+    /// M4.2 with M2.3: both ways a dictation ends without a paste (nothing to
+    /// paste, Secure Input) leave the coordinator in Idle with the audio
+    /// worker's bounded queue ready, so the next dictation starts and
+    /// transcribes. Only the block is an error.
+    #[tokio::test]
+    async fn a_dropped_transcript_and_a_secure_input_block_both_leave_the_next_dictation_working() {
+        let inserter = FakeInserter::new();
+        let (mut runner, _shutdown) = runner(&inserter);
+        let (ui, mut ui_events) = mpsc::unbounded_channel();
+        runner.ui = ui;
+
+        // Dictation 1: a blank transcript goes straight to Idle, no error.
+        key(&mut runner, HotkeyEvent::Pressed, 0);
+        key(&mut runner, HotkeyEvent::Released, 500);
+        deliver(&mut runner, JobResult::Transcribed(1, Ok("  ".into())));
+        assert_eq!(runner.state, State::Idle);
+        assert_eq!(
+            runner.jobs.len(),
+            1,
+            "no insert job for a dropped transcript"
+        );
+
+        // Dictation 2 (jobs 2 and 3: transcribe, insert): the paste is blocked by
+        // Secure Input.
+        key(&mut runner, HotkeyEvent::Pressed, 1_000);
+        key(&mut runner, HotkeyEvent::Released, 1_500);
+        deliver(&mut runner, JobResult::Transcribed(2, Ok("hello".into())));
+        assert_eq!(runner.state, State::Inserting);
+        deliver(
+            &mut runner,
+            JobResult::Inserted(3, Err(InsertError::SecureInput)),
+        );
+        assert_eq!(runner.state, State::Idle);
+
+        // Dictation 3 starts and reaches Transcribing as usual.
+        key(&mut runner, HotkeyEvent::Pressed, 2_000);
+        key(&mut runner, HotkeyEvent::Released, 2_500);
+        assert_eq!((runner.state, runner.job), (State::Transcribing, 4));
+
+        let mut errors = Vec::new();
+        while let Ok(event) = ui_events.try_recv() {
+            if let UiEvent::Error(error) = event {
+                errors.push(error);
+            }
+        }
+        assert_eq!(errors, [DictationError::SecureInput]);
+        runner.jobs.abort_all();
+        while runner.jobs.join_next().await.is_some() {}
     }
 
     #[tokio::test]
