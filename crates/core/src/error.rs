@@ -37,6 +37,12 @@ pub enum DictationError {
     /// The OS has not granted a permission dictation needs.
     #[error("{} permission is missing.", permission_name(*.0))]
     PermissionMissing(Permission),
+    /// The global hotkey stopped working (macOS: often because
+    /// Accessibility was turned off).
+    #[error(
+        "The dictation hotkey stopped working. Check the Accessibility permission, then restart the app."
+    )]
+    HotkeyFailed,
 }
 
 fn permission_name(permission: Permission) -> &'static str {
@@ -77,6 +83,10 @@ mod tests {
             (
                 DictationError::PermissionMissing(Permission::Accessibility),
                 "Accessibility permission is missing.",
+            ),
+            (
+                DictationError::HotkeyFailed,
+                "The dictation hotkey stopped working. Check the Accessibility permission, then restart the app.",
             ),
         ];
         for (error, message) in cases {

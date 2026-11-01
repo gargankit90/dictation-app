@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use dictation_core::retry::{RetryPolicy, SplitMix64};
+use dictation_core::settings::Provider;
 use dictation_core::text::{Transcript, mean_no_speech_prob};
 use dictation_core::wav;
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
@@ -62,6 +63,17 @@ pub const OPENAI: Preset = Preset {
     base_url: "https://api.openai.com/v1",
     model: "whisper-1",
 };
+
+impl Preset {
+    /// The preset for `provider`.
+    #[must_use]
+    pub fn for_provider(provider: Provider) -> Self {
+        match provider {
+            Provider::Groq => GROQ,
+            Provider::OpenAi => OPENAI,
+        }
+    }
+}
 
 /// A transcript with the per-segment detail `verbose_json` returns.
 #[derive(Debug, Clone, PartialEq)]
@@ -457,6 +469,15 @@ mod tests {
         // No segments: nothing to judge by, so none.
         let t = parse(br#"{"text":"hi"}"#).unwrap().into_transcript();
         assert_eq!(t.no_speech_prob, None);
+    }
+
+    #[test]
+    fn each_provider_has_a_preset_with_its_default_model() {
+        for provider in Provider::ALL {
+            let preset = Preset::for_provider(provider);
+            assert_eq!(preset.name, provider.to_string());
+            assert_eq!(preset.model, provider.default_model());
+        }
     }
 
     #[test]

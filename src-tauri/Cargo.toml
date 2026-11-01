@@ -26,9 +26,15 @@ dictation-transcribe.workspace = true
 tauri = { workspace = true, features = ["tray-icon"] }
 tauri-plugin-single-instance.workspace = true
 tauri-specta.workspace = true
+serde.workspace = true
 specta.workspace = true
 specta-typescript.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+dictation-platform = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+wiremock.workspace = true

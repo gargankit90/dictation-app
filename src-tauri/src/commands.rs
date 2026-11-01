@@ -7,12 +7,21 @@
 //! generated bindings by `tests::criterion_2_*`). Keychain calls can block
 //! (and on macOS, show an access prompt), so every command runs on the
 //! blocking pool, never the main thread.
+//!
+//! `test_api_key` (M3.4) is the one command that sends a key anywhere but
+//! the keychain: to the provider, in the `Authorization` header, with a short
+//! silent clip. It returns nothing but success or a [`KeyTestError`] whose
+//! message is written here and never holds a key.
 
 use std::sync::Arc;
 
 use dictation_core::settings::{Provider, Settings};
-use dictation_pipeline::config::{Config, ConfigError};
+use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_platform::secrets::KeychainSecretStore;
+use dictation_ports::{SecretStore, TranscribeError};
+use dictation_transcribe::check_key::check_key;
+use dictation_transcribe::openai_compat::{self, Preset};
+use serde::Serialize;
 use tauri::State;
 
 /// Where the bindings go, relative to `src-tauri/`.
@@ -69,6 +78,157 @@ pub async fn has_api_key(state: State<'_, AppConfig>, provider: Provider) -> Res
     on_config(&state, move |config| config.has_api_key(provider)).await
 }
 
+/// What went wrong when testing a key, so the UI can pick its wording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyTestKind {
+    /// No key was typed or saved to test.
+    NoKey,
+    /// The key can't be a key, or the provider rejected it.
+    InvalidKey,
+    /// The provider is rate limiting; the key may be fine.
+    RateLimited,
+    /// The provider couldn't be reached (offline, DNS, timeout).
+    Network,
+    /// The provider failed or gave an answer we can't use.
+    Server,
+    /// The saved key couldn't be read from the keychain.
+    Keychain,
+}
+
+/// Why a key test failed. Never contains the key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+pub struct KeyTestError {
+    /// The category.
+    pub kind: KeyTestKind,
+    /// What to show the user.
+    pub message: String,
+}
+
+impl KeyTestError {
+    fn new(kind: KeyTestKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+}
+
+/// The provider's name for messages.
+fn provider_name(provider: Provider) -> &'static str {
+    match provider {
+        Provider::Groq => "Groq",
+        Provider::OpenAi => "OpenAI",
+    }
+}
+
+/// The user-facing error for a failed check. The messages are fixed text
+/// plus the engine's own detail, which never holds the key, the audio or a
+/// transcript (`TranscribeError`).
+fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
+    let name = provider_name(provider);
+    match error {
+        TranscribeError::InvalidKey => KeyTestError::new(
+            KeyTestKind::InvalidKey,
+            format!(
+                "{name} rejected this API key. Check that you copied the whole key from {name}."
+            ),
+        ),
+        TranscribeError::RateLimited => KeyTestError::new(
+            KeyTestKind::RateLimited,
+            format!(
+                "{name} is limiting requests right now. The key may be fine; try again in a minute."
+            ),
+        ),
+        TranscribeError::Timeout => KeyTestError::new(
+            KeyTestKind::Network,
+            format!("{name} didn't answer in time. Check your internet connection and try again."),
+        ),
+        TranscribeError::Network(_) => KeyTestError::new(
+            KeyTestKind::Network,
+            format!("Couldn't reach {name}. Check your internet connection and try again."),
+        ),
+        TranscribeError::Engine(detail) => KeyTestError::new(
+            KeyTestKind::Server,
+            format!(
+                "{name} had a problem, so the key couldn't be checked ({detail}). Try again later."
+            ),
+        ),
+    }
+}
+
+/// Tests `typed`, or the stored key if `typed` is `None`, against
+/// `provider` at `base_url`. A typed key is only used for this request;
+/// it is not stored (saving it is `set_api_key`'s job).
+async fn key_test<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    provider: Provider,
+    typed: Option<String>,
+    base_url: &str,
+) -> Result<(), KeyTestError> {
+    let name = provider_name(provider);
+    let (key, source) = match typed {
+        Some(typed) => {
+            let key = config::validate_key(&typed).map_err(|error| match error {
+                ConfigError::InvalidKey(reason) => {
+                    KeyTestError::new(KeyTestKind::InvalidKey, format!("The API key {reason}."))
+                }
+                other => KeyTestError::new(KeyTestKind::Keychain, other.to_string()),
+            })?;
+            (key, "typed")
+        }
+        None => {
+            let stored = Arc::clone(config);
+            let stored = tokio::task::spawn_blocking(move || stored.api_key(provider))
+                .await
+                .map_err(|_| KeyTestError::new(KeyTestKind::Keychain, "the keychain task crashed"))?
+                .map_err(|error| {
+                    KeyTestError::new(
+                        KeyTestKind::Keychain,
+                        format!("Couldn't read the saved key: {error}."),
+                    )
+                })?;
+            let key = stored.ok_or_else(|| {
+                KeyTestError::new(
+                    KeyTestKind::NoKey,
+                    format!("No {name} API key is saved yet. Paste one first."),
+                )
+            })?;
+            (key, "stored")
+        }
+    };
+    let engine = openai_compat::Config {
+        base_url: base_url.to_owned(),
+        ..openai_compat::Config::from_preset(Preset::for_provider(provider))
+    };
+    let result = check_key(engine, key).await;
+    match &result {
+        Ok(()) => tracing::info!(%provider, source, "API key works"),
+        Err(error) => tracing::warn!(%provider, source, %error, "API key test failed"),
+    }
+    result.map_err(|error| describe(provider, &error))
+}
+
+/// Tests an API key with a short silent clip through `provider`'s
+/// transcription endpoint: the key typed in the form (`key`, used for this
+/// request only and not stored), or the saved one if `key` is `None`. The
+/// key never comes back; the result is success or a [`KeyTestError`].
+#[tauri::command]
+#[specta::specta]
+pub async fn test_api_key(
+    state: State<'_, AppConfig>,
+    provider: Provider,
+    key: Option<String>,
+) -> Result<(), KeyTestError> {
+    key_test(
+        &state.0,
+        provider,
+        key,
+        Preset::for_provider(provider).base_url,
+    )
+    .await
+}
+
 /// Every command, for the invoke handler and the bindings.
 pub fn builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
@@ -76,6 +236,7 @@ pub fn builder() -> tauri_specta::Builder<tauri::Wry> {
         save_settings,
         set_api_key,
         has_api_key,
+        test_api_key,
     ])
 }
 
@@ -129,9 +290,15 @@ mod tests {
     }
 
     #[test]
-    fn criterion_2_the_bindings_have_exactly_the_four_commands() {
+    fn criterion_2_the_bindings_have_exactly_the_five_commands() {
         let bindings = std::fs::read_to_string(committed()).unwrap();
-        for command in ["getSettings", "saveSettings", "setApiKey", "hasApiKey"] {
+        for command in [
+            "getSettings",
+            "saveSettings",
+            "setApiKey",
+            "hasApiKey",
+            "testApiKey",
+        ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
                 "{command} missing"
@@ -139,9 +306,35 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 4,
+            commands, 5,
             "a command was added; check it doesn't return a key"
         );
+    }
+
+    #[test]
+    fn the_ui_default_models_match_core() {
+        let providers = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/providers.ts"),
+        )
+        .unwrap();
+        for provider in Provider::ALL {
+            let entry = format!(
+                "id: \"{provider}\", name: \"{}\", defaultModel: \"{}\"",
+                provider_name(provider),
+                provider.default_model()
+            );
+            assert!(providers.contains(&entry), "src/providers.ts lacks {entry}");
+        }
+    }
+
+    /// The field names of a generated TypeScript object type's body.
+    fn field_names(body: &str) -> Vec<&str> {
+        body.lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with('/') && !line.starts_with('*'))
+            .filter_map(|line| line.split(':').next())
+            .filter(|field| !field.is_empty())
+            .collect()
     }
 
     #[test]
@@ -161,22 +354,222 @@ mod tests {
         // The key goes in and nothing comes back; the check returns a bool.
         assert!(command("setApiKey").contains("typedError<null, string>"));
         assert!(command("hasApiKey").contains("typedError<boolean, string>"));
+        // The Test key command sends the key out and returns success or a
+        // `KeyTestError` (kind and message), never the key.
+        assert!(command("testApiKey").contains("typedError<null, KeyTestError>"));
+        let error = bindings
+            .split("export type KeyTestError = {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n};").next())
+            .unwrap();
+        assert_eq!(field_names(error), ["kind", "message"]);
+        assert!(error.contains("kind: KeyTestKind") && error.contains("message: string"));
         // Settings, the only other type sent back, has no key field.
         let settings = bindings
             .split("export type Settings_Serialize = {")
             .nth(1)
             .and_then(|rest| rest.split("\n};").next())
             .unwrap();
-        let fields: Vec<&str> = settings
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.starts_with('/') && !line.starts_with('*'))
-            .filter_map(|line| line.split(':').next())
-            .filter(|field| !field.is_empty())
-            .collect();
+        let fields = field_names(settings);
         assert_eq!(
             fields,
             ["version", "provider", "model", "language", "hotkey"]
         );
+    }
+
+    mod key_test {
+        use dictation_pipeline::config::Config;
+        use dictation_platform::fakes::MemSecretStore;
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use super::super::*;
+
+        /// Obviously fake; every test checks it never appears in an error.
+        const STORED: &str = "stored-key-NOT-REAL-5d41402a";
+        const TYPED: &str = "typed-key-NOT-REAL-7b3d9e1f";
+
+        fn config(dir: &std::path::Path) -> (Arc<Config<MemSecretStore>>, MemSecretStore) {
+            let secrets = MemSecretStore::new();
+            (Arc::new(Config::new(dir, secrets.clone())), secrets)
+        }
+
+        fn temp() -> std::path::PathBuf {
+            std::env::temp_dir().join("dictation-key-test-unused")
+        }
+
+        async fn provider(status: u16, key: &str) -> MockServer {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/audio/transcriptions"))
+                .and(header("authorization", format!("Bearer {key}").as_str()))
+                .respond_with(ResponseTemplate::new(status).set_body_string(r#"{"text":""}"#))
+                .mount(&server)
+                .await;
+            server
+        }
+
+        async fn run(
+            typed: Option<&str>,
+            secrets: Option<&str>,
+            server: &MockServer,
+        ) -> (Result<(), KeyTestError>, MemSecretStore) {
+            let (config, store) = config(&temp());
+            if let Some(key) = secrets {
+                config.set_api_key(Provider::Groq, key).unwrap();
+            }
+            let result = key_test(
+                &config,
+                Provider::Groq,
+                typed.map(str::to_owned),
+                &server.uri(),
+            )
+            .await;
+            (result, store)
+        }
+
+        #[tokio::test]
+        async fn the_stored_key_is_used_when_none_is_typed() {
+            let server = provider(200, STORED).await;
+            let (result, _) = run(None, Some(STORED), &server).await;
+            assert_eq!(result, Ok(()));
+        }
+
+        #[tokio::test]
+        async fn a_typed_key_is_used_and_not_stored() {
+            let server = provider(200, TYPED).await;
+            // A different key is stored; the typed one wins.
+            let (result, store) = run(Some(&format!("  {TYPED}\n")), Some(STORED), &server).await;
+            assert_eq!(result, Ok(()));
+            assert_eq!(
+                store.get("groq-api-key").unwrap().unwrap().expose(),
+                STORED,
+                "testing doesn't overwrite the saved key"
+            );
+            // Nothing stored beforehand: still nothing afterwards.
+            let (result, store) = run(Some(TYPED), None, &server).await;
+            assert_eq!(result, Ok(()));
+            assert_eq!(store.get("groq-api-key").unwrap(), None);
+        }
+
+        #[tokio::test]
+        async fn each_failure_has_a_kind_and_a_readable_message_without_the_key() {
+            for (status, kind, words) in [
+                (401, KeyTestKind::InvalidKey, "rejected this API key"),
+                (403, KeyTestKind::InvalidKey, "rejected this API key"),
+                (429, KeyTestKind::RateLimited, "limiting requests"),
+                (503, KeyTestKind::Server, "HTTP 503"),
+                (400, KeyTestKind::Server, "HTTP 400"),
+            ] {
+                let server = provider(status, TYPED).await;
+                let (result, _) = run(Some(TYPED), None, &server).await;
+                let error = result.unwrap_err();
+                assert_eq!(error.kind, kind, "HTTP {status}");
+                assert!(error.message.contains(words), "{}", error.message);
+                assert!(error.message.contains("Groq"), "{}", error.message);
+                assert!(!error.message.contains(TYPED));
+            }
+        }
+
+        #[tokio::test]
+        async fn an_unreachable_provider_is_a_network_error() {
+            let port = std::net::TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            let (config, _) = config(&temp());
+            let error = key_test(
+                &config,
+                Provider::Groq,
+                Some(TYPED.to_owned()),
+                &format!("http://127.0.0.1:{port}"),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.kind, KeyTestKind::Network);
+            assert!(
+                error.message.contains("Couldn't reach Groq"),
+                "{}",
+                error.message
+            );
+            assert!(!error.message.contains(TYPED));
+        }
+
+        #[tokio::test]
+        async fn without_a_stored_or_typed_key_there_is_nothing_to_test() {
+            let server = provider(200, STORED).await;
+            let (result, _) = run(None, None, &server).await;
+            let error = result.unwrap_err();
+            assert_eq!(error.kind, KeyTestKind::NoKey);
+            assert!(
+                error.message.contains("No Groq API key"),
+                "{}",
+                error.message
+            );
+            assert!(
+                server.received_requests().await.unwrap().is_empty(),
+                "no request without a key"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_typed_key_that_cant_be_a_key_is_refused_before_any_request() {
+            let server = provider(200, STORED).await;
+            for (typed, why) in [
+                ("", "is empty"),
+                ("   ", "is empty"),
+                ("two words", "contains spaces"),
+            ] {
+                let (result, _) = run(Some(typed), Some(STORED), &server).await;
+                let error = result.unwrap_err();
+                assert_eq!(error.kind, KeyTestKind::InvalidKey);
+                assert_eq!(error.message, format!("The API key {why}."));
+            }
+            assert!(server.received_requests().await.unwrap().is_empty());
+        }
+
+        #[tokio::test]
+        async fn a_denied_keychain_is_reported_as_such() {
+            let server = provider(200, STORED).await;
+            let (config, secrets) = config(&temp());
+            secrets.set_access_denied(true);
+            let error = key_test(&config, Provider::Groq, None, &server.uri())
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind, KeyTestKind::Keychain);
+            assert!(error.message.contains("keychain access was denied"));
+        }
+
+        #[tokio::test]
+        async fn openai_errors_name_openai() {
+            let (config, _) = config(&temp());
+            let server = provider(401, TYPED).await;
+            let error = key_test(
+                &config,
+                Provider::OpenAi,
+                Some(TYPED.to_owned()),
+                &server.uri(),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                error.message.contains("OpenAI rejected"),
+                "{}",
+                error.message
+            );
+        }
+
+        #[test]
+        fn each_provider_tests_against_its_own_base_url() {
+            assert_eq!(
+                Preset::for_provider(Provider::Groq).base_url,
+                "https://api.groq.com/openai/v1"
+            );
+            assert_eq!(
+                Preset::for_provider(Provider::OpenAi).base_url,
+                "https://api.openai.com/v1"
+            );
+        }
     }
 }

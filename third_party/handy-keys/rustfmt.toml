@@ -1,0 +1,3 @@
+# Added for dictation-app: the pre-commit hook runs rustfmt with
+# --edition 2024; keep the vendored code in its own 2021 style.
+style_edition = "2021"

@@ -442,6 +442,8 @@ where
             },
             HotkeyEvent::Released => Event::HotkeyReleased(at),
             HotkeyEvent::CancelPressed => Event::CancelPressed,
+            HotkeyEvent::Interrupted => Event::HotkeyInterrupted,
+            HotkeyEvent::Failed => Event::HotkeyFailed,
         })
     }
 

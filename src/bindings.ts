@@ -15,9 +15,39 @@ export const commands = {
 	setApiKey: (provider: Provider, key: string) => typedError<null, string>(__TAURI_INVOKE("set_api_key", { provider, key })),
 	/**  Whether `provider` has an API key stored. */
 	hasApiKey: (provider: Provider) => typedError<boolean, string>(__TAURI_INVOKE("has_api_key", { provider })),
+	/**
+	 *  Tests an API key with a short silent clip through `provider`'s
+	 *  transcription endpoint: the key typed in the form (`key`, used for this
+	 *  request only and not stored), or the saved one if `key` is `None`. The
+	 *  key never comes back; the result is success or a [`KeyTestError`].
+	 */
+	testApiKey: (provider: Provider, key: string | null) => typedError<null, KeyTestError>(__TAURI_INVOKE("test_api_key", { provider, key })),
 };
 
 /* Types */
+/**  Why a key test failed. Never contains the key. */
+export type KeyTestError = {
+	/**  The category. */
+	kind: KeyTestKind,
+	/**  What to show the user. */
+	message: string,
+};
+
+/**  What went wrong when testing a key, so the UI can pick its wording. */
+export type KeyTestKind = 
+/**  No key was typed or saved to test. */
+"no_key" | 
+/**  The key can't be a key, or the provider rejected it. */
+"invalid_key" | 
+/**  The provider is rate limiting; the key may be fine. */
+"rate_limited" | 
+/**  The provider couldn't be reached (offline, DNS, timeout). */
+"network" | 
+/**  The provider failed or gave an answer we can't use. */
+"server" | 
+/**  The saved key couldn't be read from the keychain. */
+"keychain";
+
 /**  The cloud speech-to-text provider. */
 export type Provider = 
 /**  Groq's `OpenAI`-compatible Whisper API. */
