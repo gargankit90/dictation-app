@@ -4,6 +4,9 @@
 //! [`PasteInserter`] runs the flow over the [`Clipboard`] port and a
 //! [`PasteKeys`] sender, so it is OS-neutral and tested with fakes:
 //!
+//! 0. if Secure Input is on (a password field has focus), stop with
+//!    [`InsertError::SecureInput`] before touching anything: no paste, and
+//!    the clipboard is never written (see [`SecureInputProbe`]);
 //! 1. save everything on the clipboard ([`Clipboard::snapshot`]);
 //! 2. write the text with the privacy markers and a new session marker
 //!    ([`Clipboard::write_dictation`]);
@@ -131,24 +134,68 @@ impl Settle for ThreadSettle {
     }
 }
 
+/// Answers "is Secure Input on right now?". Any `Fn() -> bool` works, so
+/// the macOS adapter is `secure_input::is_secure_input_enabled` and tests
+/// pass a closure.
+pub trait SecureInputProbe: Send + Sync {
+    /// Whether a password field (or an app with Secure Keyboard Entry) has
+    /// Secure Input on.
+    fn is_on(&self) -> bool;
+}
+
+impl<F: Fn() -> bool + Send + Sync> SecureInputProbe for F {
+    fn is_on(&self) -> bool {
+        self()
+    }
+}
+
+/// The probe of a [`PasteInserter`] that doesn't check Secure Input: always
+/// off. This is what [`PasteInserter::new`] gives; the system inserter
+/// adds the real probe with [`PasteInserter::with_secure_input`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NeverSecure;
+
+impl SecureInputProbe for NeverSecure {
+    fn is_on(&self) -> bool {
+        false
+    }
+}
+
 /// The paste flow (see the module docs) over any clipboard and key sender.
 #[derive(Debug)]
-pub struct PasteInserter<C, K, S = ThreadSettle> {
+pub struct PasteInserter<C, K, S = ThreadSettle, P = NeverSecure> {
     clipboard: C,
     keys: K,
     settle: S,
     delay: Duration,
+    secure_input: P,
 }
 
 impl<C, K, S> PasteInserter<C, K, S> {
     /// The flow with `settle` waiting `delay` between the paste and the
-    /// restore.
+    /// restore. It doesn't check Secure Input; see
+    /// [`with_secure_input`](Self::with_secure_input).
     pub fn new(clipboard: C, keys: K, settle: S, delay: Duration) -> Self {
         Self {
             clipboard,
             keys,
             settle,
             delay,
+            secure_input: NeverSecure,
+        }
+    }
+}
+
+impl<C, K, S, P> PasteInserter<C, K, S, P> {
+    /// The same flow, refusing to paste while `probe` says Secure Input is
+    /// on.
+    pub fn with_secure_input<Q: SecureInputProbe>(self, probe: Q) -> PasteInserter<C, K, S, Q> {
+        PasteInserter {
+            clipboard: self.clipboard,
+            keys: self.keys,
+            settle: self.settle,
+            delay: self.delay,
+            secure_input: probe,
         }
     }
 }
@@ -157,8 +204,16 @@ fn failed(what: &str, error: &ClipboardError) -> InsertError {
     InsertError::Failed(format!("{what}: {error}"))
 }
 
-impl<C: Clipboard, K: PasteKeys, S: Settle> TextInserter for PasteInserter<C, K, S> {
+impl<C: Clipboard, K: PasteKeys, S: Settle, P: SecureInputProbe> TextInserter
+    for PasteInserter<C, K, S, P>
+{
     fn insert(&self, text: &str) -> Result<(), InsertError> {
+        // Before anything else: with a password field focused, don't put
+        // the text on the clipboard (other apps can read it) or paste it.
+        if self.secure_input.is_on() {
+            tracing::debug!("secure input is on; not pasting");
+            return Err(InsertError::SecureInput);
+        }
         let saved = self
             .clipboard
             .snapshot()
@@ -189,7 +244,7 @@ impl<C: Clipboard, K: PasteKeys, S: Settle> TextInserter for PasteInserter<C, K,
 /// with [`InsertError::Failed`].
 pub struct SystemInserter {
     #[cfg(target_os = "macos")]
-    inner: PasteInserter<MacPasteboard, MacPasteKeys>,
+    inner: PasteInserter<MacPasteboard, MacPasteKeys, ThreadSettle, fn() -> bool>,
 }
 
 impl SystemInserter {
@@ -203,7 +258,8 @@ impl SystemInserter {
                 MacPasteKeys::new(),
                 ThreadSettle,
                 DEFAULT_SETTLE,
-            ),
+            )
+            .with_secure_input(crate::secure_input::is_secure_input_enabled as fn() -> bool),
         }
     }
 }
@@ -313,6 +369,56 @@ mod tests {
         );
         assert_eq!(clipboard.markers(), ClipboardMarkers::NONE);
         assert_eq!(clipboard.session(), None);
+    }
+
+    // M4.2 criterion 1: Secure Input on means nothing is pasted and the
+    // clipboard is never touched.
+    #[test]
+    fn secure_input_on_pastes_nothing_and_leaves_the_clipboard_alone() {
+        let clipboard = MemClipboard::with_text("the user's text");
+        let keys = keys_for(&clipboard);
+        let settle = FakeSettle::default();
+        let result = inserter(&clipboard, keys.clone(), settle.clone())
+            .with_secure_input(|| true)
+            .insert("dictated words");
+
+        assert_eq!(result, Err(InsertError::SecureInput));
+        assert!(keys.pastes.lock().unwrap().is_empty());
+        assert!(settle.waits.lock().unwrap().is_empty());
+        assert_eq!(
+            clipboard.read_text().unwrap().as_deref(),
+            Some("the user's text")
+        );
+        assert_eq!(clipboard.markers(), ClipboardMarkers::NONE);
+        assert_eq!(clipboard.session(), None);
+    }
+
+    #[test]
+    fn secure_input_is_checked_before_the_clipboard_is_used() {
+        let clipboard = MemClipboard::with_text("old");
+        clipboard.set_unavailable(true);
+        let result = inserter(&clipboard, keys_for(&clipboard), FakeSettle::default())
+            .with_secure_input(|| true)
+            .insert("words");
+        // Not "could not save the clipboard".
+        assert_eq!(result, Err(InsertError::SecureInput));
+    }
+
+    #[test]
+    fn secure_input_off_pastes_as_usual_and_is_asked_on_every_insert() {
+        let clipboard = MemClipboard::with_text("old");
+        let keys = keys_for(&clipboard);
+        let on = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let probe = Arc::clone(&on);
+        let flow = inserter(&clipboard, keys.clone(), FakeSettle::default())
+            .with_secure_input(move || probe.load(std::sync::atomic::Ordering::SeqCst));
+
+        assert_eq!(flow.insert("first"), Err(InsertError::SecureInput));
+        on.store(false, std::sync::atomic::Ordering::SeqCst);
+        flow.insert("second").unwrap();
+
+        assert_eq!(*keys.pastes.lock().unwrap(), [Some("second".to_owned())]);
+        assert_eq!(clipboard.read_text().unwrap().as_deref(), Some("old"));
     }
 
     #[test]
