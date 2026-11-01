@@ -40,18 +40,7 @@ impl TextBeforeCursor for SystemTextBeforeCursor {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::time::{Duration, Instant};
-
-    use super::*;
-
-    /// The real reader answers (whatever this machine's focus and
-    /// permissions are) within its own timeout and never panics.
-    #[test]
-    fn the_system_reader_answers_promptly() {
-        let started = Instant::now();
-        let _ = SystemTextBeforeCursor::new().char_before_cursor();
-        assert!(started.elapsed() < Duration::from_secs(2));
-    }
-}
+// No test calls the real reader: it would read whatever text field has
+// focus on the developer's machine, and its timing depends on that app. The
+// macos module tests its pure parts; the VM scenario e2e_smart_space tests
+// the real read.
