@@ -61,8 +61,10 @@ Tauri is a thin layer on top.
 - Strict CSP; no remote content.
 - Commands stay thin: validate input, call `app`, map errors.
 - Secrets stay in Rust. The UI can set or test the API key, never read it back.
-- Single-instance plugin with CLI flags forwarded (`--press`/`--release` are
-  test hooks). Updater plugin with a minisign key.
+- One instance per user through `dictation_platform::single_instance` (a
+  lock file plus a socket with bounded reads; it replaced the single-instance
+  plugin in M1.7), with CLI flags forwarded (`--press`/`--release` are test
+  hooks). Updater plugin with a minisign key.
 
 ## TypeScript / React
 
