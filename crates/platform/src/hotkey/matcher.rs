@@ -190,6 +190,13 @@ mod tests {
     }
 
     #[test]
+    fn adding_a_key_that_is_already_held_keeps_it_held() {
+        let twice = RIGHT_ALT.with(Modifier::Alt, Hand::Right);
+        assert_eq!(twice, RIGHT_ALT);
+        assert!(twice.contains(Modifier::Alt, Hand::Right));
+    }
+
+    #[test]
     fn right_option_press_and_release() {
         let events = run(
             "RightAlt",
