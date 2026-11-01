@@ -311,6 +311,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_ui_default_models_match_core() {
+        let providers = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/providers.ts"),
+        )
+        .unwrap();
+        for provider in Provider::ALL {
+            let entry = format!(
+                "id: \"{provider}\", name: \"{}\", defaultModel: \"{}\"",
+                provider_name(provider),
+                provider.default_model()
+            );
+            assert!(providers.contains(&entry), "src/providers.ts lacks {entry}");
+        }
+    }
+
     /// The field names of a generated TypeScript object type's body.
     fn field_names(body: &str) -> Vec<&str> {
         body.lines()
