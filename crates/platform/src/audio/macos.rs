@@ -6,7 +6,11 @@
 //! (`rtrb`) and never allocates, locks or blocks; a delivery thread drains
 //! the ring, mixes to mono and resamples to 16 kHz (`rubato`, a sinc
 //! resampler) and hands fixed-size chunks to our [`Collector`] sink, which
-//! may allocate since it isn't on the audio thread.
+//! may allocate since it isn't on the audio thread. That holds below cpal
+//! too only because coreaudio-rs is patched (`third_party/coreaudio-rs`,
+//! `PATCHES.md`): 0.14.2's input callback wrapper reallocated its buffer on
+//! the audio thread when the callback's frame count changed, and freed it
+//! with the wrong capacity at teardown (#77 B2).
 //!
 //! On top of that this adapter decides when the device is open:
 //!
@@ -17,14 +21,26 @@
 //!   closes so the microphone indicator goes off. Handy keeps its stream
 //!   open the same way.
 //! - **Route changes.** An open recorder is tied to the device it opened.
-//!   When that device goes away or the default input changes (AirPods
-//!   connect or disconnect), handy-recorder fails the recorder; the next
-//!   `start` opens the new default device. Mid-recording, `stop` returns
-//!   the audio captured up to the change instead of failing, and nothing
-//!   panics. Like Muesli, the adapter never waits on CoreAudio from the
-//!   pipeline task (the pipeline calls it on the blocking pool).
+//!   Two things end a warm recorder before the next `start` reuses it:
+//!   - its device went away (AirPods disconnect): handy-recorder fails the
+//!     recorder;
+//!   - the default input is now another device, though the old one is still
+//!     there (AirPods connect, or the user picks another input in System
+//!     Settings): handy-recorder doesn't watch the default input, so `start`
+//!     compares the open device's id with the current default's.
+//!
+//!   Either way `start` opens the current default device. A change of
+//!   default *during* a recording doesn't move it: the recording stays on
+//!   the device it started on, so a dictation is never split across two
+//!   microphones, and the next `start` switches. If the device goes away
+//!   mid-recording, `stop` returns the audio captured up to the loss
+//!   instead of failing, and nothing panics. Like Muesli, the adapter never
+//!   waits on CoreAudio from the pipeline task (the pipeline calls it on the
+//!   blocking pool).
 //! - **Latency.** Each recording measures the time from `start` to the first
 //!   audio chunk, logged at debug level as `first_audio_ms`.
+//! - **Length.** The resampler's leading filter delay is dropped, so a clip
+//!   is as long as the audio captured ([`resampler_delay`]).
 //!
 //! Never logs audio contents.
 
@@ -49,9 +65,35 @@ pub const WARM_FOR: Duration = Duration::from_secs(30);
 pub(crate) type FailureHandler = Box<dyn FnOnce(Error) + Send + 'static>;
 /// Opens a recorder; the real one opens the default device.
 pub(crate) type Opener =
-    dyn Fn(RecorderConfig, FailureHandler) -> Result<Recorder<Collector>, Error> + Send + Sync;
+    dyn Fn(RecorderConfig, FailureHandler) -> Result<Opened, Error> + Send + Sync;
 /// Reads the microphone permission without prompting.
 pub(crate) type PermissionCheck = dyn Fn() -> Permission + Send + Sync;
+/// The id of the current default input device, as [`Opened::device`]
+/// holds it; `None` if there's none or it can't be read.
+pub(crate) type DefaultInput = dyn Fn() -> Option<String> + Send + Sync;
+
+/// A recorder an [`Opener`] opened, and the id of its device.
+pub(crate) struct Opened {
+    pub(crate) recorder: Recorder<Collector>,
+    pub(crate) device: String,
+}
+
+/// Opens the default input device, through handy-recorder.
+fn open_default(config: RecorderConfig, handler: FailureHandler) -> Result<Opened, Error> {
+    let recorder = Recorder::open_with_failure_handler(config, handler)?;
+    let device = recorder.info().device.id.clone();
+    Ok(Opened { recorder, device })
+}
+
+/// The current default input's id, in the form handy-recorder gives the
+/// device it opened (`InputDevice::id`, cpal's `DeviceId` as text: the
+/// host and the CoreAudio device UID). Two property reads; doesn't open
+/// the device or need microphone access.
+fn current_default_input() -> Option<String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let device = cpal::default_host().default_input_device()?;
+    device.id().ok().map(|id| id.to_string())
+}
 
 /// The recorder config: the default device, 16 kHz mono, ~10 ms chunks.
 fn config() -> RecorderConfig {
@@ -76,6 +118,8 @@ pub struct Collector {
     first_audio: Option<Duration>,
     /// Frames collected so far, readable while recording (tests).
     frames: Arc<AtomicU64>,
+    /// Leading frames still to drop: the resampler's delay.
+    skip: usize,
 }
 
 impl Collector {
@@ -86,7 +130,14 @@ impl Collector {
             started,
             first_audio: None,
             frames,
+            skip: 0,
         }
+    }
+
+    /// Drops the first `frames` frames: the delay of `open`'s resampler.
+    fn skipping(mut self, open: &Open) -> Self {
+        self.skip = open.delay;
+        self
     }
 }
 
@@ -97,15 +148,51 @@ impl Sink for Collector {
         }
         // Mono: one sample per frame.
         let real = &chunk.samples[..chunk.valid_frames.min(chunk.samples.len())];
+        let skipped = self.skip.min(real.len());
+        self.skip -= skipped;
+        let real = &real[skipped..];
         self.samples.extend_from_slice(real);
         self.frames.fetch_add(real.len() as u64, Ordering::Relaxed);
     }
 }
 
-/// An open recorder and whether it has failed since it opened.
+/// handy-recorder's resampler chunk size, in input frames
+/// (`capture/resampler.rs`, `RESAMPLER_CHUNK_SIZE`).
+const RESAMPLER_CHUNK_FRAMES: usize = 1024;
+
+/// Leading frames the resampler adds before the first real output frame,
+/// at 16 kHz. handy-recorder delivers them (its `finish` keeps the tail, so
+/// a clip is `input * 16 kHz / rate + delay` frames long) but doesn't expose
+/// the figure, so this builds the same rubato resampler handy-recorder does
+/// (`FrameResampler::new`, pinned versions) and asks it. The adapter tests
+/// check the resulting clip length and alignment, so a change in either
+/// crate fails them.
+fn resampler_delay(device_rate: u32) -> usize {
+    use rubato::{Fft, FixedSync, Resampler, WindowFunction};
+    if device_rate == SAMPLE_RATE {
+        return 0;
+    }
+    Fft::<f32>::new_custom(
+        device_rate as usize,
+        SAMPLE_RATE as usize,
+        RESAMPLER_CHUNK_FRAMES,
+        1,
+        1,
+        WindowFunction::BlackmanHarris2,
+        FixedSync::Input,
+    )
+    .map_or(0, |resampler| resampler.output_delay())
+}
+
+/// An open recorder, its device, whether it has failed since it opened, and
+/// its resampler's delay.
 struct Open {
     recorder: Recorder<Collector>,
+    /// [`Opened::device`].
+    device: String,
     failed: Arc<AtomicBool>,
+    /// [`resampler_delay`] for the device's rate.
+    delay: usize,
 }
 
 impl Open {
@@ -136,6 +223,7 @@ struct Shared {
 pub struct MacMicrophone {
     open: Box<Opener>,
     permission: Box<PermissionCheck>,
+    default_input: Box<DefaultInput>,
     warm_for: Duration,
     shared: Arc<Shared>,
     /// The current recording's frame count, while recording.
@@ -154,8 +242,9 @@ impl MacMicrophone {
     #[must_use]
     pub fn new() -> Self {
         Self::with(
-            Box::new(Recorder::open_with_failure_handler),
+            Box::new(open_default),
             Box::new(handy_recorder::permission_status),
+            Box::new(current_default_input),
             WARM_FOR,
         )
     }
@@ -163,11 +252,13 @@ impl MacMicrophone {
     pub(crate) fn with(
         open: Box<Opener>,
         permission: Box<PermissionCheck>,
+        default_input: Box<DefaultInput>,
         warm_for: Duration,
     ) -> Self {
         Self {
             open,
             permission,
+            default_input,
             warm_for,
             shared: Arc::new(Shared {
                 open: Mutex::new(None),
@@ -215,16 +306,24 @@ impl MacMicrophone {
             flag.store(true, Ordering::Release);
         });
         let opened_at = Instant::now();
-        let recorder = (self.open)(config(), handler).map_err(|error| audio_error(&error))?;
+        let Opened { recorder, device } =
+            (self.open)(config(), handler).map_err(|error| audio_error(&error))?;
         let info = recorder.info();
+        let delay = resampler_delay(info.device_format.sample_rate);
         tracing::debug!(
             device = %info.device.name,
             device_rate = info.device_format.sample_rate,
             device_channels = info.device_format.channels,
+            resampler_delay = delay,
             open_ms = opened_at.elapsed().as_millis(),
             "microphone opened"
         );
-        Ok(Open { recorder, failed })
+        Ok(Open {
+            recorder,
+            device,
+            failed,
+            delay,
+        })
     }
 
     /// Closes the device after [`WARM_FOR`] unless another recording starts
@@ -288,12 +387,27 @@ impl AudioSource for MacMicrophone {
         self.shared.generation.fetch_add(1, Ordering::AcqRel);
         let frames = Arc::new(AtomicU64::new(0));
         let sink = Collector::new(started, Arc::clone(&frames));
+        // Read before taking the lock: CoreAudio may be slow mid-switch.
+        let default = (self.default_input)();
 
         let mut slot = lock(&self.shared.open);
-        // A warm recorder whose device went away, or whose default device
-        // changed, while idle: open the device that's there now.
-        if slot.as_ref().is_some_and(Open::has_failed) {
-            tracing::debug!("the microphone changed while idle; reopening");
+        // A warm recorder whose device went away, or that isn't on the
+        // default input any more: open the device that's the default now.
+        // An unknown default keeps it; if its device is gone, it failed.
+        let stale = slot.as_ref().and_then(|open| {
+            if open.has_failed() {
+                Some("the microphone failed while idle; reopening")
+            } else if default
+                .as_ref()
+                .is_some_and(|default| *default != open.device)
+            {
+                Some("the default input changed while idle; reopening")
+            } else {
+                None
+            }
+        });
+        if let Some(reason) = stale {
+            tracing::debug!("{reason}");
             if let Some(stale) = slot.take() {
                 stale.close();
             }
@@ -302,7 +416,7 @@ impl AudioSource for MacMicrophone {
             Some(open) => open,
             None => self.open_device()?,
         };
-        let open = match open.recorder.start(sink) {
+        let open = match open.recorder.start(sink.skipping(&open)) {
             Ok(()) => open,
             Err(StartError { error, sink }) if is_recorder_failure(error.kind()) => {
                 // Failed after the check above: one fresh try.
@@ -311,7 +425,7 @@ impl AudioSource for MacMicrophone {
                 let fresh = self.open_device()?;
                 fresh
                     .recorder
-                    .start(sink)
+                    .start(sink.skipping(&fresh))
                     .map_err(|start| audio_error(&start.error))?;
                 fresh
             }
