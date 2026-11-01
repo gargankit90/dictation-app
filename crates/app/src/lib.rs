@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod config;
 pub mod debug_audio;
 pub mod hotkey;
 pub mod pipeline;

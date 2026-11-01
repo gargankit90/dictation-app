@@ -6,5 +6,7 @@ target/
 coverage/
 src-tauri/gen/
 src-tauri/icons/
+# tauri-specta writes it (src-tauri/src/commands.rs).
+src/bindings.ts
 # Prose is wrapped by hand; Prettier would rewrap every paragraph.
 *.md

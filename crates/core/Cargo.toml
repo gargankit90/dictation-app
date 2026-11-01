@@ -9,7 +9,14 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# TypeScript types for the Tauri commands (src-tauri turns it on).
+specta = ["dep:specta"]
+
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+specta = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]

@@ -19,4 +19,5 @@ pub mod clock;
 pub mod hotkey;
 pub mod insert;
 pub mod permissions;
+pub mod secrets;
 pub mod secure_input;

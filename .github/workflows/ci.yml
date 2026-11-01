@@ -30,6 +30,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The coverage build on top of the restored rust-cache can fill the
+      # runner's disk, and lld then dies with a Bus error (SIGBUS) while it
+      # mmaps its output. Free the space of tools this job never uses.
+      - name: Free runner disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
       # Libraries src-tauri links on Linux (wry/tao): webkit2gtk, javascriptcore,
       # libsoup and GTK 3. Tray (appindicator) is loaded at runtime, not linked.
       - name: Install Tauri system libraries
@@ -57,6 +66,12 @@ jobs:
 
       - name: Quality gate
         run: scripts/gate.sh
+
+      - name: Disk usage
+        if: always()
+        run: |
+          df -h
+          du -sh target 2>/dev/null || true
 
   # The Mac-only code in dictation-platform (hotkey, Accessibility, Secure
   # Input): build, lint and test it where it compiles (#10).
