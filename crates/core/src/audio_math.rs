@@ -12,7 +12,7 @@ use crate::coordinator::MIN_HOLD;
 /// A 20 ms frame quieter than this (RMS) is silence: 0.003 162 is −50 dBFS.
 ///
 /// Laptop and headset microphones in a quiet room sit around −60 to
-/// −50 dBFS, while speech measured on the built-in MacBook microphone
+/// −50 dBFS, while speech measured on the built-in laptop microphone
 /// (issue #72) averaged −40 and −37 dBFS over the whole clip, so −50 dBFS
 /// leaves room on both sides even for a soft talker, whose pauses and quiet
 /// consonants are in the average. Sending silence costs an API call and
