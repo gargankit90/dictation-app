@@ -8,6 +8,10 @@
 //! (and on macOS, show an access prompt), so every command runs on the
 //! blocking pool, never the main thread.
 //!
+//! `save_settings` and `set_api_key` also rebuild the speech-to-text engine
+//! from what was saved (M4.4, [`crate::engine`]), so the next dictation uses
+//! the new provider, model, language or key without a restart.
+//!
 //! `test_api_key` (M3.4) is the one command that sends a key anywhere but
 //! the keychain: to the provider, in the `Authorization` header, with a short
 //! silent clip. It returns nothing but success or a [`KeyTestError`] whose
@@ -23,6 +27,8 @@ use dictation_transcribe::check_key::check_key;
 use dictation_transcribe::openai_compat::{self, Preset};
 use serde::Serialize;
 use tauri::State;
+
+use crate::engine::{self, LiveEngine};
 
 /// Where the bindings go, relative to `src-tauri/`.
 pub const BINDINGS_PATH: &str = "../src/bindings.ts";
@@ -56,8 +62,16 @@ pub async fn get_settings(state: State<'_, AppConfig>) -> Result<Settings, Strin
 /// Validates and saves the settings.
 #[tauri::command]
 #[specta::specta]
-pub async fn save_settings(state: State<'_, AppConfig>, settings: Settings) -> Result<(), String> {
-    on_config(&state, move |config| config.save_settings(&settings)).await
+pub async fn save_settings(
+    state: State<'_, AppConfig>,
+    engine: State<'_, LiveEngine>,
+    settings: Settings,
+) -> Result<(), String> {
+    let live = engine.inner().clone();
+    on_config(&state, move |config| {
+        engine::changed(config, &live, |config| config.save_settings(&settings))
+    })
+    .await
 }
 
 /// Stores `key` as `provider`'s API key in the keychain. Write-only.
@@ -65,10 +79,15 @@ pub async fn save_settings(state: State<'_, AppConfig>, settings: Settings) -> R
 #[specta::specta]
 pub async fn set_api_key(
     state: State<'_, AppConfig>,
+    engine: State<'_, LiveEngine>,
     provider: Provider,
     key: String,
 ) -> Result<(), String> {
-    on_config(&state, move |config| config.set_api_key(provider, &key)).await
+    let live = engine.inner().clone();
+    on_config(&state, move |config| {
+        engine::changed(config, &live, |config| config.set_api_key(provider, &key))
+    })
+    .await
 }
 
 /// Whether `provider` has an API key stored.

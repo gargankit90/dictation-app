@@ -11,16 +11,21 @@
 //! release builds ignore them and have no way to inject key events or
 //! audio.
 //!
+//! M4.4: dictation uses the real provider. The engine is built from the saved
+//! settings and the keychain at startup and rebuilt whenever they're saved
+//! ([`engine`]); `--transcriber mock` keeps the mock.
+//!
 //! M3.4: Settings… shows the `main` window, which holds the settings UI; its
 //! close button hides it instead of destroying it, so the tray can show it
 //! again.
 
 pub mod commands;
+pub mod engine;
 mod flags;
 mod logging;
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context as _;
 use dictation_core::coordinator::Phase;
@@ -39,6 +44,7 @@ use dictation_platform::hotkey::SystemHotkey;
 use dictation_platform::insert::SystemInserter;
 use dictation_platform::permissions::SystemPermissions;
 use dictation_ports::{AudioSource, Permission, PermissionError, PermissionStatus, Permissions};
+use dictation_transcribe::engine::{Engine, Transcribers};
 use dictation_transcribe::mock::MockTranscriber;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -206,11 +212,33 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
 
     let argv: Vec<String> = std::env::args().collect();
     let launch = flags::parse(&argv, flags::TEST_FLAGS);
-    // Only one engine so far; an enum that delegates comes with the second.
-    let flags::TranscriberChoice::Mock = launch.transcriber.unwrap_or_default();
-    let transcriber = MockTranscriber::default();
+    // Settings and API keys for the commands (M3.3), used by the settings UI
+    // (M3.4) and, since M4.4, to build the engine.
+    let config_dir = app.path().app_config_dir().context("no config directory")?;
+    let config = Arc::new(dictation_pipeline::config::Config::new(
+        &config_dir,
+        dictation_platform::secrets::KeychainSecretStore::new(),
+    ));
+    tracing::info!(path = %config.path().display(), "settings file");
+
+    let choice = launch.transcriber.unwrap_or_default();
+    let (transcribers, live) = match choice {
+        flags::TranscriberChoice::Mock => (
+            Transcribers::new(Engine::Mock(MockTranscriber::default())),
+            engine::LiveEngine::fixed(),
+        ),
+        flags::TranscriberChoice::Settings => {
+            // Reads the keychain; fine here, the event loop hasn't started.
+            let transcribers = Transcribers::new(engine::engine_from_config(&config, None));
+            (
+                transcribers.clone(),
+                engine::LiveEngine::follow(transcribers),
+            )
+        }
+    };
     tracing::info!(
-        transcriber = flags::TranscriberChoice::Mock.name(),
+        transcriber = choice.name(),
+        engine = transcribers.name(),
         "engine"
     );
 
@@ -223,7 +251,7 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
     let ports = Ports {
         hotkey,
         audio,
-        transcriber,
+        transcriber: transcribers,
         inserter: SystemInserter::new(),
         permissions,
         clock: SystemClock::new(),
@@ -233,15 +261,8 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
         tauri::async_runtime::block_on(async { Pipeline::spawn(ports, Config::default()) })
             .context("could not start the pipeline")?;
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
-
-    // Settings and API keys for the commands (M3.3), used by the settings UI (M3.4).
-    let config_dir = app.path().app_config_dir().context("no config directory")?;
-    let config = dictation_pipeline::config::Config::new(
-        &config_dir,
-        dictation_platform::secrets::KeychainSecretStore::new(),
-    );
-    tracing::info!(path = %config.path().display(), "settings file");
-    app.manage(commands::AppConfig(std::sync::Arc::new(config)));
+    app.manage(commands::AppConfig(config));
+    app.manage(live);
     tauri::async_runtime::spawn(show_ui_events(app.handle().clone(), ui_events));
     tracing::info!(hotkey = %HotkeySpec::default(), "ready");
 

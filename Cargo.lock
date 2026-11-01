@@ -936,6 +936,7 @@ dependencies = [
  "dictation-ports",
  "dictation-transcribe",
  "serde",
+ "serde_json",
  "specta",
  "specta-typescript",
  "tauri",

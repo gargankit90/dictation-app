@@ -17,8 +17,10 @@
 //!
 //! `--transcriber <name>` picks the speech-to-text engine. It's a normal flag
 //! in every build: it only affects the process that starts with it (a
-//! forwarded second launch can't switch the running app's engine), and the
-//! only engine so far, `mock`, needs no network, key or permission.
+//! forwarded second launch can't switch the running app's engine). `settings`
+//! (the default) is the real provider chosen in the settings, with its key
+//! from the keychain; `mock` needs no network, key or permission and is what
+//! the e2e scenarios run with.
 
 use std::path::PathBuf;
 
@@ -36,15 +38,17 @@ pub const TRANSCRIBER_FLAG: &str = "--transcriber";
 /// The speech-to-text engine to run.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TranscriberChoice {
-    /// `transcribe::mock::MockTranscriber`: fixed text, no network. The
-    /// default until a real engine lands (M3.2).
+    /// The provider, model and language from the settings and the provider's
+    /// key from the keychain, rebuilt whenever they're saved (M4.4).
     #[default]
+    Settings,
+    /// `transcribe::mock::MockTranscriber`: fixed text, no network.
     Mock,
 }
 
 impl TranscriberChoice {
     /// Every engine, for the "known engines" warning.
-    pub const ALL: [Self; 1] = [Self::Mock];
+    pub const ALL: [Self; 2] = [Self::Settings, Self::Mock];
 
     /// The known engine names, comma-separated.
     #[must_use]
@@ -56,6 +60,7 @@ impl TranscriberChoice {
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
+            "settings" => Some(Self::Settings),
             "mock" => Some(Self::Mock),
             _ => None,
         }
@@ -65,6 +70,7 @@ impl TranscriberChoice {
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
+            Self::Settings => "settings",
             Self::Mock => "mock",
         }
     }
@@ -199,6 +205,8 @@ mod tests {
             }
         }
         assert_eq!(parse(&argv(&[]), true).transcriber, None);
+        let flags = parse(&argv(&["--transcriber", "settings"]), true);
+        assert_eq!(flags.transcriber, Some(TranscriberChoice::Settings));
     }
 
     #[test]
@@ -222,10 +230,10 @@ mod tests {
     #[test]
     fn engine_names_round_trip() {
         let choice = TranscriberChoice::default();
-        assert_eq!(choice, TranscriberChoice::Mock);
+        assert_eq!(choice, TranscriberChoice::Settings, "the real engine");
         assert_eq!(TranscriberChoice::from_name(choice.name()), Some(choice));
         assert_eq!(TranscriberChoice::from_name("Mock"), None);
-        assert_eq!(TranscriberChoice::known_names(), "mock");
+        assert_eq!(TranscriberChoice::known_names(), "settings, mock");
         for choice in TranscriberChoice::ALL {
             assert_eq!(TranscriberChoice::from_name(choice.name()), Some(choice));
         }
