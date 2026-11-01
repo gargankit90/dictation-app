@@ -1440,6 +1440,43 @@ mod capability_tests {
         assert!(invoke(&windows[1], "save_settings", args("save_settings")).is_err());
     }
 
+    /// Arguments the command can't take: the ACL has already let the call
+    /// through when they are rejected, and the command itself never runs,
+    /// so no keychain or network is touched.
+    fn unusable_args() -> serde_json::Value {
+        serde_json::json!({ "provider": "not-a-provider", "settings": 0, "key": 0 })
+    }
+
+    /// #110: `main` may call every app command, not just the two above, so
+    /// a command left out of its grant fails here instead of breaking
+    /// Settings at run time. The keychain and network commands are called
+    /// with arguments they refuse, which the ACL checks before.
+    #[test]
+    fn the_settings_window_may_invoke_all_five_app_commands() {
+        let (_app, windows) = app_with_windows(&[MAIN, OVERLAY]);
+        let (main, overlay) = (&windows[0], &windows[1]);
+        for command in COMMAND_NAMES {
+            let reached = match *command {
+                "get_settings" | "save_settings" => {
+                    invoke(main, command, args(command)).map(|_| ())
+                }
+                _ => match invoke(main, command, unusable_args()) {
+                    Err(error) if error.to_string().contains("invalid args") => Ok(()),
+                    other => other.map(|_| ()),
+                },
+            };
+            assert_eq!(reached, Ok(()), "main couldn't call {command}");
+            // The same unusable call from the overlay is refused by the ACL,
+            // so the arguments' error above really comes after it.
+            let refused = invoke(overlay, command, unusable_args()).unwrap_err();
+            assert!(
+                refused.to_string().contains("not allowed"),
+                "{command}: {refused}"
+            );
+        }
+        assert_eq!(COMMAND_NAMES.len(), 5);
+    }
+
     #[test]
     fn the_command_names_are_the_registered_commands() {
         let bindings = std::fs::read_to_string(
