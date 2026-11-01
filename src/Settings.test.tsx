@@ -1,7 +1,7 @@
 // M3.4 criteria 1-3: the settings form, with the app's commands replaced by
 // a fake backend through `mockIPC`. The keys here are made up.
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { KeyTestError, Provider, Settings_Serialize } from "./bindings";
@@ -32,6 +32,13 @@ class Backend {
   calls: Call[] = [];
   /** Holds `test_api_key` until called, to test a reply that arrives late. */
   holdTest: Promise<void> | null = null;
+  /** Holds `set_api_key` until released, to test the form while a save runs. */
+  holdSetKey: Promise<void> | null = null;
+  /**
+   * Holds the next `has_api_key` reply for a provider. The answer is decided
+   * when the call arrives, but delivered only when the promise settles.
+   */
+  holdKeyCheck = new Map<Provider, Promise<void>>();
 
   handle = async (command: string, payload: unknown): Promise<unknown> => {
     const args = (payload ?? {}) as Record<string, unknown>;
@@ -47,10 +54,17 @@ class Backend {
         this.settings = args.settings as Settings_Serialize;
         return null;
       case "set_api_key":
+        if (this.holdSetKey) await this.holdSetKey;
         this.keys[args.provider as Provider] = true;
         return null;
-      case "has_api_key":
-        return this.keys[args.provider as Provider];
+      case "has_api_key": {
+        const provider = args.provider as Provider;
+        const answer = this.keys[provider];
+        const held = this.holdKeyCheck.get(provider);
+        this.holdKeyCheck.delete(provider);
+        if (held) await held;
+        return answer;
+      }
       case "test_api_key":
         if (this.holdTest) await this.holdTest;
         // eslint-disable-next-line @typescript-eslint/only-throw-error
@@ -94,6 +108,30 @@ const type = (label: string | RegExp, value: string) => {
 const click = (name: string) => {
   fireEvent.click(screen.getByRole("button", { name }));
 };
+
+/** A promise and the function that settles it. */
+function gate() {
+  let open: () => void = () => undefined;
+  const closed = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { closed, open };
+}
+
+/** Lets pending promise callbacks (the held replies) run. */
+async function flush() {
+  for (let round = 0; round < 5; round += 1) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+}
+
+/** Disabled itself or through a disabled fieldset (jsdom's `.disabled` ignores the latter). */
+const locked = (element: HTMLElement) => element.matches(":disabled");
+
+const checks = (provider: Provider) =>
+  backend.named("has_api_key").filter((call) => call.args.provider === provider).length;
 
 describe("loading", () => {
   it("shows the saved settings", async () => {
@@ -526,5 +564,226 @@ describe("criterion 3: the key is never rendered back", () => {
     });
     expect(keyBox().value).toBe("");
     expect(within(document.body).queryByDisplayValue(KEY)).toBeNull();
+  });
+});
+
+describe("review round 1", () => {
+  describe("a settings-only save keeps the model", () => {
+    it("saving another field leaves a non-default model alone", async () => {
+      backend.settings = { ...backend.settings, model: "whisper-large-v3", language: null };
+      await open();
+      type("Language", "de");
+      click("Save");
+      await screen.findByText("Settings saved.");
+
+      expect(backend.settings.model).toBe("whisper-large-v3");
+      expect(backend.settings.language).toBe("de");
+    });
+
+    it("says that a provider change switches to the new default model", async () => {
+      await open();
+      expect(screen.queryByText(/default model/)).toBeNull();
+
+      type("Provider", "openai");
+      expect(
+        screen.getByText(/Saving switches to OpenAI's default model, whisper-1\./),
+      ).toBeTruthy();
+
+      type("Provider", "groq");
+      expect(screen.queryByText(/default model/)).toBeNull();
+    });
+
+    it("keeps the model on the next save after a provider change", async () => {
+      await open();
+      type("Provider", "openai");
+      click("Save");
+      await screen.findByText("Settings saved.");
+      expect(backend.settings.model).toBe("whisper-1");
+      expect(screen.queryByText(/default model/)).toBeNull();
+
+      backend.settings = { ...backend.settings, model: "whisper-custom" };
+      cleanup();
+      await open();
+      type("Language", "fr");
+      click("Save");
+      await screen.findByText("Settings saved.");
+      expect(backend.settings.model).toBe("whisper-custom");
+    });
+  });
+
+  describe("a key-status reply for a provider that was left is ignored", () => {
+    it("a late 'no key' for OpenAI doesn't hide the saved Groq key", async () => {
+      backend.keys = { groq: true, openai: false };
+      await open();
+      const openai = gate();
+      backend.holdKeyCheck.set("openai", openai.closed);
+
+      type("Provider", "openai");
+      await waitFor(() => {
+        expect(checks("openai")).toBe(1);
+      });
+      type("Provider", "groq");
+      expect(await screen.findByText("Key saved")).toBeTruthy();
+      openai.open();
+      await flush();
+
+      expect(screen.getByText("Key saved")).toBeTruthy();
+      expect(screen.queryByText(/No key saved yet/)).toBeNull();
+      click("Test key");
+      await screen.findByRole("status");
+      expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "groq", key: null });
+    });
+
+    it("a late 'saved' for OpenAI doesn't show a key for Groq", async () => {
+      backend.keys = { groq: false, openai: true };
+      await open();
+      const openai = gate();
+      backend.holdKeyCheck.set("openai", openai.closed);
+
+      type("Provider", "openai");
+      await waitFor(() => {
+        expect(checks("openai")).toBe(1);
+      });
+      type("Provider", "groq");
+      expect(await screen.findByText(/No key saved yet/)).toBeTruthy();
+      openai.open();
+      await flush();
+
+      expect(screen.getByText(/No key saved yet/)).toBeTruthy();
+      expect(screen.queryByText("Key saved")).toBeNull();
+      click("Test key");
+      expect((await screen.findByRole("alert")).textContent).toBe("Paste your API key.");
+      expect(backend.named("test_api_key")).toEqual([]);
+    });
+
+    it("an old reply doesn't undo a key that was just saved", async () => {
+      await open();
+      const stale = gate();
+      backend.holdKeyCheck.set("groq", stale.closed);
+      type("Provider", "openai");
+      type("Provider", "groq"); // asks again; this reply is held (and says 'no key')
+      await waitFor(() => {
+        expect(checks("groq")).toBe(2);
+      });
+      type(/API key/, KEY);
+      click("Save");
+      await screen.findByText("Settings saved.");
+      stale.open();
+      await flush();
+
+      expect(screen.getByText("Key saved")).toBeTruthy();
+    });
+  });
+
+  describe("the form is locked while saving", () => {
+    it("edits during a save are refused, and what shows is what was saved", async () => {
+      await open();
+      type(/API key/, KEY);
+      const hold = gate();
+      backend.holdSetKey = hold.closed;
+      click("Save");
+      await screen.findByRole("button", { name: "Saving…" });
+
+      expect(locked(screen.getByLabelText<HTMLSelectElement>("Provider"))).toBe(true);
+      expect(locked(keyBox())).toBe(true);
+      expect(locked(screen.getByLabelText<HTMLInputElement>("Hotkey"))).toBe(true);
+      expect(locked(screen.getByLabelText<HTMLInputElement>("Language"))).toBe(true);
+      // Even an edit that gets through (a change event on a disabled control)
+      // changes nothing.
+      type("Provider", "openai");
+      type(/API key/, OTHER_KEY);
+      type("Language", "de");
+      hold.open();
+      await screen.findByText("Settings saved.");
+
+      expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("groq");
+      expect(backend.settings.provider).toBe("groq");
+      expect(backend.settings.language).toBeNull();
+      expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("");
+      expect(screen.getByLabelText(/Groq API key/)).toBeTruthy();
+      expect(screen.getByText("Key saved")).toBeTruthy();
+      expect(backend.keys).toEqual({ groq: true, openai: false });
+      expect(backend.named("set_api_key").map((call) => call.args.provider)).toEqual(["groq"]);
+      expect(keyBox().value).toBe("");
+      // Editable again afterwards.
+      expect(locked(screen.getByLabelText("Provider"))).toBe(false);
+    });
+
+    it("shows the stored provider if the settings come back different", async () => {
+      await open();
+      type("Provider", "openai");
+      const handle = backend.handle;
+      mockIPC(async (command, payload) => {
+        const result = await handle(command, payload);
+        if (command === "save_settings") {
+          backend.settings = { ...backend.settings, provider: "groq", model: "whisper-large-v3" };
+        }
+        return result;
+      });
+      click("Save");
+      await screen.findByText("Settings saved.");
+
+      expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("groq");
+    });
+  });
+
+  describe("a keychain lookup error is shown, not swallowed", () => {
+    it("shows the app's message with a way to retry, not 'Checking…'", async () => {
+      backend.failing.set("has_api_key", "keychain access was denied");
+      await open();
+
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toBe("Couldn't check for a saved key: keychain access was denied");
+      expect(screen.queryByText("Checking for a saved key…")).toBeNull();
+      expect(screen.queryByText("Key saved")).toBeNull();
+      expect(screen.queryByText(/No key saved yet/)).toBeNull();
+
+      backend.failing.delete("has_api_key");
+      backend.keys.groq = true;
+      click("Retry");
+      expect(await screen.findByText("Key saved")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    });
+
+    it("an IPC failure is a generic message", async () => {
+      const handle = backend.handle;
+      mockIPC((command, payload) => {
+        if (command === "has_api_key") throw new Error("ipc is down");
+        return handle(command, payload);
+      });
+      await open();
+
+      expect((await screen.findByRole("alert")).textContent).toContain("Something went wrong");
+      expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    });
+
+    it("Test key still asks the app about the stored key, which explains itself", async () => {
+      backend.failing.set("has_api_key", "keychain access was denied");
+      backend.testResult = {
+        kind: "keychain",
+        message: "Couldn't read the saved key: keychain access was denied.",
+      };
+      await open();
+      click("Test key");
+
+      await waitFor(() => {
+        expect(screen.getByRole<HTMLButtonElement>("button", { name: "Test key" }).disabled).toBe(
+          false,
+        );
+        expect(backend.named("test_api_key")).toHaveLength(1);
+      });
+      expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "groq", key: null });
+      expect(
+        screen.getAllByRole("alert").some((alert) => alert.textContent.includes("Couldn't read")),
+      ).toBe(true);
+    });
+
+    it("the error carries no key", async () => {
+      backend.failing.set("has_api_key", "keychain access was denied");
+      await open();
+      await screen.findByRole("alert");
+
+      expect(document.body.textContent).not.toContain("gsk_");
+    });
   });
 });

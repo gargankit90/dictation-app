@@ -11,6 +11,19 @@ interface Notice {
   text: string;
 }
 
+/**
+ * What the app knows about the selected provider's stored key. "checking" and
+ * "error" are different: a failed lookup (say, a denied keychain) must not
+ * look like one still running.
+ */
+type KeyStatus =
+  | { state: "checking" }
+  | { state: "saved" }
+  | { state: "none" }
+  | { state: "error"; message: string };
+
+const CHECKING: KeyStatus = { state: "checking" };
+
 interface FieldErrors {
   key?: string;
   language?: string;
@@ -40,7 +53,7 @@ export function Settings() {
   const [language, setLanguage] = useState("");
   const [hotkey, setHotkey] = useState("");
   const [keyInput, setKeyInput] = useState("");
-  const [keySaved, setKeySaved] = useState<boolean | null>(null);
+  const [keyStatus, setKeyStatus] = useState<KeyStatus>(CHECKING);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [notice, setNotice] = useState<Notice | null>(null);
   const [testing, setTesting] = useState(false);
@@ -48,14 +61,26 @@ export function Settings() {
   // Bumped whenever a test result would be out of date (a new test, or the
   // key or provider changed), so a slow reply can't show up under a newer key.
   const testRun = useRef(0);
+  // Bumped by every key-status lookup (and when a save settles the status), so
+  // only the newest reply counts: replies can arrive in any order, and one for
+  // a provider the user has since left must not overwrite the current one.
+  const keyCheck = useRef(0);
 
   const checkKeySaved = useCallback(async (which: Provider) => {
+    keyCheck.current += 1;
+    const run = keyCheck.current;
+    setKeyStatus(CHECKING);
+    let status: KeyStatus;
     try {
       const result = await commands.hasApiKey(which);
-      setKeySaved(result.status === "ok" ? result.data : null);
+      status =
+        result.status === "error"
+          ? { state: "error", message: messageOf(result.error) }
+          : { state: result.data ? "saved" : "none" };
     } catch {
-      setKeySaved(null);
+      status = { state: "error", message: BROKEN };
     }
+    if (run === keyCheck.current) setKeyStatus(status);
   }, []);
 
   useEffect(() => {
@@ -85,18 +110,23 @@ export function Settings() {
 
   const info = providerInfo(provider);
 
+  // The form is locked while a save runs, so what it shows is what gets saved.
+  // (The fieldset disables the controls; these guards cover anything else.)
+  const changesModel = loaded !== null && provider !== loaded.provider;
+
   function changeProvider(next: Provider) {
+    if (saving) return;
     testRun.current += 1;
     setTesting(false);
     setProvider(next);
     setKeyInput("");
-    setKeySaved(null);
     setErrors({});
     setNotice(null);
     void checkKeySaved(next);
   }
 
   function changeKey(value: string) {
+    if (saving) return;
     testRun.current += 1;
     setTesting(false);
     setKeyInput(value);
@@ -108,7 +138,9 @@ export function Settings() {
     // A typed key is tested without saving it; with the field empty, the
     // saved key is tested.
     const typed = keyInput.trim() === "" ? null : keyInput;
-    if (typed === null && keySaved !== true) {
+    // While the lookup is running or failed, the app is asked anyway: it
+    // answers for the stored key, with its own typed error if it can't read it.
+    if (typed === null && keyStatus.state === "none") {
       setErrors((current) => ({ ...current, key: "Paste your API key." }));
       return;
     }
@@ -141,7 +173,7 @@ export function Settings() {
 
   async function save(event: SyntheticEvent) {
     event.preventDefault();
-    if (loaded === null) return;
+    if (loaded === null || saving) return;
     const found: FieldErrors = {
       key: keyInput.trim() === "" ? undefined : (validateKey(keyInput) ?? undefined),
       language: validateLanguage(language) ?? undefined,
@@ -163,27 +195,32 @@ export function Settings() {
           return;
         }
         setKeyInput("");
-        setKeySaved(true);
+        keyCheck.current += 1; // any lookup still running predates this key
+        setKeyStatus({ state: "saved" });
       }
-      const saved = await commands.saveSettings({
+      const toSave: Settings_Serialize = {
         ...loaded,
         provider,
-        model: info.defaultModel,
+        // The model is kept unless the provider changes; then it becomes the
+        // new provider's default (the form says so).
+        model: provider === loaded.provider ? loaded.model : info.defaultModel,
         language: normalizeLanguage(language),
         hotkey: hotkey.trim(),
-      });
+      };
+      const saved = await commands.saveSettings(toSave);
       if (saved.status === "error") {
         setNotice({ kind: "error", text: messageOf(saved.error) });
         return;
       }
-      // Reload, so the form shows what was stored (the canonical hotkey).
+      // Reload, so the form shows what was stored (the canonical hotkey). If
+      // that fails, what we just saved is still what is stored.
       const reread = await commands.getSettings();
-      if (reread.status === "ok") {
-        setLoaded(reread.data);
-        setLanguage(reread.data.language ?? "");
-        setHotkey(reread.data.hotkey);
-      }
-      await checkKeySaved(provider);
+      const stored = reread.status === "ok" ? reread.data : toSave;
+      setLoaded(stored);
+      setProvider(stored.provider);
+      setLanguage(stored.language ?? "");
+      setHotkey(stored.hotkey);
+      await checkKeySaved(stored.provider);
       setNotice({ kind: "ok", text: "Settings saved." });
     } catch {
       setNotice({ kind: "error", text: BROKEN });
@@ -215,124 +252,148 @@ export function Settings() {
     <main className="settings">
       <h1>Settings</h1>
       <form onSubmit={(event) => void save(event)} noValidate>
-        <div className="field">
-          <label htmlFor="provider">Provider</label>
-          <select
-            id="provider"
-            value={provider}
-            onChange={(event) => {
-              changeProvider(event.target.value as Provider);
-            }}
-          >
-            {PROVIDERS.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </select>
-          <p className="hint">Speech is sent to this service to be turned into text.</p>
-        </div>
-
-        <div className="field">
-          <label htmlFor="api-key">{info.name} API key</label>
-          <input
-            id="api-key"
-            type="password"
-            value={keyInput}
-            autoComplete="off"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            placeholder={keySaved === true ? "Paste a new key to replace it" : "Paste your key"}
-            aria-invalid={errors.key !== undefined}
-            aria-describedby="api-key-status api-key-error"
-            onChange={(event) => {
-              changeKey(event.target.value);
-            }}
-          />
-          <p id="api-key-status" className="hint">
-            {keySaved === true ? (
-              <strong className="saved">Key saved</strong>
-            ) : keySaved === false ? (
-              "No key saved yet."
-            ) : (
-              "Checking for a saved key…"
-            )}{" "}
-            The key is kept in the system keychain and is never shown again.
-          </p>
-          <p id="api-key-error" role={errors.key ? "alert" : undefined} className="error">
-            {errors.key}
-          </p>
-          <div className="row">
-            <button type="button" disabled={testing || saving} onClick={() => void testKey()}>
-              {testing ? "Testing…" : "Test key"}
-            </button>
-            <span className="hint">
-              Tests the key in the box (without saving it), or the saved key if the box is empty.
-            </span>
-          </div>
-          {notice !== null && (
-            <p
-              role={notice.kind === "error" ? "alert" : "status"}
-              className={`notice ${notice.kind}`}
+        <fieldset disabled={saving}>
+          <div className="field">
+            <label htmlFor="provider">Provider</label>
+            <select
+              id="provider"
+              value={provider}
+              onChange={(event) => {
+                changeProvider(event.target.value as Provider);
+              }}
             >
-              {notice.text}
+              {PROVIDERS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+            <p className="hint">
+              Speech is sent to this service to be turned into text.
+              {changesModel &&
+                ` Saving switches to ${info.name}'s default model, ${info.defaultModel}.`}
             </p>
-          )}
-        </div>
+          </div>
 
-        <div className="field">
-          <label htmlFor="hotkey">Hotkey</label>
-          <input
-            id="hotkey"
-            type="text"
-            value={hotkey}
-            autoComplete="off"
-            spellCheck={false}
-            aria-invalid={errors.hotkey !== undefined}
-            aria-describedby="hotkey-hint hotkey-error"
-            onChange={(event) => {
-              setHotkey(event.target.value);
-              setErrors((current) => ({ ...current, hotkey: undefined }));
-            }}
-          />
-          <p id="hotkey-hint" className="hint">
-            Hold it to talk. For example RightAlt (the right Option key) or Ctrl+Shift+Space.
-          </p>
-          <p id="hotkey-error" role={errors.hotkey ? "alert" : undefined} className="error">
-            {errors.hotkey}
-          </p>
-        </div>
+          <div className="field">
+            <label htmlFor="api-key">{info.name} API key</label>
+            <input
+              id="api-key"
+              type="password"
+              value={keyInput}
+              autoComplete="off"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder={
+                keyStatus.state === "saved" ? "Paste a new key to replace it" : "Paste your key"
+              }
+              aria-invalid={errors.key !== undefined}
+              aria-describedby="api-key-status api-key-error"
+              onChange={(event) => {
+                changeKey(event.target.value);
+              }}
+            />
+            <p id="api-key-status" className="hint">
+              {keyStatus.state === "saved" ? (
+                <strong className="saved">Key saved</strong>
+              ) : keyStatus.state === "none" ? (
+                "No key saved yet."
+              ) : keyStatus.state === "checking" ? (
+                "Checking for a saved key…"
+              ) : (
+                <span role="alert" className="error">
+                  Couldn&apos;t check for a saved key: {keyStatus.message}
+                </span>
+              )}{" "}
+              The key is kept in the system keychain and is never shown again.
+            </p>
+            <p id="api-key-error" role={errors.key ? "alert" : undefined} className="error">
+              {errors.key}
+            </p>
+            <div className="row">
+              <button type="button" disabled={testing || saving} onClick={() => void testKey()}>
+                {testing ? "Testing…" : "Test key"}
+              </button>
+              <span className="hint">
+                Tests the key in the box (without saving it), or the saved key if the box is empty.
+              </span>
+              {keyStatus.state === "error" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void checkKeySaved(provider);
+                  }}
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+            {notice !== null && (
+              <p
+                role={notice.kind === "error" ? "alert" : "status"}
+                className={`notice ${notice.kind}`}
+              >
+                {notice.text}
+              </p>
+            )}
+          </div>
 
-        <div className="field">
-          <label htmlFor="language">Language</label>
-          <input
-            id="language"
-            type="text"
-            value={language}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="Detect automatically"
-            aria-invalid={errors.language !== undefined}
-            aria-describedby="language-hint language-error"
-            onChange={(event) => {
-              setLanguage(event.target.value);
-              setErrors((current) => ({ ...current, language: undefined }));
-            }}
-          />
-          <p id="language-hint" className="hint">
-            A code such as en, de or fr. Leave it empty to detect the language.
-          </p>
-          <p id="language-error" role={errors.language ? "alert" : undefined} className="error">
-            {errors.language}
-          </p>
-        </div>
+          <div className="field">
+            <label htmlFor="hotkey">Hotkey</label>
+            <input
+              id="hotkey"
+              type="text"
+              value={hotkey}
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={errors.hotkey !== undefined}
+              aria-describedby="hotkey-hint hotkey-error"
+              onChange={(event) => {
+                if (saving) return;
+                setHotkey(event.target.value);
+                setErrors((current) => ({ ...current, hotkey: undefined }));
+              }}
+            />
+            <p id="hotkey-hint" className="hint">
+              Hold it to talk. For example RightAlt (the right Option key) or Ctrl+Shift+Space.
+            </p>
+            <p id="hotkey-error" role={errors.hotkey ? "alert" : undefined} className="error">
+              {errors.hotkey}
+            </p>
+          </div>
 
-        <div className="row actions">
-          <button type="submit" className="primary" disabled={saving || testing}>
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
+          <div className="field">
+            <label htmlFor="language">Language</label>
+            <input
+              id="language"
+              type="text"
+              value={language}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Detect automatically"
+              aria-invalid={errors.language !== undefined}
+              aria-describedby="language-hint language-error"
+              onChange={(event) => {
+                if (saving) return;
+                setLanguage(event.target.value);
+                setErrors((current) => ({ ...current, language: undefined }));
+              }}
+            />
+            <p id="language-hint" className="hint">
+              A code such as en, de or fr. Leave it empty to detect the language.
+            </p>
+            <p id="language-error" role={errors.language ? "alert" : undefined} className="error">
+              {errors.language}
+            </p>
+          </div>
+
+          <div className="row actions">
+            <button type="submit" className="primary" disabled={saving || testing}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </fieldset>
       </form>
     </main>
   );

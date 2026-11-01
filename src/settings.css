@@ -130,3 +130,10 @@ button:disabled {
 .actions {
   justify-content: flex-end;
 }
+
+.settings fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
