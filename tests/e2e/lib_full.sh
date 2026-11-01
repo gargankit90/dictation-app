@@ -12,9 +12,12 @@ VM_HOME="/Users/$VM_USER"
 VM_RUN_DIR="$VM_HOME/e2e-run"
 
 # The first launch of a full-app scenario: records `file` (default: the
-# tone) instead of the microphone and "transcribes" MOCK_TEXT.
+# tone) instead of the microphone and "transcribes" MOCK_TEXT. Any further
+# arguments are more flags for the app (e2e_rapid's --mock-text-sequence).
 launch_full() {
-  launch --debug-audio-file "${1:-$VM_TONE}" --mock-text "$MOCK_TEXT"
+  local wav=${1:-$VM_TONE}
+  [ $# -eq 0 ] || shift
+  launch --debug-audio-file "$wav" --mock-text "$MOCK_TEXT" "$@"
 }
 
 # --- TextEdit ---------------------------------------------------------------
