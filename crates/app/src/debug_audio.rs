@@ -52,11 +52,16 @@ impl<A: AudioSource> AudioSource for SavingAudio<A> {
 }
 
 fn save(dir: &Path, audio: &Audio) -> Result<PathBuf, String> {
-    let bytes = wav::encode_f32(&audio.samples, audio.sample_rate).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_millis());
+    save_at(dir, audio, millis)
+}
+
+/// [`save`] with the time given, so a test can make names collide.
+fn save_at(dir: &Path, audio: &Audio, millis: u128) -> Result<PathBuf, String> {
+    let bytes = wav::encode_f32(&audio.samples, audio.sample_rate).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     // Two stops in the same millisecond get -1, -2, …
     let mut path = dir.join(format!("recording-{millis}.wav"));
     let mut n = 0;
@@ -202,6 +207,65 @@ mod tests {
         };
         assert!(save(&dir.0, &audio).is_err());
         assert!(!dir.0.exists());
+    }
+
+    /// P2-03: at one timestamp, with the base name and the first suffixes
+    /// already taken, the next free suffix is used, nothing is overwritten
+    /// and every file decodes. It does not depend on how fast the disk is.
+    #[test]
+    fn same_timestamp_occupied_suffixes_produce_unique_recordings() {
+        let dir = TempDir::new();
+        std::fs::create_dir_all(&dir.0).unwrap();
+        let taken = [
+            "recording-1234.wav",
+            "recording-1234-1.wav",
+            "recording-1234-2.wav",
+        ];
+        for name in taken {
+            std::fs::write(dir.0.join(name), format!("old {name}")).unwrap();
+        }
+        let audio = Audio {
+            sample_rate: 16_000,
+            samples: vec![0.0, 0.5],
+        };
+
+        // In a thread with a bound: a loop that never finds a free name
+        // fails the test instead of hanging it.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let path_dir = dir.0.clone();
+        std::thread::spawn(move || {
+            let paths: Vec<_> = (0..3)
+                .map(|_| save_at(&path_dir, &audio, 1234).unwrap())
+                .collect();
+            let _ = tx.send(paths);
+        });
+        let paths = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("save_at never found a free name");
+        let names: Vec<_> = paths
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "recording-1234-3.wav",
+                "recording-1234-4.wav",
+                "recording-1234-5.wav"
+            ]
+        );
+        for name in taken {
+            assert_eq!(
+                std::fs::read_to_string(dir.0.join(name)).unwrap(),
+                format!("old {name}"),
+                "{name} was overwritten"
+            );
+        }
+        for path in &paths {
+            let reader = hound::WavReader::open(path).unwrap();
+            assert_eq!(reader.spec().sample_rate, 16_000);
+            assert_eq!(reader.len(), 2);
+        }
     }
 
     #[test]
