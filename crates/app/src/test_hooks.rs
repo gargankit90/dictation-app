@@ -43,6 +43,75 @@ pub const DEBUG_SET_API_KEY_FLAG: &str = "--debug-set-api-key-stdin";
 /// `--debug-delete-api-key`: remove the Groq API key and exit.
 pub const DEBUG_DELETE_API_KEY_FLAG: &str = "--debug-delete-api-key";
 
+/// `--debug-launch-at-login-on`, `-off` and `-status`: set or print the login
+/// item through the same code as the Settings window, then exit (M5.3).
+pub const DEBUG_LAUNCH_ON_FLAG: &str = "--debug-launch-at-login-on";
+/// See [`DEBUG_LAUNCH_ON_FLAG`].
+pub const DEBUG_LAUNCH_OFF_FLAG: &str = "--debug-launch-at-login-off";
+/// See [`DEBUG_LAUNCH_ON_FLAG`].
+pub const DEBUG_LAUNCH_STATUS_FLAG: &str = "--debug-launch-at-login-status";
+
+/// What a launch-at-login hook asks for. The process does it and exits
+/// instead of starting the app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchCommand {
+    /// Turn it on.
+    On,
+    /// Turn it off.
+    Off,
+    /// Print what the OS says.
+    Status,
+}
+
+impl LaunchCommand {
+    /// The hook `flag` is, if it is one.
+    #[must_use]
+    pub fn from_flag(flag: &str) -> Option<Self> {
+        match flag {
+            DEBUG_LAUNCH_ON_FLAG => Some(Self::On),
+            DEBUG_LAUNCH_OFF_FLAG => Some(Self::Off),
+            DEBUG_LAUNCH_STATUS_FLAG => Some(Self::Status),
+            _ => None,
+        }
+    }
+}
+
+/// Does `command` through `login` the way saving the Settings window would
+/// ([`crate::launch::apply`]) and says what the OS reports afterwards:
+/// `launch at login: enabled`, `disabled` or `requires approval`.
+///
+/// # Errors
+///
+/// The reason (for the user) if the OS can't be read or refuses.
+pub fn run_launch_command(
+    command: LaunchCommand,
+    login: &dyn dictation_ports::LaunchAtLogin,
+) -> Result<String, String> {
+    use dictation_ports::LaunchAtLoginState;
+
+    let wanted = match command {
+        LaunchCommand::On => Some(true),
+        LaunchCommand::Off => Some(false),
+        LaunchCommand::Status => None,
+    };
+    if let Some(wanted) = wanted {
+        let mut settings = dictation_core::settings::Settings {
+            launch_at_login: wanted,
+            ..dictation_core::settings::Settings::default()
+        };
+        crate::launch::apply(login, &mut settings).map_err(|problem| problem.to_string())?;
+    }
+    let state = login.state().map_err(|error| error.to_string())?;
+    Ok(format!(
+        "launch at login: {}",
+        match state {
+            LaunchAtLoginState::Enabled => "enabled",
+            LaunchAtLoginState::Disabled => "disabled",
+            LaunchAtLoginState::RequiresApproval => "requires approval",
+        }
+    ))
+}
+
 /// What a key hook asks for. The process does it and exits instead of
 /// starting the app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,6 +337,45 @@ mod tests {
             }),
             rx,
         )
+    }
+
+    #[test]
+    fn the_launch_at_login_hooks_set_and_report_the_os_state() {
+        use dictation_platform::fakes::FakeLaunchAtLogin;
+        use dictation_ports::{LaunchAtLoginError, LaunchAtLoginState};
+
+        let login = FakeLaunchAtLogin::new();
+        let run = |command| run_launch_command(command, &login);
+        assert_eq!(
+            run(LaunchCommand::Status).unwrap(),
+            "launch at login: disabled"
+        );
+        assert_eq!(run(LaunchCommand::On).unwrap(), "launch at login: enabled");
+        assert_eq!(
+            run(LaunchCommand::Status).unwrap(),
+            "launch at login: enabled"
+        );
+        assert_eq!(
+            run(LaunchCommand::Off).unwrap(),
+            "launch at login: disabled"
+        );
+
+        login.enabling_gives(LaunchAtLoginState::RequiresApproval);
+        assert!(run(LaunchCommand::On).unwrap_err().contains("approval"));
+        assert_eq!(
+            run(LaunchCommand::Status).unwrap(),
+            "launch at login: requires approval"
+        );
+        login.fail_with(LaunchAtLoginError::Unsupported);
+        assert!(run(LaunchCommand::Status).is_err());
+        for (flag, command) in [
+            (DEBUG_LAUNCH_ON_FLAG, LaunchCommand::On),
+            (DEBUG_LAUNCH_OFF_FLAG, LaunchCommand::Off),
+            (DEBUG_LAUNCH_STATUS_FLAG, LaunchCommand::Status),
+        ] {
+            assert_eq!(LaunchCommand::from_flag(flag), Some(command));
+        }
+        assert_eq!(LaunchCommand::from_flag("--press"), None);
     }
 
     #[test]

@@ -151,14 +151,28 @@ fn shell_hotkey() -> (ShellHotkey, Option<Injector>) {
     }
 }
 
-/// The API key commands (debug builds): stores the Groq API key from stdin
-/// and/or removes it, saying so on stderr. `None` when `argv` has none, so the
-/// app starts normally; otherwise the exit code. The key is never logged or
-/// printed.
+/// The commands that run in a process of their own (debug builds): the API
+/// key commands store the Groq API key from stdin and/or remove it; the
+/// launch-at-login commands set or print the login item. Each says what it
+/// did on stderr. `None` when `argv` has none, so the app starts normally;
+/// otherwise the exit code. The key is never logged or printed.
 fn run_key_commands(argv: &[String], mut stdin: impl std::io::Read) -> Option<i32> {
     let launch = flags::parse(argv, flags::TEST_FLAGS);
-    if launch.key_commands.is_empty() {
+    if launch.key_commands.is_empty() && launch.launch_commands.is_empty() {
         return None;
+    }
+    let login = SystemLaunchAtLogin::new();
+    for command in launch.launch_commands {
+        match dictation_pipeline::test_hooks::run_launch_command(command, &login) {
+            Ok(message) => eprintln!("{message}"),
+            Err(error) => {
+                eprintln!("{error}");
+                return Some(1);
+            }
+        }
+    }
+    if launch.key_commands.is_empty() {
+        return Some(0);
     }
     // No settings are read or written; only the keychain is used.
     let config = dictation_pipeline::config::Config::new(
