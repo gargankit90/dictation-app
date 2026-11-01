@@ -359,6 +359,9 @@ impl Failure {
                 Self::fatal(TranscribeError::InvalidKey)
             }
             StatusCode::TOO_MANY_REQUESTS => Self::retry(TranscribeError::RateLimited, retry_after),
+            // Never followed (issue #76) and never retried: the same request
+            // gets the same answer. Its own error, so the UI can say so (#86).
+            s if s.is_redirection() => Self::fatal(TranscribeError::Redirected(s.as_u16())),
             s if s.is_server_error() => Self::retry(
                 TranscribeError::Engine(format!("the provider failed (HTTP {})", s.as_u16())),
                 retry_after,

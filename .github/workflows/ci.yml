@@ -98,3 +98,6 @@ jobs:
       - run: cargo clippy -p dictation-platform --all-targets --all-features -- -D warnings
       - run: cargo nextest run -p dictation-platform --all-features --profile ci
       - run: cargo test -p dictation-platform --doc --all-features
+      # The vendored hotkey and CoreAudio crates are not workspace members, so
+      # nothing above runs their patch tests (#77, #80, #88).
+      - run: scripts/vendor-tests.sh

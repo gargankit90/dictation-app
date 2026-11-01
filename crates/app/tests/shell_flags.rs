@@ -11,13 +11,13 @@ use dictation_pipeline::stand_ins::{
     DiscardingInserter, FixedTranscriber, GrantedPermissions, ToneAudio,
 };
 use dictation_pipeline::test_hooks::{SyntheticHotkey, hook_events};
+use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::fakes::{FakeClock, FakeHotkey};
 use dictation_ports::{HotkeyError, HotkeyEvent};
-use tokio::sync::mpsc::UnboundedReceiver;
 
 const WAIT: Duration = Duration::from_secs(5);
 
-async fn next(ui: &mut UnboundedReceiver<UiEvent>) -> UiEvent {
+async fn next(ui: &mut UiReceiver) -> UiEvent {
     tokio::time::timeout(WAIT, ui.recv())
         .await
         .unwrap()

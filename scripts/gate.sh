@@ -59,6 +59,11 @@ step cargo test --workspace --doc
 # platform crate on its own, where its compile_fail doctest runs.
 step cargo test -p dictation-platform --doc
 step scripts/coverage.sh
+# coverage.sh fails a crate with no tests (#33, #62); prove it does.
+step scripts/test-coverage.sh
+# The vendored crates' callback tests (#77, #80, #88). macOS only; the script
+# skips itself elsewhere.
+step scripts/vendor-tests.sh
 
 # TypeScript
 step npx tsc -b --noEmit

@@ -46,6 +46,15 @@ All in `src/platform/macos/listener.rs` unless noted.
    Shift cleared Option silently and the Shift event read as the hotkey's
    release, so the recording was transcribed instead of discarded. Normal
    typing explains its own change and sends none.
+   **Synthetic flags** (#89). A key or mouse event whose own flags disagree
+   with the tracked modifiers is no longer taken as a missed release on its
+   own: software that posts events (remote desktop, automation, the app's
+   own paste) often gives them flags with no Option bit and no side bits,
+   and that used to cancel a recording while Option was still held. The
+   callback now asks the session's own flags
+   (`CGEventSourceFlagsState`, the same source as the snapshot at start)
+   and reconciles to those; only if they show the change too is it a missed
+   release and a resync.
 5. `src/types/hotkey.rs`: `KeyEvent::resync(modifiers)` and
    `KeyEvent::is_resync()`. A resync has no key and no changed modifier,
    which no other macOS event has. `HotkeyManager` needs no change: it

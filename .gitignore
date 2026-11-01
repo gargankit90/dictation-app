@@ -24,3 +24,6 @@ lcov.info
 
 # e2e run output
 /tests/e2e/out/
+
+# Seeded by scripts/vendor-tests.sh and removed again
+/third_party/*/Cargo.lock

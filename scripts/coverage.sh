@@ -3,12 +3,16 @@
 # threshold (docs/ENGINEERING.md). Part of the quality gate.
 #
 # Each crate is measured with only its own tests, so `app` tests can't lift
-# `core` over its bar. A crate with no code yet has no coverage data and is
-# listed as skipped. Override a threshold for one run with COVERAGE_MIN_<CRATE>,
-# e.g. `COVERAGE_MIN_CORE=99 scripts/coverage.sh`.
+# `core` over its bar. A crate with no tests, or no coverage data, fails: a
+# filter or `#[cfg]` that hides every test, or a deleted test directory, must
+# not pass as "no code yet" (#33, #62). Override a threshold for one run with
+# COVERAGE_MIN_<CRATE>, e.g. `COVERAGE_MIN_CORE=99 scripts/coverage.sh`.
+#
+# COVERAGE_ROOT and COVERAGE_CRATES (space-separated entries as below) point
+# the script at a fixture workspace; scripts/test-coverage.sh does that.
 set -euo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
+cd "${COVERAGE_ROOT:-$(git rev-parse --show-toplevel)}"
 
 # crate dir : package : minimum line coverage (%)
 crates=(
@@ -16,6 +20,9 @@ crates=(
   "transcribe:dictation-transcribe:85"
   "app:dictation-pipeline:70"
 )
+if [ -n "${COVERAGE_CRATES:-}" ]; then
+  read -r -a crates <<<"$COVERAGE_CRATES"
+fi
 
 status=0
 report=$(mktemp)
@@ -29,17 +36,11 @@ for entry in "${crates[@]}"; do
   min=${!override:-$min}
 
   cargo llvm-cov clean --workspace >/dev/null 2>&1
-  # Test failures fail the script here, before any report is made.
-  # `--no-tests=pass` while `transcribe` and `app` have no tests yet (#29);
-  # the workspace nextest run in gate.sh already fails on zero tests.
-  cargo llvm-cov nextest --no-report -p "$package" --no-tests=pass --status-level fail
+  # Test failures fail the script here, before any report is made. So does a
+  # package with no tests: nextest exits non-zero when it runs none.
+  cargo llvm-cov nextest --no-report -p "$package" --status-level fail
 
   if ! cargo llvm-cov report -p "$package" --json --summary-only >"$report" 2>"$report.err"; then
-    if grep -q 'no coverage data found' "$report.err"; then
-      printf '%-12s %-22s %9s %9s  %s\n' "$dir" "$package" - "$min%" "skipped (no code yet)"
-      rm -f "$report.err"
-      continue
-    fi
     cat "$report.err" >&2
     rm -f "$report.err"
     exit 1
@@ -57,6 +58,7 @@ for entry in "${crates[@]}"; do
 done
 
 for skipped in ports platform src-tauri; do
+  [ -z "${COVERAGE_CRATES:-}" ] || break
   printf '%-12s %-22s %9s %9s  %s\n' "$skipped" - - - "not measured (no threshold)"
 done
 

@@ -41,6 +41,10 @@ pub enum TranscribeError {
     /// ([`dictation_core::redact::summary`]), as a backstop.
     #[error("network error: {}", redact::summary(.0))]
     Network(String),
+    /// The provider answered with a redirect (3xx), which is never followed
+    /// (requests go only to the configured provider). Holds the HTTP status.
+    #[error("the provider answered with a redirect (HTTP {0}), which isn't followed")]
+    Redirected(u16),
     /// The provider or engine returned an error or a response we can't read.
     /// Same rule as [`Network`](Self::Network): a short summary such as
     /// "the provider failed (HTTP 503)", never the reply body.
@@ -67,6 +71,8 @@ impl fmt::Debug for TranscribeError {
                 .debug_tuple("Network")
                 .field(&redact::summary(text))
                 .finish(),
+            // Holds only the HTTP status, never the Location header or a body.
+            Self::Redirected(status) => f.debug_tuple("Redirected").field(status).finish(),
             Self::Engine(text) => f
                 .debug_tuple("Engine")
                 .field(&redact::summary(text))
@@ -102,6 +108,9 @@ impl TranscribeError {
             Self::Network(_) => {
                 "Couldn't reach the provider. Check your internet connection.".to_owned()
             }
+            Self::Redirected(_) => "The provider answered with a redirect, which the app \
+                 doesn't follow. Check the provider selected in Settings."
+                .to_owned(),
             Self::Engine(detail) => format!("Something went wrong: {}.", redact::summary(detail)),
         }
     }
@@ -185,6 +194,10 @@ mod tests {
                 "Couldn't read your API key from the Keychain. Unlock the Keychain or allow access, then try again, or enter the key again in Settings.",
             ),
             (
+                TranscribeError::Redirected(302),
+                "The provider answered with a redirect, which the app doesn't follow. Check the provider selected in Settings.",
+            ),
+            (
                 TranscribeError::Engine("the provider failed (HTTP 503)".into()),
                 "Something went wrong: the provider failed (HTTP 503).",
             ),
@@ -216,6 +229,19 @@ mod tests {
             }
             let debug = format!("{error:?}");
             assert!(!debug.contains(key) && debug.len() < 300, "{debug}");
+        }
+    }
+
+    /// The redirect error carries only the status: neither the target URL
+    /// (which may hold a key in its query) nor a body can reach any output.
+    #[test]
+    fn redirected_shows_only_the_status() {
+        let error = TranscribeError::Redirected(302);
+        assert_eq!(format!("{error:?}"), "Redirected(302)");
+        let shown = [error.to_string(), error.user_message()];
+        for text in shown {
+            assert!(!text.contains("http"), "{text}");
+            assert!(!text.contains('\n') && text.chars().count() < 300, "{text}");
         }
     }
 
