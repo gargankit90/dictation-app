@@ -31,7 +31,8 @@ use dictation_core::events::{Command, Event};
 use dictation_core::text::{Cleaned, Transcript, clean};
 use dictation_ports::{
     Audio, AudioError, AudioSource, Clock, HotkeyError, HotkeyEvent, HotkeySource, InsertError,
-    Permission, PermissionStatus, Permissions, TextInserter, TranscribeError, Transcriber,
+    Permission, PermissionStatus, Permissions, TextBeforeCursor, TextInserter, TranscribeError,
+    Transcriber,
 };
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{Notify, mpsc, oneshot, watch};
@@ -85,6 +86,72 @@ impl Default for Config {
     }
 }
 
+/// How long a dictation waits for the text before the cursor before it
+/// pastes without a smart leading space. A healthy app answers in a few
+/// milliseconds; this bounds what a hung one can add to the paste.
+pub const CURSOR_READ_TIMEOUT: Duration = Duration::from_millis(200);
+
+/// Reads the character before the cursor for the smart leading space (#93),
+/// once per dictation, right after the transcript arrives and only if there
+/// is text to paste. What it reads is used for that one transcript and
+/// never logged.
+#[derive(Clone)]
+pub struct CursorReader {
+    reader: Arc<dyn TextBeforeCursor>,
+    timeout: Duration,
+}
+
+impl CursorReader {
+    /// Reads through `reader`, waiting at most [`CURSOR_READ_TIMEOUT`].
+    pub fn new(reader: impl TextBeforeCursor + 'static) -> Self {
+        Self {
+            reader: Arc::new(reader),
+            timeout: CURSOR_READ_TIMEOUT,
+        }
+    }
+
+    /// Waits at most `timeout` instead.
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// The character before the cursor, or `None` (no space is added) if
+    /// the cursor is at the start of a field, the reader fails, or it
+    /// doesn't answer within the timeout. The read runs on the blocking
+    /// pool; one that times out is left to finish there and its answer is
+    /// dropped.
+    async fn preceding(&self) -> Option<char> {
+        let reader = Arc::clone(&self.reader);
+        let read = task::spawn_blocking(move || reader.char_before_cursor());
+        match tokio::time::timeout(self.timeout, read).await {
+            Ok(Ok(Ok(before))) => before.preceding(),
+            Ok(Ok(Err(error))) => {
+                tracing::debug!(%error, "no text before the cursor; no leading space");
+                None
+            }
+            Ok(Err(_)) => {
+                // The panic message isn't logged: it could hold text.
+                tracing::warn!("reading the text before the cursor crashed; no leading space");
+                None
+            }
+            Err(_) => {
+                tracing::debug!(timeout = ?self.timeout, "the focused app did not answer in time; no leading space");
+                None
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for CursorReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CursorReader")
+            .field("timeout", &self.timeout)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Controls a running pipeline.
 #[derive(Debug)]
 pub struct Pipeline {
@@ -94,7 +161,9 @@ pub struct Pipeline {
 
 impl Pipeline {
     /// Starts the hotkey and the pipeline task on the current tokio runtime
-    /// and returns the UI event stream.
+    /// and returns the UI event stream. Nothing reads the text before the
+    /// cursor, so no smart leading space is added; see
+    /// [`spawn_with_cursor`](Self::spawn_with_cursor).
     ///
     /// # Errors
     ///
@@ -105,6 +174,48 @@ impl Pipeline {
     /// Outside a tokio runtime.
     pub fn spawn<H, A, T, I, P, C>(
         ports: Ports<H, A, T, I, P, C>,
+        config: Config,
+    ) -> Result<(Self, UiReceiver), HotkeyError>
+    where
+        H: HotkeySource + 'static,
+        A: AudioSource + 'static,
+        T: Transcriber + 'static,
+        I: TextInserter + 'static,
+        P: Permissions + 'static,
+        C: Clock + 'static,
+    {
+        Self::start(ports, None, config)
+    }
+
+    /// Like [`spawn`](Self::spawn), and each transcript gets a smart leading
+    /// space from the character `cursor` reads before the cursor.
+    ///
+    /// # Errors
+    ///
+    /// The hotkey source's error if it can't start; nothing runs then.
+    ///
+    /// # Panics
+    ///
+    /// Outside a tokio runtime.
+    pub fn spawn_with_cursor<H, A, T, I, P, C>(
+        ports: Ports<H, A, T, I, P, C>,
+        cursor: CursorReader,
+        config: Config,
+    ) -> Result<(Self, UiReceiver), HotkeyError>
+    where
+        H: HotkeySource + 'static,
+        A: AudioSource + 'static,
+        T: Transcriber + 'static,
+        I: TextInserter + 'static,
+        P: Permissions + 'static,
+        C: Clock + 'static,
+    {
+        Self::start(ports, Some(cursor), config)
+    }
+
+    fn start<H, A, T, I, P, C>(
+        ports: Ports<H, A, T, I, P, C>,
+        cursor: Option<CursorReader>,
         config: Config,
     ) -> Result<(Self, UiReceiver), HotkeyError>
     where
@@ -149,7 +260,7 @@ impl Pipeline {
         let (ui, ui_events) = ui_channel();
         let (shutdown, shutdown_rx) = watch::channel(false);
         let (audio, audio_failures) = AudioWorker::spawn(audio);
-        let runner = Runner::new(
+        let mut runner = Runner::new(
             hotkey,
             audio,
             transcriber,
@@ -160,6 +271,7 @@ impl Pipeline {
             shutdown_rx,
             ticks,
         );
+        runner.cursor = cursor;
         let task = tokio::spawn(runner.run(keys, audio_failures));
         Ok((Self { shutdown, task }, ui_events))
     }
@@ -174,13 +286,12 @@ impl Pipeline {
     }
 }
 
-/// The event for a transcript once cleaned up (`dictation_core::text`):
-/// the text to insert, or "nothing to paste" (no error). Never logs the
-/// text.
-fn cleaned_event(transcript: &Transcript) -> Event {
-    // No adapter reads the character before the cursor yet, so no smart
-    // leading space (see the `text` module docs).
-    match clean(transcript, None) {
+/// The event for a transcript once cleaned up (`dictation_core::text`),
+/// with `preceding` the character before the cursor if known (the smart
+/// leading space): the text to insert, or "nothing to paste" (no error).
+/// Never logs the text or `preceding`.
+fn cleaned_event(transcript: &Transcript, preceding: Option<char>) -> Event {
+    match clean(transcript, preceding) {
         Cleaned::Text(text) => Event::TranscriptReady(text),
         Cleaned::Dropped(why) => {
             tracing::debug!(?why, "transcript dropped; nothing to paste");
@@ -221,7 +332,9 @@ struct Overflow {
 
 /// A finished background job, tagged with the job it belongs to.
 enum JobResult {
-    Transcribed(u64, Result<Transcript, TranscribeError>),
+    /// The transcription's result and, if there is text to paste and a
+    /// [`CursorReader`], the character before the cursor right after it.
+    Transcribed(u64, Result<Transcript, TranscribeError>, Option<char>),
     /// The audio was empty, too short or silent, so nothing was sent to the
     /// transcriber (#69, #72).
     NotTranscribed(u64),
@@ -501,6 +614,9 @@ struct Runner<H, T, I, P, C> {
     session: u64,
     transcriber: Arc<T>,
     inserter: Arc<I>,
+    /// Reads the character before the cursor, if set (the smart leading
+    /// space).
+    cursor: Option<CursorReader>,
     permissions: P,
     clock: Arc<C>,
     ui: UiSender,
@@ -553,6 +669,7 @@ where
             session: 0,
             transcriber: Arc::new(transcriber),
             inserter: Arc::new(inserter),
+            cursor: None,
             permissions,
             clock,
             ui,
@@ -697,10 +814,12 @@ where
             Err(error) => return self.job_crashed(&error),
         };
         match result {
-            JobResult::Transcribed(job, result) if job == self.job => Some(match result {
-                Ok(transcript) => cleaned_event(&transcript),
-                Err(error) => Event::TranscriptionFailed(error.user_message()),
-            }),
+            JobResult::Transcribed(job, result, preceding) if job == self.job => {
+                Some(match result {
+                    Ok(transcript) => cleaned_event(&transcript, preceding),
+                    Err(error) => Event::TranscriptionFailed(error.user_message()),
+                })
+            }
             // Nothing to paste, and no error to show: straight back to Idle.
             JobResult::NotTranscribed(job) if job == self.job => Some(Event::TranscriptDropped),
             JobResult::Inserted(job, result) if job == self.job => Some(match result {
@@ -716,7 +835,7 @@ where
             JobResult::AudioFailed(job, error) if job == self.job => Some(
                 Event::TranscriptionFailed(format!("the microphone failed ({error})")),
             ),
-            JobResult::Transcribed(job, _)
+            JobResult::Transcribed(job, ..)
             | JobResult::NotTranscribed(job)
             | JobResult::Inserted(job, _)
             | JobResult::AudioFailed(job, _) => {
@@ -802,7 +921,9 @@ where
         };
         let job = self.job;
         let transcriber = Arc::clone(&self.transcriber);
-        // The job waits for the audio worker's stop, then transcribes.
+        let cursor = self.cursor.clone();
+        // The job waits for the audio worker's stop, then transcribes, then
+        // reads the character before the cursor.
         let task = self.jobs.spawn(async move {
             let audio = match captured.await {
                 Ok(Ok(audio)) => audio,
@@ -826,7 +947,18 @@ where
                 return JobResult::NotTranscribed(job);
             }
             tracing::debug!(job, duration = ?audio.duration(), "transcribing");
-            JobResult::Transcribed(job, transcriber.transcribe_detailed(&audio).await)
+            let result = transcriber.transcribe_detailed(&audio).await;
+            let preceding = match (&result, cursor) {
+                // Only when there is text to paste: nothing is read for a
+                // failure or a dropped transcript.
+                (Ok(transcript), Some(cursor))
+                    if matches!(clean(transcript, None), Cleaned::Text(_)) =>
+                {
+                    cursor.preceding().await
+                }
+                _ => None,
+            };
+            JobResult::Transcribed(job, result, preceding)
         });
         self.running = Some((task.id(), Job::Transcribe));
     }
@@ -989,7 +1121,7 @@ mod tests {
         key(&mut runner, HotkeyEvent::Released, 500);
         deliver(
             &mut runner,
-            JobResult::Transcribed(1, Ok(SECRET_WORDS.into())),
+            JobResult::Transcribed(1, Ok(SECRET_WORDS.into()), None),
         );
         let inserted = next_insert(&mut runner).await;
         deliver(&mut runner, inserted);
@@ -1002,7 +1134,7 @@ mod tests {
         let reply = format!("Invalid key {KEY}");
         deliver(
             &mut runner,
-            JobResult::Transcribed(3, Err(TranscribeError::Engine(reply))),
+            JobResult::Transcribed(3, Err(TranscribeError::Engine(reply)), None),
         );
         assert_eq!(runner.state, State::Idle);
 
@@ -1030,7 +1162,10 @@ mod tests {
         key(&mut runner, HotkeyEvent::Pressed, 0);
         key(&mut runner, HotkeyEvent::Released, 500);
         assert_eq!(runner.job, 1);
-        deliver(&mut runner, JobResult::Transcribed(1, Ok("first".into())));
+        deliver(
+            &mut runner,
+            JobResult::Transcribed(1, Ok("first".into()), None),
+        );
         let inserted = next_insert(&mut runner).await;
         deliver(&mut runner, inserted);
         assert_eq!(runner.state, State::Idle);
@@ -1045,7 +1180,10 @@ mod tests {
 
         // A late copy of job 1's transcript arrives while the coordinator
         // would accept a transcript: the job id drops it.
-        deliver(&mut runner, JobResult::Transcribed(1, Ok("stale".into())));
+        deliver(
+            &mut runner,
+            JobResult::Transcribed(1, Ok("stale".into()), None),
+        );
         assert_eq!(runner.state, State::Transcribing);
 
         // A late insert result can't end the current dictation either.
@@ -1055,7 +1193,10 @@ mod tests {
         );
         assert_eq!(runner.state, State::Transcribing);
 
-        deliver(&mut runner, JobResult::Transcribed(3, Ok("third".into())));
+        deliver(
+            &mut runner,
+            JobResult::Transcribed(3, Ok("third".into()), None),
+        );
         let inserted = next_insert(&mut runner).await;
         deliver(&mut runner, inserted);
         assert_eq!(runner.state, State::Idle);
@@ -1076,7 +1217,10 @@ mod tests {
         // Dictation 1: a blank transcript goes straight to Idle, no error.
         key(&mut runner, HotkeyEvent::Pressed, 0);
         key(&mut runner, HotkeyEvent::Released, 500);
-        deliver(&mut runner, JobResult::Transcribed(1, Ok("  ".into())));
+        deliver(
+            &mut runner,
+            JobResult::Transcribed(1, Ok("  ".into()), None),
+        );
         assert_eq!(runner.state, State::Idle);
         assert_eq!(
             runner.jobs.len(),
@@ -1088,7 +1232,10 @@ mod tests {
         // Secure Input.
         key(&mut runner, HotkeyEvent::Pressed, 1_000);
         key(&mut runner, HotkeyEvent::Released, 1_500);
-        deliver(&mut runner, JobResult::Transcribed(2, Ok("hello".into())));
+        deliver(
+            &mut runner,
+            JobResult::Transcribed(2, Ok("hello".into()), None),
+        );
         assert_eq!(runner.state, State::Inserting);
         deliver(
             &mut runner,
@@ -1121,7 +1268,10 @@ mod tests {
         // The transcript and the shutdown arrive together; the transcript
         // is stepped first.
         shutdown.send(true).unwrap();
-        deliver(&mut runner, JobResult::Transcribed(1, Ok("late".into())));
+        deliver(
+            &mut runner,
+            JobResult::Transcribed(1, Ok("late".into()), None),
+        );
         assert_eq!(runner.state, State::Inserting);
         // Only the (never-ending) transcription; no insert was started.
         assert_eq!(runner.jobs.len(), 1);
@@ -1138,12 +1288,12 @@ mod tests {
         vec![
             (
                 "transcribed",
-                |n| JobResult::Transcribed(n, Ok(Transcript::from_text("hello"))),
+                |n| JobResult::Transcribed(n, Ok(Transcript::from_text("hello")), None),
                 Event::TranscriptReady("hello".into()),
             ),
             (
                 "transcription failed",
-                |n| JobResult::Transcribed(n, Err(TranscribeError::Timeout)),
+                |n| JobResult::Transcribed(n, Err(TranscribeError::Timeout), None),
                 Event::TranscriptionFailed(TranscribeError::Timeout.user_message()),
             ),
             (
@@ -1229,7 +1379,10 @@ mod tests {
         assert!(ui_events.try_recv().is_err(), "no event for a stale result");
 
         // Job 2 is inserting.
-        deliver(&mut runner, JobResult::Transcribed(1, Ok("hello".into())));
+        deliver(
+            &mut runner,
+            JobResult::Transcribed(1, Ok("hello".into()), None),
+        );
         assert_eq!((runner.state, runner.job), (State::Inserting, 2));
         while ui_events.try_recv().is_ok() {}
         for (name, make, _) in every_result() {
@@ -1261,7 +1414,7 @@ mod tests {
             assert_eq!((runner.state, runner.job), (State::Transcribing, n));
             deliver(
                 &mut runner,
-                JobResult::Transcribed(n, Err(TranscribeError::Timeout)),
+                JobResult::Transcribed(n, Err(TranscribeError::Timeout), None),
             );
             assert_eq!(runner.state, State::Idle);
             assert!(
@@ -1295,7 +1448,7 @@ mod tests {
         key(&mut runner, HotkeyEvent::Released, n * 1_000 + 500);
         deliver(
             &mut runner,
-            JobResult::Transcribed(n, Err(TranscribeError::Timeout)),
+            JobResult::Transcribed(n, Err(TranscribeError::Timeout), None),
         );
         let mut after = Vec::new();
         while let Ok(event) = ui_events.try_recv() {
