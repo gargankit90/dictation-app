@@ -8,13 +8,21 @@
 //!    [`InsertError::SecureInput`] before touching anything: no paste, and
 //!    the clipboard is never written (see [`SecureInputProbe`]);
 //! 1. save everything on the clipboard ([`Clipboard::snapshot`]);
-//! 2. write the text with the privacy markers and a new session marker
-//!    ([`Clipboard::write_dictation`]);
-//! 3. send the paste chord;
+//! 2. ask again, then write the text with the privacy markers and a new
+//!    session marker ([`Clipboard::write_dictation`]); the snapshot can
+//!    take a while, and focus may have moved to a password field meanwhile;
+//! 3. send the paste chord, asking a last time right before the keys go
+//!    out ([`PasteKeys::paste_unless`]); if Secure Input came on after the
+//!    write, the chord isn't sent and step 5 puts the clipboard back;
 //! 4. wait a short settle delay, so the target app reads the clipboard;
 //! 5. put the saved contents back only if our session marker is still on
 //!    the clipboard ([`Clipboard::restore_snapshot_if_unchanged`]): if the
 //!    user (or an app) copied something meanwhile, it's left alone.
+//!
+//! The probes shrink the race with the user's focus; they can't close it.
+//! The OS has no "check focus and paste" in one step, so a password field
+//! can still take focus in the few microseconds between the last probe and
+//! the chord reaching the event queue (see [`PasteKeys::paste_unless`]).
 //!
 //! [`paste_chord`] picks the chord for the OS and keyboard layout. macOS
 //! adapters: [`MacPasteboard`], [`MacPasteKeys`]. [`SystemInserter`] picks
@@ -115,6 +123,29 @@ pub trait PasteKeys: Send + Sync {
     /// [`InsertError::PermissionDenied`] if the OS doesn't allow synthetic
     /// keys, [`InsertError::Failed`] otherwise.
     fn paste(&self) -> Result<(), InsertError>;
+
+    /// Like [`paste`](Self::paste), but calls `blocked` as late as the
+    /// adapter can, after all its slow preparation (permission check,
+    /// keyboard layout lookup) and right before the keys go out, and sends
+    /// nothing if it returns `true`.
+    ///
+    /// The default checks once, then pastes. An adapter that prepares first
+    /// overrides it so the check sits after the preparation.
+    ///
+    /// The window that remains is between `blocked` returning and the OS
+    /// delivering the chord to the focused app; no OS API closes it, so
+    /// this narrows the race with a focus change rather than removing it.
+    ///
+    /// # Errors
+    ///
+    /// [`InsertError::SecureInput`] if `blocked` returned `true`; otherwise
+    /// as [`paste`](Self::paste).
+    fn paste_unless(&self, blocked: &dyn Fn() -> bool) -> Result<(), InsertError> {
+        if blocked() {
+            return Err(InsertError::SecureInput);
+        }
+        self.paste()
+    }
 }
 
 /// Waits the settle delay. [`ThreadSettle`] sleeps; tests record instead.
@@ -210,19 +241,34 @@ impl<C: Clipboard, K: PasteKeys, S: Settle, P: SecureInputProbe> TextInserter
     fn insert(&self, text: &str) -> Result<(), InsertError> {
         // Before anything else: with a password field focused, don't put
         // the text on the clipboard (other apps can read it) or paste it.
-        if self.secure_input.is_on() {
-            tracing::debug!("secure input is on; not pasting");
+        let blocked = || {
+            let on = self.secure_input.is_on();
+            if on {
+                tracing::debug!("secure input is on; not pasting");
+            }
+            on
+        };
+        if blocked() {
             return Err(InsertError::SecureInput);
         }
         let saved = self
             .clipboard
             .snapshot()
             .map_err(|e| failed("could not save the clipboard", &e))?;
+        // The snapshot copies every item and representation, so focus may
+        // have moved to a password field since the first check. Ask again
+        // before the text lands on the clipboard; nothing to undo yet.
+        if blocked() {
+            return Err(InsertError::SecureInput);
+        }
         let session = self
             .clipboard
             .write_dictation(text)
             .map_err(|e| failed("could not write the clipboard", &e))?;
-        let pasted = self.keys.paste();
+        // The last check is inside `paste_unless`, after the key sender's
+        // own preparation. If it trips, nothing is sent and the restore
+        // below puts the user's clipboard back (unless they copied since).
+        let pasted = self.keys.paste_unless(&blocked);
         if pasted.is_ok() {
             self.settle.settle(self.delay);
         }
@@ -527,6 +573,234 @@ mod tests {
             inserter(&clipboard, keys_for(&clipboard), settle).insert("dictated"),
             Ok(())
         );
+    }
+
+    /// A [`MemClipboard`] that runs a hook after a snapshot or a dictation
+    /// write: the user moving focus to a password field mid-flow.
+    #[derive(Clone, Default)]
+    struct HookClipboard {
+        inner: MemClipboard,
+        after_snapshot: Option<Arc<dyn Fn() + Send + Sync>>,
+        after_write: Option<Arc<dyn Fn() + Send + Sync>>,
+    }
+
+    impl Clipboard for HookClipboard {
+        fn read_text(&self) -> Result<Option<String>, ClipboardError> {
+            self.inner.read_text()
+        }
+        fn write_text(&self, text: &str) -> Result<(), ClipboardError> {
+            self.inner.write_text(text)
+        }
+        fn write_dictation(
+            &self,
+            text: &str,
+        ) -> Result<dictation_ports::SessionMarker, ClipboardError> {
+            let session = self.inner.write_dictation(text);
+            if let Some(hook) = &self.after_write {
+                hook();
+            }
+            session
+        }
+        fn restore_if_unchanged(
+            &self,
+            session: &dictation_ports::SessionMarker,
+            previous: Option<&str>,
+        ) -> Result<bool, ClipboardError> {
+            self.inner.restore_if_unchanged(session, previous)
+        }
+        fn snapshot(&self) -> Result<ClipboardSnapshot, ClipboardError> {
+            let snapshot = self.inner.snapshot();
+            if let Some(hook) = &self.after_snapshot {
+                hook();
+            }
+            snapshot
+        }
+        fn restore_snapshot_if_unchanged(
+            &self,
+            session: &dictation_ports::SessionMarker,
+            previous: &ClipboardSnapshot,
+        ) -> Result<bool, ClipboardError> {
+            self.inner.restore_snapshot_if_unchanged(session, previous)
+        }
+    }
+
+    /// A key sender whose preparation (permission check, layout lookup)
+    /// runs a hook before it asks `blocked`, like [`MacPasteKeys`].
+    #[derive(Clone, Default)]
+    struct PreparingKeys {
+        prepare: Option<Arc<dyn Fn() + Send + Sync>>,
+        sent: Arc<Mutex<u32>>,
+    }
+
+    impl PasteKeys for PreparingKeys {
+        fn paste(&self) -> Result<(), InsertError> {
+            self.paste_unless(&|| false)
+        }
+        fn paste_unless(&self, blocked: &dyn Fn() -> bool) -> Result<(), InsertError> {
+            if let Some(prepare) = &self.prepare {
+                prepare();
+            }
+            if blocked() {
+                return Err(InsertError::SecureInput);
+            }
+            *self.sent.lock().unwrap() += 1;
+            Ok(())
+        }
+    }
+
+    fn flag() -> Arc<std::sync::atomic::AtomicBool> {
+        Arc::new(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    fn turn_on(flag: &Arc<std::sync::atomic::AtomicBool>) -> Arc<dyn Fn() + Send + Sync> {
+        let flag = Arc::clone(flag);
+        Arc::new(move || flag.store(true, std::sync::atomic::Ordering::SeqCst))
+    }
+
+    fn reads(flag: &Arc<std::sync::atomic::AtomicBool>) -> impl Fn() -> bool + Send + Sync + use<> {
+        let flag = Arc::clone(flag);
+        move || flag.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn assert_untouched(clipboard: &MemClipboard) {
+        assert_eq!(
+            clipboard.read_text().unwrap().as_deref(),
+            Some("the user's text")
+        );
+        assert_eq!(clipboard.markers(), ClipboardMarkers::NONE);
+        assert_eq!(clipboard.session(), None);
+    }
+
+    // M4.2 round 1, M1: focus moves to a password field during the snapshot.
+    #[test]
+    fn secure_input_turning_on_during_the_snapshot_writes_and_pastes_nothing() {
+        let inner = MemClipboard::with_text("the user's text");
+        let on = flag();
+        let clipboard = HookClipboard {
+            inner: inner.clone(),
+            after_snapshot: Some(turn_on(&on)),
+            ..HookClipboard::default()
+        };
+        let keys = keys_for(&inner);
+        let settle = FakeSettle::default();
+        let result = PasteInserter::new(clipboard, keys.clone(), settle.clone(), DEFAULT_SETTLE)
+            .with_secure_input(reads(&on))
+            .insert("dictated words");
+
+        assert_eq!(result, Err(InsertError::SecureInput));
+        assert!(keys.pastes.lock().unwrap().is_empty());
+        assert!(settle.waits.lock().unwrap().is_empty());
+        assert_untouched(&inner);
+    }
+
+    // ... after the dictation is on the clipboard.
+    #[test]
+    fn secure_input_turning_on_after_the_write_sends_no_chord_and_restores() {
+        let inner = MemClipboard::with_text("the user's text");
+        let on = flag();
+        let clipboard = HookClipboard {
+            inner: inner.clone(),
+            after_write: Some(turn_on(&on)),
+            ..HookClipboard::default()
+        };
+        let keys = keys_for(&inner);
+        let settle = FakeSettle::default();
+        let result = PasteInserter::new(clipboard, keys.clone(), settle.clone(), DEFAULT_SETTLE)
+            .with_secure_input(reads(&on))
+            .insert("dictated words");
+
+        assert_eq!(result, Err(InsertError::SecureInput));
+        assert!(keys.pastes.lock().unwrap().is_empty(), "no paste");
+        assert!(settle.waits.lock().unwrap().is_empty());
+        assert_untouched(&inner);
+    }
+
+    // ... while the key sender prepares (the layout lookup), the last gap.
+    #[test]
+    fn secure_input_turning_on_before_the_chord_sends_nothing_and_restores() {
+        let inner = MemClipboard::with_text("the user's text");
+        let on = flag();
+        let keys = PreparingKeys {
+            prepare: Some(turn_on(&on)),
+            ..PreparingKeys::default()
+        };
+        let settle = FakeSettle::default();
+        let result =
+            PasteInserter::new(inner.clone(), keys.clone(), settle.clone(), DEFAULT_SETTLE)
+                .with_secure_input(reads(&on))
+                .insert("dictated words");
+
+        assert_eq!(result, Err(InsertError::SecureInput));
+        assert_eq!(*keys.sent.lock().unwrap(), 0, "no chord");
+        assert!(settle.waits.lock().unwrap().is_empty());
+        assert_untouched(&inner);
+    }
+
+    // The restore after an abort still never overwrites a newer user copy.
+    #[test]
+    fn an_abort_after_the_write_keeps_what_the_user_copied_since() {
+        let inner = MemClipboard::with_text("the user's text");
+        let on = flag();
+        let (copy, flip) = (inner.clone(), turn_on(&on));
+        let clipboard = HookClipboard {
+            inner: inner.clone(),
+            after_write: Some(Arc::new(move || {
+                copy.user_copies("copied meanwhile");
+                flip();
+            })),
+            ..HookClipboard::default()
+        };
+        let keys = keys_for(&inner);
+        let result = PasteInserter::new(
+            clipboard,
+            keys.clone(),
+            FakeSettle::default(),
+            DEFAULT_SETTLE,
+        )
+        .with_secure_input(reads(&on))
+        .insert("dictated words");
+
+        assert_eq!(result, Err(InsertError::SecureInput));
+        assert!(keys.pastes.lock().unwrap().is_empty());
+        assert_eq!(
+            inner.read_text().unwrap().as_deref(),
+            Some("copied meanwhile")
+        );
+    }
+
+    // The next attempt, with the password field gone, pastes as usual.
+    #[test]
+    fn the_next_insert_after_an_abort_pastes_normally() {
+        let inner = MemClipboard::with_text("the user's text");
+        let on = flag();
+        let clipboard = HookClipboard {
+            inner: inner.clone(),
+            after_write: Some(turn_on(&on)),
+            ..HookClipboard::default()
+        };
+        let keys = keys_for(&inner);
+        let flow = PasteInserter::new(
+            clipboard,
+            keys.clone(),
+            FakeSettle::default(),
+            DEFAULT_SETTLE,
+        )
+        .with_secure_input(reads(&on));
+        assert_eq!(flow.insert("first"), Err(InsertError::SecureInput));
+
+        on.store(false, std::sync::atomic::Ordering::SeqCst);
+        // A fresh flow over the same clipboard, without the hook.
+        let flow = PasteInserter::new(
+            inner.clone(),
+            keys.clone(),
+            FakeSettle::default(),
+            DEFAULT_SETTLE,
+        )
+        .with_secure_input(reads(&on));
+        flow.insert("second").unwrap();
+
+        assert_eq!(*keys.pastes.lock().unwrap(), [Some("second".to_owned())]);
+        assert_untouched(&inner);
     }
 
     /// A clipboard that saves and restores whole items, like the macOS one.
