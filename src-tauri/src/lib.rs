@@ -7,7 +7,8 @@
 //! tray's title and tooltip until the next recording. A second launch
 //! forwards its flags to the running app through the single-instance
 //! plugin and exits. Debug builds act on the test flags (`--press`,
-//! `--release`, `--debug-audio-file`, `--debug-save-audio`; see [`flags`]);
+//! `--release`, `--debug-audio-file`, `--debug-save-audio`,
+//! `--debug-set-api-key-stdin`, `--debug-delete-api-key`; see [`flags`]);
 //! release builds ignore them and have no way to inject key events or
 //! audio.
 //!
@@ -140,6 +141,32 @@ fn shell_hotkey() -> (ShellHotkey, Option<Injector>) {
     }
 }
 
+/// The API key commands (debug builds): stores the Groq API key from stdin
+/// and/or removes it, saying so on stderr. `None` when `argv` has none, so the
+/// app starts normally; otherwise the exit code. The key is never logged or
+/// printed.
+fn run_key_commands(argv: &[String], mut stdin: impl std::io::Read) -> Option<i32> {
+    let launch = flags::parse(argv, flags::TEST_FLAGS);
+    if launch.key_commands.is_empty() {
+        return None;
+    }
+    // No settings are read or written; only the keychain is used.
+    let config = dictation_pipeline::config::Config::new(
+        std::env::temp_dir(),
+        dictation_platform::secrets::KeychainSecretStore::new(),
+    );
+    for command in launch.key_commands {
+        match dictation_pipeline::test_hooks::run_key_command(command, &config, &mut stdin) {
+            Ok(message) => eprintln!("{message}"),
+            Err(error) => {
+                eprintln!("{error}");
+                return Some(1);
+            }
+        }
+    }
+    Some(0)
+}
+
 /// Builds and runs the Tauri application.
 ///
 /// # Panics
@@ -147,6 +174,10 @@ fn shell_hotkey() -> (ShellHotkey, Option<Injector>) {
 /// Panics if Tauri fails to start, which leaves the app with nothing to show.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let argv: Vec<String> = std::env::args().collect();
+    if let Some(code) = run_key_commands(&argv, std::io::stdin()) {
+        std::process::exit(code);
+    }
     let (hotkey, injector) = shell_hotkey();
     let forward = injector.clone();
 
@@ -291,6 +322,12 @@ fn handle_flags(injector: Option<&Injector>, flags: flags::LaunchFlags, from: &s
             default = flags::TranscriberChoice::default().name(),
             from,
             "unknown --transcriber engine; using the default"
+        );
+    }
+    if !flags.key_commands.is_empty() {
+        tracing::warn!(
+            from,
+            "the API key commands only run as a process of their own; ignored"
         );
     }
     for flag in &flags.ignored {

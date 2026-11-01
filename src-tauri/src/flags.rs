@@ -12,6 +12,12 @@
 //!   (debug mode). Both choose how the pipeline is built, so only the first
 //!   launch's count; a second launch's are logged and ignored.
 //!
+//! - `--debug-set-api-key-stdin` and `--debug-delete-api-key` store (the key
+//!   comes from stdin, never an argument) and remove the Groq API key through
+//!   the same path as the Settings window, then exit without starting the
+//!   app. They run in their own process, never in a running app, so a
+//!   forwarded second launch ignores them.
+//!
 //! A release build treats them like any other unknown flag: logged and
 //! ignored.
 //!
@@ -25,7 +31,7 @@
 use std::path::PathBuf;
 
 use dictation_pipeline::test_hooks::{
-    DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, PRESS_FLAG, RELEASE_FLAG,
+    DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, KeyCommand, PRESS_FLAG, RELEASE_FLAG,
 };
 use dictation_ports::HotkeyEvent;
 
@@ -86,6 +92,9 @@ pub struct LaunchFlags {
     pub audio_file: Option<PathBuf>,
     /// Save every recording as a WAV (debug builds only).
     pub save_audio: bool,
+    /// The API key commands, in order (debug builds only): done instead of
+    /// starting the app.
+    pub key_commands: Vec<KeyCommand>,
     /// The engine `--transcriber` asked for; the last one wins.
     pub transcriber: Option<TranscriberChoice>,
     /// Engine names `--transcriber` was given that no engine has.
@@ -113,6 +122,9 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
             PRESS_FLAG if test_flags => flags.events.push(HotkeyEvent::Pressed),
             RELEASE_FLAG if test_flags => flags.events.push(HotkeyEvent::Released),
             DEBUG_SAVE_AUDIO_FLAG if test_flags => flags.save_audio = true,
+            key_flag if test_flags && KeyCommand::from_flag(key_flag).is_some() => {
+                flags.key_commands.extend(KeyCommand::from_flag(key_flag));
+            }
             DEBUG_AUDIO_FILE_FLAG if test_flags => match args.next() {
                 Some(path) => flags.audio_file = Some(PathBuf::from(path)),
                 None => flags.ignored.push(arg.clone()),
@@ -274,6 +286,45 @@ mod tests {
         let flags = parse(&argv(&["--debug-audio-file="]), true);
         assert_eq!(flags.ignored, ["--debug-audio-file="]);
         assert!(!flags.configure_audio());
+    }
+
+    #[test]
+    fn debug_builds_take_the_key_commands_in_order() {
+        let flags = parse(
+            &argv(&[
+                "--debug-delete-api-key",
+                "--debug-set-api-key-stdin",
+                "--press",
+            ]),
+            true,
+        );
+        assert_eq!(flags.key_commands, [KeyCommand::Delete, KeyCommand::Set]);
+        assert_eq!(flags.events, [Pressed]);
+        assert!(flags.ignored.is_empty());
+        assert!(parse(&argv(&["--press"]), true).key_commands.is_empty());
+    }
+
+    #[test]
+    fn release_builds_ignore_the_key_commands() {
+        let flags = parse(
+            &argv(&["--debug-set-api-key-stdin", "--debug-delete-api-key"]),
+            false,
+        );
+        assert!(flags.key_commands.is_empty());
+        assert_eq!(
+            flags.ignored,
+            ["--debug-set-api-key-stdin", "--debug-delete-api-key"]
+        );
+    }
+
+    #[test]
+    fn near_miss_key_flags_are_not_commands() {
+        let flags = parse(
+            &argv(&["--debug-set-api-key", "--debug-delete-api-key=1"]),
+            true,
+        );
+        assert!(flags.key_commands.is_empty());
+        assert_eq!(flags.ignored.len(), 2);
     }
 
     #[test]
