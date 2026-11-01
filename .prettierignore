@@ -12,3 +12,5 @@ third_party/
 src/bindings.ts
 # Prose is wrapped by hand; Prettier would rewrap every paragraph.
 *.md
+# A template: whitespace is output.
+about.hbs
