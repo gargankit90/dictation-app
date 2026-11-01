@@ -243,7 +243,8 @@ pub fn run() {
     };
 
     #[allow(clippy::expect_used)] // No UI exists yet to report a startup failure to.
-    let app = tauri::Builder::default()
+    // A launch doesn't take focus from the user's app (T2).
+    let app = dictation_platform::overlay::launch_without_focus(tauri::Builder::default())
         // The overlay's non-activating panel (M5.1).
         .plugin(dictation_platform::overlay::plugin())
         .invoke_handler(commands::builder().invoke_handler())

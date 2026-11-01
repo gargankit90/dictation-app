@@ -72,6 +72,24 @@ impl NativeWindow {
     }
 }
 
+/// Makes `builder`'s app launch without taking focus from the app the user
+/// is in (T2). Tauri activates an app when it finishes launching, even with
+/// another app active; a menu-bar dictation app that does so, at login or
+/// when started again after a Quit, takes the key window away from the
+/// user's document, and the next paste lands nowhere. macOS: only activate if
+/// no other app is active. Elsewhere: unchanged.
+#[must_use]
+pub fn launch_without_focus<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    #[cfg(target_os = "macos")]
+    {
+        builder.activate_ignoring_other_apps(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder
+    }
+}
+
 /// The plugin the overlay needs: `tauri-nspanel`'s on macOS, a no-op
 /// elsewhere. Register it before calling [`Overlay::create`].
 #[must_use]
