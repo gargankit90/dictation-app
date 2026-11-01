@@ -2,11 +2,14 @@
 //! the log directory can't grow without limit (the daily rotation of
 //! `tracing-appender` bounds the number of files, not their size).
 //!
-//! Files are named `<prefix>.<UTC timestamp>` (`dictation-app.log.
-//! 2026-11-01T153045.123Z`), so sorting the names sorts them by age and
-//! `cat dictation-app.log*` reads the log in order. Old daily files from
-//! earlier builds (`dictation-app.log.2026-10-31`) sort before the new names
-//! and age out like the rest.
+//! Files are named `<prefix>.s<sequence>.<UTC timestamp>` (`dictation-app.
+//! log.s00000007.2026-11-01T153045.123Z`). Age is the sequence number, not
+//! the clock: a clock set backwards must not make a new file look older than
+//! the ones it replaces (and get pruned at once). Sorting the names still
+//! sorts them by age, so `cat dictation-app.log*` reads the log in order.
+//! Old daily files from earlier builds (`dictation-app.log.2026-10-31`) have
+//! no sequence number, count as older than every numbered file and age out
+//! like the rest; ones over the size limit are deleted when the log opens.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -25,6 +28,8 @@ pub struct RotatingFile {
     keep: usize,
     now: Box<dyn Fn() -> SystemTime + Send>,
     current: Option<(File, u64)>,
+    /// The file `current` writes to, which pruning must never delete.
+    active: Option<PathBuf>,
 }
 
 impl RotatingFile {
@@ -58,24 +63,31 @@ impl RotatingFile {
             keep: keep.max(1),
             now,
             current: None,
+            active: None,
         };
-        file.current = match file.files()?.pop() {
-            Some(newest) => {
-                let size = fs::metadata(&newest)?.len();
-                if size < file.max_bytes {
-                    let opened = OpenOptions::new().append(true).open(&newest)?;
-                    Some((opened, size))
-                } else {
-                    None
-                }
+        file.drop_oversized_legacy_files();
+        if let Some(newest) = file.files()?.pop() {
+            let size = fs::metadata(&newest)?.len();
+            if size < file.max_bytes {
+                let opened = OpenOptions::new().append(true).open(&newest)?;
+                file.current = Some((opened, size));
+                file.active = Some(newest);
             }
-            None => None,
-        };
+        }
         if file.current.is_none() {
             file.start_new()?;
         }
         file.prune();
         Ok(file)
+    }
+
+    /// The sequence number in a file's name, or `None` for a file from the
+    /// old daily logger.
+    fn sequence(&self, path: &Path) -> Option<u64> {
+        let name = path.file_name()?.to_string_lossy();
+        let rest = name.strip_prefix(&format!("{}.s", self.prefix))?;
+        let (digits, _) = rest.split_once('.')?;
+        digits.parse().ok()
     }
 
     /// The log files in `dir`, oldest first.
@@ -87,39 +99,52 @@ impl RotatingFile {
             .filter(|entry| entry.file_name().to_string_lossy().starts_with(&start))
             .map(|entry| entry.path())
             .collect();
-        files.sort();
+        // Numbered files by number, after the unnumbered legacy ones.
+        files.sort_by_cached_key(|path| (self.sequence(path), path.clone()));
         Ok(files)
     }
 
-    /// Starts a file named for now (a millisecond later if that name is
-    /// taken, so names always increase).
+    /// Starts the file after the newest one, whatever the clock says.
     fn start_new(&mut self) -> io::Result<()> {
-        let mut at = (self.now)();
-        let file = loop {
-            let name = format!("{}.{}", self.prefix, timestamp(at));
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(self.dir.join(name))
-            {
-                Ok(file) => break file,
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    at += std::time::Duration::from_millis(1);
-                }
-                Err(error) => return Err(error),
-            }
-        };
+        let next = self
+            .files()?
+            .iter()
+            .filter_map(|path| self.sequence(path))
+            .max()
+            .map_or(1, |newest| newest.saturating_add(1));
+        let name = format!("{}.s{next:08}.{}", self.prefix, timestamp((self.now)()));
+        let path = self.dir.join(name);
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
         self.current = Some((file, 0));
+        self.active = Some(path);
         Ok(())
     }
 
-    /// Deletes the oldest files beyond `keep`. A file that can't be deleted
-    /// stays; the next rotation tries again.
+    /// Deletes the oldest files beyond `keep`, never the one being written.
+    /// A file that can't be deleted stays; the next rotation tries again.
     fn prune(&self) {
         let Ok(files) = self.files() else { return };
-        let excess = files.len().saturating_sub(self.keep);
-        for old in files.into_iter().take(excess) {
+        let others: Vec<PathBuf> = files
+            .into_iter()
+            .filter(|path| Some(path) != self.active.as_ref())
+            .collect();
+        let excess = others.len().saturating_sub(self.keep.saturating_sub(1));
+        for old in others.into_iter().take(excess) {
             let _ = fs::remove_file(old);
+        }
+    }
+
+    /// Deletes daily files from the old logger that are over the size limit,
+    /// so an upgrade can't leave the directory over its budget.
+    fn drop_oversized_legacy_files(&self) {
+        let Ok(files) = self.files() else { return };
+        for path in files.into_iter().filter(|p| self.sequence(p).is_none()) {
+            if fs::metadata(&path).is_ok_and(|meta| meta.len() > self.max_bytes) {
+                let _ = fs::remove_file(path);
+            }
         }
     }
 }
@@ -378,6 +403,73 @@ mod tests {
         log.write_all(b"x").unwrap();
         log.flush().unwrap();
         assert_eq!(names(&nested).len(), 1);
+    }
+
+    #[test]
+    fn a_clock_set_backwards_never_deletes_the_active_file() {
+        let dir = TempDir::new();
+        let clock = TestClock::at_secs(NOV_1);
+        let mut log =
+            RotatingFile::open_with_clock(&dir.0, "app.log", 10, 2, clock.boxed()).unwrap();
+        log.write_all(b"first11111").unwrap();
+        clock.advance_secs(100);
+        log.write_all(b"second2222").unwrap();
+        // The clock jumps back an hour (a time-zone mix-up, a bad NTP step).
+        clock.0.fetch_sub(3_600_000, Ordering::Relaxed);
+        for word in ["latest3333", "fourth4444", "fifth55555"] {
+            log.write_all(word.as_bytes()).unwrap();
+            log.flush().unwrap();
+            let text: String = names(&dir.0)
+                .iter()
+                .map(|n| fs::read_to_string(dir.0.join(n)).unwrap())
+                .collect();
+            assert!(text.ends_with(word), "{word} must be on disk, got {text}");
+            assert_eq!(names(&dir.0).len(), 2);
+        }
+    }
+
+    #[test]
+    fn a_restart_after_a_clock_step_continues_after_future_dated_files() {
+        let dir = TempDir::new();
+        let clock = TestClock::at_secs(NOV_1 + 86_400);
+        {
+            let mut log =
+                RotatingFile::open_with_clock(&dir.0, "app.log", 10, 2, clock.boxed()).unwrap();
+            log.write_all(b"future0000").unwrap();
+            log.write_all(b"future1111").unwrap();
+        }
+        // The clock is a day behind the existing files now.
+        let clock = TestClock::at_secs(NOV_1);
+        let mut log =
+            RotatingFile::open_with_clock(&dir.0, "app.log", 10, 2, clock.boxed()).unwrap();
+        log.write_all(b"present222").unwrap();
+        log.flush().unwrap();
+        let text: String = names(&dir.0)
+            .iter()
+            .map(|n| fs::read_to_string(dir.0.join(n)).unwrap())
+            .collect();
+        assert_eq!(text, "future1111present222");
+    }
+
+    #[test]
+    fn oversized_legacy_daily_logs_are_deleted_when_the_log_opens() {
+        let dir = TempDir::new();
+        for day in 25..30 {
+            fs::write(dir.0.join(format!("app.log.2026-10-{day}")), [b'o'; 1_000]).unwrap();
+        }
+        // Within the limit stays; other files are never touched.
+        fs::write(dir.0.join("app.log.2026-10-31"), [b'k'; 90]).unwrap();
+        fs::write(dir.0.join("notes.txt"), [b'n'; 5_000]).unwrap();
+        let (max_bytes, keep) = (100, 5);
+        let mut log = RotatingFile::open(&dir.0, "app.log", max_bytes, keep).unwrap();
+        log.write_all(b"new").unwrap();
+        let names = names(&dir.0);
+        // The small one has room, so the log carries on in it.
+        assert_eq!(names, ["app.log.2026-10-31", "notes.txt"]);
+        let log_bytes = fs::metadata(dir.0.join("app.log.2026-10-31"))
+            .unwrap()
+            .len();
+        assert!(log_bytes <= max_bytes, "{log_bytes}");
     }
 
     #[test]

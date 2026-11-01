@@ -13,6 +13,7 @@
 pub mod rotation;
 pub mod scrub;
 
+use std::io;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -25,7 +26,7 @@ use rotation::RotatingFile;
 use scrub::ScrubbingWriter;
 
 /// The log files' name; a timestamp is appended
-/// (`dictation-app.log.2026-11-01T153045.123Z`).
+/// (`dictation-app.log.s00000007.2026-11-01T153045.123Z`).
 pub const LOG_FILE_PREFIX: &str = "dictation-app.log";
 
 /// A log file is closed when it reaches this size.
@@ -69,33 +70,61 @@ fn filter(level: LevelFilter) -> Targets {
         .with_targets(OWN_CRATES.map(|name| (name, level)))
 }
 
-/// The subscriber the app uses, writing to `file` and `console`.
-fn subscriber<F, C>(level: LevelFilter, file: F, console: C) -> impl Subscriber + Send + Sync
+/// The subscriber the app uses, writing to `file` (if there is one) and
+/// `console`.
+fn subscriber<F, C>(
+    level: LevelFilter,
+    file: Option<F>,
+    console: C,
+) -> impl Subscriber + Send + Sync
 where
     F: for<'a> MakeWriter<'a> + Send + Sync + 'static,
     C: for<'a> MakeWriter<'a> + Send + Sync + 'static,
 {
     tracing_subscriber::registry()
         .with(filter(level))
-        .with(fmt::layer().with_ansi(false).with_writer(file))
+        .with(file.map(|file| fmt::layer().with_ansi(false).with_writer(file)))
         .with(fmt::layer().with_ansi(false).with_writer(console))
+}
+
+/// The app's subscriber: the rotating log in `dir` (if it can be opened) and
+/// `console`, both scrubbed. The error is why there is no file, if so.
+fn app_subscriber<C>(
+    dir: &Path,
+    level: LevelFilter,
+    console: C,
+) -> (impl Subscriber + Send + Sync, Option<io::Error>)
+where
+    C: for<'a> MakeWriter<'a> + Send + Sync + 'static,
+{
+    let (file, failure) = match RotatingFile::open(dir, LOG_FILE_PREFIX, MAX_FILE_BYTES, KEEP_FILES)
+    {
+        Ok(file) => (Some(ScrubbingWriter::new(file)), None),
+        Err(error) => (None, Some(error)),
+    };
+    (subscriber(level, file, console), failure)
 }
 
 /// Starts logging into `dir`, at the level [`LEVEL_VARIABLE`] asks for.
 ///
+/// A log directory that can't be used (read-only, a file in the way, a full
+/// disk) is not a reason to stop the app: logging then goes to stderr alone,
+/// and says so once.
+///
 /// # Errors
 ///
-/// If the directory or file can't be created or a global subscriber is
-/// already set.
+/// If a global subscriber is already set.
 pub fn init(dir: &Path) -> anyhow::Result<()> {
-    let file = RotatingFile::open(dir, LOG_FILE_PREFIX, MAX_FILE_BYTES, KEEP_FILES)?;
     let level = level_from(std::env::var(LEVEL_VARIABLE).ok().as_deref());
-    subscriber(
-        level,
-        ScrubbingWriter::new(file),
-        ScrubbingWriter::new(std::io::stderr()),
-    )
-    .try_init()?;
+    let (subscriber, failure) = app_subscriber(dir, level, ScrubbingWriter::new(io::stderr()));
+    subscriber.try_init()?;
+    if let Some(error) = failure {
+        tracing::warn!(
+            %error,
+            dir = %dir.display(),
+            "could not open the log file; logging to stderr only"
+        );
+    }
     Ok(())
 }
 
@@ -143,7 +172,7 @@ mod tests {
         let capture = Capture::default();
         let subscriber = subscriber(
             level,
-            ScrubbingWriter::new(capture.clone()),
+            Some(ScrubbingWriter::new(capture.clone())),
             ScrubbingWriter::new(io::sink()),
         );
         tracing::subscriber::with_default(subscriber, log);
@@ -267,6 +296,30 @@ mod tests {
     }
 
     #[test]
+    fn an_unusable_log_directory_leaves_stderr_logging_that_says_so() {
+        // A file where the directory should be: nothing can be created in it.
+        let blocker =
+            std::env::temp_dir().join(format!("dictation-log-blocked-{}", std::process::id()));
+        std::fs::write(&blocker, "x").unwrap();
+        let console = Capture::default();
+        let (subscriber, failure) = app_subscriber(
+            &blocker,
+            LevelFilter::INFO,
+            ScrubbingWriter::new(console.clone()),
+        );
+        let failure = failure.expect("the file could not be opened");
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::warn!(%failure, dir = %blocker.display(), "could not open the log file; logging to stderr only");
+            tracing::info!("still logging {KEY}");
+        });
+        let _ = std::fs::remove_file(&blocker);
+        let log = console.text();
+        assert!(log.contains("logging to stderr only"), "{log}");
+        assert!(log.contains("still logging"), "{log}");
+        assert!(!log.contains(KEY), "scrubbed even without a file: {log}");
+    }
+
+    #[test]
     fn init_writes_to_a_rotating_file_in_the_directory() {
         // Not callable twice per process (a global subscriber), so only the
         // pieces: the file opens in the directory and takes the scrubbed text.
@@ -275,7 +328,7 @@ mod tests {
         let writer = ScrubbingWriter::new(file);
         let subscriber = subscriber(
             LevelFilter::INFO,
-            writer.clone(),
+            Some(writer.clone()),
             io::sink as fn() -> io::Sink,
         );
         tracing::subscriber::with_default(subscriber, || {
