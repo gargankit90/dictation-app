@@ -19,9 +19,13 @@ dictation-core.workspace = true
 dictation-ports.workspace = true
 # FileAudioSource, the `--debug-audio-file` test hook, reads WAVs.
 hound.workspace = true
+# The overlay window (M5.1) is a Tauri window; only `overlay` uses it.
+tauri.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Turns the overlay window into a non-activating panel (M5.1).
+tauri-nspanel.workspace = true
 keyring = { workspace = true, features = ["apple-native"] }
 handy-keys.workspace = true
 handy-recorder.workspace = true
@@ -37,7 +41,15 @@ objc2-av-foundation = { workspace = true, features = [
     "AVCaptureDevice",
     "AVMediaFormat",
 ] }
-objc2-app-kit = { workspace = true, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
+objc2-app-kit = { workspace = true, features = [
+    "std",
+    "NSPasteboard",
+    "NSPasteboardItem",
+    # Reading the overlay panel back (M5.1 M1).
+    "NSPanel",
+    "NSResponder",
+    "NSWindow",
+] }
 objc2-core-graphics = { workspace = true, features = [
     "std",
     "CGEvent",
@@ -45,7 +57,14 @@ objc2-core-graphics = { workspace = true, features = [
     "CGEventTypes",
     "CGRemoteOperation",
 ] }
-objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSError", "NSString"] }
+objc2-foundation = { workspace = true, features = [
+    "std",
+    "NSArray",
+    "NSData",
+    "NSError",
+    "NSString",
+    "NSThread",
+] }
 # Login item registration (M5.3).
 objc2-service-management = { workspace = true, features = ["std", "objc2", "SMAppService", "objc2-foundation"] }
 

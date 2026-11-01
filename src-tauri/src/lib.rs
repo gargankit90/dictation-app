@@ -26,6 +26,9 @@
 //! M3.4: Settings… shows the `main` window, which holds the settings UI; its
 //! close button hides it instead of destroying it, so the tray can show it
 //! again.
+//!
+//! M5.1: the `overlay` window shows Recording, Transcribing and errors
+//! without taking focus ([`overlay`]).
 
 // Only the build script and the capability tests need the list.
 #[cfg(test)]
@@ -34,6 +37,7 @@ pub mod commands;
 pub mod engine;
 mod flags;
 mod logging;
+mod overlay;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -63,6 +67,7 @@ use dictation_transcribe::mock::MockTranscriber;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Manager, RunEvent, WindowEvent};
+use tokio::sync::mpsc::UnboundedSender;
 
 const QUIT_ID: &str = "quit";
 const SETTINGS_ID: &str = "settings";
@@ -231,6 +236,8 @@ pub fn run() {
 
     #[allow(clippy::expect_used)] // No UI exists yet to report a startup failure to.
     let app = tauri::Builder::default()
+        // The overlay's non-activating panel (M5.1).
+        .plugin(dictation_platform::overlay::plugin())
         .invoke_handler(commands::builder().invoke_handler())
         .on_window_event(|window, event| {
             // Closing the settings window hides it, so the tray can show it
@@ -359,7 +366,11 @@ fn setup(
     if let Err(error) = live.rebuild_in_background(config) {
         tracing::error!(%error, "could not start reading the API key");
     }
-    tauri::async_runtime::spawn(show_ui_events(app.handle().clone(), ui_events));
+    // Dictation still works without the overlay.
+    let overlay = overlay::start(app.handle())
+        .inspect_err(|error| tracing::error!(%error, "could not create the overlay"))
+        .ok();
+    tauri::async_runtime::spawn(show_ui_events(app.handle().clone(), ui_events, overlay));
     tracing::info!(hotkey = %HotkeySpec::default(), "ready");
 
     // This launch's own flags first, so they come before any forwarded one.
@@ -504,11 +515,19 @@ fn show_settings(app: &AppHandle) {
     }
 }
 
-/// Logs each state change (never the transcript) and shows a dictation
-/// error as the tray's title and tooltip until the next recording starts.
-/// The overlay replaces this in the UI milestones.
-async fn show_ui_events(app: AppHandle, mut events: UiReceiver) {
+/// Logs each state change (never the transcript), passes each event to the
+/// overlay, and shows a dictation error as the tray's title and tooltip
+/// until the next recording starts.
+async fn show_ui_events(
+    app: AppHandle,
+    mut events: UiReceiver,
+    overlay: Option<UnboundedSender<UiEvent>>,
+) {
     while let Some(event) = events.recv().await {
+        if let Some(overlay) = &overlay {
+            // Fails only once the overlay has stopped, at shutdown.
+            let _ = overlay.send(event.clone());
+        }
         match event {
             UiEvent::StateChanged(phase) => {
                 tracing::info!(?phase, "state changed");

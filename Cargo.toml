@@ -27,6 +27,8 @@ dictation-transcribe = { path = "crates/transcribe" }
 
 tauri = { version = "2.12.5", features = [] }
 tauri-build = { version = "2.7.4", features = [] }
+# The overlay's non-activating NSPanel (M5.1). MIT OR Apache-2.0.
+tauri-nspanel = "2.1.1"
 # The ACL resolver Tauri itself uses, for the capability test (M1.7).
 tauri-utils = "2.10.2"
 anyhow = "1.0.104"
