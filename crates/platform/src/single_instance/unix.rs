@@ -615,4 +615,47 @@ mod tests {
         assert!(matches!(second.join().unwrap().unwrap(), Launch::Forwarded));
         assert_eq!(rx.try_recv().unwrap(), message("early"));
     }
+
+    #[test]
+    fn an_existing_open_directory_is_made_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let config = temp_config();
+        std::fs::create_dir_all(&config.dir).unwrap();
+        std::fs::set_permissions(&config.dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let Launch::Primary(_instance) = acquire(&config, &message("a")).unwrap() else {
+            panic!("not the primary");
+        };
+        let mode = std::fs::metadata(&config.dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[test]
+    fn a_symlinked_directory_is_refused() {
+        let config = temp_config();
+        let target = config.dir.with_extension("target");
+        std::fs::create_dir_all(&target).unwrap();
+        std::os::unix::fs::symlink(&target, &config.dir).unwrap();
+        let error = acquire(&config, &message("a")).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(!target.join("t.lock").exists(), "followed the symlink");
+    }
+
+    #[test]
+    fn a_directory_that_is_a_file_is_refused() {
+        let config = temp_config();
+        std::fs::write(&config.dir, b"").unwrap();
+        assert!(acquire(&config, &message("a")).is_err());
+    }
+
+    #[test]
+    fn a_symlinked_lock_file_is_refused_and_its_target_untouched() {
+        let config = temp_config();
+        std::fs::create_dir_all(&config.dir).unwrap();
+        let target = config.dir.join("elsewhere");
+        std::fs::write(&target, b"keep").unwrap();
+        std::os::unix::fs::symlink(&target, config.lock_path()).unwrap();
+        let error = acquire(&config, &message("a")).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(std::fs::read(&target).unwrap(), b"keep");
+    }
 }

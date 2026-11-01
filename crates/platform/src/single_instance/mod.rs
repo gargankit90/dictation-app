@@ -170,6 +170,8 @@ pub enum Launch {
 ///
 /// - The directory or lock file can't be created, or the socket can't be
 ///   bound (no process should run without one).
+/// - The directory exists but isn't a real directory this user owns, or the
+///   lock file is a symlink ([`io::ErrorKind::PermissionDenied`]).
 /// - `message` is too long to forward ([`io::ErrorKind::InvalidInput`]).
 /// - Another instance holds the lock but didn't acknowledge the message
 ///   within [`Config::forward_timeout`] ([`io::ErrorKind::TimedOut`]), or
@@ -179,6 +181,7 @@ pub enum Launch {
 pub fn acquire(config: &Config, message: &Message) -> io::Result<Launch> {
     create_private_dir(&config.dir)?;
     let frame = frame::encode(message)?;
+    refuse_symlink(&config.lock_path())?;
     let lock = OpenOptions::new()
         .create(true)
         .write(true)
@@ -208,12 +211,59 @@ pub fn acquire(config: &Config, message: &Message) -> io::Result<Launch> {
 
 /// Creates `dir` (and its parents) if missing; on Unix, one only this user
 /// can enter, so other users can't reach the socket.
+///
+/// On Unix an existing `dir` is held to the same standard, because the
+/// directory is the access boundary: it must be a real directory (not a
+/// symlink), and it is made 0700 if it was looser, which also proves this
+/// user owns it (chmod fails otherwise). Anything else is refused, so a
+/// directory someone else prepared is never trusted.
 fn create_private_dir(dir: &Path) -> io::Result<()> {
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-    builder.create(dir)
+    builder.create(dir)?;
+    #[cfg(unix)]
+    ensure_private(dir)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn ensure_private(dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let refuse = |why: &str| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} {why}; refusing to use it", dir.display()),
+        )
+    };
+    // Not `metadata`: a symlink is someone else's choice of where we go.
+    let meta = std::fs::symlink_metadata(dir)?;
+    if !meta.is_dir() {
+        return Err(refuse("is not a plain directory (a symlink, say)"));
+    }
+    if meta.permissions().mode() & 0o077 != 0 {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| refuse(&format!("is open to other users and not ours ({error})")))?;
+        tracing::debug!(path = %dir.display(), "made the single-instance directory private");
+    }
+    Ok(())
+}
+
+/// Refuses a lock file that is a symlink: where it points is not ours to
+/// open. (The directory is private by now, so nobody else can swap it in
+/// between this check and the open.)
+fn refuse_symlink(path: &Path) -> io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} is a symlink; refusing to use it", path.display()),
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 /// How often a second launch retries while the running instance starts up.
