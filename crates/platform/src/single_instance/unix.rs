@@ -4,8 +4,8 @@
 use std::io::{self, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use super::frame::{self, ACK, HEADER, NAK};
@@ -25,7 +25,7 @@ pub struct Server {
     io_timeout: Duration,
     /// Taken by [`Server::listen`].
     listener: Option<UnixListener>,
-    stopping: Arc<AtomicBool>,
+    shutdown: Arc<Shutdown>,
 }
 
 impl Server {
@@ -44,7 +44,7 @@ impl Server {
             socket,
             io_timeout: config.io_timeout,
             listener: Some(listener),
-            stopping: Arc::new(AtomicBool::new(false)),
+            shutdown: Arc::default(),
         })
     }
 
@@ -60,7 +60,7 @@ impl Server {
             on_message: Arc::new(Mutex::new(on_message)),
             readers: Arc::new(AtomicUsize::new(0)),
             io_timeout: self.io_timeout,
-            stopping: Arc::clone(&self.stopping),
+            shutdown: Arc::clone(&self.shutdown),
         };
         std::thread::Builder::new()
             .name("single-instance".into())
@@ -68,18 +68,28 @@ impl Server {
         Ok(())
     }
 
-    /// Stops accepting and removes the socket. The lock must still be held,
-    /// so no other instance has bound a socket at this path.
+    /// Stops accepting, removes the socket and waits (up to twice
+    /// [`Config::io_timeout`]) for the messages already handed to the
+    /// callback to be answered. The lock must still be held, so no other
+    /// instance has bound a socket at this path, and must be released only
+    /// after this returns.
+    ///
+    /// The wait is what keeps a launch from running a second instance: a
+    /// launch whose message was acted on but never acknowledged retries,
+    /// and once the lock is free it would take it.
     pub fn stop(&mut self) {
-        if self.stopping.swap(true, Ordering::SeqCst) {
+        if !self.shutdown.begin() {
             return;
         }
         if self.listener.take().is_none() {
-            // Wake the accept loop so it sees `stopping` and ends.
+            // Wake the accept loop so it sees it's stopping and ends.
             let _ = UnixStream::connect(&self.socket);
         }
         if let Err(error) = std::fs::remove_file(&self.socket) {
             tracing::debug!(%error, "could not remove the socket");
+        }
+        if !self.shutdown.wait_for_deliveries(self.io_timeout * 2) {
+            tracing::debug!("single-instance: stopped with a message still being answered");
         }
     }
 }
@@ -95,13 +105,13 @@ struct Accepting {
     on_message: Arc<Mutex<Callback>>,
     readers: Arc<AtomicUsize>,
     io_timeout: Duration,
-    stopping: Arc<AtomicBool>,
+    shutdown: Arc<Shutdown>,
 }
 
 impl Accepting {
     fn run(&self, listener: &UnixListener) {
         for stream in listener.incoming() {
-            if self.stopping.load(Ordering::SeqCst) {
+            if self.shutdown.is_stopping() {
                 return;
             }
             match stream {
@@ -122,11 +132,12 @@ impl Accepting {
         };
         let on_message = Arc::clone(&self.on_message);
         let io_timeout = self.io_timeout;
+        let shutdown = Arc::clone(&self.shutdown);
         let spawned = std::thread::Builder::new()
             .name("single-instance-reader".into())
             .spawn(move || {
                 let _slot = slot;
-                serve(stream, io_timeout, &on_message);
+                serve(stream, io_timeout, &on_message, &shutdown);
             });
         if let Err(error) = spawned {
             tracing::debug!(%error, "single-instance: could not start a reader");
@@ -155,13 +166,93 @@ impl Drop for Slot {
     }
 }
 
+/// Whether the server is stopping, and how many messages are being handed
+/// to the callback and answered, so [`Server::stop`] can wait for them.
+#[derive(Debug, Default)]
+struct Shutdown {
+    state: Mutex<ShutdownState>,
+    /// Signalled when the last delivery ends.
+    idle: Condvar,
+}
+
+#[derive(Debug, Default)]
+struct ShutdownState {
+    stopping: bool,
+    delivering: usize,
+}
+
+impl Shutdown {
+    fn state(&self) -> MutexGuard<'_, ShutdownState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn is_stopping(&self) -> bool {
+        self.state().stopping
+    }
+
+    /// Marks the server as stopping; `false` if it already was.
+    fn begin(&self) -> bool {
+        !std::mem::replace(&mut self.state().stopping, true)
+    }
+
+    /// Starts handing a message over, unless the server is stopping: then
+    /// the message must go unanswered, so its launch retries (and runs
+    /// itself once this instance is gone) instead of being acted on by an
+    /// instance that may quit before acknowledging it.
+    fn start_delivery(self: &Arc<Self>) -> Option<Delivery> {
+        let mut state = self.state();
+        if state.stopping {
+            return None;
+        }
+        state.delivering += 1;
+        Some(Delivery(Arc::clone(self)))
+    }
+
+    /// Waits until no message is being handed over, or `limit` passes;
+    /// `true` if none is.
+    fn wait_for_deliveries(&self, limit: Duration) -> bool {
+        let (state, _) = self
+            .idle
+            .wait_timeout_while(self.state(), limit, |state| state.delivering > 0)
+            .unwrap_or_else(PoisonError::into_inner);
+        state.delivering == 0
+    }
+}
+
+/// One message being handed to the callback and answered; ends when
+/// dropped (even if the callback panics).
+struct Delivery(Arc<Shutdown>);
+
+impl Drop for Delivery {
+    fn drop(&mut self) {
+        let mut state = self.0.state();
+        state.delivering -= 1;
+        if state.delivering == 0 {
+            self.0.idle.notify_all();
+        }
+    }
+}
+
 /// Reads one message within `io_timeout`, runs the callback and answers
 /// [`ACK`] if it took the message, or [`NAK`] if it rejected it or the frame
-/// is invalid. A peer that's too slow gets no answer.
-fn serve(mut stream: UnixStream, io_timeout: Duration, on_message: &Mutex<Callback>) {
+/// is invalid. A peer that's too slow gets no answer, and so does one whose
+/// message arrives once the server is stopping.
+fn serve(
+    mut stream: UnixStream,
+    io_timeout: Duration,
+    on_message: &Mutex<Callback>,
+    shutdown: &Arc<Shutdown>,
+) {
     let deadline = Instant::now() + io_timeout;
+    // Held until the answer is written, so `Server::stop` waits for it.
+    let _delivery;
     let reply = match read_message(&mut stream, deadline) {
         Ok(message) => {
+            let Some(started) = shutdown.start_delivery() else {
+                tracing::debug!("single-instance: stopping; leaving a message unanswered");
+                return;
+            };
+            _delivery = started;
             let mut on_message = on_message.lock().unwrap_or_else(PoisonError::into_inner);
             match on_message(message) {
                 Ok(()) => ACK,
@@ -252,6 +343,7 @@ pub(super) fn forward(config: &Config, frame: &[u8]) -> Result<(), Forward> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicBool;
     use std::sync::mpsc;
 
     use super::*;
@@ -546,6 +638,55 @@ mod tests {
         if let Launch::Primary(_) = outcome {
             assert!(config.socket_path().exists());
         }
+    }
+
+    #[test]
+    fn stopping_waits_for_a_message_being_answered() {
+        let config = temp_config();
+        let Launch::Primary(mut instance) = acquire(&config, &message("a")).unwrap() else {
+            panic!("not the primary");
+        };
+        let (entered_tx, entered) = mpsc::channel();
+        let handled = Arc::new(AtomicBool::new(false));
+        let done = Arc::clone(&handled);
+        instance
+            .listen(move |_| {
+                entered_tx.send(()).unwrap();
+                std::thread::sleep(Duration::from_millis(200));
+                done.store(true, Ordering::SeqCst);
+            })
+            .unwrap();
+        let second = {
+            let config = config.clone();
+            std::thread::spawn(move || acquire(&config, &message("b")))
+        };
+        entered.recv().unwrap();
+        // Quitting while the message is being acted on: the lock may go only
+        // once it is answered, or the launch would retry and run itself.
+        drop(instance);
+        assert!(handled.load(Ordering::SeqCst), "stopped mid-delivery");
+        assert!(matches!(second.join().unwrap().unwrap(), Launch::Forwarded));
+    }
+
+    #[test]
+    fn a_message_that_arrives_while_stopping_is_not_acted_on() {
+        let config = temp_config();
+        let (instance, rx) = primary(&config);
+        let frame = frame::encode(&message("late")).unwrap();
+        let mut stream = UnixStream::connect(config.socket_path()).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        stream.write_all(&frame[..HEADER]).unwrap();
+        // Let a reader start on it, then quit before the rest arrives.
+        std::thread::sleep(Duration::from_millis(50));
+        drop(instance);
+        // Either error is fine: the instance may have closed it already.
+        let _ = stream.write_all(&frame[HEADER..]);
+        let mut reply = [0];
+        // No answer, so the launch retries (and runs itself).
+        assert!(matches!(stream.read(&mut reply), Ok(0) | Err(_)));
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]
