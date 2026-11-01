@@ -53,6 +53,7 @@ use dictation_pipeline::stand_ins::{GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
 #[cfg(debug_assertions)]
 use dictation_pipeline::test_hooks::SyntheticHotkey;
+use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::audio::{FileAudioSource, SystemMicrophone};
 use dictation_platform::clock::SystemClock;
 use dictation_platform::hotkey::SystemHotkey;
@@ -66,7 +67,7 @@ use dictation_transcribe::mock::MockTranscriber;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Manager, RunEvent, WindowEvent};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedSender;
 
 const QUIT_ID: &str = "quit";
 const SETTINGS_ID: &str = "settings";
@@ -428,7 +429,7 @@ fn handle_flags(
             "--transcriber only applies when the app starts; ignored"
         );
     }
-    for engine in &flags.unknown_engines {
+    for engine in flags.unknown_engines_to_warn_about(from == SECOND_LAUNCH) {
         tracing::warn!(
             %engine,
             known = %flags::TranscriberChoice::known_names(),
@@ -519,7 +520,7 @@ fn show_settings(app: &AppHandle) {
 /// until the next recording starts.
 async fn show_ui_events(
     app: AppHandle,
-    mut events: UnboundedReceiver<UiEvent>,
+    mut events: UiReceiver,
     overlay: Option<UnboundedSender<UiEvent>>,
 ) {
     while let Some(event) = events.recv().await {

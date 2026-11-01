@@ -20,12 +20,13 @@ use dictation_core::error::DictationError;
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
 use dictation_pipeline::stand_ins::{DiscardingInserter, GrantedPermissions};
 use dictation_pipeline::test_hooks::{Injector, SyntheticHotkey, hook_events};
+use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::fakes::{FakeClock, FakeHotkey};
 use dictation_ports::{
     Audio, AudioError, AudioSource, HotkeyError, HotkeyEvent, Permission, TranscribeError,
     Transcriber,
 };
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::Notify;
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -51,6 +52,8 @@ struct GatedStart {
     recording: Arc<Mutex<bool>>,
     starts: Arc<AtomicUsize>,
     stops: Arc<AtomicUsize>,
+    /// Signalled when `discard` has run: the fence for the audio worker.
+    discarded: Arc<Notify>,
 }
 
 impl GatedStart {
@@ -62,6 +65,7 @@ impl GatedStart {
             recording: Arc::default(),
             starts: Arc::default(),
             stops: Arc::default(),
+            discarded: Arc::new(Notify::new()),
         };
         (source, release)
     }
@@ -96,6 +100,7 @@ impl AudioSource for GatedStart {
 
     fn discard(&mut self) {
         *self.recording.lock().unwrap() = false;
+        self.discarded.notify_one();
     }
 
     fn is_recording(&self) -> bool {
@@ -105,13 +110,13 @@ impl AudioSource for GatedStart {
 
 struct Run {
     pipeline: Pipeline,
-    ui: UnboundedReceiver<UiEvent>,
+    ui: UiReceiver,
     injector: Injector,
     clock: FakeClock,
     transcribed: Arc<AtomicUsize>,
 }
 
-async fn next(ui: &mut UnboundedReceiver<UiEvent>) -> UiEvent {
+async fn next(ui: &mut UiReceiver) -> UiEvent {
     tokio::time::timeout(WAIT, ui.recv())
         .await
         .unwrap()
@@ -275,10 +280,16 @@ async fn criterion_6_cancelled_recordings_never_start_and_shutdown_does_not_repl
     assert_eq!(run.transcribed.load(Ordering::SeqCst), 0);
 }
 
-#[tokio::test(flavor = "multi_thread")]
+/// A current-thread runtime: the pipeline can't run while the test's own
+/// loop injects keys, so the flood fills the queue, deterministically. Then
+/// the pipeline must end idle with no recording, and nothing is sent to wake
+/// it up (#91: it used to need an Esc, and the test waited 500 ms).
+#[tokio::test(flavor = "current_thread")]
 async fn criterion_7_a_key_flood_behind_a_blocked_start_is_bounded_and_recovers() {
     let (audio, release_gate) = GatedStart::new(None);
     let starts = Arc::clone(&audio.starts);
+    let recording = Arc::clone(&audio.recording);
+    let discarded = Arc::clone(&audio.discarded);
     let mut run = spawn(audio);
 
     run.hook("--press");
@@ -292,32 +303,33 @@ async fn criterion_7_a_key_flood_behind_a_blocked_start_is_bounded_and_recovers(
         run.hook("--press");
     }
     assert!(run.injector.inject(HotkeyEvent::CancelPressed));
+    // The fence: the pipeline throws away what was queued and cancels the
+    // recording it had, by itself.
+    assert_eq!(next(&mut run.ui).await, UiEvent::StateChanged(Phase::Idle));
     release_gate.send(()).unwrap();
-    // Let the flood drain, then the pipeline must be idle and usable.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let mut tail = Vec::new();
-    while let Ok(e) = run.ui.try_recv() {
-        tail.push(e);
-    }
-    // Known gap (tech-debt issue): a dropped key's cancel is applied after
-    // the keys still queued, so the flood can end in Recording even when
-    // its last key was a cancel. One Esc settles it either way.
-    let mut idle = matches!(tail.last(), Some(UiEvent::StateChanged(Phase::Idle)) | None);
-    if !idle {
-        assert!(run.injector.inject(HotkeyEvent::CancelPressed));
-        let deadline = Instant::now() + WAIT;
-        while !idle {
-            assert!(Instant::now() < deadline, "no Idle after an Esc");
-            idle = next(&mut run.ui).await == UiEvent::StateChanged(Phase::Idle);
-        }
-    }
-    let started_by_flood = starts.load(Ordering::SeqCst);
+    // The overflow's cancellation reached the microphone by itself, before
+    // anything else (shutdown also discards and would hide an open one).
+    tokio::time::timeout(WAIT, discarded.notified())
+        .await
+        .expect("overflow never discarded the recording");
     assert!(
-        started_by_flood <= 1 + 64,
-        "{started_by_flood} starts ran for a flood of cancelled recordings"
+        !*recording.lock().unwrap(),
+        "overflow left the microphone open"
     );
+    // Nothing queued ran: no more starts, no recording, no transcription.
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    assert!(run.ui.try_recv().is_err(), "nothing after the Idle");
+    assert_eq!(starts.load(Ordering::SeqCst), 1, "no cancelled start ran");
+    assert_eq!(run.transcribed.load(Ordering::SeqCst), 0);
+
     let events = run.dictate_once().await;
     assert_eq!(events.last(), Some(&UiEvent::StateChanged(Phase::Idle)));
     assert_eq!(run.transcribed.load(Ordering::SeqCst), 1);
     run.pipeline.shutdown().await;
+    assert!(
+        !*recording.lock().unwrap(),
+        "the microphone is not left recording"
+    );
 }

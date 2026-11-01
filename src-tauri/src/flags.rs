@@ -156,7 +156,7 @@ fn split_texts(texts: &str) -> Vec<String> {
 #[must_use]
 pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
     let mut flags = LaunchFlags::default();
-    let mut args = argv.iter().skip(1);
+    let mut args = argv.iter().skip(1).peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             PRESS_FLAG if test_flags => flags.events.push(HotkeyEvent::Pressed),
@@ -170,10 +170,14 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
                     .launch_commands
                     .extend(LaunchCommand::from_flag(login_flag));
             }
-            DEBUG_AUDIO_FILE_FLAG if test_flags => match args.next() {
-                Some(path) => flags.audio_file = Some(PathBuf::from(path)),
-                None => flags.ignored.push(arg.clone()),
-            },
+            // A flag right after it is not its path (#73): the path is missing,
+            // so this one is ignored with a warning and the next flag still acts.
+            DEBUG_AUDIO_FILE_FLAG if test_flags => {
+                match args.next_if(|next| !next.starts_with("--")) {
+                    Some(path) => flags.audio_file = Some(PathBuf::from(path)),
+                    None => flags.ignored.push(arg.clone()),
+                }
+            }
             other if test_flags && audio_file_value(other).is_some() => {
                 flags.audio_file = audio_file_value(other).map(PathBuf::from);
             }
@@ -234,6 +238,19 @@ fn audio_file_value(arg: &str) -> Option<&str> {
 }
 
 impl LaunchFlags {
+    /// The unknown `--transcriber` names worth a warning. A forwarded launch
+    /// (`forwarded`) is the second process's flags arriving in the running
+    /// app, which ignores `--transcriber` anyway, and that process already
+    /// warned about its own argv, so the running app stays quiet (#70).
+    #[must_use]
+    pub fn unknown_engines_to_warn_about(&self, forwarded: bool) -> &[String] {
+        if forwarded {
+            &[]
+        } else {
+            &self.unknown_engines
+        }
+    }
+
     fn transcriber(&mut self, name: &str) {
         match TranscriberChoice::from_name(name) {
             Some(choice) => self.transcriber = Some(choice),
@@ -252,6 +269,47 @@ mod tests {
             .chain(args.iter().copied())
             .map(String::from)
             .collect()
+    }
+
+    /// #73: a flag after `--debug-audio-file` is not its path.
+    #[test]
+    fn debug_audio_file_without_a_path_does_not_swallow_the_next_flag() {
+        for next in [
+            "--press",
+            "--release",
+            "--debug-save-audio",
+            "--transcriber=mock",
+        ] {
+            let flags = parse(&argv(&["--debug-audio-file", next, "--press"]), true);
+            assert_eq!(flags.audio_file, None, "{next}");
+            assert_eq!(flags.ignored, ["--debug-audio-file"], "{next}");
+            assert!(flags.events.contains(&Pressed), "{next} still acts");
+        }
+        // Nothing after it at all.
+        let flags = parse(&argv(&["--debug-audio-file"]), true);
+        assert_eq!(flags.audio_file, None);
+        assert_eq!(flags.ignored, ["--debug-audio-file"]);
+        // A real path, even a dashed one that is not a flag, still counts.
+        let flags = parse(
+            &argv(&["--debug-audio-file", "-weird.wav", "--press"]),
+            true,
+        );
+        assert_eq!(flags.audio_file, Some(PathBuf::from("-weird.wav")));
+        assert_eq!(flags.events, [Pressed]);
+        let flags = parse(&argv(&["--debug-audio-file", "/tmp/a.wav"]), true);
+        assert_eq!(flags.audio_file, Some(PathBuf::from("/tmp/a.wav")));
+    }
+
+    /// #70: the running app doesn't repeat the warning the second process
+    /// already gave for its own argv.
+    #[test]
+    fn a_forwarded_launch_does_not_repeat_the_unknown_engine_warning() {
+        let flags = parse(&argv(&["--transcriber", "whisperr"]), true);
+        assert_eq!(flags.unknown_engines_to_warn_about(false), ["whisperr"]);
+        assert!(flags.unknown_engines_to_warn_about(true).is_empty());
+        // The name is still recorded (and still ignored by the running app).
+        assert_eq!(flags.unknown_engines, ["whisperr"]);
+        assert_eq!(flags.transcriber, None);
     }
 
     #[test]

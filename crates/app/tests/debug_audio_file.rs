@@ -14,9 +14,9 @@ use dictation_pipeline::debug_audio::SavingAudio;
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
 use dictation_pipeline::stand_ins::{DiscardingInserter, GrantedPermissions};
 use dictation_pipeline::test_hooks::{SyntheticHotkey, debug_audio_file, hook_events};
+use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::fakes::{FakeClock, FakeHotkey, FileAudioSource};
 use dictation_ports::{Audio, AudioSource, HotkeyError, TranscribeError, Transcriber};
-use tokio::sync::mpsc::UnboundedReceiver;
 
 const WAIT: Duration = Duration::from_secs(5);
 
@@ -71,7 +71,7 @@ impl Drop for Temp {
     }
 }
 
-async fn next(ui: &mut UnboundedReceiver<UiEvent>) -> UiEvent {
+async fn next(ui: &mut UiReceiver) -> UiEvent {
     tokio::time::timeout(WAIT, ui.recv())
         .await
         .unwrap()

@@ -90,11 +90,29 @@ impl LiveEngine {
         self
     }
 
+    /// `provider`'s saved key, for the settings commands (`has_api_key`, a
+    /// test of the saved key). Bounded like the engine's own reads: the
+    /// keychain gets [`KEY_READ_TIMEOUT`], through the same [`KeyReads`], so a
+    /// keychain that never answers costs one parked thread however often the
+    /// UI asks again, and each ask returns an error at its deadline.
+    /// Blocks: call it from a blocking task.
+    ///
+    /// # Errors
+    ///
+    /// The keychain's error, or that it didn't answer in time.
+    pub fn read_key<S: SecretStore + 'static>(
+        &self,
+        config: &Arc<Config<S>>,
+        provider: Provider,
+    ) -> Result<Option<Secret>, SecretError> {
+        self.reads.read(config, provider, self.key_timeout)
+    }
+
     /// Gives up on a keychain read after `timeout` instead of
     /// [`KEY_READ_TIMEOUT`]; only tests need it short.
     #[cfg(test)]
     #[must_use]
-    fn with_key_timeout(mut self, timeout: Duration) -> Self {
+    pub(crate) fn with_key_timeout(mut self, timeout: Duration) -> Self {
         self.key_timeout = timeout;
         self
     }
@@ -356,11 +374,11 @@ mod tests {
     use dictation_core::error::DictationError;
     use dictation_core::settings::Provider;
     use dictation_pipeline::pipeline::{Config as PipelineConfig, Pipeline, Ports, UiEvent};
+    use dictation_pipeline::ui_events::UiReceiver;
     use dictation_platform::fakes::{
         FakeClock, FakeHotkey, FakeInserter, FakePermissions, FileAudioSource, MemSecretStore,
     };
     use dictation_ports::{HotkeyEvent, Secret};
-    use tokio::sync::mpsc::UnboundedReceiver;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -406,7 +424,7 @@ mod tests {
         clock: FakeClock,
         inserter: FakeInserter,
         pipeline: Pipeline,
-        ui: UnboundedReceiver<UiEvent>,
+        ui: UiReceiver,
     }
 
     impl Rig {

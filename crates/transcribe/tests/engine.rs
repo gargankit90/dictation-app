@@ -240,10 +240,15 @@ async fn a_transcription_in_flight_finishes_with_the_engine_it_started_with() {
         let transcribers = transcribers.clone();
         tokio::spawn(async move { transcribers.transcribe(&audio()).await })
     };
-    // Wait until the request is really in flight.
-    while slow.received_requests().await.unwrap().is_empty() {
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+    // Wait until the request is really in flight. Bounded: if it never
+    // arrives (a bug in the engine) the test fails instead of hanging.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while slow.received_requests().await.unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the request never reached the provider");
     transcribers.update(|| Engine::Unavailable(TranscribeError::MissingKey));
     assert_eq!(running.await.unwrap().unwrap(), TRANSCRIPT);
     assert_eq!(

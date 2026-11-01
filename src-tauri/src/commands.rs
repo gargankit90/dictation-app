@@ -124,10 +124,33 @@ pub async fn set_api_key(
 }
 
 /// Whether `provider` has an API key stored.
+// Bounded: a keychain that never answers gives an error after
+// `engine::KEY_READ_TIMEOUT`, so the UI shows it and offers a retry instead
+// of waiting for ever.
 #[tauri::command]
 #[specta::specta]
-pub async fn has_api_key(state: State<'_, AppConfig>, provider: Provider) -> Result<bool, String> {
-    on_config(&state, move |config| config.has_api_key(provider)).await
+pub async fn has_api_key(
+    state: State<'_, AppConfig>,
+    engine: State<'_, LiveEngine>,
+    provider: Provider,
+) -> Result<bool, String> {
+    has_key(&state.0, engine.inner(), provider).await
+}
+
+async fn has_key<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    live: &LiveEngine,
+    provider: Provider,
+) -> Result<bool, String> {
+    let (config, live) = (Arc::clone(config), live.clone());
+    tauri::async_runtime::spawn_blocking(move || live.read_key(&config, provider))
+        .await
+        .map_err(|_| "the settings task crashed".to_owned())?
+        .map(|key| key.is_some())
+        .map_err(|error| {
+            tracing::warn!(%error, "checking for a saved key failed");
+            ConfigError::Secret(error).to_string()
+        })
 }
 
 /// What went wrong when testing a key, so the UI can pick its wording.
@@ -210,6 +233,13 @@ fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
             KeyTestKind::Keychain,
             "Couldn't read your API key from the Keychain.".to_owned(),
         ),
+        // Never followed, so retrying won't help (#86).
+        TranscribeError::Redirected(status) => KeyTestError::new(
+            KeyTestKind::Server,
+            format!(
+                "{name} answered with a redirect (HTTP {status}), which isn't followed, so the key couldn't be checked. Check the provider selected in Settings, then test the key again."
+            ),
+        ),
         TranscribeError::Engine(detail) => KeyTestError::new(
             KeyTestKind::Server,
             format!(
@@ -224,6 +254,7 @@ fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
 /// it is not stored (saving it is `set_api_key`'s job).
 async fn key_test<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
+    live: &LiveEngine,
     provider: Provider,
     typed: Option<String>,
     base_url: &str,
@@ -240,8 +271,11 @@ async fn key_test<S: SecretStore + 'static>(
             (key, "typed")
         }
         None => {
-            let stored = Arc::clone(config);
-            let stored = tokio::task::spawn_blocking(move || stored.api_key(provider))
+            // Bounded and shared with the engine's reads: a keychain that
+            // never answers is an error here, not a button stuck on
+            // "Testing…", and a retry doesn't start another thread.
+            let (stored, live) = (Arc::clone(config), live.clone());
+            let stored = tokio::task::spawn_blocking(move || live.read_key(&stored, provider))
                 .await
                 .map_err(|_| KeyTestError::new(KeyTestKind::Keychain, "the keychain task crashed"))?
                 .map_err(|error| {
@@ -279,11 +313,13 @@ async fn key_test<S: SecretStore + 'static>(
 #[specta::specta]
 pub async fn test_api_key(
     state: State<'_, AppConfig>,
+    engine: State<'_, LiveEngine>,
     provider: Provider,
     key: Option<String>,
 ) -> Result<(), KeyTestError> {
     key_test(
         &state.0,
+        engine.inner(),
         provider,
         key,
         Preset::for_provider(provider).base_url,
@@ -539,6 +575,8 @@ mod tests {
 
     mod key_test {
         use dictation_pipeline::config::Config;
+        use std::time::Duration;
+
         use dictation_platform::fakes::MemSecretStore;
         use wiremock::matchers::{header, method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -580,6 +618,7 @@ mod tests {
             }
             let result = key_test(
                 &config,
+                &LiveEngine::fixed(),
                 Provider::Groq,
                 typed.map(str::to_owned),
                 &server.uri(),
@@ -631,6 +670,28 @@ mod tests {
             }
         }
 
+        /// #86: a 3xx says redirects aren't followed, not "try again later".
+        #[tokio::test]
+        async fn a_redirect_has_its_own_message() {
+            for status in [301, 302, 307, 308] {
+                let server = provider(status, TYPED).await;
+                let (result, _) = run(Some(TYPED), None, &server).await;
+                let error = result.unwrap_err();
+                assert_eq!(error.kind, KeyTestKind::Server, "HTTP {status}");
+                assert!(
+                    error.message
+                        == format!(
+                            "Groq answered with a redirect (HTTP {status}), which isn't followed, so the key couldn't be checked. Check the provider selected in Settings, then test the key again."
+                        ),
+                    "{}",
+                    error.message
+                );
+                assert!(!error.message.contains("address"), "{}", error.message);
+                assert!(!error.message.contains("later"), "{}", error.message);
+                assert!(!error.message.contains(TYPED), "{}", error.message);
+            }
+        }
+
         #[tokio::test]
         async fn an_unreachable_provider_is_a_network_error() {
             let port = std::net::TcpListener::bind("127.0.0.1:0")
@@ -641,6 +702,7 @@ mod tests {
             let (config, _) = config(&temp());
             let error = key_test(
                 &config,
+                &LiveEngine::fixed(),
                 Provider::Groq,
                 Some(TYPED.to_owned()),
                 &format!("http://127.0.0.1:{port}"),
@@ -694,11 +756,117 @@ mod tests {
             let server = provider(200, STORED).await;
             let (config, secrets) = config(&temp());
             secrets.set_access_denied(true);
-            let error = key_test(&config, Provider::Groq, None, &server.uri())
-                .await
-                .unwrap_err();
+            let error = key_test(
+                &config,
+                &LiveEngine::fixed(),
+                Provider::Groq,
+                None,
+                &server.uri(),
+            )
+            .await
+            .unwrap_err();
             assert_eq!(error.kind, KeyTestKind::Keychain);
             assert!(error.message.contains("keychain access was denied"));
+        }
+
+        /// A keychain that doesn't answer until it is opened, and counts
+        /// how often it was asked.
+        #[derive(Clone)]
+        struct HangingStore {
+            inner: MemSecretStore,
+            open: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+            gets: Arc<std::sync::atomic::AtomicUsize>,
+        }
+
+        impl HangingStore {
+            fn open(&self) {
+                *self.open.0.lock().unwrap() = true;
+                self.open.1.notify_all();
+            }
+        }
+
+        impl SecretStore for HangingStore {
+            fn get(
+                &self,
+                name: &str,
+            ) -> Result<Option<dictation_ports::Secret>, dictation_ports::SecretError> {
+                self.gets.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut open = self.open.0.lock().unwrap();
+                while !*open {
+                    open = self.open.1.wait(open).unwrap();
+                }
+                self.inner.get(name)
+            }
+
+            fn set(
+                &self,
+                name: &str,
+                secret: &dictation_ports::Secret,
+            ) -> Result<(), dictation_ports::SecretError> {
+                self.inner.set(name, secret)
+            }
+
+            fn delete(&self, name: &str) -> Result<(), dictation_ports::SecretError> {
+                self.inner.delete(name)
+            }
+        }
+
+        /// P1-05: a keychain that never answers can't leave the key-setup
+        /// screen stuck. Both lookups (the saved-key status and the test of
+        /// the saved key) end in an error at the deadline, however often the
+        /// UI retries, through one parked keychain read, and work again once
+        /// the keychain answers.
+        #[tokio::test]
+        async fn key_lookup_deadline_shows_retry() {
+            let server = provider(200, STORED).await;
+            let store = HangingStore {
+                inner: MemSecretStore::new(),
+                open: Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new())),
+                gets: Arc::default(),
+            };
+            let config = Arc::new(Config::new(temp(), store.clone()));
+            config.set_api_key(Provider::Groq, STORED).unwrap();
+            let live = LiveEngine::fixed().with_key_timeout(Duration::from_millis(150));
+
+            for attempt in 1..=3 {
+                let error = tokio::time::timeout(
+                    Duration::from_secs(20),
+                    key_test(&config, &live, Provider::Groq, None, &server.uri()),
+                )
+                .await
+                .expect("the test never returned")
+                .unwrap_err();
+                assert_eq!(error.kind, KeyTestKind::Keychain, "test {attempt}");
+                assert!(
+                    error.message.contains("no answer from the keychain"),
+                    "{}",
+                    error.message
+                );
+                assert!(!error.message.contains(STORED));
+
+                let status = tokio::time::timeout(
+                    Duration::from_secs(20),
+                    has_key(&config, &live, Provider::Groq),
+                )
+                .await
+                .expect("the status never returned")
+                .unwrap_err();
+                assert!(status.contains("no answer from the keychain"), "{status}");
+            }
+            assert_eq!(
+                store.gets.load(std::sync::atomic::Ordering::SeqCst),
+                1,
+                "retries share the one read in flight"
+            );
+            assert!(server.received_requests().await.unwrap().is_empty());
+
+            // The keychain answers: the same calls now work.
+            store.open();
+            assert_eq!(has_key(&config, &live, Provider::Groq).await, Ok(true));
+            assert_eq!(
+                key_test(&config, &live, Provider::Groq, None, &server.uri()).await,
+                Ok(())
+            );
         }
 
         #[tokio::test]
@@ -707,6 +875,7 @@ mod tests {
             let server = provider(401, TYPED).await;
             let error = key_test(
                 &config,
+                &LiveEngine::fixed(),
                 Provider::OpenAi,
                 Some(TYPED.to_owned()),
                 &server.uri(),

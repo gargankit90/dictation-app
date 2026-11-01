@@ -858,6 +858,7 @@ version = "0.1.0"
 dependencies = [
  "dictation-core",
  "dictation-ports",
+ "hound",
  "httpdate",
  "reqwest",
  "rustls",

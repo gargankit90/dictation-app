@@ -12,11 +12,12 @@
 //! not stall this task: a Cancel is handled while the microphone is still
 //! opening.
 //!
-//! The queues into this task are bounded (#81): hotkey events
-//! ([`KEYS_QUEUED`]; a dropped key cancels a recording, see [`Keys`]), the
-//! audio worker's commands (at most three: a cancelled recording's `Start`
-//! is dropped before it begins, see [`AudioQueue`]) and its start failures.
-//! The UI channel isn't bounded yet (#84).
+//! The queues into and out of this task are bounded (#81, #84): hotkey events
+//! ([`KEYS_QUEUED`]; a dropped key discards everything queued and cancels,
+//! see [`Keys`]), the audio worker's commands (at most three: a cancelled
+//! recording's `Start` is dropped before it begins, see [`AudioQueue`]), its
+//! start failures, and the UI events (see [`crate::ui_events`] for what a UI
+//! that stops reading gets).
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -36,6 +37,8 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::{self, JoinError, JoinHandle, JoinSet};
 use tokio::time::{Interval, MissedTickBehavior};
+
+use crate::ui_events::{UiReceiver, UiSender, ui_channel};
 
 /// What the UI hears about.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,7 +106,7 @@ impl Pipeline {
     pub fn spawn<H, A, T, I, P, C>(
         ports: Ports<H, A, T, I, P, C>,
         config: Config,
-    ) -> Result<(Self, mpsc::UnboundedReceiver<UiEvent>), HotkeyError>
+    ) -> Result<(Self, UiReceiver), HotkeyError>
     where
         H: HotkeySource + 'static,
         A: AudioSource + 'static,
@@ -130,19 +133,20 @@ impl Pipeline {
         let (keys_tx, keys_rx) = mpsc::channel(KEYS_QUEUED);
         let keys = Keys {
             rx: keys_rx,
-            overflowed: Arc::new(AtomicBool::new(false)),
+            overflow: Arc::new(Overflow::default()),
         };
-        let overflowed = Arc::clone(&keys.overflowed);
+        let overflow = Arc::clone(&keys.overflow);
         let stamp = Arc::clone(&clock);
         hotkey.start(Box::new(move |key| {
-            if let Err(TrySendError::Full(_)) = keys_tx.try_send((key, stamp.now()))
-                && !overflowed.swap(true, Ordering::AcqRel)
-            {
-                tracing::warn!("hotkey events are queueing up; dropping them and cancelling");
+            if let Err(TrySendError::Full(_)) = keys_tx.try_send((key, stamp.now())) {
+                if !overflow.dropped.swap(true, Ordering::AcqRel) {
+                    tracing::warn!("hotkey events are queueing up; discarding them and cancelling");
+                }
+                overflow.noticed.notify_one();
             }
         }))?;
 
-        let (ui, ui_events) = mpsc::unbounded_channel();
+        let (ui, ui_events) = ui_channel();
         let (shutdown, shutdown_rx) = watch::channel(false);
         let (audio, audio_failures) = AudioWorker::spawn(audio);
         let runner = Runner::new(
@@ -194,14 +198,25 @@ const KEYS_QUEUED: usize = 64;
 /// were waiting.
 ///
 /// A dropped event could be a release, which would leave a recording
-/// running, so after one the pipeline acts as if Esc was pressed: a
-/// recording in progress is discarded, and anything else is unaffected
-/// (Esc is ignored while transcribing or inserting). The flag is read after
-/// each key, and the queue was full when it was set, so it's seen within
-/// [`KEYS_QUEUED`] keys.
+/// running, or a press that the queued keys no longer make sense without. So
+/// once one is dropped none of the keys still queued can be trusted either:
+/// the task throws them all away and acts as if Esc was pressed. A recording
+/// in progress is discarded, and anything else is unaffected (Esc is ignored
+/// while transcribing or inserting). The task is told as soon as the key is
+/// dropped ([`Overflow`]), whether or not another key ever comes (#91).
 struct Keys {
     rx: mpsc::Receiver<(HotkeyEvent, Duration)>,
-    overflowed: Arc<AtomicBool>,
+    overflow: Arc<Overflow>,
+}
+
+/// Says a hotkey event was dropped: set by the hotkey thread, handled by the
+/// pipeline task.
+#[derive(Default)]
+struct Overflow {
+    /// A key was dropped and not yet handled.
+    dropped: AtomicBool,
+    /// Wakes the task; keeps a permit if it isn't waiting.
+    noticed: Notify,
 }
 
 /// A finished background job, tagged with the job it belongs to.
@@ -488,7 +503,7 @@ struct Runner<H, T, I, P, C> {
     inserter: Arc<I>,
     permissions: P,
     clock: Arc<C>,
-    ui: mpsc::UnboundedSender<UiEvent>,
+    ui: UiSender,
     /// Becomes `true` (or closes) when the pipeline should stop.
     shutdown: watch::Receiver<bool>,
     /// Ticks while recording; reset when a recording starts.
@@ -527,7 +542,7 @@ where
         inserter: I,
         permissions: P,
         clock: Arc<C>,
-        ui: mpsc::UnboundedSender<UiEvent>,
+        ui: UiSender,
         shutdown: watch::Receiver<bool>,
         ticks: Interval,
     ) -> Self {
@@ -562,6 +577,10 @@ where
             tokio::select! {
                 biased;
                 _ = self.shutdown.changed() => break,
+                // Before the keys: those still queued are thrown away.
+                () = keys.overflow.noticed.notified() => {
+                    self.keys_overflowed(&mut keys);
+                }
                 Some(failed) = audio_failures.recv() => {
                     if let Some(event) = self.start_failed(&failed) {
                         self.feed(event);
@@ -572,7 +591,7 @@ where
                         self.feed(event);
                     }
                 }
-                Some((key, at)) = keys.rx.recv() => self.key(key, at, &keys.overflowed).await,
+                Some((key, at)) = keys.rx.recv() => self.key(key, at).await,
                 _ = self.ticks.tick(), if recording => self.feed(Event::Tick(self.clock.now())),
             }
         }
@@ -581,19 +600,35 @@ where
         self.audio.shut_down().await;
     }
 
-    /// Feeds a key, then the cancel a dropped key calls for (see [`Keys`]),
-    /// then a Tick that has come due: keys alone can't hold off the
-    /// recording limit.
-    async fn key(&mut self, key: HotkeyEvent, at: Duration, overflowed: &AtomicBool) {
+    /// Feeds a key, then a Tick that has come due: keys alone can't hold off
+    /// the recording limit.
+    async fn key(&mut self, key: HotkeyEvent, at: Duration) {
         if let Some(event) = self.key_event(key, at) {
             self.feed(event);
-        }
-        if overflowed.swap(false, Ordering::AcqRel) {
-            self.feed(Event::CancelPressed);
         }
         if matches!(self.state, State::Recording { .. }) && self.tick_due().await {
             self.feed(Event::Tick(self.clock.now()));
         }
+    }
+
+    /// A hotkey event was dropped (see [`Keys`]): throws away the keys still
+    /// queued and cancels, so the pipeline ends without a recording or a
+    /// transcription of its own, with no key press needed to get there.
+    ///
+    /// Returns how many queued keys it threw away, or `None` if no key was
+    /// dropped after all (a wake-up left over from an overflow already
+    /// handled: the hotkey thread wakes the task once per dropped key).
+    fn keys_overflowed(&mut self, keys: &mut Keys) -> Option<usize> {
+        if !keys.overflow.dropped.swap(false, Ordering::AcqRel) {
+            return None;
+        }
+        let mut discarded = 0_usize;
+        while keys.rx.try_recv().is_ok() {
+            discarded += 1;
+        }
+        tracing::warn!(discarded, "hotkey events overflowed; cancelled");
+        self.feed(Event::CancelPressed);
+        Some(discarded)
     }
 
     /// Whether a Tick is due now, taking it if so; doesn't wait.
@@ -749,10 +784,10 @@ where
             Command::Insert(text) => self.insert(text),
             Command::ShowError(error) => {
                 tracing::info!(%error, "dictation failed");
-                let _ = self.ui.send(UiEvent::Error(error));
+                self.ui.send(UiEvent::Error(error));
             }
             Command::StateChanged(phase) => {
-                let _ = self.ui.send(UiEvent::StateChanged(phase));
+                self.ui.send(UiEvent::StateChanged(phase));
             }
         }
     }
@@ -818,6 +853,7 @@ where
 mod tests {
     use std::future::{Future, pending};
 
+    use dictation_core::coordinator::Phase::{Idle, Recording, Transcribing};
     use dictation_platform::fakes::{FakeClock, FakeHotkey, FakeInserter, FakePermissions};
 
     use super::*;
@@ -867,7 +903,7 @@ mod tests {
         Runner<FakeHotkey, SilentTranscriber, FakeInserter, FakePermissions, FakeClock>;
 
     fn runner(inserter: &FakeInserter) -> (TestRunner, watch::Sender<bool>) {
-        let (ui, _) = mpsc::unbounded_channel();
+        let (ui, _) = ui_channel();
         let (shutdown, shutdown_rx) = watch::channel(false);
         let (audio, _) = AudioWorker::spawn(BurstAudio(false));
         let runner = Runner::new(
@@ -1034,7 +1070,7 @@ mod tests {
     async fn a_dropped_transcript_and_a_secure_input_block_both_leave_the_next_dictation_working() {
         let inserter = FakeInserter::new();
         let (mut runner, _shutdown) = runner(&inserter);
-        let (ui, mut ui_events) = mpsc::unbounded_channel();
+        let (ui, mut ui_events) = ui_channel();
         runner.ui = ui;
 
         // Dictation 1: a blank transcript goes straight to Idle, no error.
@@ -1094,6 +1130,190 @@ mod tests {
         assert!(inserter.inserted().is_empty());
     }
 
+    /// Every kind of job result, as a function of the job it claims to be.
+    type MakeResult = fn(u64) -> JobResult;
+
+    /// `(name, the result for job n, the event the current job's gives)`.
+    fn every_result() -> Vec<(&'static str, MakeResult, Event)> {
+        vec![
+            (
+                "transcribed",
+                |n| JobResult::Transcribed(n, Ok(Transcript::from_text("hello"))),
+                Event::TranscriptReady("hello".into()),
+            ),
+            (
+                "transcription failed",
+                |n| JobResult::Transcribed(n, Err(TranscribeError::Timeout)),
+                Event::TranscriptionFailed(TranscribeError::Timeout.user_message()),
+            ),
+            (
+                "not transcribed",
+                JobResult::NotTranscribed,
+                Event::TranscriptDropped,
+            ),
+            (
+                "inserted",
+                |n| JobResult::Inserted(n, Ok(())),
+                Event::InsertDone,
+            ),
+            (
+                "insert blocked by Secure Input",
+                |n| JobResult::Inserted(n, Err(InsertError::SecureInput)),
+                Event::SecureInputBlocked,
+            ),
+            (
+                "insert failed",
+                |n| JobResult::Inserted(n, Err(InsertError::Failed("no".into()))),
+                Event::InsertFailed(InsertError::Failed("no".into()).to_string()),
+            ),
+            (
+                "audio failed: permission",
+                |n| JobResult::AudioFailed(n, AudioError::PermissionDenied),
+                Event::PermissionMissing(Permission::Microphone),
+            ),
+            (
+                "audio failed: device",
+                |n| JobResult::AudioFailed(n, AudioError::NoDevice),
+                Event::TranscriptionFailed(format!(
+                    "the microphone failed ({})",
+                    AudioError::NoDevice
+                )),
+            ),
+        ]
+    }
+
+    /// A result for any job but the current one is dropped, for every kind
+    /// of result; the current job's is handled. Each row fails if its guard
+    /// is removed (P1-04).
+    #[tokio::test]
+    async fn all_job_result_variants_ignore_stale_ids() {
+        let (mut runner, _shutdown) = runner(&FakeInserter::new());
+        runner.job = 7;
+        let id = tokio::spawn(async {}).id();
+        for (name, make, current) in every_result() {
+            // Older, newer and extreme ids are all "not this job".
+            for stale in [0, 1, 6, 8, u64::MAX] {
+                assert_eq!(
+                    runner.job_event(Ok((id, make(stale)))),
+                    None,
+                    "{name}: job {stale} while the current job is 7"
+                );
+            }
+            assert_eq!(
+                runner.job_event(Ok((id, make(7)))),
+                Some(current),
+                "{name}: the current job"
+            );
+        }
+    }
+
+    /// The same through the whole step: stale results of every kind, while a
+    /// dictation is in each state a result can end, change nothing the user
+    /// sees: not the phase, no error.
+    #[tokio::test]
+    async fn stale_results_change_neither_the_phase_nor_the_errors() {
+        let inserter = FakeInserter::new();
+        let (mut runner, _shutdown) = runner(&inserter);
+        let (ui, mut ui_events) = ui_channel();
+        runner.ui = ui;
+
+        // Job 1 is transcribing.
+        key(&mut runner, HotkeyEvent::Pressed, 0);
+        key(&mut runner, HotkeyEvent::Released, 500);
+        assert_eq!((runner.state, runner.job), (State::Transcribing, 1));
+        while ui_events.try_recv().is_ok() {}
+        for (name, make, _) in every_result() {
+            deliver(&mut runner, make(0));
+            assert_eq!(runner.state, State::Transcribing, "{name}");
+        }
+        assert!(ui_events.try_recv().is_err(), "no event for a stale result");
+
+        // Job 2 is inserting.
+        deliver(&mut runner, JobResult::Transcribed(1, Ok("hello".into())));
+        assert_eq!((runner.state, runner.job), (State::Inserting, 2));
+        while ui_events.try_recv().is_ok() {}
+        for (name, make, _) in every_result() {
+            deliver(&mut runner, make(1));
+            assert_eq!(runner.state, State::Inserting, "{name}");
+        }
+        assert!(ui_events.try_recv().is_err(), "no event for a stale result");
+        let inserted = next_insert(&mut runner).await;
+        deliver(&mut runner, inserted);
+        assert_eq!(runner.state, State::Idle);
+        assert_eq!(inserter.inserted(), ["hello"]);
+    }
+
+    /// #84: a UI that stops reading for 300 failed dictations keeps the
+    /// queue bounded; when it reads again it finds the current phase last
+    /// and the first errors, with the rest counted; and it keeps working.
+    #[tokio::test]
+    async fn stalled_ui_consumer_keeps_bounded_state_and_errors() {
+        use crate::ui_events::{UI_ERRORS_QUEUED, UI_EVENTS_QUEUED};
+
+        let (mut runner, _shutdown) = runner(&FakeInserter::new());
+        let (ui, mut ui_events) = ui_channel();
+        runner.ui = ui;
+
+        const DICTATIONS: u64 = 300;
+        for n in 1..=DICTATIONS {
+            key(&mut runner, HotkeyEvent::Pressed, n * 1_000);
+            key(&mut runner, HotkeyEvent::Released, n * 1_000 + 500);
+            assert_eq!((runner.state, runner.job), (State::Transcribing, n));
+            deliver(
+                &mut runner,
+                JobResult::Transcribed(n, Err(TranscribeError::Timeout)),
+            );
+            assert_eq!(runner.state, State::Idle);
+            assert!(
+                ui_events.queued() <= UI_EVENTS_QUEUED,
+                "{} events after dictation {n}",
+                ui_events.queued()
+            );
+        }
+        assert_eq!(
+            ui_events.dropped_errors(),
+            DICTATIONS - UI_ERRORS_QUEUED as u64
+        );
+
+        // The UI reads again: errors first (the oldest), the phase it must
+        // end on, Idle, last.
+        let mut read = Vec::new();
+        while let Ok(event) = ui_events.try_recv() {
+            read.push(event);
+        }
+        assert!(read.len() <= UI_EVENTS_QUEUED);
+        assert_eq!(read.last(), Some(&UiEvent::StateChanged(Idle)));
+        let errors = read
+            .iter()
+            .filter(|event| matches!(event, UiEvent::Error(_)))
+            .count();
+        assert_eq!(errors, UI_ERRORS_QUEUED);
+
+        // And it recovers: the next dictation arrives whole and in order.
+        let n = DICTATIONS + 1;
+        key(&mut runner, HotkeyEvent::Pressed, n * 1_000);
+        key(&mut runner, HotkeyEvent::Released, n * 1_000 + 500);
+        deliver(
+            &mut runner,
+            JobResult::Transcribed(n, Err(TranscribeError::Timeout)),
+        );
+        let mut after = Vec::new();
+        while let Ok(event) = ui_events.try_recv() {
+            after.push(event);
+        }
+        assert_eq!(
+            after,
+            [
+                UiEvent::StateChanged(Recording),
+                UiEvent::StateChanged(Transcribing),
+                UiEvent::Error(DictationError::TranscriptionFailed {
+                    reason: TranscribeError::Timeout.user_message()
+                }),
+                UiEvent::StateChanged(Idle),
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn a_dropped_pipeline_counts_as_shutting_down() {
         let (runner, shutdown) = runner(&FakeInserter::new());
@@ -1125,6 +1345,8 @@ mod audio_worker_tests {
 
     use dictation_core::coordinator::Phase::{Idle, Recording, Transcribing};
     use dictation_platform::fakes::{FakeClock, FakeHotkey, FakeInserter, FakePermissions};
+
+    use tokio::sync::mpsc::error::TryRecvError;
 
     use super::*;
     use crate::stand_ins::FixedTranscriber;
@@ -1238,7 +1460,7 @@ mod audio_worker_tests {
         hotkey: FakeHotkey,
         clock: FakeClock,
         pipeline: Pipeline,
-        ui: mpsc::UnboundedReceiver<UiEvent>,
+        ui: UiReceiver,
     }
 
     impl Harness {
@@ -1291,6 +1513,87 @@ mod audio_worker_tests {
                 }
             }
         }
+    }
+
+    /// Says when the source is dropped (the device closed).
+    struct DropReport<A>(A, std_mpsc::Sender<()>);
+
+    impl<A: AudioSource> AudioSource for DropReport<A> {
+        fn start(&mut self) -> Result<(), AudioError> {
+            self.0.start()
+        }
+
+        fn stop(&mut self) -> Result<Audio, AudioError> {
+            self.0.stop()
+        }
+
+        fn discard(&mut self) {
+            self.0.discard();
+        }
+
+        fn is_recording(&self) -> bool {
+            self.0.is_recording()
+        }
+    }
+
+    impl<A> Drop for DropReport<A> {
+        fn drop(&mut self) {
+            let _ = self.1.send(());
+        }
+    }
+
+    /// A runner that is abandoned (its task is aborted, as a panic would
+    /// end it) while a `start` is blocked still closes its audio worker:
+    /// once the call returns the source is discarded and dropped.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn abandoned_runner_closes_audio_worker() {
+        let (release, gate) = std_mpsc::channel();
+        let audio = ScriptedAudio::new(vec![OnStart::Block(gate)]);
+        let (dropped_tx, dropped) = std_mpsc::channel();
+        let (worker, failures) = AudioWorker::spawn(DropReport(audio.clone(), dropped_tx));
+        let (ui, mut ui_events) = ui_channel();
+        let (_shutdown, shutdown_rx) = watch::channel(false);
+        let runner = Runner::new(
+            FakeHotkey::new(),
+            worker,
+            FixedTranscriber,
+            FakeInserter::new(),
+            FakePermissions::all_granted(),
+            Arc::new(FakeClock::new()),
+            ui,
+            shutdown_rx,
+            tokio::time::interval(Duration::from_millis(250)),
+        );
+        let (keys_tx, keys_rx) = mpsc::channel(KEYS_QUEUED);
+        let keys = Keys {
+            rx: keys_rx,
+            overflow: Arc::new(Overflow::default()),
+        };
+        let task = tokio::spawn(runner.run(keys, failures));
+
+        keys_tx
+            .send((HotkeyEvent::Pressed, Duration::ZERO))
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(WAIT, ui_events.recv()).await.unwrap(),
+            Some(UiEvent::StateChanged(Recording))
+        );
+        audio.entered(1).await;
+
+        // Abandon the runner with the call held, then let the call finish.
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(dropped.try_recv().is_err(), "the call is still running");
+        release.send(()).unwrap();
+
+        // Bounded: if nothing closes the worker this fails after WAIT
+        // instead of hanging.
+        let closed = tokio::task::spawn_blocking(move || dropped.recv_timeout(WAIT))
+            .await
+            .unwrap();
+        assert!(closed.is_ok(), "the audio source was never dropped");
+        assert_eq!(audio.calls(), ["start", "discard"]);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1507,18 +1810,15 @@ mod audio_worker_tests {
             harness.emit(HotkeyEvent::Pressed);
             harness.emit(HotkeyEvent::CancelPressed);
         }
-        // Let it work through what was queued.
-        let mut recordings = 0;
-        while let Ok(Some(event)) =
-            tokio::time::timeout(Duration::from_millis(100), harness.ui.recv()).await
-        {
-            if event == UiEvent::StateChanged(Recording) {
-                recordings += 1;
-            }
+        // The pipeline runs now, on one thread: it throws away all of the
+        // queued keys (#91), so none of them starts a recording.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
         }
-        assert!(
-            (1..=KEYS_QUEUED / 3 + 1).contains(&recordings),
-            "{recordings} recordings from the queued keys"
+        assert_eq!(
+            harness.ui.try_recv(),
+            Err(TryRecvError::Empty),
+            "no recording from the queued keys"
         );
 
         release.send(()).unwrap();
@@ -1545,11 +1845,12 @@ mod audio_worker_tests {
         let audio = ScriptedAudio::new(Vec::new());
         let mut harness = Harness::start(audio.clone());
         harness.emit(HotkeyEvent::Pressed);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+        // A current-thread runtime: the pipeline can't run during this.
         for _ in 0..(2 * KEYS_QUEUED) {
             // Repeats while recording: ignored, but they fill the queue.
             harness.emit(HotkeyEvent::Pressed);
         }
-        assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
         assert_eq!(harness.next().await, UiEvent::StateChanged(Idle));
         harness.pipeline.shutdown().await;
         // Depending on when the worker ran, the Start was dropped by the
@@ -1606,7 +1907,7 @@ mod audio_worker_tests {
     /// changes.
     #[tokio::test]
     async fn an_interrupted_key_after_a_dropped_one_discards_once() {
-        let (ui, mut ui_events) = mpsc::unbounded_channel();
+        let (ui, mut ui_events) = ui_channel();
         let (_shutdown, shutdown_rx) = watch::channel(false);
         let (release, gate) = std_mpsc::channel();
         let audio = ScriptedAudio::new(vec![OnStart::Block(gate)]);
@@ -1622,19 +1923,26 @@ mod audio_worker_tests {
             shutdown_rx,
             tokio::time::interval(Duration::from_millis(250)),
         );
-        let overflowed = AtomicBool::new(false);
-        runner
-            .key(HotkeyEvent::Pressed, Duration::ZERO, &overflowed)
-            .await;
+        let (_keys_tx, keys_rx) = mpsc::channel(KEYS_QUEUED);
+        let mut keys = Keys {
+            rx: keys_rx,
+            overflow: Arc::new(Overflow::default()),
+        };
+        runner.key(HotkeyEvent::Pressed, Duration::ZERO).await;
         assert!(matches!(runner.state, State::Recording { .. }));
         audio.entered(1).await;
 
-        overflowed.store(true, Ordering::SeqCst);
-        runner
-            .key(HotkeyEvent::Interrupted, Duration::ZERO, &overflowed)
-            .await;
+        // The interruption discards the recording; the overflow's cancel
+        // then finds the coordinator idle.
+        runner.key(HotkeyEvent::Interrupted, Duration::ZERO).await;
         assert_eq!(runner.state, State::Idle);
-        assert!(!overflowed.load(Ordering::SeqCst), "the flag is consumed");
+        keys.overflow.dropped.store(true, Ordering::SeqCst);
+        assert_eq!(runner.keys_overflowed(&mut keys), Some(0));
+        assert_eq!(runner.state, State::Idle);
+        assert!(
+            !keys.overflow.dropped.load(Ordering::SeqCst),
+            "the flag is consumed"
+        );
 
         release.send(()).unwrap();
         audio.finished(2).await;
@@ -1645,11 +1953,56 @@ mod audio_worker_tests {
         assert!(ui_events.try_recv().is_err(), "nothing else");
     }
 
+    /// #91: an overflow throws away every queued key and cancels the
+    /// recording; a leftover wake-up with no dropped key does nothing.
+    #[tokio::test]
+    async fn keys_overflowed_discards_the_queue_and_cancels_only_when_a_key_was_dropped() {
+        let (ui, mut ui_events) = ui_channel();
+        let (_shutdown, shutdown_rx) = watch::channel(false);
+        let (audio, _) = AudioWorker::spawn(ScriptedAudio::new(Vec::new()));
+        let mut runner = Runner::new(
+            FakeHotkey::new(),
+            audio,
+            FixedTranscriber,
+            FakeInserter::new(),
+            FakePermissions::all_granted(),
+            Arc::new(FakeClock::new()),
+            ui,
+            shutdown_rx,
+            tokio::time::interval(Duration::from_millis(250)),
+        );
+        let (keys_tx, keys_rx) = mpsc::channel(KEYS_QUEUED);
+        let mut keys = Keys {
+            rx: keys_rx,
+            overflow: Arc::new(Overflow::default()),
+        };
+        runner.key(HotkeyEvent::Pressed, Duration::ZERO).await;
+        assert!(matches!(runner.state, State::Recording { .. }));
+        for _ in 0..5 {
+            keys_tx
+                .try_send((HotkeyEvent::Released, Duration::from_secs(1)))
+                .unwrap();
+        }
+
+        // No key dropped: nothing is discarded and the recording goes on.
+        assert_eq!(runner.keys_overflowed(&mut keys), None);
+        assert!(matches!(runner.state, State::Recording { .. }));
+        assert!(keys.rx.try_recv().is_ok(), "the queue was left alone");
+
+        // A key was dropped: the other four go too, and the recording ends.
+        keys.overflow.dropped.store(true, Ordering::SeqCst);
+        assert_eq!(runner.keys_overflowed(&mut keys), Some(4));
+        assert_eq!(runner.state, State::Idle);
+        assert!(keys.rx.try_recv().is_err());
+        assert_eq!(ui_events.try_recv(), Ok(UiEvent::StateChanged(Recording)));
+        assert_eq!(ui_events.try_recv(), Ok(UiEvent::StateChanged(Idle)));
+    }
+
     /// #81 M1: keys arriving nonstop don't hold off the recording limit:
     /// each key also feeds a Tick that has come due.
     #[tokio::test]
     async fn a_key_feeds_a_tick_that_came_due() {
-        let (ui, _ui) = mpsc::unbounded_channel();
+        let (ui, _ui) = ui_channel();
         let (_shutdown, shutdown_rx) = watch::channel(false);
         let (audio, _) = AudioWorker::spawn(ScriptedAudio::new(Vec::new()));
         let clock = FakeClock::new();
@@ -1664,18 +2017,13 @@ mod audio_worker_tests {
             shutdown_rx,
             tokio::time::interval(Duration::from_millis(1)),
         );
-        let overflowed = AtomicBool::new(false);
-        runner
-            .key(HotkeyEvent::Pressed, Duration::ZERO, &overflowed)
-            .await;
+        runner.key(HotkeyEvent::Pressed, Duration::ZERO).await;
         assert!(matches!(runner.state, State::Recording { .. }));
 
         clock.advance(dictation_core::coordinator::MAX_RECORDING);
         tokio::time::sleep(Duration::from_millis(5)).await;
         // A repeat, ignored by itself; the Tick due ends the recording.
-        runner
-            .key(HotkeyEvent::Pressed, clock.now(), &overflowed)
-            .await;
+        runner.key(HotkeyEvent::Pressed, clock.now()).await;
         assert_eq!(runner.state, State::Transcribing);
     }
 
@@ -1731,6 +2079,10 @@ mod audio_worker_tests {
             queue.push(Discard);
         }
         assert_eq!(kinds(&queue), ["discard"]);
+        // A discard right behind a discard adds nothing.
+        queue.push(Discard);
+        queue.push(Discard);
+        assert_eq!(kinds(&queue), ["discard"]);
         // Then a dictation that stops.
         let (reply, _captured) = oneshot::channel();
         queue.push(Start(100));
@@ -1747,7 +2099,7 @@ mod audio_worker_tests {
 
     #[tokio::test]
     async fn a_start_failure_from_an_earlier_recording_is_dropped() {
-        let (ui, _ui) = mpsc::unbounded_channel();
+        let (ui, _ui) = ui_channel();
         let (_shutdown, shutdown_rx) = watch::channel(false);
         let (audio, _) = AudioWorker::spawn(ScriptedAudio::new(Vec::new()));
         let mut runner = Runner::new(
