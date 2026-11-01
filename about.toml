@@ -1,0 +1,29 @@
+# cargo-about: the third-party licence notice shipped with every build
+# (THIRD-PARTY-LICENSES.txt, #24). scripts/gen-licences.sh runs it and
+# adds NOTICE and the npm licences; scripts/check-licences.sh (in the gate)
+# fails when the committed file is out of date.
+#
+# The licences accepted here mirror deny.toml: a crate under another licence
+# fails the build of the notice, as it fails `cargo deny check`.
+accepted = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Zlib",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "ISC",
+    "MPL-2.0",
+]
+
+# What ships: the Mac builds. Add the Windows target with M-W.1.
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+
+# Build tools and tests are not in the app.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+# Our own crates are `publish = false` with no licence field.
+private = { ignore = true }
