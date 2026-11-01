@@ -117,6 +117,11 @@ fn transition(state: State, event: Event) -> (State, Vec<Command>) {
         (State::Transcribing, Event::TranscriptionFailed(reason)) => {
             fail(DictationError::TranscriptionFailed { reason })
         }
+        // The recording just stopped never started: the app layer learnt
+        // only then that the permission was missing (M2.3, #81).
+        (State::Transcribing, Event::PermissionMissing(permission)) => {
+            fail(DictationError::PermissionMissing(permission))
+        }
         (State::Inserting, Event::InsertDone) => (State::Idle, Vec::new()),
         (State::Inserting, Event::InsertFailed(reason)) => {
             fail(DictationError::InsertFailed { reason })
@@ -201,13 +206,36 @@ mod tests {
     #[test]
     fn criterion_3_press_while_transcribing_or_inserting_is_ignored() {
         for state in [State::Transcribing, State::Inserting] {
-            for event in [
-                Event::HotkeyPressed(ms(5_000)),
-                Event::PermissionMissing(Permission::Microphone),
-            ] {
-                assert_eq!(step(state, event), (state, Vec::new()));
-            }
+            assert_eq!(
+                step(state, Event::HotkeyPressed(ms(5_000))),
+                (state, Vec::new())
+            );
         }
+        let permission_missing = Event::PermissionMissing(Permission::Microphone);
+        assert_eq!(
+            step(State::Inserting, permission_missing),
+            (State::Inserting, Vec::new())
+        );
+    }
+
+    /// M2.3 (#81 M2): the recording stopped, but its start had failed for
+    /// want of the permission. Changed from "ignored" in M1.1 criterion 3:
+    /// the app layer only reports this for the recording being transcribed.
+    #[test]
+    fn a_permission_missing_while_transcribing_fails_the_dictation() {
+        assert_eq!(
+            step(
+                State::Transcribing,
+                Event::PermissionMissing(Permission::Microphone)
+            ),
+            (
+                State::Idle,
+                vec![
+                    Command::ShowError(DictationError::PermissionMissing(Permission::Microphone)),
+                    Command::StateChanged(Phase::Idle),
+                ]
+            )
+        );
     }
 
     #[test]
