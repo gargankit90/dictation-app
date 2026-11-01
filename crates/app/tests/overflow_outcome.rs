@@ -8,7 +8,11 @@
 //! test's loop injects keys: the queue fills and overflows at the same key
 //! every time. The completion fence is the pipeline's own `Idle`.
 
-#![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers fail the test on purpose"
+)]
 
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
