@@ -8,7 +8,8 @@ members = [
     "crates/app",
     "src-tauri",
 ]
-# Vendored, patched dependencies; not ours to lint or test with the gate.
+# Vendored, patched dependencies (see [patch.crates-io] below). Not members:
+# they keep their upstream code, lints and tests.
 exclude = ["third_party"]
 
 [workspace.package]
@@ -63,8 +64,14 @@ objc2-foundation = { version = "0.3.2", default-features = false }
 # coreaudio-rs 0.14.2 with a fix for its input callback buffer (#77 B2);
 # see third_party/coreaudio-rs/PATCHES.md. Drop it once a fixed release is
 # out and handy-cpal takes it.
+#
+# handy-keys 0.3.4 with the macOS hotkey fixes of M1.6 (#80): modifier
+# direction from the event's flags, a modifier snapshot at start, and a
+# notice when the event tap was disabled. third_party/handy-keys/PATCHES.md
+# lists the changes; drop this once upstream ships them.
 [patch.crates-io]
 coreaudio-rs = { path = "third_party/coreaudio-rs" }
+handy-keys = { path = "third_party/handy-keys" }
 
 # Every crate opts in with `[lints] workspace = true`. Tests may unwrap
 # (clippy.toml). `clippy::pedantic` is turned on in core's lib.rs, since a

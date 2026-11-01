@@ -1,0 +1,400 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { SyntheticEvent } from "react";
+import { commands } from "./bindings";
+import type { Provider, Settings_Serialize } from "./bindings";
+import { PROVIDERS, providerInfo } from "./providers";
+import "./settings.css";
+import { normalizeLanguage, validateHotkey, validateKey, validateLanguage } from "./validation";
+
+interface Notice {
+  kind: "ok" | "error";
+  text: string;
+}
+
+/**
+ * What the app knows about the selected provider's stored key. "checking" and
+ * "error" are different: a failed lookup (say, a denied keychain) must not
+ * look like one still running.
+ */
+type KeyStatus =
+  | { state: "checking" }
+  | { state: "saved" }
+  | { state: "none" }
+  | { state: "error"; message: string };
+
+const CHECKING: KeyStatus = { state: "checking" };
+
+interface FieldErrors {
+  key?: string;
+  language?: string;
+  hotkey?: string;
+}
+
+/** Shown when a command fails without a message of its own (the IPC itself broke). */
+const BROKEN = "Something went wrong talking to the app. Try again.";
+
+/** The message of a failed command: the app's own text, or [`BROKEN`]. */
+function messageOf(error: unknown): string {
+  return typeof error === "string" && error !== "" ? error : BROKEN;
+}
+
+/**
+ * The settings window: provider, API key (write-only), hotkey and language,
+ * with a Test key button. The key lives in this component only while it is
+ * being typed; it is cleared after a save and never loaded back. The only
+ * thing the app tells us about a stored key is whether one exists.
+ */
+export function Settings() {
+  // `null` until the saved settings load. Fields the form doesn't show
+  // (version) are sent back as loaded.
+  const [loaded, setLoaded] = useState<Settings_Serialize | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [provider, setProvider] = useState<Provider>("groq");
+  const [language, setLanguage] = useState("");
+  const [hotkey, setHotkey] = useState("");
+  const [keyInput, setKeyInput] = useState("");
+  const [keyStatus, setKeyStatus] = useState<KeyStatus>(CHECKING);
+  const [errors, setErrors] = useState<FieldErrors>({});
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  // Bumped whenever a test result would be out of date (a new test, or the
+  // key or provider changed), so a slow reply can't show up under a newer key.
+  const testRun = useRef(0);
+  // Bumped by every key-status lookup (and when a save settles the status), so
+  // only the newest reply counts: replies can arrive in any order, and one for
+  // a provider the user has since left must not overwrite the current one.
+  const keyCheck = useRef(0);
+
+  const checkKeySaved = useCallback(async (which: Provider) => {
+    keyCheck.current += 1;
+    const run = keyCheck.current;
+    setKeyStatus(CHECKING);
+    let status: KeyStatus;
+    try {
+      const result = await commands.hasApiKey(which);
+      status =
+        result.status === "error"
+          ? { state: "error", message: messageOf(result.error) }
+          : { state: result.data ? "saved" : "none" };
+    } catch {
+      status = { state: "error", message: BROKEN };
+    }
+    if (run === keyCheck.current) setKeyStatus(status);
+  }, []);
+
+  useEffect(() => {
+    // An object, not a `let`, so the checks after each `await` see changes.
+    const state = { cancelled: false };
+    void (async () => {
+      try {
+        const result = await commands.getSettings();
+        if (state.cancelled) return;
+        if (result.status === "error") {
+          setLoadError(messageOf(result.error));
+          return;
+        }
+        setLoaded(result.data);
+        setProvider(result.data.provider);
+        setLanguage(result.data.language ?? "");
+        setHotkey(result.data.hotkey);
+        await checkKeySaved(result.data.provider);
+      } catch {
+        if (!state.cancelled) setLoadError(BROKEN);
+      }
+    })();
+    return () => {
+      state.cancelled = true;
+    };
+  }, [checkKeySaved]);
+
+  const info = providerInfo(provider);
+
+  // The form is locked while a save runs, so what it shows is what gets saved.
+  // (The fieldset disables the controls; these guards cover anything else.)
+  const changesModel = loaded !== null && provider !== loaded.provider;
+
+  function changeProvider(next: Provider) {
+    if (saving) return;
+    testRun.current += 1;
+    setTesting(false);
+    setProvider(next);
+    setKeyInput("");
+    setErrors({});
+    setNotice(null);
+    void checkKeySaved(next);
+  }
+
+  function changeKey(value: string) {
+    if (saving) return;
+    testRun.current += 1;
+    setTesting(false);
+    setKeyInput(value);
+    setErrors((current) => ({ ...current, key: undefined }));
+    setNotice(null);
+  }
+
+  async function testKey() {
+    // A typed key is tested without saving it; with the field empty, the
+    // saved key is tested.
+    const typed = keyInput.trim() === "" ? null : keyInput;
+    // While the lookup is running or failed, the app is asked anyway: it
+    // answers for the stored key, with its own typed error if it can't read it.
+    if (typed === null && keyStatus.state === "none") {
+      setErrors((current) => ({ ...current, key: "Paste your API key." }));
+      return;
+    }
+    if (typed !== null) {
+      const problem = validateKey(typed);
+      if (problem !== null) {
+        setErrors((current) => ({ ...current, key: problem }));
+        return;
+      }
+    }
+    setErrors((current) => ({ ...current, key: undefined }));
+    setNotice(null);
+    testRun.current += 1;
+    const run = testRun.current;
+    setTesting(true);
+    let outcome: Notice;
+    try {
+      const result = await commands.testApiKey(provider, typed);
+      outcome =
+        result.status === "ok"
+          ? { kind: "ok", text: `The key works. ${info.name} accepted it.` }
+          : { kind: "error", text: result.error.message };
+    } catch {
+      outcome = { kind: "error", text: BROKEN };
+    }
+    if (run !== testRun.current) return;
+    setTesting(false);
+    setNotice(outcome);
+  }
+
+  async function save(event: SyntheticEvent) {
+    event.preventDefault();
+    if (loaded === null || saving) return;
+    const found: FieldErrors = {
+      key: keyInput.trim() === "" ? undefined : (validateKey(keyInput) ?? undefined),
+      language: validateLanguage(language) ?? undefined,
+      hotkey: validateHotkey(hotkey) ?? undefined,
+    };
+    setErrors(found);
+    if (found.key ?? found.language ?? found.hotkey) {
+      setNotice(null);
+      return;
+    }
+    setSaving(true);
+    setNotice(null);
+    try {
+      // The key first: if the keychain refuses, nothing else has changed.
+      if (keyInput.trim() !== "") {
+        const result = await commands.setApiKey(provider, keyInput);
+        if (result.status === "error") {
+          setNotice({ kind: "error", text: messageOf(result.error) });
+          return;
+        }
+        setKeyInput("");
+        keyCheck.current += 1; // any lookup still running predates this key
+        setKeyStatus({ state: "saved" });
+      }
+      const toSave: Settings_Serialize = {
+        ...loaded,
+        provider,
+        // The model is kept unless the provider changes; then it becomes the
+        // new provider's default (the form says so).
+        model: provider === loaded.provider ? loaded.model : info.defaultModel,
+        language: normalizeLanguage(language),
+        hotkey: hotkey.trim(),
+      };
+      const saved = await commands.saveSettings(toSave);
+      if (saved.status === "error") {
+        setNotice({ kind: "error", text: messageOf(saved.error) });
+        return;
+      }
+      // Reload, so the form shows what was stored (the canonical hotkey). If
+      // that fails, what we just saved is still what is stored.
+      const reread = await commands.getSettings();
+      const stored = reread.status === "ok" ? reread.data : toSave;
+      setLoaded(stored);
+      setProvider(stored.provider);
+      setLanguage(stored.language ?? "");
+      setHotkey(stored.hotkey);
+      await checkKeySaved(stored.provider);
+      setNotice({ kind: "ok", text: "Settings saved." });
+    } catch {
+      setNotice({ kind: "error", text: BROKEN });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loadError !== null) {
+    return (
+      <main className="settings">
+        <h1>Settings</h1>
+        <p role="alert" className="notice error">
+          Couldn&apos;t load the settings: {loadError}
+        </p>
+      </main>
+    );
+  }
+  if (loaded === null) {
+    return (
+      <main className="settings">
+        <h1>Settings</h1>
+        <p>Loading…</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="settings">
+      <h1>Settings</h1>
+      <form onSubmit={(event) => void save(event)} noValidate>
+        <fieldset disabled={saving}>
+          <div className="field">
+            <label htmlFor="provider">Provider</label>
+            <select
+              id="provider"
+              value={provider}
+              onChange={(event) => {
+                changeProvider(event.target.value as Provider);
+              }}
+            >
+              {PROVIDERS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+            <p className="hint">
+              Speech is sent to this service to be turned into text.
+              {changesModel &&
+                ` Saving switches to ${info.name}'s default model, ${info.defaultModel}.`}
+            </p>
+          </div>
+
+          <div className="field">
+            <label htmlFor="api-key">{info.name} API key</label>
+            <input
+              id="api-key"
+              type="password"
+              value={keyInput}
+              autoComplete="off"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder={
+                keyStatus.state === "saved" ? "Paste a new key to replace it" : "Paste your key"
+              }
+              aria-invalid={errors.key !== undefined}
+              aria-describedby="api-key-status api-key-error"
+              onChange={(event) => {
+                changeKey(event.target.value);
+              }}
+            />
+            <p id="api-key-status" className="hint">
+              {keyStatus.state === "saved" ? (
+                <strong className="saved">Key saved</strong>
+              ) : keyStatus.state === "none" ? (
+                "No key saved yet."
+              ) : keyStatus.state === "checking" ? (
+                "Checking for a saved key…"
+              ) : (
+                <span role="alert" className="error">
+                  Couldn&apos;t check for a saved key: {keyStatus.message}
+                </span>
+              )}{" "}
+              The key is kept in the system keychain and is never shown again.
+            </p>
+            <p id="api-key-error" role={errors.key ? "alert" : undefined} className="error">
+              {errors.key}
+            </p>
+            <div className="row">
+              <button type="button" disabled={testing || saving} onClick={() => void testKey()}>
+                {testing ? "Testing…" : "Test key"}
+              </button>
+              <span className="hint">
+                Tests the key in the box (without saving it), or the saved key if the box is empty.
+              </span>
+              {keyStatus.state === "error" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void checkKeySaved(provider);
+                  }}
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+            {notice !== null && (
+              <p
+                role={notice.kind === "error" ? "alert" : "status"}
+                className={`notice ${notice.kind}`}
+              >
+                {notice.text}
+              </p>
+            )}
+          </div>
+
+          <div className="field">
+            <label htmlFor="hotkey">Hotkey</label>
+            <input
+              id="hotkey"
+              type="text"
+              value={hotkey}
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={errors.hotkey !== undefined}
+              aria-describedby="hotkey-hint hotkey-error"
+              onChange={(event) => {
+                if (saving) return;
+                setHotkey(event.target.value);
+                setErrors((current) => ({ ...current, hotkey: undefined }));
+              }}
+            />
+            <p id="hotkey-hint" className="hint">
+              Hold it to talk. For example RightAlt (the right Option key) or Ctrl+Shift+Space.
+            </p>
+            <p id="hotkey-error" role={errors.hotkey ? "alert" : undefined} className="error">
+              {errors.hotkey}
+            </p>
+          </div>
+
+          <div className="field">
+            <label htmlFor="language">Language</label>
+            <input
+              id="language"
+              type="text"
+              value={language}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Detect automatically"
+              aria-invalid={errors.language !== undefined}
+              aria-describedby="language-hint language-error"
+              onChange={(event) => {
+                if (saving) return;
+                setLanguage(event.target.value);
+                setErrors((current) => ({ ...current, language: undefined }));
+              }}
+            />
+            <p id="language-hint" className="hint">
+              A code such as en, de or fr. Leave it empty to detect the language.
+            </p>
+            <p id="language-error" role={errors.language ? "alert" : undefined} className="error">
+              {errors.language}
+            </p>
+          </div>
+
+          <div className="row actions">
+            <button type="submit" className="primary" disabled={saving || testing}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </fieldset>
+      </form>
+    </main>
+  );
+}

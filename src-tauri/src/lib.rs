@@ -1,8 +1,8 @@
 //! Thin Tauri shell: wires windows, commands and events to the `app` crate.
 //!
-//! M1.5: a menu-bar app with a tray menu (Settings, disabled for now, and
-//! Quit) that runs the pipeline with the real hotkey and the stand-ins for
-//! transcription and paste. M2.2: it records from the real microphone, and
+//! M1.5: a menu-bar app with a tray menu (Settings and Quit) that runs the
+//! pipeline with the real hotkey and the stand-ins for transcription and
+//! paste. M2.2: it records from the real microphone, and
 //! a dictation error (such as a missing microphone permission) shows as the
 //! tray's title and tooltip until the next recording. A second launch
 //! forwards its flags to the running app through the single-instance
@@ -10,6 +10,10 @@
 //! `--release`, `--debug-audio-file`, `--debug-save-audio`; see [`flags`]);
 //! release builds ignore them and have no way to inject key events or
 //! audio.
+//!
+//! M3.4: Settings… shows the `main` window, which holds the settings UI; its
+//! close button hides it instead of destroying it, so the tray can show it
+//! again.
 
 pub mod commands;
 mod flags;
@@ -38,11 +42,13 @@ use dictation_ports::{AudioSource, Permission, PermissionError, PermissionStatus
 use dictation_transcribe::mock::MockTranscriber;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{App, AppHandle, Manager, RunEvent};
+use tauri::{App, AppHandle, Manager, RunEvent, WindowEvent};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 const QUIT_ID: &str = "quit";
 const SETTINGS_ID: &str = "settings";
+/// The one window: it holds the settings UI (`src/Settings.tsx`).
+const SETTINGS_WINDOW: &str = "main";
 const TRAY_ID: &str = "main";
 const TOOLTIP: &str = "dictation-app";
 /// Where a launch's flags came from, for the log.
@@ -154,6 +160,16 @@ pub fn run() {
             },
         ))
         .invoke_handler(commands::builder().invoke_handler())
+        .on_window_event(|window, event| {
+            // Closing the settings window hides it, so the tray can show it
+            // again; destroying it would leave the tray nothing to show.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                if let Err(error) = window.hide() {
+                    tracing::warn!(%error, "could not hide the settings window");
+                }
+            }
+        })
         .setup(move |app| {
             setup(app, hotkey, injector.as_ref())?;
             Ok(())
@@ -218,7 +234,7 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
             .context("could not start the pipeline")?;
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
 
-    // Settings and API keys for the commands (M3.3); the settings UI is M3.4.
+    // Settings and API keys for the commands (M3.3), used by the settings UI (M3.4).
     let config_dir = app.path().app_config_dir().context("no config directory")?;
     let config = dictation_pipeline::config::Config::new(
         &config_dir,
@@ -261,7 +277,7 @@ fn handle_flags(injector: Option<&Injector>, flags: flags::LaunchFlags, from: &s
 }
 
 fn build_tray(app: &App) -> tauri::Result<()> {
-    let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", false, None::<&str>)?;
+    let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit dictation-app", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&settings, &quit])?;
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
@@ -271,6 +287,8 @@ fn build_tray(app: &App) -> tauri::Result<()> {
             if event.id() == QUIT_ID {
                 tracing::info!("quit from the tray");
                 app.exit(0);
+            } else if event.id() == SETTINGS_ID {
+                show_settings(app);
             }
         });
     if let Some(icon) = app.default_window_icon() {
@@ -278,6 +296,21 @@ fn build_tray(app: &App) -> tauri::Result<()> {
     }
     tray.build(app)?;
     Ok(())
+}
+
+/// Shows the settings window in front, even when it's minimized or hidden.
+fn show_settings(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(SETTINGS_WINDOW) else {
+        tracing::warn!("the settings window doesn't exist");
+        return;
+    };
+    let shown = window
+        .unminimize()
+        .and_then(|()| window.show())
+        .and_then(|()| window.set_focus());
+    if let Err(error) = shown {
+        tracing::warn!(%error, "could not show the settings window");
+    }
 }
 
 /// Logs each state change (never the transcript) and shows a dictation

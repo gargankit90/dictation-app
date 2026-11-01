@@ -610,6 +610,8 @@ where
             },
             HotkeyEvent::Released => Event::HotkeyReleased(at),
             HotkeyEvent::CancelPressed => Event::CancelPressed,
+            HotkeyEvent::Interrupted => Event::HotkeyInterrupted,
+            HotkeyEvent::Failed => Event::HotkeyFailed,
         })
     }
 
@@ -1390,6 +1392,92 @@ mod audio_worker_tests {
         let calls = audio.calls();
         assert_eq!(calls.last(), Some(&"discard"), "{calls:?}");
         assert!(!calls.contains(&"stop"), "{calls:?}");
+    }
+
+    /// M1.6 (#80) with M2.3 (#81): an `Interrupted` or `Failed` hotkey ends
+    /// a recording like Esc does, so the `Start` queued behind a blocked one
+    /// is dropped, never run.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_interrupted_or_failed_hotkey_drops_the_queued_start() {
+        let (release, gate) = std_mpsc::channel();
+        let audio = ScriptedAudio::new(vec![OnStart::Block(gate)]);
+        let mut harness = Harness::start(audio.clone());
+
+        harness.emit(HotkeyEvent::Pressed);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+        audio.entered(1).await;
+        harness.emit(HotkeyEvent::Interrupted);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Idle));
+
+        // The Start of each of these waits behind the blocked one.
+        harness.emit(HotkeyEvent::Pressed);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+        harness.emit(HotkeyEvent::Interrupted);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Idle));
+        harness.emit(HotkeyEvent::Pressed);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+        harness.emit(HotkeyEvent::Failed);
+        let mut after_failed = [harness.next().await, harness.next().await];
+        after_failed.sort_by_key(|event| matches!(event, UiEvent::StateChanged(_)));
+        assert_eq!(
+            after_failed,
+            [
+                UiEvent::Error(DictationError::HotkeyFailed),
+                UiEvent::StateChanged(Idle)
+            ]
+        );
+
+        release.send(()).unwrap();
+        audio.finished(2).await;
+        assert_eq!(audio.calls(), ["start", "discard"], "no queued start ran");
+        assert_eq!(audio.entered.load(Ordering::SeqCst), 1);
+        harness.pipeline.shutdown().await;
+    }
+
+    /// M1.6 with M2.3: a key dropped by the full queue calls for an Esc
+    /// after the key that follows it. When that key is `Interrupted`, the
+    /// recording is already gone: the Esc finds the coordinator idle and
+    /// adds nothing, so the recording is discarded once and nothing else
+    /// changes.
+    #[tokio::test]
+    async fn an_interrupted_key_after_a_dropped_one_discards_once() {
+        let (ui, mut ui_events) = mpsc::unbounded_channel();
+        let (_shutdown, shutdown_rx) = watch::channel(false);
+        let (release, gate) = std_mpsc::channel();
+        let audio = ScriptedAudio::new(vec![OnStart::Block(gate)]);
+        let (worker, _failed) = AudioWorker::spawn(audio.clone());
+        let mut runner = Runner::new(
+            FakeHotkey::new(),
+            worker,
+            FixedTranscriber,
+            FakeInserter::new(),
+            FakePermissions::all_granted(),
+            Arc::new(FakeClock::new()),
+            ui,
+            shutdown_rx,
+            tokio::time::interval(Duration::from_millis(250)),
+        );
+        let overflowed = AtomicBool::new(false);
+        runner
+            .key(HotkeyEvent::Pressed, Duration::ZERO, &overflowed)
+            .await;
+        assert!(matches!(runner.state, State::Recording { .. }));
+        audio.entered(1).await;
+
+        overflowed.store(true, Ordering::SeqCst);
+        runner
+            .key(HotkeyEvent::Interrupted, Duration::ZERO, &overflowed)
+            .await;
+        assert_eq!(runner.state, State::Idle);
+        assert!(!overflowed.load(Ordering::SeqCst), "the flag is consumed");
+
+        release.send(()).unwrap();
+        audio.finished(2).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(audio.calls(), ["start", "discard"], "one discard");
+        assert_eq!(ui_events.try_recv(), Ok(UiEvent::StateChanged(Recording)));
+        assert_eq!(ui_events.try_recv(), Ok(UiEvent::StateChanged(Idle)));
+        assert!(ui_events.try_recv().is_err(), "nothing else");
     }
 
     /// #81 M1: keys arriving nonstop don't hold off the recording limit:

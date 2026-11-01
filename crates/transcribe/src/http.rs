@@ -29,6 +29,9 @@ pub(crate) fn client(timeout: Duration) -> Result<Client, TranscribeError> {
     Client::builder()
         .tls_backend_preconfigured(tls)
         .timeout(timeout)
+        // Never follow a redirect: requests go only to the configured
+        // provider, and a 3xx is a provider error (issue #76).
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| failed("HTTP client", &e))
 }
