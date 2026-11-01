@@ -1,5 +1,10 @@
-# The quality gate on every pull request and on main, on Linux: the same
-# scripts/gate.sh that the lefthook pre-push-gate hook runs locally.
+# The quality gate on every pull request and on main, on the owner's Mac (a
+# self-hosted runner): the same scripts/gate.sh that the lefthook
+# pre-push-gate hook runs locally. See "CI runner" in docs/ENGINEERING.md.
+#
+# Safety on a self-hosted runner: pull requests run only when their branch is
+# in this repository (never a fork), pull_request_target is never used, the
+# token is read-only, and nothing here touches the Lume VMs.
 name: CI
 
 on:
@@ -12,55 +17,40 @@ on:
 permissions:
   contents: read
 
+# One run per PR: a new push cancels the superseded run. Runs on main and
+# manual runs queue instead, so none is dropped half-way.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # The full gate runs on Linux: macOS minutes cost 10x and often queue for a
-  # runner. The `macos` job below covers the #[cfg(target_os = "macos")] code
-  # in crates/platform, which Linux compiles out. Windows comes with M-W.1.
+  # The full gate runs on the Mac, so it also covers the
+  # #[cfg(target_os = "macos")] code. Windows comes with M-W.1.
   gate:
-    name: Quality gate (Linux)
-    runs-on: ubuntu-24.04
+    name: Quality gate (macOS, self-hosted)
+    runs-on: [self-hosted, macOS, owner-mac]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
       NEXTEST_PROFILE: ci
     steps:
+      # clean: false keeps the ignored target/ and node_modules/ between runs
+      # (the cache); the next step removes everything else untracked.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          clean: false
 
-      # The coverage build on top of the restored rust-cache can fill the
-      # runner's disk, and lld then dies with a Bus error (SIGBUS) while it
-      # mmaps its output. Free the space of tools this job never uses.
-      - name: Free runner disk space
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
+      - name: Remove untracked files, keep target/ and node_modules/
+        run: git clean -ffd
 
-      # Libraries src-tauri links on Linux (wry/tao): webkit2gtk, javascriptcore,
-      # libsoup and GTK 3. Tray (appindicator) is loaded at runtime, not linked.
-      - name: Install Tauri system libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
-            libgtk-3-dev pkg-config
+      - name: Check the runner's tools
+        run: >-
+          scripts/ci-check-tools.sh cargo-nextest cargo-deny cargo-machete
+          cargo-llvm-cov cargo-about typos
 
       - name: Install the pinned Rust toolchain
-        run: rustup toolchain install # reads rust-toolchain.toml
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
-        with:
-          tool: cargo-about@0.9.3,cargo-deny@0.20.2,cargo-machete@0.9.2,cargo-nextest@0.9.149,cargo-llvm-cov@0.9.1,typos@1.51.1
+        run: rustup toolchain install # reads rust-toolchain.toml; a no-op when present
 
       - run: npm ci
 
@@ -70,29 +60,32 @@ jobs:
       - name: Disk usage
         if: always()
         run: |
-          df -h
+          df -h /
           du -sh target 2>/dev/null || true
 
   # The Mac-only code in dictation-platform (hotkey, Accessibility, Secure
-  # Input): build, lint and test it where it compiles (#10).
+  # Input): build, lint and test it on its own, with --all-features (#10).
   macos:
     name: Platform crate (macOS)
-    runs-on: macos-latest
+    runs-on: [self-hosted, macOS, owner-mac]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 30
     env:
       CARGO_TERM_COLOR: always
       NEXTEST_PROFILE: ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          clean: false
+
+      - name: Remove untracked files, keep target/ and node_modules/
+        run: git clean -ffd
+
+      - name: Check the runner's tools
+        run: scripts/ci-check-tools.sh cargo-nextest
 
       - name: Install the pinned Rust toolchain
-        run: rustup toolchain install # reads rust-toolchain.toml
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
-        with:
-          tool: cargo-nextest@0.9.149
+        run: rustup toolchain install # reads rust-toolchain.toml; a no-op when present
 
       - run: cargo build -p dictation-platform --all-targets --all-features
       - run: cargo clippy -p dictation-platform --all-targets --all-features -- -D warnings

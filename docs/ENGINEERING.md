@@ -155,6 +155,40 @@ every finding is fixed.
 A suppression (`#[allow]`, `eslint-disable`) needs a comment explaining why,
 and the Code Reviewer must agree.
 
+## CI runner
+
+CI (`.github/workflows/ci.yml`, `dmg.yml`) runs on the owner's Mac, a
+self-hosted GitHub Actions runner, because GitHub-hosted jobs are blocked by
+account billing.
+
+- **Where:** `~/actions-runner` on the owner's Mac, registered as
+  `owner-mac-m4pro` and running as the owner's macOS user, one job at a time.
+  Labels: `self-hosted`, `macOS`, `ARM64`, `owner-mac`. Jobs use
+  `runs-on: [self-hosted, macOS, owner-mac]`.
+- **The Mac must be awake** and online. If it sleeps or is off, jobs wait in
+  the queue until it is back (then they time out after GitHub's limit).
+- **Tools** are installed by hand, not downloaded per run: the pinned Rust
+  toolchain, Node (the major in `.nvmrc`), cargo-nextest, cargo-deny,
+  cargo-machete, cargo-llvm-cov, cargo-about and typos.
+  `scripts/ci-check-tools.sh` fails a job early and names a missing tool.
+  When a version pin in `gate.sh`-related files changes, update the Mac too.
+- **Caches** are local: the checkout keeps `target/` and `node_modules/`
+  between runs (`clean: false`, then `git clean -ffd`, which leaves ignored
+  files). No `actions/cache` or rust-cache upload.
+- **Safety:** pull requests run only from branches in this repository, never
+  forks; `pull_request_target` is not used; the token is `contents: read`;
+  CI never touches the Lume VMs, and runs no e2e tests. The DMG job signs ad
+  hoc (`DMG_ADHOC=1`), so it never uses the owner's dev certificate.
+- **One run per PR:** a new push cancels the superseded run.
+- **Fall back to hosted runners:** in both workflow files change `runs-on`
+  back to `ubuntu-24.04` (gate) or `macos-latest` (platform crate, DMG), drop
+  the `scripts/ci-check-tools.sh` steps and add back
+  `taiki-e/install-action` (tools as pinned in the old workflow, see git
+  history) and `Swatinem/rust-cache`. The gate on Linux also needs the Tauri
+  system libraries (`libwebkit2gtk-4.1-dev`, `libjavascriptcoregtk-4.1-dev`,
+  `libsoup-3.0-dev`, `libgtk-3-dev`, `pkg-config`) and freed disk space; copy
+  those steps from the history of `ci.yml` before this change.
+
 ## Git
 
 - Trunk-based; `main` is always green and changes only by merging a PR.
