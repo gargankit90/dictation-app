@@ -15,7 +15,7 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use dictation_core::coordinator::Phase::{Idle, Inserting, Recording, Transcribing};
@@ -32,7 +32,7 @@ use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::fakes::{
     FakeClock, FakeHotkey, FakeInserter, FakePermissions, MemSecretStore,
 };
-use dictation_ports::{HotkeyError, HotkeyEvent, HotkeySource};
+use dictation_ports::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};
 
 const WAIT: Duration = Duration::from_secs(5);
 const QUIET: Duration = Duration::from_millis(200);
@@ -67,24 +67,64 @@ impl Drop for TempDir {
     }
 }
 
+type StopHook = Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>;
+type StartHook = Box<dyn FnOnce(&FakeHotkey) + Send>;
+
+/// A source the factory built: a fake, plus fences a test can put into its
+/// start (after it listens) and its stop (before it stops listening), like
+/// the real listener's thread start and join.
+struct Key {
+    fake: FakeHotkey,
+    after_start: Option<StartHook>,
+    on_stop: StopHook,
+}
+
+impl HotkeySource for Key {
+    fn start(&mut self, sink: HotkeySink) -> Result<(), HotkeyError> {
+        self.fake.start(sink)?;
+        if let Some(hook) = self.after_start.take() {
+            hook(&self.fake);
+        }
+        Ok(())
+    }
+
+    fn stop(&mut self) {
+        let hook = self.on_stop.lock().unwrap().take();
+        if let Some(hook) = hook {
+            hook();
+        }
+        self.fake.stop();
+    }
+}
+
 /// The hotkey factory: one fake per spec asked for, in order. A start
-/// failure can be queued for the next source it makes.
+/// failure or a start fence can be queued for the next source it makes.
 #[derive(Clone, Default)]
 struct Keyboard {
-    built: Arc<Mutex<Vec<(HotkeySpec, FakeHotkey)>>>,
+    built: Arc<Mutex<Vec<(HotkeySpec, FakeHotkey, StopHook)>>>,
     fail_next: Arc<Mutex<Option<HotkeyError>>>,
+    after_next_start: Arc<Mutex<Option<StartHook>>>,
 }
 
 impl Keyboard {
-    fn factory(&self) -> impl Fn(HotkeySpec) -> FakeHotkey + Send + Sync + 'static {
+    fn factory(&self) -> impl Fn(HotkeySpec) -> Key + Send + Sync + 'static {
         let keyboard = self.clone();
         move |spec| {
             let fake = FakeHotkey::new();
             if let Some(error) = keyboard.fail_next.lock().unwrap().take() {
                 fake.fail_next_start(error);
             }
-            keyboard.built.lock().unwrap().push((spec, fake.clone()));
-            fake
+            let on_stop = StopHook::default();
+            keyboard
+                .built
+                .lock()
+                .unwrap()
+                .push((spec, fake.clone(), Arc::clone(&on_stop)));
+            Key {
+                fake,
+                after_start: keyboard.after_next_start.lock().unwrap().take(),
+                on_stop,
+            }
         }
     }
 
@@ -92,8 +132,31 @@ impl Keyboard {
         *self.fail_next.lock().unwrap() = Some(error);
     }
 
+    /// Runs `hook` on the next source built, right after it starts
+    /// listening and before `start` returns.
+    fn after_next_start(&self, hook: impl FnOnce(&FakeHotkey) + Send + 'static) {
+        *self.after_next_start.lock().unwrap() = Some(Box::new(hook));
+    }
+
+    /// Runs `hook` when the source for `spec` is stopped, before it stops
+    /// listening: its stop blocks until `hook` returns.
+    fn on_stop(&self, spec: HotkeySpec, hook: impl FnOnce() + Send + 'static) {
+        let built = self.built.lock().unwrap();
+        let (_, _, slot) = built
+            .iter()
+            .rev()
+            .find(|(s, _, _)| *s == spec)
+            .unwrap_or_else(|| panic!("no source was built for {spec}"));
+        *slot.lock().unwrap() = Some(Box::new(hook));
+    }
+
     fn specs(&self) -> Vec<HotkeySpec> {
-        self.built.lock().unwrap().iter().map(|(s, _)| *s).collect()
+        self.built
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(s, _, _)| *s)
+            .collect()
     }
 
     /// The most recent source built for `spec`: the key it stands for.
@@ -103,9 +166,23 @@ impl Keyboard {
             .unwrap()
             .iter()
             .rev()
-            .find(|(s, _)| *s == spec)
-            .map(|(_, fake)| fake.clone())
+            .find(|(s, _, _)| *s == spec)
+            .map(|(_, fake, _)| fake.clone())
             .unwrap_or_else(|| panic!("no source was built for {spec}"))
+    }
+
+    /// Blocks the stop of the source for `spec` until the returned gate is
+    /// opened; `stopping` receives once that stop has begun.
+    fn hold_stop(&self, spec: HotkeySpec) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+        let (began, stopping) = mpsc::channel();
+        let (gate, gate_rx) = mpsc::channel::<()>();
+        self.on_stop(spec, move || {
+            began.send(()).unwrap();
+            gate_rx
+                .recv_timeout(WAIT)
+                .expect("the stop was never let go");
+        });
+        (stopping, gate)
     }
 }
 
@@ -127,7 +204,7 @@ impl App {
     fn start_with<H: HotkeySource + 'static>(
         file: &SettingsFile<MemSecretStore>,
         keyboard: Keyboard,
-        wrap: impl FnOnce(ConfigurableHotkey<FakeHotkey>) -> H,
+        wrap: impl FnOnce(ConfigurableHotkey<Key>) -> H,
     ) -> Self {
         let (hotkey, control) = ConfigurableHotkey::new(
             hotkey_setting::startup_spec(file.settings()),
@@ -464,4 +541,114 @@ async fn after_the_pipeline_stops_a_switch_only_records_the_spec() {
     assert_eq!(control.switch(spec("F6")), Ok(Switched::NotListening(None)));
     assert_eq!(control.spec(), spec("F6"));
     assert_eq!(keyboard.specs(), [HotkeySpec::default()]);
+}
+
+/// R1 (T2 review round 1): the new key is heard while the old listener is
+/// still being stopped and joined. A press then is one dictation, not a lost
+/// press followed by a stray release.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_press_of_the_new_key_while_the_old_one_stops_is_heard_once() {
+    let dir = TempDir::new("handoff-press");
+    let file = dir.settings_file();
+    let mut app = App::start(&file);
+    let old = HotkeySpec::default();
+    let (stopping, gate) = app.keyboard.hold_stop(old);
+
+    let control = app.control.clone();
+    let switching = std::thread::spawn(move || control.switch(spec("F6")));
+    stopping
+        .recv_timeout(WAIT)
+        .expect("the old source was never stopped");
+
+    // The old listener is mid-stop; the user already holds the new key.
+    assert!(app.keyboard.key(spec("F6")).emit(HotkeyEvent::Pressed));
+    assert_eq!(app.next().await, UiEvent::StateChanged(Recording));
+
+    gate.send(()).unwrap();
+    assert_eq!(switching.join().unwrap(), Ok(Switched::Now));
+    app.clock.advance(Duration::from_millis(500));
+    assert!(app.keyboard.key(spec("F6")).emit(HotkeyEvent::Released));
+    assert_eq!(app.next().await, UiEvent::StateChanged(Transcribing));
+    assert_eq!(app.next().await, UiEvent::StateChanged(Inserting));
+    assert_eq!(app.next().await, UiEvent::StateChanged(Idle));
+    app.assert_quiet().await;
+    assert_eq!(app.inserter.inserted(), [FIXED_TRANSCRIPT]);
+    app.pipeline.shutdown().await;
+}
+
+/// The other side of the handoff: once the new key has taken over, an event
+/// the old listener sends while it is being stopped never arrives, so the
+/// two keys are never heard at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_old_key_is_not_heard_once_the_new_one_has_taken_over() {
+    let dir = TempDir::new("handoff-old");
+    let file = dir.settings_file();
+    let mut app = App::start(&file);
+    let old = HotkeySpec::default();
+    let (stopping, gate) = app.keyboard.hold_stop(old);
+
+    let control = app.control.clone();
+    let switching = std::thread::spawn(move || control.switch(spec("F6")));
+    stopping
+        .recv_timeout(WAIT)
+        .expect("the old source was never stopped");
+
+    // Still listening (its stop hasn't got that far), but no longer current.
+    assert!(app.keyboard.key(old).emit(HotkeyEvent::Pressed));
+    app.assert_quiet().await;
+
+    gate.send(()).unwrap();
+    assert_eq!(switching.join().unwrap(), Ok(Switched::Now));
+    assert!(!app.keyboard.key(old).emit(HotkeyEvent::Released));
+    app.assert_quiet().await;
+    app.dictate_with(spec("F6")).await;
+    assert_eq!(app.inserter.inserted(), [FIXED_TRANSCRIPT]);
+    app.pipeline.shutdown().await;
+}
+
+/// A press of the new key after it starts listening but before it takes
+/// over isn't lost either: it starts the dictation at the handoff, so the
+/// release that follows ends it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_press_of_the_new_key_as_it_starts_is_heard_at_the_handoff() {
+    let dir = TempDir::new("handoff-start");
+    let file = dir.settings_file();
+    let mut app = App::start(&file);
+    app.keyboard.after_next_start(|key| {
+        assert!(key.emit(HotkeyEvent::Pressed));
+    });
+
+    assert_eq!(app.control.switch(spec("F6")), Ok(Switched::Now));
+    assert_eq!(app.next().await, UiEvent::StateChanged(Recording));
+    app.clock.advance(Duration::from_millis(500));
+    assert!(app.keyboard.key(spec("F6")).emit(HotkeyEvent::Released));
+    assert_eq!(app.next().await, UiEvent::StateChanged(Transcribing));
+    assert_eq!(app.next().await, UiEvent::StateChanged(Inserting));
+    assert_eq!(app.next().await, UiEvent::StateChanged(Idle));
+    app.assert_quiet().await;
+    assert_eq!(app.inserter.inserted(), [FIXED_TRANSCRIPT]);
+    app.pipeline.shutdown().await;
+}
+
+/// A new key that starts but fails before it takes over: the failure is
+/// passed on at the handoff instead of being swallowed, and a press of the
+/// old key while the new one was starting still reached the pipeline.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_key_that_fails_as_it_starts_reports_it_at_the_handoff() {
+    let dir = TempDir::new("handoff-failed");
+    let file = dir.settings_file();
+    let mut app = App::start(&file);
+    let old = app.keyboard.key(HotkeySpec::default());
+    app.keyboard.after_next_start(move |key| {
+        assert!(old.emit(HotkeyEvent::Pressed), "the old key still listens");
+        assert!(key.emit(HotkeyEvent::Failed));
+    });
+
+    assert_eq!(app.control.switch(spec("F6")), Ok(Switched::Now));
+    assert_eq!(app.next().await, UiEvent::StateChanged(Recording));
+    // The old hold ends at the handoff, then the new key's failure.
+    assert_eq!(app.next().await, UiEvent::StateChanged(Idle));
+    assert!(matches!(app.next().await, UiEvent::Error(_)));
+    assert!(app.inserter.inserted().is_empty());
+    app.pipeline.shutdown().await;
 }

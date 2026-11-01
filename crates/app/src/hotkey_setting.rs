@@ -9,12 +9,18 @@
 //! listens is the old one stopped. If the new one can't start, the old one
 //! keeps listening and the error says why.
 //!
+//! The handoff is one step under the delivery lock, which every event of
+//! every source passes through: before it only the old source's events reach
+//! the pipeline, after it only the new one's. There is no moment when
+//! neither does (a press of the new key while the old listener is still
+//! being stopped and joined arrives) or both do (an old event that was
+//! already on its way is dropped, not delivered after the handoff).
+//!
 //! [`startup_spec`] picks the spec to start with from the saved settings, and
 //! [`apply`] is what saving Settings does with the hotkey field: switch to
 //! it, or keep the old hotkey in both the listener and the settings to be
 //! saved, so the file, the form and the keyboard always agree.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use dictation_core::hotkey_spec::HotkeySpec;
@@ -59,16 +65,98 @@ pub enum Switched {
 struct Shared<H> {
     factory: HotkeyFactory<H>,
     state: Mutex<State<H>>,
+    /// Where every source's events go. Never held while a source starts or
+    /// stops, so a source's `stop` can wait for its own event in flight.
+    delivery: Arc<Mutex<Delivery>>,
+}
+
+/// Which source's events reach the pipeline. Each event is checked and
+/// passed on under this lock, so the handoff is atomic with delivery.
+#[derive(Default)]
+struct Delivery {
     /// The pipeline's sink while started. Every source this hotkey starts
     /// sends through it.
-    sink: Arc<Mutex<Option<HotkeySink>>>,
+    sink: Option<HotkeySink>,
     /// The generation whose events reach the sink; a source's events are
     /// dropped unless it is the current one.
-    active: Arc<AtomicU64>,
+    active: u64,
     /// Whether the current source's last event was a press, so a switch in
     /// the middle of a hold can end it (the release would come from the old
-    /// source, which no longer listens).
-    held: Arc<AtomicBool>,
+    /// source, which no longer reaches the pipeline).
+    held: bool,
+    /// The generation being started by a switch, if any (0: none). Its
+    /// events are not passed on yet, only remembered for the handoff.
+    pending: u64,
+    /// Whether the pending source's key is held now.
+    pending_held: bool,
+    /// Whether the pending source has failed since it started.
+    pending_failed: bool,
+}
+
+impl Delivery {
+    fn send(&mut self, event: HotkeyEvent) {
+        if let Some(sink) = self.sink.as_mut() {
+            sink(event);
+        }
+    }
+
+    /// An event from the source of `generation`.
+    fn deliver(&mut self, generation: u64, event: HotkeyEvent) {
+        if generation == self.active {
+            match event {
+                HotkeyEvent::Pressed => self.held = true,
+                HotkeyEvent::Released | HotkeyEvent::Interrupted | HotkeyEvent::Failed => {
+                    self.held = false;
+                }
+                // Esc says nothing about the hotkey.
+                HotkeyEvent::CancelPressed => {}
+            }
+            self.send(event);
+        } else if generation == self.pending {
+            match event {
+                HotkeyEvent::Pressed => self.pending_held = true,
+                HotkeyEvent::Released | HotkeyEvent::Interrupted => self.pending_held = false,
+                HotkeyEvent::Failed => {
+                    self.pending_held = false;
+                    self.pending_failed = true;
+                }
+                // Esc before the switch is the old hotkey's business.
+                HotkeyEvent::CancelPressed => {}
+            }
+        }
+    }
+
+    /// A switch is starting the source of `generation`.
+    fn begin(&mut self, generation: u64) {
+        self.pending = generation;
+        self.pending_held = false;
+        self.pending_failed = false;
+    }
+
+    /// The pending source couldn't start.
+    fn abandon(&mut self) {
+        self.begin(0);
+    }
+
+    /// Makes the pending source the current one: from here on only its
+    /// events reach the sink. A hold of the old key ends (its release would
+    /// be dropped); a hold of the new key that began while it was pending
+    /// starts, so its release isn't the first the pipeline hears of it.
+    fn hand_over(&mut self) {
+        self.active = self.pending;
+        let pressed = self.pending_held;
+        let failed = self.pending_failed;
+        self.abandon();
+        if std::mem::take(&mut self.held) {
+            self.send(HotkeyEvent::Interrupted);
+        }
+        if failed {
+            self.send(HotkeyEvent::Failed);
+        } else if pressed {
+            self.held = true;
+            self.send(HotkeyEvent::Pressed);
+        }
+    }
 }
 
 struct State<H> {
@@ -108,9 +196,7 @@ impl<H: HotkeySource + 'static> ConfigurableHotkey<H> {
                 last_error: None,
                 generation: 0,
             }),
-            sink: Arc::new(Mutex::new(None)),
-            active: Arc::new(AtomicU64::new(0)),
-            held: Arc::new(AtomicBool::new(false)),
+            delivery: Arc::new(Mutex::new(Delivery::default())),
         });
         let control = HotkeyControl {
             switch: Arc::clone(&shared) as Arc<dyn Switch>,
@@ -123,29 +209,11 @@ impl<H: HotkeySource> Shared<H> {
     /// A sink for the source of `generation`: passes its events on while it
     /// is the current one, and tracks whether its key is held.
     fn forwarder(&self, generation: u64) -> HotkeySink {
-        let sink = Arc::clone(&self.sink);
-        let active = Arc::clone(&self.active);
-        let held = Arc::clone(&self.held);
-        Box::new(move |event| {
-            if active.load(Ordering::SeqCst) != generation {
-                return;
-            }
-            match event {
-                HotkeyEvent::Pressed => held.store(true, Ordering::SeqCst),
-                HotkeyEvent::Released | HotkeyEvent::Interrupted | HotkeyEvent::Failed => {
-                    held.store(false, Ordering::SeqCst);
-                }
-                // Esc says nothing about the hotkey.
-                HotkeyEvent::CancelPressed => {}
-            }
-            if let Some(sink) = lock(&sink).as_mut() {
-                sink(event);
-            }
-        })
+        let delivery = Arc::clone(&self.delivery);
+        Box::new(move |event| lock(&delivery).deliver(generation, event))
     }
 
-    /// Builds and starts a source for `spec` that sends as `generation` (not
-    /// yet current).
+    /// Builds and starts a source for `spec` that sends as `generation`.
     fn start_source(&self, spec: HotkeySpec, generation: u64) -> Result<H, HotkeyError> {
         let mut source = (self.factory)(spec);
         source.start(self.forwarder(generation))?;
@@ -160,11 +228,13 @@ impl<H: HotkeySource + 'static> HotkeySource for ConfigurableHotkey<H> {
         if state.started {
             return Err(HotkeyError::AlreadyStarted);
         }
-        *lock(&shared.sink) = Some(sink);
         state.generation += 1;
         let generation = state.generation;
-        shared.active.store(generation, Ordering::SeqCst);
-        shared.held.store(false, Ordering::SeqCst);
+        *lock(&shared.delivery) = Delivery {
+            sink: Some(sink),
+            active: generation,
+            ..Delivery::default()
+        };
         match shared.start_source(state.spec, generation) {
             Ok(source) => {
                 state.source = Some(source);
@@ -174,7 +244,7 @@ impl<H: HotkeySource + 'static> HotkeySource for ConfigurableHotkey<H> {
             }
             Err(error) => {
                 // As the trait says: on error the sink is dropped.
-                *lock(&shared.sink) = None;
+                lock(&shared.delivery).sink = None;
                 state.last_error = Some(error.clone());
                 Err(error)
             }
@@ -186,11 +256,13 @@ impl<H: HotkeySource + 'static> HotkeySource for ConfigurableHotkey<H> {
         let mut state = lock(&shared.state);
         state.started = false;
         if let Some(mut source) = state.source.take() {
-            // Its stop may wait for a sink call, which takes only the sink's
-            // lock, never the state's.
+            // Its stop may wait for a sink call, which takes only the
+            // delivery lock, never the state's.
             source.stop();
         }
-        *lock(&shared.sink) = None;
+        let mut delivery = lock(&shared.delivery);
+        delivery.sink = None;
+        delivery.held = false;
     }
 }
 
@@ -212,21 +284,25 @@ impl<H: HotkeySource + 'static> Switch for Shared<H> {
         let generation = state.generation;
         // The new source first: if it can't start, the old one keeps
         // listening as if nothing happened.
-        let source = self.start_source(spec, generation)?;
+        lock(&self.delivery).begin(generation);
+        let source = match self.start_source(spec, generation) {
+            Ok(source) => source,
+            Err(error) => {
+                lock(&self.delivery).abandon();
+                return Err(error);
+            }
+        };
+        // The handoff, atomic with delivery: the new source's events reach
+        // the pipeline from here on, the old one's never again.
+        lock(&self.delivery).hand_over();
         if let Some(mut old) = state.source.replace(source) {
-            // No event of the old source arrives after this returns, so
-            // `held` is its last word.
+            // Outside the delivery lock: the old source's stop may wait for
+            // an event of its own in flight, which is then dropped. The new
+            // key is heard meanwhile.
             old.stop();
         }
-        self.active.store(generation, Ordering::SeqCst);
         state.spec = spec;
         state.last_error = None;
-        if self.held.swap(false, Ordering::SeqCst) {
-            // The old key's release will never come: end the hold.
-            if let Some(sink) = lock(&self.sink).as_mut() {
-                sink(HotkeyEvent::Interrupted);
-            }
-        }
         Ok(Switched::Now)
     }
 }
@@ -240,9 +316,10 @@ impl HotkeyControl {
     }
 
     /// Makes `spec` the hotkey. While the pipeline runs, a source for `spec`
-    /// is started and, once it listens, the old one is stopped; a hold in
-    /// progress ends with [`HotkeyEvent::Interrupted`]. Blocks while the old
-    /// source stops (it may wait for its thread).
+    /// is started and, once it listens, takes over in one step; then the old
+    /// one is stopped. A hold of the old key ends with
+    /// [`HotkeyEvent::Interrupted`]. Blocks while the old source stops (it
+    /// may wait for its thread); the new key is already heard meanwhile.
     ///
     /// # Errors
     ///
