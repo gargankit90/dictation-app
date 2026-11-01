@@ -34,10 +34,16 @@ pub enum Event {
     TranscriptReady(String),
     /// The transcriber failed; `reason` is a short, user-safe summary.
     TranscriptionFailed(String),
+    /// The transcript had nothing to paste once cleaned up
+    /// ([`crate::text::clean`] dropped it): back to Idle, no error.
+    TranscriptDropped,
     /// The text was inserted into the focused app.
     InsertDone,
     /// Inserting failed; `reason` is a short, user-safe summary.
     InsertFailed(String),
+    /// Nothing was pasted because a password field has focus (Secure
+    /// Input); the user's clipboard was not touched.
+    SecureInputBlocked,
     /// A required permission is missing: on a hotkey press, so recording
     /// must not start, or revoked while recording, which discards it.
     PermissionMissing(Permission),
@@ -79,8 +85,10 @@ impl fmt::Debug for Event {
             Event::TranscriptionFailed(reason) => {
                 f.debug_tuple("TranscriptionFailed").field(reason).finish()
             }
+            Event::TranscriptDropped => f.write_str("TranscriptDropped"),
             Event::InsertDone => f.write_str("InsertDone"),
             Event::InsertFailed(reason) => f.debug_tuple("InsertFailed").field(reason).finish(),
+            Event::SecureInputBlocked => f.write_str("SecureInputBlocked"),
             Event::PermissionMissing(permission) => f
                 .debug_tuple("PermissionMissing")
                 .field(permission)
@@ -128,6 +136,8 @@ mod tests {
                 Event::TranscriptionFailed("x".into()),
                 "TranscriptionFailed(\"x\")",
             ),
+            (Event::TranscriptDropped, "TranscriptDropped"),
+            (Event::SecureInputBlocked, "SecureInputBlocked"),
             (Event::InsertDone, "InsertDone"),
             (Event::InsertFailed("x".into()), "InsertFailed(\"x\")"),
             (

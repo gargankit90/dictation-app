@@ -114,10 +114,12 @@ fn transition(state: State, event: Event) -> (State, Vec<Command>) {
                 (State::Inserting, vec![Command::Insert(text)])
             }
         }
+        (State::Transcribing, Event::TranscriptDropped) => (State::Idle, Vec::new()),
         (State::Transcribing, Event::TranscriptionFailed(reason)) => {
             fail(DictationError::TranscriptionFailed { reason })
         }
         (State::Inserting, Event::InsertDone) => (State::Idle, Vec::new()),
+        (State::Inserting, Event::SecureInputBlocked) => fail(DictationError::SecureInput),
         (State::Inserting, Event::InsertFailed(reason)) => {
             fail(DictationError::InsertFailed { reason })
         }
@@ -302,6 +304,38 @@ mod tests {
                 Command::StateChanged(Phase::Idle)
             ]
         );
+    }
+
+    // M4.2 criterion 1: Secure Input on means no paste, an error, Idle.
+    #[test]
+    fn secure_input_blocked_shows_the_message_and_returns_to_idle() {
+        let (state, commands) = step(State::Inserting, Event::SecureInputBlocked);
+        assert_eq!(state, State::Idle);
+        assert_eq!(
+            commands,
+            [
+                Command::ShowError(DictationError::SecureInput),
+                Command::StateChanged(Phase::Idle)
+            ]
+        );
+    }
+
+    // A transcript cleaned down to nothing: no error, no paste, Idle.
+    #[test]
+    fn a_dropped_transcript_returns_to_idle_without_an_error() {
+        let (state, commands) = step(State::Transcribing, Event::TranscriptDropped);
+        assert_eq!(state, State::Idle);
+        assert_eq!(commands, [Command::StateChanged(Phase::Idle)]);
+    }
+
+    #[test]
+    fn dropped_and_blocked_events_are_ignored_in_other_states() {
+        for state in [State::Idle, recording_since(0), State::Inserting] {
+            assert_eq!(step(state, Event::TranscriptDropped), (state, Vec::new()));
+        }
+        for state in [State::Idle, recording_since(0), State::Transcribing] {
+            assert_eq!(step(state, Event::SecureInputBlocked), (state, Vec::new()));
+        }
     }
 
     #[test]

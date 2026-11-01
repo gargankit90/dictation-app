@@ -30,6 +30,10 @@ pub enum DictationError {
         /// What went wrong, without the transcript.
         reason: String,
     },
+    /// A password field has focus (macOS Secure Input), so the text was
+    /// not pasted.
+    #[error("A password field is focused; dictation wasn't pasted.")]
+    SecureInput,
     /// The OS has not granted a permission dictation needs.
     #[error("{} permission is missing.", permission_name(*.0))]
     PermissionMissing(Permission),
@@ -61,6 +65,10 @@ mod tests {
                     reason: "no focused app".into(),
                 },
                 "Could not insert the text: no focused app",
+            ),
+            (
+                DictationError::SecureInput,
+                "A password field is focused; dictation wasn't pasted.",
             ),
             (
                 DictationError::PermissionMissing(Permission::Microphone),
