@@ -12,6 +12,12 @@
 //!   (debug mode). Both choose how the pipeline is built, so only the first
 //!   launch's count; a second launch's are logged and ignored.
 //!
+//! - `--debug-set-api-key-stdin` and `--debug-delete-api-key` store (the key
+//!   comes from stdin, never an argument) and remove the Groq API key through
+//!   the same path as the Settings window, then exit without starting the
+//!   app. They run in their own process, never in a running app, so a
+//!   forwarded second launch ignores them.
+//!
 //! - `--mock-text <text>` makes the mock transcriber answer with that text
 //!   instead of its default, so a test can look for it where it is pasted.
 //!   Like the audio flags it shapes the pipeline, so only the first
@@ -27,13 +33,15 @@
 //!
 //! `--transcriber <name>` picks the speech-to-text engine. It's a normal flag
 //! in every build: it only affects the process that starts with it (a
-//! forwarded second launch can't switch the running app's engine), and the
-//! only engine so far, `mock`, needs no network, key or permission.
+//! forwarded second launch can't switch the running app's engine). `settings`
+//! (the default) is the real provider chosen in the settings, with its key
+//! from the keychain; `mock` needs no network, key or permission and is what
+//! the e2e scenarios run with.
 
 use std::path::PathBuf;
 
 use dictation_pipeline::test_hooks::{
-    DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, PRESS_FLAG, RELEASE_FLAG,
+    DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, KeyCommand, PRESS_FLAG, RELEASE_FLAG,
 };
 use dictation_ports::HotkeyEvent;
 
@@ -55,15 +63,17 @@ pub const TRANSCRIBER_FLAG: &str = "--transcriber";
 /// The speech-to-text engine to run.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TranscriberChoice {
-    /// `transcribe::mock::MockTranscriber`: fixed text, no network. The
-    /// default until a real engine lands (M3.2).
+    /// The provider, model and language from the settings and the provider's
+    /// key from the keychain, rebuilt whenever they're saved (M4.4).
     #[default]
+    Settings,
+    /// `transcribe::mock::MockTranscriber`: fixed text, no network.
     Mock,
 }
 
 impl TranscriberChoice {
     /// Every engine, for the "known engines" warning.
-    pub const ALL: [Self; 1] = [Self::Mock];
+    pub const ALL: [Self; 2] = [Self::Settings, Self::Mock];
 
     /// The known engine names, comma-separated.
     #[must_use]
@@ -75,6 +85,7 @@ impl TranscriberChoice {
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
+            "settings" => Some(Self::Settings),
             "mock" => Some(Self::Mock),
             _ => None,
         }
@@ -84,6 +95,7 @@ impl TranscriberChoice {
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
+            Self::Settings => "settings",
             Self::Mock => "mock",
         }
     }
@@ -99,6 +111,9 @@ pub struct LaunchFlags {
     pub audio_file: Option<PathBuf>,
     /// Save every recording as a WAV (debug builds only).
     pub save_audio: bool,
+    /// The API key commands, in order (debug builds only): done instead of
+    /// starting the app.
+    pub key_commands: Vec<KeyCommand>,
     /// The text the mock transcriber answers with (debug builds only); the
     /// last one given wins.
     pub mock_text: Option<String>,
@@ -139,6 +154,9 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
             PRESS_FLAG if test_flags => flags.events.push(HotkeyEvent::Pressed),
             RELEASE_FLAG if test_flags => flags.events.push(HotkeyEvent::Released),
             DEBUG_SAVE_AUDIO_FLAG if test_flags => flags.save_audio = true,
+            key_flag if test_flags && KeyCommand::from_flag(key_flag).is_some() => {
+                flags.key_commands.extend(KeyCommand::from_flag(key_flag));
+            }
             DEBUG_AUDIO_FILE_FLAG if test_flags => match args.next() {
                 Some(path) => flags.audio_file = Some(PathBuf::from(path)),
                 None => flags.ignored.push(arg.clone()),
@@ -263,6 +281,8 @@ mod tests {
             }
         }
         assert_eq!(parse(&argv(&[]), true).transcriber, None);
+        let flags = parse(&argv(&["--transcriber", "settings"]), true);
+        assert_eq!(flags.transcriber, Some(TranscriberChoice::Settings));
     }
 
     #[test]
@@ -286,10 +306,10 @@ mod tests {
     #[test]
     fn engine_names_round_trip() {
         let choice = TranscriberChoice::default();
-        assert_eq!(choice, TranscriberChoice::Mock);
+        assert_eq!(choice, TranscriberChoice::Settings, "the real engine");
         assert_eq!(TranscriberChoice::from_name(choice.name()), Some(choice));
         assert_eq!(TranscriberChoice::from_name("Mock"), None);
-        assert_eq!(TranscriberChoice::known_names(), "mock");
+        assert_eq!(TranscriberChoice::known_names(), "settings, mock");
         for choice in TranscriberChoice::ALL {
             assert_eq!(TranscriberChoice::from_name(choice.name()), Some(choice));
         }
@@ -394,6 +414,45 @@ mod tests {
             flags.ignored,
             ["--mock-text-sequence", "x,y", "--mock-text-sequence=z"]
         );
+    }
+
+    #[test]
+    fn debug_builds_take_the_key_commands_in_order() {
+        let flags = parse(
+            &argv(&[
+                "--debug-delete-api-key",
+                "--debug-set-api-key-stdin",
+                "--press",
+            ]),
+            true,
+        );
+        assert_eq!(flags.key_commands, [KeyCommand::Delete, KeyCommand::Set]);
+        assert_eq!(flags.events, [Pressed]);
+        assert!(flags.ignored.is_empty());
+        assert!(parse(&argv(&["--press"]), true).key_commands.is_empty());
+    }
+
+    #[test]
+    fn release_builds_ignore_the_key_commands() {
+        let flags = parse(
+            &argv(&["--debug-set-api-key-stdin", "--debug-delete-api-key"]),
+            false,
+        );
+        assert!(flags.key_commands.is_empty());
+        assert_eq!(
+            flags.ignored,
+            ["--debug-set-api-key-stdin", "--debug-delete-api-key"]
+        );
+    }
+
+    #[test]
+    fn near_miss_key_flags_are_not_commands() {
+        let flags = parse(
+            &argv(&["--debug-set-api-key", "--debug-delete-api-key=1"]),
+            true,
+        );
+        assert!(flags.key_commands.is_empty());
+        assert_eq!(flags.ignored.len(), 2);
     }
 
     #[test]

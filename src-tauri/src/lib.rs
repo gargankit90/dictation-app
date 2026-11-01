@@ -7,21 +7,27 @@
 //! tray's title and tooltip until the next recording. A second launch
 //! forwards its flags to the running app through the single-instance
 //! plugin and exits. Debug builds act on the test flags (`--press`,
-//! `--release`, `--debug-audio-file`, `--debug-save-audio`, `--mock-text`, `--mock-text-sequence`;
-//! see [`flags`]);
+//! `--release`, `--debug-audio-file`, `--debug-save-audio`, `--mock-text`,
+//! `--mock-text-sequence`, `--debug-set-api-key-stdin`,
+//! `--debug-delete-api-key`; see [`flags`]);
 //! release builds ignore them and have no way to inject key events or
 //! audio.
+//!
+//! M4.4: dictation uses the real provider. The engine is built from the saved
+//! settings and the keychain at startup and rebuilt whenever they're saved
+//! ([`engine`]); `--transcriber mock` keeps the mock.
 //!
 //! M3.4: Settings… shows the `main` window, which holds the settings UI; its
 //! close button hides it instead of destroying it, so the tray can show it
 //! again.
 
 pub mod commands;
+pub mod engine;
 mod flags;
 mod logging;
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context as _;
 use dictation_core::coordinator::Phase;
@@ -40,6 +46,7 @@ use dictation_platform::hotkey::SystemHotkey;
 use dictation_platform::insert::SystemInserter;
 use dictation_platform::permissions::SystemPermissions;
 use dictation_ports::{AudioSource, Permission, PermissionError, PermissionStatus, Permissions};
+use dictation_transcribe::engine::{Engine, Transcribers};
 use dictation_transcribe::mock::MockTranscriber;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -135,6 +142,32 @@ fn shell_hotkey() -> (ShellHotkey, Option<Injector>) {
     }
 }
 
+/// The API key commands (debug builds): stores the Groq API key from stdin
+/// and/or removes it, saying so on stderr. `None` when `argv` has none, so the
+/// app starts normally; otherwise the exit code. The key is never logged or
+/// printed.
+fn run_key_commands(argv: &[String], mut stdin: impl std::io::Read) -> Option<i32> {
+    let launch = flags::parse(argv, flags::TEST_FLAGS);
+    if launch.key_commands.is_empty() {
+        return None;
+    }
+    // No settings are read or written; only the keychain is used.
+    let config = dictation_pipeline::config::Config::new(
+        std::env::temp_dir(),
+        dictation_platform::secrets::KeychainSecretStore::new(),
+    );
+    for command in launch.key_commands {
+        match dictation_pipeline::test_hooks::run_key_command(command, &config, &mut stdin) {
+            Ok(message) => eprintln!("{message}"),
+            Err(error) => {
+                eprintln!("{error}");
+                return Some(1);
+            }
+        }
+    }
+    Some(0)
+}
+
 /// Builds and runs the Tauri application.
 ///
 /// # Panics
@@ -142,6 +175,10 @@ fn shell_hotkey() -> (ShellHotkey, Option<Injector>) {
 /// Panics if Tauri fails to start, which leaves the app with nothing to show.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let argv: Vec<String> = std::env::args().collect();
+    if let Some(code) = run_key_commands(&argv, std::io::stdin()) {
+        std::process::exit(code);
+    }
     let (hotkey, injector) = shell_hotkey();
     let forward = injector.clone();
 
@@ -207,17 +244,43 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
 
     let argv: Vec<String> = std::env::args().collect();
     let launch = flags::parse(&argv, flags::TEST_FLAGS);
-    // Only one engine so far; an enum that delegates comes with the second.
-    let flags::TranscriberChoice::Mock = launch.transcriber.unwrap_or_default();
-    let mut transcriber = launch
+    // Settings and API keys for the commands (M3.3), used by the settings UI
+    // (M3.4) and, since M4.4, to build the engine.
+    let config_dir = app.path().app_config_dir().context("no config directory")?;
+    let config = Arc::new(dictation_pipeline::config::Config::new(
+        &config_dir,
+        dictation_platform::secrets::KeychainSecretStore::new(),
+    ));
+    tracing::info!(path = %config.path().display(), "settings file");
+
+    let choice = launch.transcriber.unwrap_or_default();
+    // `--mock-text` and `--mock-text-sequence` shape the mock engine only.
+    let mut mock = launch
         .mock_text
         .clone()
         .map_or_else(MockTranscriber::default, MockTranscriber::new);
     if let Some(texts) = &launch.mock_text_sequence {
-        transcriber = transcriber.with_texts(texts);
+        mock = mock.with_texts(texts);
     }
+    let (transcribers, live) = match choice {
+        flags::TranscriberChoice::Mock => (
+            Transcribers::new(Engine::Mock(mock)),
+            engine::LiveEngine::fixed(),
+        ),
+        flags::TranscriberChoice::Settings => {
+            // Startup never touches the keychain, which can block on a
+            // locked keychain or an access prompt. The key is read on a
+            // thread of its own once the app is up (below).
+            let transcribers = Transcribers::new(engine::starting());
+            (
+                transcribers.clone(),
+                engine::LiveEngine::follow(transcribers),
+            )
+        }
+    };
     tracing::info!(
-        transcriber = flags::TranscriberChoice::Mock.name(),
+        transcriber = choice.name(),
+        engine = transcribers.name(),
         "engine"
     );
 
@@ -230,7 +293,7 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
     let ports = Ports {
         hotkey,
         audio,
-        transcriber,
+        transcriber: transcribers,
         inserter: SystemInserter::new(),
         permissions,
         clock: SystemClock::new(),
@@ -240,15 +303,11 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
         tauri::async_runtime::block_on(async { Pipeline::spawn(ports, Config::default()) })
             .context("could not start the pipeline")?;
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
-
-    // Settings and API keys for the commands (M3.3), used by the settings UI (M3.4).
-    let config_dir = app.path().app_config_dir().context("no config directory")?;
-    let config = dictation_pipeline::config::Config::new(
-        &config_dir,
-        dictation_platform::secrets::KeychainSecretStore::new(),
-    );
-    tracing::info!(path = %config.path().display(), "settings file");
-    app.manage(commands::AppConfig(std::sync::Arc::new(config)));
+    app.manage(commands::AppConfig(Arc::clone(&config)));
+    app.manage(live.clone());
+    if let Err(error) = live.rebuild_in_background(config) {
+        tracing::error!(%error, "could not start reading the API key");
+    }
     tauri::async_runtime::spawn(show_ui_events(app.handle().clone(), ui_events));
     tracing::info!(hotkey = %HotkeySpec::default(), "ready");
 
@@ -272,6 +331,12 @@ fn handle_flags(injector: Option<&Injector>, flags: flags::LaunchFlags, from: &s
             default = flags::TranscriberChoice::default().name(),
             from,
             "unknown --transcriber engine; using the default"
+        );
+    }
+    if !flags.key_commands.is_empty() {
+        tracing::warn!(
+            from,
+            "the API key commands only run as a process of their own; ignored"
         );
     }
     for flag in &flags.ignored {

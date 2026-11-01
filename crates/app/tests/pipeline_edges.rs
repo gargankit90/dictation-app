@@ -307,7 +307,7 @@ async fn a_transcriber_error_then_a_successful_dictation() {
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
             UiEvent::Error(DictationError::TranscriptionFailed {
-                reason: "network error: connection reset".into()
+                reason: TranscribeError::Network("connection reset".into()).user_message()
             }),
             UiEvent::StateChanged(Idle),
         ]

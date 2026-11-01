@@ -664,7 +664,7 @@ where
         match result {
             JobResult::Transcribed(job, result) if job == self.job => Some(match result {
                 Ok(transcript) => cleaned_event(&transcript),
-                Err(error) => Event::TranscriptionFailed(error.to_string()),
+                Err(error) => Event::TranscriptionFailed(error.user_message()),
             }),
             // Nothing to paste, and no error to show: straight back to Idle.
             JobResult::NotTranscribed(job) if job == self.job => Some(Event::TranscriptDropped),
