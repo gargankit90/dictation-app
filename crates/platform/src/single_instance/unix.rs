@@ -225,7 +225,9 @@ pub(super) fn forward(config: &Config, frame: &[u8]) -> Result<(), Forward> {
     stream
         .set_write_timeout(Some(config.io_timeout))
         .and_then(|()| stream.set_read_timeout(Some(config.io_timeout)))
-        .map_err(Forward::Fail)?;
+        // macOS fails these with EINVAL once the instance has closed the
+        // connection unread (it was busy), so they're worth a retry too.
+        .map_err(Forward::Retry)?;
     // A write error means the instance closed the connection unread.
     stream.write_all(frame).map_err(Forward::Retry)?;
     let mut reply = [0];
@@ -362,7 +364,9 @@ mod tests {
 
     #[test]
     fn a_silent_peer_does_not_hold_up_a_launch() {
-        let config = temp_config();
+        let mut config = temp_config();
+        // Long enough that waiting out the silent peer would be obvious.
+        config.io_timeout = Duration::from_secs(10);
         let (_instance, rx) = primary(&config);
         // Connected, never writes, never closes.
         let _silent = UnixStream::connect(config.socket_path()).unwrap();
@@ -371,7 +375,7 @@ mod tests {
             acquire(&config, &message("--release")).unwrap(),
             Launch::Forwarded
         ));
-        assert!(started.elapsed() < Duration::from_millis(250));
+        assert!(started.elapsed() < Duration::from_secs(1));
         assert_eq!(rx.try_recv().unwrap(), message("--release"));
     }
 
@@ -388,8 +392,9 @@ mod tests {
             acquire(&config, &message("late")).unwrap(),
             Launch::Forwarded
         ));
-        // The readers time out after io_timeout (300 ms); then a slot frees.
-        assert!(started.elapsed() < config.io_timeout * 3);
+        // The readers time out after io_timeout (300 ms); then a slot frees
+        // and the launch's retry gets in, well before forward_timeout (3 s).
+        assert!(started.elapsed() < Duration::from_secs(2));
         assert_eq!(rx.try_recv().unwrap(), message("late"));
         drop(silent);
     }
