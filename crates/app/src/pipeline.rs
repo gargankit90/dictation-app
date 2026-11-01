@@ -207,6 +207,9 @@ struct Keys {
 /// A finished background job, tagged with the job it belongs to.
 enum JobResult {
     Transcribed(u64, Result<Transcript, TranscribeError>),
+    /// The audio was empty, too short or silent, so nothing was sent to the
+    /// transcriber (#69, #72).
+    NotTranscribed(u64),
     /// The recording the transcription was waiting for failed.
     AudioFailed(u64, AudioError),
     Inserted(u64, Result<(), InsertError>),
@@ -663,6 +666,8 @@ where
                 Ok(transcript) => cleaned_event(&transcript),
                 Err(error) => Event::TranscriptionFailed(error.to_string()),
             }),
+            // Nothing to paste, and no error to show: straight back to Idle.
+            JobResult::NotTranscribed(job) if job == self.job => Some(Event::TranscriptDropped),
             JobResult::Inserted(job, result) if job == self.job => Some(match result {
                 Ok(()) => Event::InsertDone,
                 Err(InsertError::SecureInput) => Event::SecureInputBlocked,
@@ -677,6 +682,7 @@ where
                 Event::TranscriptionFailed(format!("the microphone failed ({error})")),
             ),
             JobResult::Transcribed(job, _)
+            | JobResult::NotTranscribed(job)
             | JobResult::Inserted(job, _)
             | JobResult::AudioFailed(job, _) => {
                 tracing::debug!(job, current = self.job, "dropping a stale result");
@@ -774,8 +780,7 @@ where
                 }
             };
             // Nothing worth sending: no request, no invented words (#69, #72).
-            // The empty transcript takes the coordinator's EmptyTranscript
-            // path back to Idle.
+            // The coordinator takes TranscriptDropped (no error) back to Idle.
             let verdict = audio_math::assess(
                 &audio.samples,
                 audio.sample_rate,
@@ -783,7 +788,7 @@ where
             );
             if verdict != Verdict::Transcribe {
                 tracing::info!(job, ?verdict, duration = ?audio.duration(), "not transcribing");
-                return JobResult::Transcribed(job, Ok(String::new()));
+                return JobResult::NotTranscribed(job);
             }
             tracing::debug!(job, duration = ?audio.duration(), "transcribing");
             JobResult::Transcribed(job, transcriber.transcribe_detailed(&audio).await)

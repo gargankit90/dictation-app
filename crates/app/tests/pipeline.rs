@@ -408,8 +408,8 @@ async fn a_tap_is_discarded_without_transcribing() {
 }
 
 /// Dictates `samples` (16 kHz) and expects the pipeline to skip the
-/// transcriber: no request, no paste, the "no speech" message, back to Idle
-/// (issues #69 and #72).
+/// transcriber: no request, no paste, no error, straight back to Idle
+/// (issues #69 and #72; M4.2's `TranscriptDropped`).
 async fn assert_not_transcribed(samples: &[i16]) {
     let wav = TempWav::new(samples);
     let mut harness = Harness::with(Setup {
@@ -422,7 +422,6 @@ async fn assert_not_transcribed(samples: &[i16]) {
         [
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
-            UiEvent::Error(DictationError::EmptyTranscript),
             UiEvent::StateChanged(Idle),
         ]
     );
