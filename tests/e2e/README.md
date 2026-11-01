@@ -1,10 +1,11 @@
 # End-to-end tests
 
-The built app, run inside the Lume VM `dictation-vm` and driven from the host
-over ssh. These aren't part of CI (CI has no VM). Run them locally:
+The built app, run inside a Lume VM and driven from the host over ssh. These
+aren't part of CI (CI has no VM). Run them locally:
 
 ```sh
 tests/e2e/run.sh                                   # build, reset the VM, run all scenarios
+E2E_VM=dictation-vm-2 tests/e2e/run.sh             # the same, in the second VM
 tests/e2e/run.sh e2e_startup                       # one scenario
 tests/e2e/run.sh --no-build --no-reset e2e_press_release   # reuse the build and the running VM
 ```
@@ -22,14 +23,60 @@ app's own log copied back from the VM (`<scenario>.app.log`) and a screenshot
 of the VM's desktop at the end (`<scenario>.png`, taken through the
 `cua-driver` daemon in the VM).
 
+## Two VMs
+
+Apple allows two macOS VMs at once, so there are two test VMs, both clones of
+the golden image `dictation-vm-golden`:
+
+| VM               | Used by    | Selected with                 |
+| ---------------- | ---------- | ----------------------------- |
+| `dictation-vm`   | Developers | the default                   |
+| `dictation-vm-2` | Testers    | `E2E_VM=dictation-vm-2`       |
+
+**Developers use `dictation-vm`, Testers use `dictation-vm-2`.** That way a
+Developer's run and a Tester's run (and the `cua-vm` MCP server, which also
+points at `dictation-vm`) don't reset each other's VM.
+
+- `E2E_VM` is `dictation-vm` (default) or `dictation-vm-2`. Any other name,
+  the golden image and its backups included, is refused before `lume` is
+  called. Everything that names the VM follows it: the `lume` calls, the ssh
+  `HostKeyAlias`, the IP lookup and the output directory
+  (`tests/e2e/out/<timestamp>-<vm>/`). The first run on `dictation-vm-2` copies
+  `dictation-vm`'s `known_hosts` entries to the alias `dictation-vm-2` (clones
+  keep the golden image's host key).
+- **Memory and CPUs:** after cloning, a reset runs `lume set <vm> --memory 6GB
+  --cpu 4` before starting the VM. Override with `E2E_VM_MEMORY` (default
+  `6GB`) and `E2E_VM_CPU` (default `4`). `lume set` runs only on the fresh
+  clone, never on the golden image. 6 GB each leaves the Mac room for two VMs
+  and a build.
+- **A lock per VM:** a run takes `~/.cache/dictation-e2e/<vm>.lock` (a
+  directory holding the run's `pid` and `since`) after the build and holds it
+  until the run ends, however it ends (normal end, `die`, Ctrl-C, kill, closed
+  terminal). A second run on the same VM stops at once with `VM busy: <vm> is
+  in use by a run (pid N since T)`; start it on the other VM or wait. A lock
+  whose pid is gone (the run was killed with `kill -9`) is stale and the next
+  run takes it over. A short `golden-clone.lock` makes two runs clone the
+  golden image one after the other (the second waits, up to 10 minutes, or
+  `E2E_CLONE_LOCK_WAIT` seconds).
+- **At most two running VMs:** a reset refuses to start when two other macOS
+  VMs are running already (`lume ls`; the golden image counts if it is
+  running).
+- The lock is per VM, not per checkout: two worktrees pointing at the same VM
+  also exclude each other. Two parallel runs from one checkout share the
+  `target/` build, so give the second `--no-build`.
+- `tests/e2e/test-vm-lock.sh` (part of the gate, no VM needed) checks all of
+  this with a stubbed `lume`.
+
 ## What a run does
 
 1. **Build:** `npm run tauri build -- --debug --bundles app`. The bundle is
    signed with the `dictation-app Dev` certificate (`scripts/make-dev-cert.sh`,
    once per Mac).
-2. **Reset the VM** (skipped with `--no-reset`):
+2. **Reset the VM** (skipped with `--no-reset`; the VM is `dictation-vm`, or
+   the one `E2E_VM` names): the VM lock is taken first, then
    `lume stop dictation-vm`, `lume delete dictation-vm --force`,
-   `lume clone dictation-vm-golden dictation-vm` and
+   `lume clone dictation-vm-golden dictation-vm`,
+   `lume set dictation-vm --memory 6GB --cpu 4` and
    `lume run dictation-vm --no-display --detach`. The run then waits for an
    IP (`lume get dictation-vm -f json`, `.ipAddress`) and for ssh to answer.
    The golden image is only cloned; change it by hand (see "The golden image"
@@ -147,9 +194,10 @@ for `osascript` to control TextEdit (M4.3).
   `known_hosts` needs the `dictation-vm` host-key alias, since every clone
   gets a new DHCP address but keeps the host key.
 - VMs `dictation-vm-golden` (clean, with the `lume` user logged in to the
-  GUI) and, after the first reset, `dictation-vm`.
-- Only one run at a time: a reset deletes `dictation-vm`, so check that no
-  other agent is using the VM (cua-vm MCP, a Tester run) first.
+  GUI) and, after the first reset, `dictation-vm` and `dictation-vm-2`.
+- One run per VM at a time (the lock above). A reset deletes the VM, so check
+  that no other agent is using it without a run (the `cua-vm` MCP server on
+  `dictation-vm`, a hand-started session) first.
 
 ## macOS notes (Gatekeeper, TCC)
 
