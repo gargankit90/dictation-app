@@ -8,4 +8,6 @@ extend-exclude = [
     "src-tauri/gen/",
     # Vendored upstream code, kept as published.
     "third_party/",
+    # Licence texts from the crates and packages we ship, as published.
+    "THIRD-PARTY-LICENSES.txt",
 ]

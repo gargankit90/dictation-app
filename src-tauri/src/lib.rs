@@ -42,6 +42,7 @@ pub mod engine;
 mod flags;
 mod logging;
 mod overlay;
+mod updater;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -52,7 +53,7 @@ use dictation_pipeline::debug_audio::SavingAudio;
 #[cfg(not(debug_assertions))]
 use dictation_pipeline::hotkey::PermissionTolerantHotkey;
 use dictation_pipeline::hotkey_setting::{self, ConfigurableHotkey, HotkeyControl};
-use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
+use dictation_pipeline::pipeline::{Config, CursorReader, Pipeline, Ports, UiEvent};
 use dictation_pipeline::stand_ins::{GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
 #[cfg(debug_assertions)]
@@ -60,6 +61,7 @@ use dictation_pipeline::test_hooks::SyntheticHotkey;
 use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::audio::{FileAudioSource, SystemMicrophone};
 use dictation_platform::clock::SystemClock;
+use dictation_platform::cursor::SystemTextBeforeCursor;
 use dictation_platform::hotkey::SystemHotkey;
 use dictation_platform::insert::SystemInserter;
 use dictation_platform::launch::SystemLaunchAtLogin;
@@ -242,9 +244,13 @@ pub fn run() {
         )),
     };
 
+    // The updater and the native dialogs (M5.4), then no Dock icon and no
+    // focus stolen at launch (#59, T2): `menu_bar::builder` doesn't activate
+    // the app while another one is active.
+    let builder =
+        dictation_platform::menu_bar::builder(updater::plugins(tauri::Builder::default()));
     #[allow(clippy::expect_used)] // No UI exists yet to report a startup failure to.
-    // A launch doesn't take focus from the user's app (T2).
-    let app = dictation_platform::overlay::launch_without_focus(tauri::Builder::default())
+    let mut app = builder
         // The overlay's non-activating panel (M5.1).
         .plugin(dictation_platform::overlay::plugin())
         .invoke_handler(commands::builder().invoke_handler())
@@ -264,6 +270,9 @@ pub fn run() {
         })
         .build(context)
         .expect("error while building the Tauri application");
+    // A menu-bar app from the first moment: no Dock icon, not even briefly
+    // (#59). Must come before `run`; see `menu_bar`.
+    dictation_platform::menu_bar::app(&mut app);
 
     app.run(|app, event| {
         if let RunEvent::ExitRequested {
@@ -295,12 +304,6 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     tracing::info!(version = env!("CARGO_PKG_VERSION"), log_dir = %log_dir.display(), "starting");
     app.manage(LogDir(log_dir));
 
-    // A menu-bar app: no Dock icon. LSUIElement (src-tauri/Info.plist) alone
-    // isn't enough, since Tauri applies its own Regular policy at launch.
-    // The one cfg(target_os) outside `platform`: the Tauri API exists only
-    // on macOS and must be called on the App, before the event loop runs.
-    #[cfg(target_os = "macos")]
-    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     build_tray(app).context("could not create the tray icon")?;
 
     let argv: Vec<String> = std::env::args().collect();
@@ -362,10 +365,14 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         permissions,
         clock: SystemClock::new(),
     };
+    // The character before the cursor gives the smart leading space (#93);
+    // it is read for one dictation at a time and never logged.
+    let cursor = CursorReader::new(SystemTextBeforeCursor::new());
     // Pipeline::spawn needs to run inside the tokio runtime Tauri owns.
-    let (pipeline, ui_events) =
-        tauri::async_runtime::block_on(async { Pipeline::spawn(ports, Config::default()) })
-            .context("could not start the pipeline")?;
+    let (pipeline, ui_events) = tauri::async_runtime::block_on(async {
+        Pipeline::spawn_with_cursor(ports, cursor, Config::default())
+    })
+    .context("could not start the pipeline")?;
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
     app.manage(commands::AppConfig(Arc::clone(&config)));
     app.manage(commands::LoginItem(Arc::new(SystemLaunchAtLogin::new())));
@@ -475,8 +482,15 @@ fn handle_flags(
 fn build_tray(app: &App) -> tauri::Result<()> {
     let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, None::<&str>)?;
     let reveal = MenuItem::with_id(app, REVEAL_LOG_ID, "Reveal log", true, None::<&str>)?;
+    let updates = MenuItem::with_id(
+        app,
+        updater::CHECK_ID,
+        updater::CHECK_LABEL,
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit dictation-app", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&settings, &reveal, &quit])?;
+    let menu = Menu::with_items(app, &[&settings, &updates, &reveal, &quit])?;
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip(TOOLTIP)
         .menu(&menu)
@@ -488,6 +502,8 @@ fn build_tray(app: &App) -> tauri::Result<()> {
                 show_settings(app);
             } else if event.id() == REVEAL_LOG_ID {
                 reveal_log(app);
+            } else if event.id() == updater::CHECK_ID {
+                updater::check_from_tray(app);
             }
         });
     if let Some(icon) = app.default_window_icon() {

@@ -46,6 +46,10 @@ no_tauri_in_pipeline() {
   ! grep -q '^tauri' <<<"$tree"
 }
 step no_tauri_in_pipeline
+# The third-party licence notice that ships in the app is current, and the
+# check itself fails when it should (#24).
+step scripts/test-check-licences.sh
+step scripts/check-licences.sh
 
 # Rust tests and coverage. nextest fails a run that finds no tests, so a
 # filter or `#[cfg]` that hides them all can't pass quietly.

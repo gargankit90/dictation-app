@@ -23,9 +23,13 @@ dictation-pipeline.workspace = true
 dictation-platform.workspace = true
 dictation-ports.workspace = true
 dictation-transcribe.workspace = true
+reqwest.workspace = true
 tauri = { workspace = true, features = ["tray-icon"] }
+tauri-plugin-dialog.workspace = true
+tauri-plugin-updater.workspace = true
 tauri-specta.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 specta.workspace = true
 specta-typescript.workspace = true
 tokio = { workspace = true, features = ["rt"] }
@@ -35,7 +39,6 @@ tracing-subscriber.workspace = true
 [dev-dependencies]
 # The mock runtime, for the ACL invocation tests (M5.1 B1).
 tauri = { workspace = true, features = ["test"] }
-serde_json.workspace = true
 tauri-utils.workspace = true
 dictation-platform = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["rt", "macros", "time"] }

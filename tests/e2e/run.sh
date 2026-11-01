@@ -30,6 +30,8 @@ ALL_SCENARIOS=(
   e2e_settings_save_reopen
   e2e_error_bad_key e2e_real_groq
   e2e_overlay_focus
+  e2e_smart_space e2e_layout_paste e2e_image_clipboard_restore
+  e2e_dmg_install
   e2e_launch_at_login
 )
 # Scenarios that need something the VM may lack (a microphone, a Groq key):

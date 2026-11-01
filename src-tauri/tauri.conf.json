@@ -38,6 +38,18 @@
       "minimumSystemVersion": "13.0",
       "signingIdentity": "dictation-app Dev",
       "entitlements": "./Entitlements.plist"
+    },
+    "resources": {
+      "../THIRD-PARTY-LICENSES.txt": "THIRD-PARTY-LICENSES.txt"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/gargankit90/dictation-app/releases/latest/download/latest.json"
+      ],
+      "pubkey": "",
+      "requireSignedVersion": true
     }
   }
 }
