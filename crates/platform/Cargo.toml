@@ -19,9 +19,13 @@ dictation-core.workspace = true
 dictation-ports.workspace = true
 # FileAudioSource, the `--debug-audio-file` test hook, reads WAVs.
 hound.workspace = true
+# The overlay window (M5.1) is a Tauri window; only `overlay` uses it.
+tauri.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Turns the overlay window into a non-activating panel (M5.1).
+tauri-nspanel.workspace = true
 keyring = { workspace = true, features = ["apple-native"] }
 handy-keys.workspace = true
 handy-recorder.workspace = true
