@@ -151,7 +151,9 @@ real_key_hold() {
   if [ "${E2E_INJECT_FAILURE:-}" = mid_hold ]; then
     cmd="$cmd; echo 'injected failure while the key is down' >&2; exit 1"
   fi
-  cmd="$cmd; sleep $1; osascript -l JavaScript $script up; down=0"
+  # `wait`, not a plain sleep: the shell runs a trap only after the command
+  # in front of it ends, but a signal ends `wait` at once.
+  cmd="$cmd; sleep $1 & wait \$!; osascript -l JavaScript $script up; down=0"
   vm_terminal "$cmd"
 }
 
