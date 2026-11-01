@@ -304,6 +304,15 @@ mod tests {
     }
 
     #[test]
+    fn the_directory_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let config = temp_config();
+        let (_instance, _rx) = primary(&config);
+        let mode = std::fs::metadata(&config.dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[test]
     fn a_stale_socket_is_replaced() {
         let config = temp_config();
         std::fs::create_dir_all(&config.dir).unwrap();

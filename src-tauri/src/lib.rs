@@ -5,8 +5,9 @@
 //! paste. M2.2: it records from the real microphone, and
 //! a dictation error (such as a missing microphone permission) shows as the
 //! tray's title and tooltip until the next recording. A second launch
-//! forwards its flags to the running app through the single-instance
-//! plugin and exits. Debug builds act on the test flags (`--press`,
+//! forwards its flags to the running app and exits (M1.7:
+//! `dictation_platform::single_instance`, which replaced the
+//! single-instance plugin). Debug builds act on the test flags (`--press`,
 //! `--release`, `--debug-audio-file`, `--debug-save-audio`; see [`flags`]);
 //! release builds ignore them and have no way to inject key events or
 //! audio.
@@ -37,6 +38,7 @@ use dictation_platform::audio::{FileAudioSource, SystemMicrophone};
 use dictation_platform::clock::SystemClock;
 use dictation_platform::hotkey::SystemHotkey;
 use dictation_platform::permissions::SystemPermissions;
+use dictation_platform::single_instance::{self, Instance, Launch, Message};
 use dictation_ports::{AudioSource, Permission, PermissionError, PermissionStatus, Permissions};
 use dictation_transcribe::mock::MockTranscriber;
 use tauri::menu::{Menu, MenuItem};
@@ -56,6 +58,11 @@ const SECOND_LAUNCH: &str = "a second launch";
 
 /// The running pipeline, taken out on Quit to shut it down.
 struct RunningPipeline(Mutex<Option<Pipeline>>);
+
+/// This process's hold on being the one running instance, released on
+/// Quit once the pipeline has stopped, so a new launch can't start a second
+/// pipeline while this one shuts down.
+struct SingleInstance(Mutex<Option<Instance>>);
 
 /// Debug builds: the real hotkey plus injected test flags; a missing
 /// Accessibility grant (or no adapter) leaves only the test flags.
@@ -139,24 +146,35 @@ fn shell_hotkey() -> (ShellHotkey, Option<Injector>) {
 /// Panics if Tauri fails to start, which leaves the app with nothing to show.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    // First, so a second launch exits before setting anything else up.
+    let config = single_instance::Config::new(&context.config().identifier);
+    let mut instance = match single_instance::acquire(&config, &Message::current()) {
+        Ok(Launch::Primary(instance)) => instance,
+        Ok(Launch::Forwarded) => return,
+        Err(error) => exit_early(&format!(
+            "could not hand this launch to the running app: {error}"
+        )),
+    };
+
     let (hotkey, injector) = shell_hotkey();
     let forward = injector.clone();
+    let listening = instance.listen(move |message| {
+        let launch = flags::parse(&message.args, flags::TEST_FLAGS);
+        if launch.configure_audio() {
+            tracing::warn!(
+                from = SECOND_LAUNCH,
+                "ignoring the debug audio flags; they only work on the first launch"
+            );
+        }
+        handle_flags(forward.as_ref(), launch, SECOND_LAUNCH);
+    });
+    if let Err(error) = listening {
+        exit_early(&format!("could not listen for later launches: {error}"));
+    }
 
     #[allow(clippy::expect_used)] // No UI exists yet to report a startup failure to.
     let app = tauri::Builder::default()
-        // First, so a second launch exits before setting anything else up.
-        .plugin(tauri_plugin_single_instance::init(
-            move |_app, argv, _cwd| {
-                let launch = flags::parse(&argv, flags::TEST_FLAGS);
-                if launch.configure_audio() {
-                    tracing::warn!(
-                        from = SECOND_LAUNCH,
-                        "ignoring the debug audio flags; they only work on the first launch"
-                    );
-                }
-                handle_flags(forward.as_ref(), launch, SECOND_LAUNCH);
-            },
-        ))
         .invoke_handler(commands::builder().invoke_handler())
         .on_window_event(|window, event| {
             // Closing the settings window hides it, so the tray can show it
@@ -169,10 +187,11 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            app.manage(SingleInstance(Mutex::new(Some(instance))));
             setup(app, hotkey, injector.as_ref())?;
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building the Tauri application");
 
     app.run(|app, event| {
@@ -187,6 +206,16 @@ pub fn run() {
             shut_down(app);
         }
     });
+}
+
+/// Ends a launch that failed before logging started: stderr is all there
+/// is.
+fn exit_early(reason: &str) -> ! {
+    #[allow(clippy::print_stderr)] // Logging isn't set up yet.
+    {
+        eprintln!("dictation-app: {reason}");
+    }
+    std::process::exit(1);
 }
 
 fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> anyhow::Result<()> {
@@ -347,16 +376,27 @@ fn show_in_tray(app: &AppHandle, error: Option<&str>) {
 }
 
 fn shut_down(app: &AppHandle) {
-    let Some(state) = app.try_state::<RunningPipeline>() else {
-        return;
-    };
-    let pipeline = state
-        .0
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .take();
-    if let Some(pipeline) = pipeline {
-        tauri::async_runtime::block_on(pipeline.shutdown());
-        tracing::info!("stopped");
+    if let Some(state) = app.try_state::<RunningPipeline>() {
+        let pipeline = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(pipeline) = pipeline {
+            tauri::async_runtime::block_on(pipeline.shutdown());
+            tracing::info!("stopped");
+        }
+    }
+    // Last, and explicitly: Tauri exits the process without running
+    // destructors, which would leave the socket behind (harmless, but the
+    // next launch would have to clean it up).
+    if let Some(state) = app.try_state::<SingleInstance>() {
+        drop(
+            state
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take(),
+        );
     }
 }

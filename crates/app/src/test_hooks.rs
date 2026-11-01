@@ -5,7 +5,7 @@
 //!
 //! [`SyntheticHotkey`] wraps the real [`HotkeySource`] and adds an
 //! [`Injector`]; the shell parses each launch's flags with [`hook_events`]
-//! (a second launch's arrive through the single-instance plugin) and injects
+//! (a second launch's arrive through the single-instance socket) and injects
 //! them. These are test hooks, not a feature: nothing else sends synthetic
 //! keys.
 

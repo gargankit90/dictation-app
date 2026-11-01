@@ -172,7 +172,7 @@ pub enum Launch {
 /// - Another instance runs and this OS can't forward to it
 ///   ([`io::ErrorKind::Unsupported`]).
 pub fn acquire(config: &Config, message: &Message) -> io::Result<Launch> {
-    std::fs::create_dir_all(&config.dir)?;
+    create_private_dir(&config.dir)?;
     let frame = frame::encode(message)?;
     let lock = OpenOptions::new()
         .create(true)
@@ -199,6 +199,16 @@ pub fn acquire(config: &Config, message: &Message) -> io::Result<Launch> {
         }
         std::thread::sleep(RETRY_INTERVAL);
     }
+}
+
+/// Creates `dir` (and its parents) if missing; on Unix, one only this user
+/// can enter, so other users can't reach the socket.
+fn create_private_dir(dir: &Path) -> io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
 }
 
 /// How often a second launch retries while the running instance starts up.
