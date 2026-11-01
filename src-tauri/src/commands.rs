@@ -893,6 +893,9 @@ mod capability_tests {
                 dictation_platform::secrets::KeychainSecretStore::new(),
             ),
         )));
+        app.manage(crate::commands::LoginItem(std::sync::Arc::new(
+            dictation_platform::fakes::FakeLaunchAtLogin::new(),
+        )));
         app.manage(LiveEngine::fixed());
         let windows = labels
             .iter()
