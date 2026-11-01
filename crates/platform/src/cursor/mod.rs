@@ -1,0 +1,57 @@
+//! The character before the cursor in the focused app (the
+//! [`TextBeforeCursor`] port), for the smart leading space (#93).
+//!
+//! On macOS, [`SystemTextBeforeCursor`] asks the focused element over the
+//! Accessibility API (see the `macos` module for exactly what it reads).
+//! Elsewhere (until the Windows milestone) it always answers
+//! [`CursorReadError::Unavailable`], so no space is added.
+//!
+//! Privacy (see the port's docs): at most two UTF-16 units before the cursor
+//! are copied out, nothing is kept or logged, and a password field is never
+//! read.
+
+#[cfg(target_os = "macos")]
+mod macos;
+
+use dictation_ports::{BeforeCursor, CursorReadError, TextBeforeCursor};
+
+/// This OS's reader of the text before the cursor.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemTextBeforeCursor;
+
+impl SystemTextBeforeCursor {
+    /// The reader.
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl TextBeforeCursor for SystemTextBeforeCursor {
+    fn char_before_cursor(&self) -> Result<BeforeCursor, CursorReadError> {
+        #[cfg(target_os = "macos")]
+        {
+            macos::char_before_cursor()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Err(CursorReadError::Unavailable)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    /// The real reader answers (whatever this machine's focus and
+    /// permissions are) within its own timeout and never panics.
+    #[test]
+    fn the_system_reader_answers_promptly() {
+        let started = Instant::now();
+        let _ = SystemTextBeforeCursor::new().char_before_cursor();
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+}

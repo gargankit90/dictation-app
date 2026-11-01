@@ -16,6 +16,7 @@ pub mod fakes;
 
 pub mod audio;
 pub mod clock;
+pub mod cursor;
 pub mod hotkey;
 pub mod insert;
 pub mod launch;
