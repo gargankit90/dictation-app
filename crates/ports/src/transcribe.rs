@@ -73,7 +73,7 @@ impl TranscribeError {
                 "Couldn't reach the provider. Check your internet connection.".to_owned()
             }
             Self::Redirected(_) => "The provider answered with a redirect, which the app \
-                 doesn't follow. Check the provider's address."
+                 doesn't follow. Check the provider selected in Settings."
                 .to_owned(),
             Self::Engine(detail) => format!("Something went wrong: {detail}."),
         }
@@ -156,6 +156,10 @@ mod tests {
             (
                 TranscribeError::KeychainUnavailable("keychain error: locked".into()),
                 "Couldn't read your API key from the Keychain. Unlock the Keychain or allow access, then try again, or enter the key again in Settings.",
+            ),
+            (
+                TranscribeError::Redirected(302),
+                "The provider answered with a redirect, which the app doesn't follow. Check the provider selected in Settings.",
             ),
             (
                 TranscribeError::Engine("the provider failed (HTTP 503)".into()),

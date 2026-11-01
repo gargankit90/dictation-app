@@ -204,7 +204,7 @@ fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
         TranscribeError::Redirected(status) => KeyTestError::new(
             KeyTestKind::Server,
             format!(
-                "{name} answered with a redirect (HTTP {status}), which isn't followed, so the key couldn't be checked. Check the provider's address."
+                "{name} answered with a redirect (HTTP {status}), which isn't followed, so the key couldn't be checked. Check the provider selected in Settings, then test the key again."
             ),
         ),
         TranscribeError::Engine(detail) => KeyTestError::new(
@@ -548,12 +548,14 @@ mod tests {
                 let error = result.unwrap_err();
                 assert_eq!(error.kind, KeyTestKind::Server, "HTTP {status}");
                 assert!(
-                    error.message.starts_with("Groq answered with a redirect")
-                        && error.message.contains(&format!("HTTP {status}"))
-                        && error.message.contains("isn't followed"),
+                    error.message
+                        == format!(
+                            "Groq answered with a redirect (HTTP {status}), which isn't followed, so the key couldn't be checked. Check the provider selected in Settings, then test the key again."
+                        ),
                     "{}",
                     error.message
                 );
+                assert!(!error.message.contains("address"), "{}", error.message);
                 assert!(!error.message.contains("later"), "{}", error.message);
                 assert!(!error.message.contains(TYPED), "{}", error.message);
             }

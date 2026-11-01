@@ -50,6 +50,8 @@ impl Transcriber for Counting {
 struct Mic {
     gate: Arc<Mutex<Option<std_mpsc::Receiver<()>>>>,
     entered: Arc<Notify>,
+    /// Signalled when `discard` has run: the fence for the audio worker.
+    discarded: Arc<Notify>,
     recording: Arc<Mutex<bool>>,
     starts: Arc<AtomicUsize>,
 }
@@ -60,6 +62,7 @@ impl Mic {
         let mic = Self {
             gate: Arc::new(Mutex::new(Some(gate))),
             entered: Arc::new(Notify::new()),
+            discarded: Arc::new(Notify::new()),
             recording: Arc::default(),
             starts: Arc::default(),
         };
@@ -89,6 +92,7 @@ impl AudioSource for Mic {
 
     fn discard(&mut self) {
         *self.recording.lock().unwrap() = false;
+        self.discarded.notify_one();
     }
 
     fn is_recording(&self) -> bool {
@@ -166,9 +170,10 @@ fn patterns() -> Vec<(String, Pattern)> {
 async fn overflow_fence_discards_all_untrusted_queued_keys() {
     for (name, pattern) in patterns() {
         let (mic, release_gate) = Mic::new();
-        let (recording, entered, starts) = (
+        let (recording, entered, discarded, starts) = (
             Arc::clone(&mic.recording),
             Arc::clone(&mic.entered),
+            Arc::clone(&mic.discarded),
             Arc::clone(&mic.starts),
         );
         let transcriber = Counting::default();
@@ -210,6 +215,16 @@ async fn overflow_fence_discards_all_untrusted_queued_keys() {
             "{name}: ends Idle with no key to settle it"
         );
         release_gate.send(()).unwrap();
+        // Fence for the audio worker: the overflow's cancellation reached the
+        // microphone, by itself. Shutdown would discard too and hide a
+        // microphone left open, so nothing checks it after that.
+        tokio::time::timeout(WAIT, discarded.notified())
+            .await
+            .unwrap_or_else(|_| panic!("{name}: overflow never discarded the recording"));
+        assert!(
+            !*recording.lock().unwrap(),
+            "{name}: overflow left the microphone open"
+        );
         for _ in 0..8 {
             tokio::task::yield_now().await;
         }

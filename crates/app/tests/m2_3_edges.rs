@@ -26,6 +26,7 @@ use dictation_ports::{
     Audio, AudioError, AudioSource, HotkeyError, HotkeyEvent, Permission, TranscribeError,
     Transcriber,
 };
+use tokio::sync::Notify;
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -51,6 +52,8 @@ struct GatedStart {
     recording: Arc<Mutex<bool>>,
     starts: Arc<AtomicUsize>,
     stops: Arc<AtomicUsize>,
+    /// Signalled when `discard` has run: the fence for the audio worker.
+    discarded: Arc<Notify>,
 }
 
 impl GatedStart {
@@ -62,6 +65,7 @@ impl GatedStart {
             recording: Arc::default(),
             starts: Arc::default(),
             stops: Arc::default(),
+            discarded: Arc::new(Notify::new()),
         };
         (source, release)
     }
@@ -96,6 +100,7 @@ impl AudioSource for GatedStart {
 
     fn discard(&mut self) {
         *self.recording.lock().unwrap() = false;
+        self.discarded.notify_one();
     }
 
     fn is_recording(&self) -> bool {
@@ -284,6 +289,7 @@ async fn criterion_7_a_key_flood_behind_a_blocked_start_is_bounded_and_recovers(
     let (audio, release_gate) = GatedStart::new(None);
     let starts = Arc::clone(&audio.starts);
     let recording = Arc::clone(&audio.recording);
+    let discarded = Arc::clone(&audio.discarded);
     let mut run = spawn(audio);
 
     run.hook("--press");
@@ -301,6 +307,15 @@ async fn criterion_7_a_key_flood_behind_a_blocked_start_is_bounded_and_recovers(
     // recording it had, by itself.
     assert_eq!(next(&mut run.ui).await, UiEvent::StateChanged(Phase::Idle));
     release_gate.send(()).unwrap();
+    // The overflow's cancellation reached the microphone by itself, before
+    // anything else (shutdown also discards and would hide an open one).
+    tokio::time::timeout(WAIT, discarded.notified())
+        .await
+        .expect("overflow never discarded the recording");
+    assert!(
+        !*recording.lock().unwrap(),
+        "overflow left the microphone open"
+    );
     // Nothing queued ran: no more starts, no recording, no transcription.
     for _ in 0..8 {
         tokio::task::yield_now().await;
