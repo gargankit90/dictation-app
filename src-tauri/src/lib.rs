@@ -5,11 +5,13 @@
 //! paste. M2.2: it records from the real microphone, and
 //! a dictation error (such as a missing microphone permission) shows as the
 //! tray's title and tooltip until the next recording. A second launch
-//! forwards its flags to the running app through the single-instance
-//! plugin and exits. Debug builds act on the test flags (`--press`,
+//! forwards its flags to the running app and exits (M1.7:
+//! `dictation_platform::single_instance`, which replaced the
+//! single-instance plugin). Debug builds act on the test flags (`--press`,
 //! `--release`, `--debug-audio-file`, `--debug-save-audio`, `--mock-text`,
 //! `--mock-text-sequence`, `--debug-set-api-key-stdin`,
-//! `--debug-delete-api-key`; see [`flags`]);
+//! `--debug-delete-api-key`; see [`flags`]; the key flags run in the
+//! launching process and are never forwarded);
 //! release builds ignore them and have no way to inject key events or
 //! audio.
 //!
@@ -25,6 +27,9 @@
 //! close button hides it instead of destroying it, so the tray can show it
 //! again.
 
+// Only the build script and the capability tests need the list.
+#[cfg(test)]
+mod command_names;
 pub mod commands;
 pub mod engine;
 mod flags;
@@ -50,6 +55,7 @@ use dictation_platform::hotkey::SystemHotkey;
 use dictation_platform::insert::SystemInserter;
 use dictation_platform::launch::SystemLaunchAtLogin;
 use dictation_platform::permissions::SystemPermissions;
+use dictation_platform::single_instance::{self, Instance, Launch, Message, Rejected};
 use dictation_ports::{AudioSource, Permission, PermissionError, PermissionStatus, Permissions};
 use dictation_transcribe::engine::{Engine, Transcribers};
 use dictation_transcribe::mock::MockTranscriber;
@@ -74,6 +80,11 @@ struct LogDir(std::path::PathBuf);
 
 /// The running pipeline, taken out on Quit to shut it down.
 struct RunningPipeline(Mutex<Option<Pipeline>>);
+
+/// This process's hold on being the one running instance, released on
+/// Quit once the pipeline has stopped, so a new launch can't start a second
+/// pipeline while this one shuts down.
+struct SingleInstance(Mutex<Option<Instance>>);
 
 /// Debug builds: the real hotkey plus injected test flags; a missing
 /// Accessibility grant (or no adapter) leaves only the test flags.
@@ -198,28 +209,28 @@ fn run_key_commands(argv: &[String], mut stdin: impl std::io::Read) -> Option<i3
 /// Panics if Tauri fails to start, which leaves the app with nothing to show.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The API key commands (debug builds) run in this process, before the
+    // single-instance check: a second launch does its own key work and exits,
+    // and never forwards it to the running app (which ignores such flags).
     let argv: Vec<String> = std::env::args().collect();
     if let Some(code) = run_key_commands(&argv, std::io::stdin()) {
         std::process::exit(code);
     }
+    let context = tauri::generate_context!();
+    // Next, so a second launch exits before setting anything else up.
+    let config = single_instance::Config::new(&context.config().identifier);
+    let instance = match single_instance::acquire(&config, &Message::current()) {
+        Ok(Launch::Primary(instance)) => instance,
+        Ok(Launch::Forwarded) => return,
+        Err(error) => exit_early(&format!(
+            "could not hand this launch to the running app: {error}"
+        )),
+    };
+
     let (hotkey, injector) = shell_hotkey();
-    let forward = injector.clone();
 
     #[allow(clippy::expect_used)] // No UI exists yet to report a startup failure to.
     let app = tauri::Builder::default()
-        // First, so a second launch exits before setting anything else up.
-        .plugin(tauri_plugin_single_instance::init(
-            move |_app, argv, _cwd| {
-                let launch = flags::parse(&argv, flags::TEST_FLAGS);
-                if launch.configure_pipeline() {
-                    tracing::warn!(
-                        from = SECOND_LAUNCH,
-                        "ignoring the debug audio and mock text flags; they only work on the first launch"
-                    );
-                }
-                handle_flags(forward.as_ref(), launch, SECOND_LAUNCH);
-            },
-        ))
         .invoke_handler(commands::builder().invoke_handler())
         .on_window_event(|window, event| {
             // Closing the settings window hides it, so the tray can show it
@@ -232,10 +243,10 @@ pub fn run() {
             }
         })
         .setup(move |app| {
-            setup(app, hotkey, injector.as_ref())?;
+            setup(app, hotkey, injector, instance)?;
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building the Tauri application");
 
     app.run(|app, event| {
@@ -252,7 +263,22 @@ pub fn run() {
     });
 }
 
-fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> anyhow::Result<()> {
+/// Ends a launch that failed before logging started: stderr is all there
+/// is.
+fn exit_early(reason: &str) -> ! {
+    #[allow(clippy::print_stderr)] // Logging isn't set up yet.
+    {
+        eprintln!("dictation-app: {reason}");
+    }
+    std::process::exit(1);
+}
+
+fn setup(
+    app: &mut App,
+    hotkey: ShellHotkey,
+    injector: Option<Injector>,
+    mut instance: Instance,
+) -> anyhow::Result<()> {
     let log_dir = app.path().app_log_dir().context("no log directory")?;
     logging::init(&log_dir).context("could not start logging")?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), log_dir = %log_dir.display(), "starting");
@@ -336,13 +362,56 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
     tauri::async_runtime::spawn(show_ui_events(app.handle().clone(), ui_events));
     tracing::info!(hotkey = %HotkeySpec::default(), "ready");
 
-    handle_flags(injector, launch, THIS_LAUNCH);
+    // This launch's own flags first, so they come before any forwarded one.
+    // A failed injection is already logged; nothing waits for this launch.
+    let _ = handle_flags(injector.as_ref(), launch, THIS_LAUNCH);
+
+    // Last: a later launch is answered only once the pipeline runs and can
+    // take its events. Until now it waited in the socket's backlog (its
+    // launch gives up after the I/O timeout), so it is never acknowledged
+    // without being delivered.
+    listen_for_later_launches(&mut instance, injector)
+        .context("could not listen for later launches")?;
+    app.manage(SingleInstance(Mutex::new(Some(instance))));
     Ok(())
+}
+
+/// Hands each later launch's flags to the running pipeline, and
+/// acknowledges the launch only if all of them were delivered; otherwise
+/// that launch fails with an error instead of being reported as handled.
+/// Call only once the pipeline has started.
+fn listen_for_later_launches(
+    instance: &mut Instance,
+    injector: Option<Injector>,
+) -> std::io::Result<()> {
+    instance.listen_checked(move |message| forwarded_launch(injector.as_ref(), &message))
+}
+
+/// Acts on the flags of a launch forwarded by [`listen_for_later_launches`].
+fn forwarded_launch(injector: Option<&Injector>, message: &Message) -> Result<(), Rejected> {
+    let launch = flags::parse(&message.args, flags::TEST_FLAGS);
+    if launch.configure_pipeline() {
+        tracing::warn!(
+            from = SECOND_LAUNCH,
+            "ignoring the debug audio and mock text flags; they only work on the first launch"
+        );
+    }
+    handle_flags(injector, launch, SECOND_LAUNCH)
 }
 
 /// Acts on a launch's flags: injects the test flags (debug builds only) and
 /// warns about the rest.
-fn handle_flags(injector: Option<&Injector>, flags: flags::LaunchFlags, from: &str) {
+///
+/// # Errors
+///
+/// [`Rejected`] if a test event couldn't be delivered (no pipeline is
+/// listening, or this build has no injector): it and the events after it
+/// are dropped, and the caller must not report the launch as handled.
+fn handle_flags(
+    injector: Option<&Injector>,
+    flags: flags::LaunchFlags,
+    from: &str,
+) -> Result<(), Rejected> {
     if from == SECOND_LAUNCH && flags.transcriber.is_some() {
         tracing::warn!(
             from,
@@ -369,8 +438,19 @@ fn handle_flags(injector: Option<&Injector>, flags: flags::LaunchFlags, from: &s
     }
     for event in flags.events {
         let delivered = injector.is_some_and(|injector| injector.inject(event));
+        if !delivered {
+            tracing::warn!(
+                ?event,
+                from,
+                delivered,
+                "test hook: not delivered; nothing is listening"
+            );
+            return Err(Rejected);
+        }
+        // This line's text is what the e2e scenarios wait for.
         tracing::info!(?event, from, delivered, "test hook");
     }
+    Ok(())
 }
 
 fn build_tray(app: &App) -> tauri::Result<()> {
@@ -460,16 +540,158 @@ fn show_in_tray(app: &AppHandle, error: Option<&str>) {
 }
 
 fn shut_down(app: &AppHandle) {
-    let Some(state) = app.try_state::<RunningPipeline>() else {
-        return;
-    };
-    let pipeline = state
-        .0
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .take();
-    if let Some(pipeline) = pipeline {
-        tauri::async_runtime::block_on(pipeline.shutdown());
-        tracing::info!("stopped");
+    if let Some(state) = app.try_state::<RunningPipeline>() {
+        let pipeline = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(pipeline) = pipeline {
+            tauri::async_runtime::block_on(pipeline.shutdown());
+            tracing::info!("stopped");
+        }
+    }
+    // Last, and explicitly: Tauri exits the process without running
+    // destructors, which would leave the socket behind (harmless, but the
+    // next launch would have to clean it up).
+    if let Some(state) = app.try_state::<SingleInstance>() {
+        drop(
+            state
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take(),
+        );
+    }
+}
+
+/// The second-launch path, against the real single-instance transport and
+/// the real injector (debug builds, which have the test flags).
+#[cfg(all(test, debug_assertions))]
+// Clippy's allow-in-tests covers only `#[cfg(test)]` modules, not this `all(..)` one.
+#[allow(clippy::unwrap_used, clippy::panic)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use dictation_platform::fakes::FakeHotkey;
+    use dictation_ports::{HotkeyEvent, HotkeySource};
+
+    use super::*;
+
+    fn message(args: &[&str]) -> Message {
+        Message {
+            cwd: "/".into(),
+            args: std::iter::once("app")
+                .chain(args.iter().copied())
+                .map(String::from)
+                .collect(),
+        }
+    }
+
+    /// A short directory (socket paths are length-limited).
+    fn config() -> single_instance::Config {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "sh-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst)
+        ));
+        let mut config = single_instance::Config::in_dir(dir, "t");
+        config.forward_timeout = Duration::from_secs(5);
+        config.io_timeout = Duration::from_secs(3);
+        config
+    }
+
+    fn primary(config: &single_instance::Config) -> Instance {
+        match single_instance::acquire(config, &message(&[])).unwrap() {
+            Launch::Primary(instance) => instance,
+            Launch::Forwarded => panic!("not the primary"),
+        }
+    }
+
+    /// A pipeline's hotkey source, started or not, and its injector.
+    fn hotkey() -> (impl HotkeySource, Injector) {
+        SyntheticHotkey::new(FakeHotkey::new())
+    }
+
+    #[test]
+    fn an_event_nobody_listens_for_is_rejected_not_dropped() {
+        let (mut hotkey, injector) = hotkey();
+        let press = message(&["--press"]);
+        // Before the pipeline starts.
+        assert_eq!(forwarded_launch(Some(&injector), &press), Err(Rejected));
+        // Without an injector at all.
+        assert_eq!(forwarded_launch(None, &press), Err(Rejected));
+
+        let (tx, rx) = mpsc::channel();
+        hotkey
+            .start(Box::new(move |event| tx.send(event).unwrap()))
+            .unwrap();
+        assert_eq!(forwarded_launch(Some(&injector), &press), Ok(()));
+        assert_eq!(
+            forwarded_launch(Some(&injector), &message(&["--release", "--press"])),
+            Ok(())
+        );
+        assert_eq!(
+            rx.try_iter().collect::<Vec<_>>(),
+            [
+                HotkeyEvent::Pressed,
+                HotkeyEvent::Released,
+                HotkeyEvent::Pressed
+            ]
+        );
+
+        // Once the pipeline has stopped, nothing listens again.
+        hotkey.stop();
+        assert_eq!(forwarded_launch(Some(&injector), &press), Err(Rejected));
+    }
+
+    #[test]
+    fn a_launch_without_events_needs_no_injector() {
+        assert_eq!(forwarded_launch(None, &message(&[])), Ok(()));
+        assert_eq!(forwarded_launch(None, &message(&["--verbose"])), Ok(()));
+    }
+
+    /// R1: a second launch that arrives while the app is still starting
+    /// (listener not up, pipeline not running) is delivered once it is, and
+    /// only then acknowledged.
+    #[test]
+    fn a_forward_during_startup_is_delivered_then_acknowledged() {
+        let config = config();
+        let mut instance = primary(&config);
+        let (mut hotkey, injector) = hotkey();
+
+        let second = {
+            let config = config.clone();
+            std::thread::spawn(move || single_instance::acquire(&config, &message(&["--press"])))
+        };
+        // Startup is still going on: the launch has no answer yet.
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!second.is_finished(), "acknowledged before delivery");
+
+        // The pipeline starts, then the shell listens.
+        let (tx, rx) = mpsc::channel();
+        hotkey
+            .start(Box::new(move |event| tx.send(event).unwrap()))
+            .unwrap();
+        listen_for_later_launches(&mut instance, Some(injector)).unwrap();
+
+        assert!(matches!(second.join().unwrap().unwrap(), Launch::Forwarded));
+        assert_eq!(rx.try_recv(), Ok(HotkeyEvent::Pressed));
+    }
+
+    /// If it still can't be delivered, the launch fails, never succeeds.
+    #[test]
+    fn a_forward_that_cannot_be_delivered_fails_the_launch() {
+        let config = config();
+        let mut instance = primary(&config);
+        let (_never_started, injector) = hotkey();
+        listen_for_later_launches(&mut instance, Some(injector)).unwrap();
+
+        let error = single_instance::acquire(&config, &message(&["--press"])).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("couldn't act on"), "{error}");
     }
 }

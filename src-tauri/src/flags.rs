@@ -1,5 +1,5 @@
-//! A launch's command-line flags, from this process or forwarded by the
-//! single-instance plugin from a second launch.
+//! A launch's command-line flags, from this process or forwarded from a
+//! second launch (`dictation_platform::single_instance`).
 //!
 //! The test hooks exist only in debug builds ([`TEST_FLAGS`]):
 //!
