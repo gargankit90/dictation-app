@@ -97,9 +97,22 @@ fn transition(state: State, event: Event) -> (State, Vec<Command>) {
         {
             stop_and_transcribe()
         }
-        (State::Recording { .. }, Event::CancelPressed) => {
+        (State::Recording { .. }, Event::CancelPressed | Event::HotkeyInterrupted) => {
             (State::Idle, vec![Command::DiscardRecording])
         }
+        // Without a hotkey there's no release to end a recording: drop it.
+        // Whatever else is going on finishes; the error is shown either way.
+        (State::Recording { .. }, Event::HotkeyFailed) => (
+            State::Idle,
+            vec![
+                Command::DiscardRecording,
+                Command::ShowError(DictationError::HotkeyFailed),
+            ],
+        ),
+        (state, Event::HotkeyFailed) => (
+            state,
+            vec![Command::ShowError(DictationError::HotkeyFailed)],
+        ),
         (State::Recording { .. }, Event::PermissionMissing(permission)) => (
             State::Idle,
             vec![
@@ -383,6 +396,60 @@ mod tests {
     }
 
     #[test]
+    fn m1_6_interrupted_hotkey_discards_the_recording_and_never_transcribes() {
+        // #80 B2: the release was lost and no key follows. Before, the
+        // duration limit's Tick then stopped and transcribed.
+        let (state, commands) = step(recording_since(0), Event::HotkeyInterrupted);
+        assert_eq!(state, State::Idle);
+        assert_eq!(
+            commands,
+            [
+                Command::DiscardRecording,
+                Command::StateChanged(Phase::Idle)
+            ]
+        );
+        let (state, commands) = step(state, Event::Tick(MAX_RECORDING + ms(1)));
+        assert_eq!((state, commands), (State::Idle, Vec::new()));
+        // A new press records afresh.
+        let (state, _) = step(state, Event::HotkeyPressed(MAX_RECORDING + ms(2)));
+        assert_eq!(state, recording_since(300_002));
+    }
+
+    #[test]
+    fn m1_6_interrupted_hotkey_is_ignored_unless_recording() {
+        for state in [State::Idle, State::Transcribing, State::Inserting] {
+            assert_eq!(step(state, Event::HotkeyInterrupted), (state, Vec::new()));
+        }
+    }
+
+    #[test]
+    fn m1_6_failed_hotkey_while_recording_discards_and_shows_error() {
+        let (state, commands) = step(recording_since(0), Event::HotkeyFailed);
+        assert_eq!(state, State::Idle);
+        assert_eq!(
+            commands,
+            [
+                Command::DiscardRecording,
+                Command::ShowError(DictationError::HotkeyFailed),
+                Command::StateChanged(Phase::Idle)
+            ]
+        );
+    }
+
+    #[test]
+    fn m1_6_failed_hotkey_otherwise_shows_error_and_lets_the_dictation_finish() {
+        for state in [State::Idle, State::Transcribing, State::Inserting] {
+            assert_eq!(
+                step(state, Event::HotkeyFailed),
+                (
+                    state,
+                    vec![Command::ShowError(DictationError::HotkeyFailed)]
+                )
+            );
+        }
+    }
+
+    #[test]
     fn default_state_is_idle() {
         assert_eq!(State::default(), State::Idle);
     }
@@ -406,6 +473,8 @@ mod proptests {
         Pressed,
         Released,
         Cancel,
+        Interrupted,
+        HotkeyFailed,
         Tick,
         AudioCaptured,
         TranscriptReady,
@@ -425,6 +494,8 @@ mod proptests {
                 Just(EventKind::Pressed),
                 Just(EventKind::Released),
                 Just(EventKind::Cancel),
+                Just(EventKind::Interrupted),
+                Just(EventKind::HotkeyFailed),
                 Just(EventKind::Tick),
                 Just(EventKind::AudioCaptured),
                 Just(EventKind::TranscriptReady),
@@ -443,6 +514,8 @@ mod proptests {
             EventKind::Pressed => Event::HotkeyPressed(now),
             EventKind::Released => Event::HotkeyReleased(now),
             EventKind::Cancel => Event::CancelPressed,
+            EventKind::Interrupted => Event::HotkeyInterrupted,
+            EventKind::HotkeyFailed => Event::HotkeyFailed,
             EventKind::Tick => Event::Tick(now),
             EventKind::AudioCaptured => Event::AudioCaptured,
             EventKind::TranscriptReady => Event::TranscriptReady("hello".into()),

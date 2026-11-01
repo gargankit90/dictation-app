@@ -10,7 +10,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use dictation_core::hotkey_spec::{HotkeySpec, Key, Modifier};
-use dictation_ports::{HotkeyError, HotkeySink, HotkeySource};
+use dictation_ports::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};
 use handy_keys::{KeyEvent, KeyboardListener, Modifiers};
 
 use super::matcher::{Hand, Held, HotkeyMatcher, KeyInput};
@@ -20,18 +20,41 @@ use crate::permissions::macos::is_accessibility_trusted;
 /// while no keys arrive.
 const STOP_POLL: Duration = Duration::from_millis(50);
 
+/// Raw key events for the listener thread: a `handy-keys`
+/// [`KeyboardListener`], or a fake in tests.
+trait RawKeys: Send {
+    /// The next event, [`handy_keys::Error::Timeout`] after `timeout`, or
+    /// another error once the listener is dead.
+    fn recv_timeout(&self, timeout: Duration) -> handy_keys::Result<KeyEvent>;
+}
+
+impl RawKeys for KeyboardListener {
+    fn recv_timeout(&self, timeout: Duration) -> handy_keys::Result<KeyEvent> {
+        KeyboardListener::recv_timeout(self, timeout)
+    }
+}
+
+/// Installs the keyboard hook: [`open_listener`], or a fake in tests.
+type Open = Box<dyn FnMut() -> Result<Box<dyn RawKeys>, HotkeyError> + Send>;
+
 /// The global hotkey on macOS. Needs Accessibility; without it
 /// [`start`](HotkeySource::start) fails with
 /// [`HotkeyError::PermissionDenied`]. Modifier-only specs keep working under
 /// Secure Input (macOS still delivers modifier changes); specs with a key
 /// don't.
+///
+/// If the event tap is paused and resumed, or misses a modifier change, it
+/// sends [`HotkeyEvent::Interrupted`]; if it dies, [`HotkeyEvent::Failed`],
+/// after which `start` works again.
 pub struct MacHotkey {
     spec: HotkeySpec,
+    open: Open,
     running: Option<Running>,
 }
 
 struct Running {
-    stop: Arc<AtomicBool>,
+    /// Set by `stop`, or by the thread itself when the listener dies.
+    done: Arc<AtomicBool>,
     thread: JoinHandle<()>,
 }
 
@@ -39,55 +62,58 @@ impl MacHotkey {
     /// A source for `spec`; it listens only once started.
     #[must_use]
     pub fn new(spec: HotkeySpec) -> Self {
+        Self::with_open(spec, Box::new(open_listener))
+    }
+
+    fn with_open(spec: HotkeySpec, open: Open) -> Self {
         Self {
             spec,
+            open,
             running: None,
         }
     }
 }
 
+fn open_listener() -> Result<Box<dyn RawKeys>, HotkeyError> {
+    // handy-keys checks too, but its error can't tell this apart from a
+    // failed tap without matching its message.
+    if !is_accessibility_trusted() {
+        return Err(HotkeyError::PermissionDenied);
+    }
+    let listener = KeyboardListener::new().map_err(|e| match e {
+        handy_keys::Error::AccessibilityNotGranted => HotkeyError::PermissionDenied,
+        other => HotkeyError::Unavailable(other.to_string()),
+    })?;
+    Ok(Box::new(listener))
+}
+
 impl HotkeySource for MacHotkey {
     fn start(&mut self, mut sink: HotkeySink) -> Result<(), HotkeyError> {
-        if self.running.is_some() {
-            return Err(HotkeyError::AlreadyStarted);
+        if let Some(running) = &self.running {
+            // A thread whose listener died has set `done` and is ending:
+            // reap it and start afresh.
+            if !running.done.load(Ordering::SeqCst) {
+                return Err(HotkeyError::AlreadyStarted);
+            }
+            self.stop();
         }
-        // handy-keys checks too, but its error can't tell this apart from a
-        // failed tap without matching its message.
-        if !is_accessibility_trusted() {
-            return Err(HotkeyError::PermissionDenied);
-        }
-        let listener = KeyboardListener::new().map_err(|e| match e {
-            handy_keys::Error::AccessibilityNotGranted => HotkeyError::PermissionDenied,
-            other => HotkeyError::Unavailable(other.to_string()),
-        })?;
+        let keys = (self.open)()?;
 
-        let stop = Arc::new(AtomicBool::new(false));
-        let thread_stop = Arc::clone(&stop);
-        let mut matcher = HotkeyMatcher::new(self.spec);
+        let done = Arc::new(AtomicBool::new(false));
+        let thread_done = Arc::clone(&done);
+        let matcher = HotkeyMatcher::new(self.spec);
         let thread = thread::Builder::new()
             .name("hotkey".into())
-            .spawn(move || {
-                while !thread_stop.load(Ordering::SeqCst) {
-                    match listener.recv_timeout(STOP_POLL) {
-                        Ok(event) => {
-                            if let Some(out) = to_input(&event).and_then(|i| matcher.on_input(i)) {
-                                sink(out);
-                            }
-                        }
-                        Err(handy_keys::Error::Timeout) => {}
-                        Err(_) => break,
-                    }
-                }
-                // Dropping the listener stops and joins the tap thread.
-            })
+            // Dropping `keys` at the end stops and joins the tap thread.
+            .spawn(move || listen(&*keys, matcher, &thread_done, &mut sink))
             .map_err(|e| HotkeyError::Unavailable(e.to_string()))?;
-        self.running = Some(Running { stop, thread });
+        self.running = Some(Running { done, thread });
         Ok(())
     }
 
     fn stop(&mut self) {
         if let Some(running) = self.running.take() {
-            running.stop.store(true, Ordering::SeqCst);
+            running.done.store(true, Ordering::SeqCst);
             // A panic in the sink already ended the thread; nothing to undo.
             let _ = running.thread.join();
         }
@@ -97,6 +123,39 @@ impl HotkeySource for MacHotkey {
 impl Drop for MacHotkey {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// The listener thread: matches `keys` until `done` is set, or until the
+/// listener dies, which it reports with [`HotkeyEvent::Failed`] after
+/// setting `done` itself.
+fn listen(
+    keys: &dyn RawKeys,
+    mut matcher: HotkeyMatcher,
+    done: &AtomicBool,
+    sink: &mut HotkeySink,
+) {
+    while !done.load(Ordering::SeqCst) {
+        match keys.recv_timeout(STOP_POLL) {
+            Ok(event) if event.is_resync() => {
+                // Presses or releases may be lost: whatever was held is over.
+                tracing::debug!("the hotkey listener lost track of the keyboard");
+                matcher.reset();
+                sink(HotkeyEvent::Interrupted);
+            }
+            Ok(event) => {
+                if let Some(out) = to_input(&event).and_then(|i| matcher.on_input(i)) {
+                    sink(out);
+                }
+            }
+            Err(handy_keys::Error::Timeout) => {}
+            Err(error) => {
+                tracing::warn!(%error, "the hotkey listener stopped");
+                done.store(true, Ordering::SeqCst);
+                sink(HotkeyEvent::Failed);
+                return;
+            }
+        }
     }
 }
 
@@ -208,7 +267,9 @@ fn to_key(key: handy_keys::Key) -> Option<Key> {
 
 #[cfg(test)]
 mod tests {
-    use dictation_ports::HotkeyEvent::{CancelPressed, Pressed, Released};
+    use std::sync::mpsc;
+
+    use dictation_ports::HotkeyEvent::{CancelPressed, Failed, Interrupted, Pressed, Released};
 
     use super::*;
 
@@ -312,6 +373,237 @@ mod tests {
     fn stop_without_start_does_nothing() {
         let mut hotkey = MacHotkey::new(HotkeySpec::default());
         hotkey.stop();
+        assert!(hotkey.running.is_none());
+    }
+
+    /// What the patched handy-keys sends, scripted. Disconnecting `events`
+    /// is the listener dying, which handy-keys reports as
+    /// `EventLoopNotRunning`.
+    struct FakeKeys(mpsc::Receiver<KeyEvent>);
+
+    impl RawKeys for FakeKeys {
+        fn recv_timeout(&self, timeout: Duration) -> handy_keys::Result<KeyEvent> {
+            self.0.recv_timeout(timeout).map_err(|e| match e {
+                mpsc::RecvTimeoutError::Timeout => handy_keys::Error::Timeout,
+                mpsc::RecvTimeoutError::Disconnected => handy_keys::Error::EventLoopNotRunning,
+            })
+        }
+    }
+
+    /// A started adapter on fake listeners: `keys` feeds the current one,
+    /// `events` gets what the adapter sends.
+    struct Harness {
+        hotkey: MacHotkey,
+        listeners: mpsc::Receiver<mpsc::Sender<KeyEvent>>,
+        keys: mpsc::Sender<KeyEvent>,
+        events: mpsc::Receiver<dictation_ports::HotkeyEvent>,
+    }
+
+    const WAIT: Duration = Duration::from_secs(5);
+
+    impl Harness {
+        fn start() -> Self {
+            let (opened, listeners) = mpsc::channel();
+            let mut hotkey = MacHotkey::with_open(
+                HotkeySpec::default(),
+                Box::new(move || {
+                    let (keys, rx) = mpsc::channel();
+                    let _ = opened.send(keys);
+                    Ok(Box::new(FakeKeys(rx)) as Box<dyn RawKeys>)
+                }),
+            );
+            let (sink, events) = mpsc::channel();
+            hotkey
+                .start(Box::new(move |e| {
+                    let _ = sink.send(e);
+                }))
+                .unwrap();
+            let keys = listeners.recv().unwrap();
+            Self {
+                hotkey,
+                listeners,
+                keys,
+                events,
+            }
+        }
+
+        fn send(&self, events: &[KeyEvent]) {
+            for &event in events {
+                self.keys.send(event).unwrap();
+            }
+        }
+
+        fn next(&self) -> dictation_ports::HotkeyEvent {
+            self.events.recv_timeout(WAIT).unwrap()
+        }
+
+        /// Nothing more within a few polls of the listener thread.
+        fn assert_quiet(&self) {
+            assert_eq!(
+                self.events.recv_timeout(STOP_POLL * 4),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            );
+        }
+    }
+
+    const RIGHT: Modifiers = Modifiers::OPT_RIGHT;
+    const LEFT: Modifiers = Modifiers::OPT_LEFT;
+
+    fn none() -> Modifiers {
+        Modifiers::empty()
+    }
+
+    #[test]
+    fn criterion_1_option_held_at_start_then_released_is_not_a_press() {
+        // The patched handy-keys reads a release as a release even when the
+        // key was down before the tap started (third_party/handy-keys,
+        // dictation_patch_tests). Each case: what it sends, from the start
+        // with Option already held, through the next press and release.
+        let cases: [(&str, Vec<KeyEvent>); 3] = [
+            (
+                "right held",
+                vec![
+                    modifier_event(none(), RIGHT, false),
+                    modifier_event(RIGHT, RIGHT, true),
+                    modifier_event(none(), RIGHT, false),
+                ],
+            ),
+            (
+                "left held",
+                vec![
+                    modifier_event(none(), LEFT, false),
+                    modifier_event(RIGHT, RIGHT, true),
+                    modifier_event(none(), RIGHT, false),
+                ],
+            ),
+            (
+                "both held, right let go first",
+                vec![
+                    modifier_event(LEFT, RIGHT, false),
+                    modifier_event(none(), LEFT, false),
+                    modifier_event(RIGHT, RIGHT, true),
+                    modifier_event(none(), RIGHT, false),
+                ],
+            ),
+        ];
+        for (name, events) in cases {
+            let harness = Harness::start();
+            harness.send(&events);
+            assert_eq!(harness.next(), Pressed, "{name}");
+            assert_eq!(harness.next(), Released, "{name}");
+            harness.assert_quiet();
+        }
+    }
+
+    #[test]
+    fn criterion_1_right_option_works_while_left_option_stays_held() {
+        let harness = Harness::start();
+        harness.send(&[
+            modifier_event(LEFT, LEFT, true),
+            modifier_event(LEFT | RIGHT, RIGHT, true),
+            modifier_event(LEFT, RIGHT, false),
+        ]);
+        assert_eq!(harness.next(), Pressed);
+        assert_eq!(harness.next(), Released);
+        harness.assert_quiet();
+    }
+
+    #[test]
+    fn criterion_2_a_resync_while_held_interrupts_and_resets() {
+        let harness = Harness::start();
+        harness.send(&[
+            modifier_event(RIGHT, RIGHT, true),
+            // The tap was off while Right Option came up; nothing else
+            // comes after the resync.
+            KeyEvent::resync(none()),
+        ]);
+        assert_eq!(harness.next(), Pressed);
+        assert_eq!(harness.next(), Interrupted);
+        harness.assert_quiet();
+
+        // The matcher starts over: the next hold is a new press.
+        harness.send(&[
+            modifier_event(RIGHT, RIGHT, true),
+            modifier_event(none(), RIGHT, false),
+        ]);
+        assert_eq!(harness.next(), Pressed);
+        assert_eq!(harness.next(), Released);
+    }
+
+    #[test]
+    fn criterion_2_after_a_resync_a_still_held_key_does_not_release() {
+        let harness = Harness::start();
+        harness.send(&[
+            modifier_event(RIGHT, RIGHT, true),
+            KeyEvent::resync(RIGHT),
+            // Let go after the tap came back: the hold already ended.
+            modifier_event(none(), RIGHT, false),
+        ]);
+        assert_eq!(harness.next(), Pressed);
+        assert_eq!(harness.next(), Interrupted);
+        harness.assert_quiet();
+    }
+
+    #[test]
+    fn criterion_3_a_dead_listener_fails_and_start_works_again() {
+        let mut harness = Harness::start();
+        harness.send(&[modifier_event(RIGHT, RIGHT, true)]);
+        assert_eq!(harness.next(), Pressed);
+
+        // The tap dies: handy-keys drops its sender.
+        let (dead, _) = mpsc::channel();
+        drop(std::mem::replace(&mut harness.keys, dead));
+        assert_eq!(harness.next(), Failed);
+        // Failed is the last event: the sink is dropped.
+        assert_eq!(
+            harness.events.recv_timeout(WAIT),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        );
+
+        let (sink, events) = mpsc::channel();
+        harness
+            .hotkey
+            .start(Box::new(move |e| {
+                let _ = sink.send(e);
+            }))
+            .unwrap();
+        harness.keys = harness.listeners.recv_timeout(WAIT).unwrap();
+        harness.events = events;
+        harness.send(&[
+            modifier_event(RIGHT, RIGHT, true),
+            modifier_event(none(), RIGHT, false),
+        ]);
+        assert_eq!(harness.next(), Pressed);
+        assert_eq!(harness.next(), Released);
+    }
+
+    #[test]
+    fn start_while_listening_is_refused_and_stop_then_start_works() {
+        let mut harness = Harness::start();
+        assert_eq!(
+            harness.hotkey.start(Box::new(|_| {})),
+            Err(HotkeyError::AlreadyStarted)
+        );
+        harness.hotkey.stop();
+        assert_eq!(
+            harness.events.recv_timeout(WAIT),
+            Err(mpsc::RecvTimeoutError::Disconnected),
+            "stop drops the sink"
+        );
+        harness.hotkey.start(Box::new(|_| {})).unwrap();
+        assert!(harness.listeners.recv_timeout(WAIT).is_ok());
+    }
+
+    #[test]
+    fn a_failed_open_leaves_it_stopped() {
+        let mut hotkey = MacHotkey::with_open(
+            HotkeySpec::default(),
+            Box::new(|| Err(HotkeyError::PermissionDenied)),
+        );
+        assert_eq!(
+            hotkey.start(Box::new(|_| {})),
+            Err(HotkeyError::PermissionDenied)
+        );
         assert!(hotkey.running.is_none());
     }
 }

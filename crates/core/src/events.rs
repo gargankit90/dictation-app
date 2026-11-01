@@ -22,6 +22,12 @@ pub enum Event {
     HotkeyReleased(Duration),
     /// The user pressed the cancel key (Esc).
     CancelPressed,
+    /// The hotkey source lost track of the keyboard, so the hotkey's
+    /// release may never arrive: a recording in progress is dropped.
+    HotkeyInterrupted,
+    /// The hotkey source stopped listening after an error: no more presses
+    /// will arrive until it is started again.
+    HotkeyFailed,
     /// The current time, sent periodically while recording.
     Tick(Duration),
     /// The audio source delivered captured audio. The coordinator ignores
@@ -70,6 +76,8 @@ impl fmt::Debug for Event {
             Event::HotkeyPressed(at) => f.debug_tuple("HotkeyPressed").field(at).finish(),
             Event::HotkeyReleased(at) => f.debug_tuple("HotkeyReleased").field(at).finish(),
             Event::CancelPressed => f.write_str("CancelPressed"),
+            Event::HotkeyInterrupted => f.write_str("HotkeyInterrupted"),
+            Event::HotkeyFailed => f.write_str("HotkeyFailed"),
             Event::Tick(now) => f.debug_tuple("Tick").field(now).finish(),
             Event::AudioCaptured => f.write_str("AudioCaptured"),
             Event::TranscriptReady(text) => f
@@ -122,6 +130,8 @@ mod tests {
             (Event::HotkeyPressed(ms), "HotkeyPressed(5ms)"),
             (Event::HotkeyReleased(ms), "HotkeyReleased(5ms)"),
             (Event::CancelPressed, "CancelPressed"),
+            (Event::HotkeyInterrupted, "HotkeyInterrupted"),
+            (Event::HotkeyFailed, "HotkeyFailed"),
             (Event::Tick(ms), "Tick(5ms)"),
             (Event::AudioCaptured, "AudioCaptured"),
             (
