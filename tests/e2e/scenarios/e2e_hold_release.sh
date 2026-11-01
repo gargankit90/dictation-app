@@ -2,9 +2,11 @@
 # keyboard sends them (a flagsChanged event for key 61 with the right-alt
 # device bit), start and stop a dictation. The events are posted by
 # fixtures/right-option.js run in Terminal.app, which has the Accessibility
-# grant; the synthetic --press/--release flags aren't used.
+# grant; the synthetic --press/--release flags aren't used. However it ends,
+# the key is released and the app quit (arm_key_cleanup, lib_full.sh).
 
 e2e_hold_release() {
+  arm_key_cleanup e2e_hold_release
   fresh_app_state
   launch_full
   expect "the app starts and logs ready" wait_for_log 'INFO .*ready'
@@ -27,6 +29,5 @@ posted up"
   expect "the transcript is in TextEdit" test "$(textedit_trimmed)" = "$MOCK_TEXT"
 
   collect_log e2e_hold_release
-  textedit_close
-  close_terminal
+  key_scenario_end
 }

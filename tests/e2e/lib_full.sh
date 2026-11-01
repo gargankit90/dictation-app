@@ -100,28 +100,35 @@ hotkey_is_on() {
 # --- Real key events ------------------------------------------------------------
 
 # Runs a shell command line in Terminal.app, in the VM's GUI session, and
-# waits for it. ssh sessions have no Accessibility grant, so they can't post
-# key events; Terminal has one in the golden image. Prints the command's
-# output.
+# waits for it (VM_TERMINAL_TIMEOUT seconds, default 30). ssh sessions have no
+# Accessibility grant, so they can't post key events; Terminal has one in
+# the golden image. Prints the command's output. A job that doesn't finish in
+# time is killed, so it can't go on posting events once the caller has moved
+# on (a killed hold job releases the key itself, see real_key_hold).
 vm_terminal() {
-  local job="$VM_RUN_DIR/job-$RANDOM" i
+  local n=$RANDOM timeout=${VM_TERMINAL_TIMEOUT:-30} i job
+  job="$VM_RUN_DIR/job-$n"
   vm "mkdir -p $(q "$VM_RUN_DIR")"
-  printf '#!/bin/zsh\n{ %s; } >%s.out 2>&1\ntouch %s.done\n' "$1" "$job" "$job" |
+  # A subshell, so that an exit in the command still reaches `touch .done`.
+  printf '#!/bin/zsh\n( %s ) >%s.out 2>&1\ntouch %s.done\n' "$1" "$job" "$job" |
     vm "cat >$(q "$job.command") && chmod +x $(q "$job.command")"
   vm "open -a Terminal $(q "$job.command")"
-  for i in $(seq 1 30); do
+  for i in $(seq 1 "$timeout"); do
     if vm "test -e $(q "$job.done")"; then
       vm "cat $(q "$job.out")"
       return 0
     fi
     sleep 1
   done
-  log "  the Terminal script did not finish"
+  log "  the Terminal script did not finish; cancelling it"
+  # The bracket keeps pkill from matching the ssh command line that runs it.
+  vm "pkill -f $(q "$VM_RUN_DIR/[j]ob-$n.command")" || true
   return 1
 }
 
 # Posts a real Right Option event (down or up) from Terminal; prints what
-# the script said ("posted down", or why not).
+# the script said ("posted down", or why not). `state` prints whether the
+# system thinks the key is held ("right option held" or "right option up").
 real_key() {
   vm_terminal "osascript -l JavaScript $(q "$VM_RIGHT_OPTION") $1"
 }
@@ -131,13 +138,83 @@ real_key() {
 # Terminal to the front, where the paste would land, so it first puts `app`
 # (default TextEdit) back in front with `open -a`, which needs no
 # Automation grant.
+#
+# The job releases the key itself if it ends any other way (an error, a
+# signal, the caller's timeout killing it), whatever the caller does next.
 real_key_hold() {
-  local script app=${2:-TextEdit}
+  local script app=${2:-TextEdit} cmd
   script=$(q "$VM_RIGHT_OPTION")
-  vm_terminal "open -a $(q "$app"); sleep 1; osascript -l JavaScript $script down; sleep $1; osascript -l JavaScript $script up"
+  cmd="open -a $(q "$app"); sleep 1; down=0"
+  cmd="$cmd; release() { if [ \$down = 1 ]; then osascript -l JavaScript $script up; fi; }"
+  cmd="$cmd; trap release EXIT; trap 'exit 1' INT TERM HUP"
+  cmd="$cmd; down=1; osascript -l JavaScript $script down"
+  if [ "${E2E_INJECT_FAILURE:-}" = mid_hold ]; then
+    cmd="$cmd; echo 'injected failure while the key is down' >&2; exit 1"
+  fi
+  cmd="$cmd; sleep $1; osascript -l JavaScript $script up; down=0"
+  vm_terminal "$cmd"
 }
 
 # Closes Terminal and removes its scripts and saved windows.
 close_terminal() {
   vm "pkill -x Terminal; sleep 1; rm -rf $(q "$VM_RUN_DIR") $(q "$VM_HOME/Library/Saved Application State/com.apple.Terminal.savedState")" || true
+}
+
+# --- Cleanup for the scenarios that post real keys -------------------------------
+
+# A scenario that posts a key-down arms this before its first event and ends
+# with key_scenario_end. If it dies in between (a failed command under
+# `set -e`, die, Ctrl-C, kill), the EXIT trap leaves the VM as if the
+# scenario had ended well: Right Option up, the app quit, no Terminal job
+# running, no document left open; and the app's log and a screenshot are
+# saved for the failure. The exit status is the one the scenario died with.
+KEY_SCENARIO=""
+
+arm_key_cleanup() {
+  KEY_SCENARIO=$1
+  trap key_cleanup_on_exit EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM HUP
+}
+
+# Posts Right Option up whether or not it is down (an up with no down does
+# nothing), after the app is gone so the app can't react to it.
+key_cleanup_steps() {
+  (
+    set +e
+    # Jobs still running in Terminal (the bracket: see vm_terminal).
+    vm "pkill -f $(q "$VM_RUN_DIR/[j]ob-")" >/dev/null 2>&1
+    fresh_app_state
+    real_key up >/dev/null
+    textedit_close
+    close_terminal
+  ) || true
+}
+
+key_cleanup_on_exit() {
+  local status=$?
+  trap - EXIT INT TERM HUP
+  set +e
+  if [ "$status" != 0 ]; then
+    log "  $KEY_SCENARIO ended with status $status; releasing Right Option and cleaning up"
+    collect_log "$KEY_SCENARIO"
+  fi
+  key_cleanup_steps
+  exit "$status"
+}
+
+# The normal end of a scenario armed with arm_key_cleanup (after collect_log).
+key_scenario_end() {
+  trap - EXIT INT TERM HUP
+  key_cleanup_steps
+}
+
+# For testing the cleanup: E2E_INJECT_FAILURE=<point> makes a scenario fail
+# at that point, as a crash would. Points: after_key_down (right after a
+# key-down is posted) and mid_hold (inside real_key_hold's job, between its
+# down and up).
+inject_failure() {
+  if [ "${E2E_INJECT_FAILURE:-}" = "$1" ]; then
+    die "injected failure at $1"
+  fi
 }

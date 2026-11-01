@@ -9,9 +9,15 @@ tests/e2e/run.sh e2e_startup                       # one scenario
 tests/e2e/run.sh --no-build --no-reset e2e_press_release   # reuse the build and the running VM
 ```
 
-It exits 0 only if every check passed, and needs no human input. Each run
+It needs no human input. It exits 0 only if no check failed and no required
+scenario was skipped. The summary (and `results.txt`) gives one line per
+scenario, `PASS`, `FAIL` or `SKIP`, and a total such as `8 passed, 0 failed, 1
+skipped`. A skipped scenario never passes silently: the optional ones
+(`OPTIONAL_SCENARIOS` in `run.sh`: `e2e_real_mic`, which `E2E_REAL_MIC=0` skips,
+and `e2e_real_groq`) may skip and the run still exits 0, but it says what was
+skipped; any other scenario that skips fails the run. Each run
 writes to `tests/e2e/out/<timestamp>/` (git-ignored): `build.log`,
-`results.txt` (PASS, FAIL or SKIPPED per scenario) and, per scenario, the
+`results.txt` and, per scenario, the
 app's own log copied back from the VM (`<scenario>.app.log`) and a screenshot
 of the VM's desktop at the end (`<scenario>.png`, taken through the
 `cua-driver` daemon in the VM).
@@ -32,7 +38,8 @@ of the VM's desktop at the end (`<scenario>.png`, taken through the
    `~/Applications` in the VM, and its signature is checked there.
    `tests/e2e/fixtures/` goes to `~/e2e-fixtures` in the VM: `tone-16k.wav` (a
    1.5 s 440 Hz tone, 16 kHz mono 16-bit; no voice), `silence-16k.wav` (1.5 s
-   of zeros) and `right-option.js` (posts a real Right Option key event).
+   of zeros) and `right-option.js` (posts a real Right Option key event, or
+   says with `state` whether the system thinks it is held).
 4. **Scenarios:** each one quits any running copy of the app, clears its log
    (`~/Library/Logs/com.dictationapp.desktop/` in the VM), launches the app
    with `open -n …/dictation-app.app --args <flags>`, and checks the log and
@@ -47,8 +54,40 @@ of the VM's desktop at the end (`<scenario>.png`, taken through the
 | `e2e_clipboard_restore` | M4.3 #2 | A `pbcopy` sentinel is still on the clipboard after a dictation, and after a second one; the transcript is not left there. |
 | `e2e_silence` | M4.3 #3 | `silence-16k.wav`: `Recording Transcribing Idle` (never Inserting), the log says `not transcribing … verdict=Silent` and no `dictation failed` (the dropped dictation shows no error), TextEdit stays empty and the clipboard sentinel is untouched. |
 | `e2e_rapid` | M4.3 #4 | Five dictations in a row (0.4 s holds, each started once the last is back in Idle): five complete `Recording Transcribing Inserting Idle` sequences, ending in Idle, and `--mock-text-sequence one,two,three,four,five` gives each dictation its own word, and TextEdit must hold exactly `onetwothreefourfive`: a paste out of order, doubled, dropped or replayed from an earlier dictation changes it. |
-| `e2e_hold_release` | #90, M1.6 #4 | A real Right Option hold (down, 1.5 s, up) posted from Terminal.app: one `Recording … Idle` sequence and the transcript in TextEdit, with no synthetic `--press` flag in the log. |
+| `e2e_hold_release` | #90, M1.6 #4 | A real Right Option hold (down, 1.5 s, up) posted from Terminal.app: one `Recording … Idle` sequence and the transcript in TextEdit, with no synthetic `--press` flag in the log. However it ends, the key is released (see "Key cleanup"). |
 | `e2e_held_at_launch` | #90, M1.6 B1 | Right Option down, then the app starts and stays up 5 s with the key still held: no Recording. The key goes up: still nothing. Then a normal hold: exactly one `Recording … Idle` sequence. |
+
+## Key cleanup
+
+A scenario that posts a real key-down (`e2e_hold_release`, `e2e_held_at_launch`)
+must not leave Right Option held in the VM, where it would spoil later hotkey
+tests and `--no-reset` runs. Three layers:
+
+- `arm_key_cleanup <scenario>` (first thing in the scenario) sets an EXIT
+  trap, with INT, TERM and HUP routed to `exit`. However the scenario dies
+  (a failed command under `set -e`, `die`, Ctrl-C), the trap saves the app's
+  log and a screenshot, quits any Terminal job still running, quits the app,
+  posts Right Option up (an up with no down does nothing), closes TextEdit's
+  documents and Terminal, and exits with the scenario's own status. A normal
+  end does the same through `key_scenario_end`.
+- `real_key_hold`'s Terminal job has its own EXIT/INT/TERM/HUP trap that
+  posts the up if the down was posted, so a job cut short releases the key
+  with no help from the host.
+- `vm_terminal` kills a job that doesn't finish within
+  `VM_TERMINAL_TIMEOUT` seconds (default 30), so it can't go on posting events;
+  the kill reaches the job's trap.
+
+To see it work, force a failure and then ask the VM what it thinks:
+
+```sh
+E2E_INJECT_FAILURE=after_key_down tests/e2e/run.sh --no-build --no-reset e2e_held_at_launch
+E2E_INJECT_FAILURE=mid_hold       tests/e2e/run.sh --no-build --no-reset e2e_hold_release
+ssh -i ~/.ssh/dictation_vm_ed25519 -o HostKeyAlias=dictation-vm lume@$(lume get dictation-vm -f json | jq -r '.[0].ipAddress') \
+  osascript -l JavaScript '~/e2e-fixtures/right-option.js' state    # right option up
+```
+
+`after_key_down` dies right after the down is posted (a failed launch);
+`mid_hold` dies inside the hold job between its down and up.
 
 ## Requirements on the host
 
@@ -149,5 +188,7 @@ Put a function in `tests/e2e/scenarios/<name>.sh`, named after the file,
 using the helpers in `lib.sh` (`launch`, `wait_for_log`, `logged_phases`,
 `app_count`, `expect`, `collect_log`) and, for full-app scenarios,
 `lib_full.sh` (`launch_full`, `textedit_fresh`, `textedit_trimmed`,
-`set_clipboard`, `clipboard`, `dictate_once`, `real_key_hold`). Add it to
-`ALL_SCENARIOS` in `run.sh`.
+`set_clipboard`, `clipboard`, `dictate_once`, `real_key_hold`). A scenario that
+posts a real key-down calls `arm_key_cleanup` first and `key_scenario_end` last.
+Add it to `ALL_SCENARIOS` in `run.sh`, and to `OPTIONAL_SCENARIOS` if it may
+skip without failing the run.

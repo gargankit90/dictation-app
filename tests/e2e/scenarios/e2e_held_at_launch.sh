@@ -1,11 +1,16 @@
 # Issue #90, M1.6 B1: Right Option is already down when the app starts. The
 # app must not start recording for a key it never saw go down, nor do
 # anything when that key comes up; a normal hold afterwards works. The
-# events are posted by fixtures/right-option.js run in Terminal.app.
+# events are posted by fixtures/right-option.js run in Terminal.app. However
+# it ends (even if the launch fails with the key down), the key is released
+# and the app quit (arm_key_cleanup, lib_full.sh).
 
 e2e_held_at_launch() {
+  # Before the first key event, so there is no way to leave the key down.
+  arm_key_cleanup e2e_held_at_launch
   fresh_app_state
   expect "Right Option goes down" test "$(real_key down)" = "posted down"
+  inject_failure after_key_down
   launch_full
   expect "the app starts and logs ready" wait_for_log 'INFO .*ready'
   expect "the real hotkey is on (Accessibility granted to the app)" hotkey_is_on
@@ -32,6 +37,5 @@ posted up"
   expect "the transcript is in TextEdit" test "$(textedit_trimmed)" = "$MOCK_TEXT"
 
   collect_log e2e_held_at_launch
-  textedit_close
-  close_terminal
+  key_scenario_end
 }
