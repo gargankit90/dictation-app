@@ -29,13 +29,16 @@ front_watch_stop() {
 }
 
 # The overlay window is on screen: cua-driver lists an on-screen window of
-# the app titled "overlay".
+# the app that is the overlay (titled "overlay", or its 420x72 size if the
+# title isn't reported).
 overlay_on_screen() {
   local windows
-  windows=$(vm "~/.local/bin/cua-driver call list_windows '{\"app\":\"$APP_NAME\"}'" 2>/dev/null) || return 1
-  log "  app windows: $(printf '%s' "$windows" | jq -c '[.windows[]? | {title, is_on_screen}]' 2>/dev/null)"
-  printf '%s' "$windows" |
-    jq -e '[.windows[]? | select(.title == "overlay" and (.is_on_screen // false))] | length > 0' >/dev/null
+  windows=$(vm "~/.local/bin/cua-driver call list_windows '{}'" 2>/dev/null) || return 1
+  windows=$(printf '%s' "$windows" | jq -c --arg app "$APP_NAME" \
+    '[.windows[]? | select(.app_name == $app) | {title, is_on_screen, bounds}]') || return 1
+  log "  app windows: $windows"
+  printf '%s' "$windows" | jq -e '[.[] | select(.is_on_screen == true and
+    (.title == "overlay" or (.bounds.width == 420 and .bounds.height == 72)))] | length > 0' >/dev/null
 }
 
 e2e_overlay_focus() {
