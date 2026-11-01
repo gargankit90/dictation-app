@@ -2,39 +2,142 @@
 # run.sh with the scenarios (every scenarios/*.sh), but defines no scenario.
 #
 # The app reads its API key from the login keychain, so a test puts one
-# there, the way the Settings window would, and removes it again. The key
-# travels to the VM on the stdin of `security -i`, so it never appears in a
-# process list on the host or in the VM, or in any file or log. It stays in
-# the VM's keychain only while a scenario runs (and the VM is thrown away at
-# the next reset anyway).
+# there, the way the Settings window would, and removes it again.
+#
+# How the secrets are kept out of sight:
+#
+# - The key (and the VM user's password, below) travel to the VM on the stdin
+#   of ssh, never in an argument, so neither is in a process list on the host
+#   or in the VM's ssh session, or in any file or log.
+# - Every function that expands one first turns shell tracing (`bash -x`,
+#   `set -x`) off and puts it back as it was when it is done, so a trace
+#   captured from a diagnostic run or CI never holds a secret either. The
+#   `{ set +x; } 2>/dev/null` form hides the trace of the `set +x` itself. A
+#   scenario must not expand $GROQ_API_KEY itself: it calls these functions,
+#   which read it from the environment.
+# - The key is removed again whenever the run ends, however it ends
+#   (groq_guard_start), and a removal that can't be verified is reported.
 
 GROQ_KEYCHAIN_SERVICE=com.dictationapp.desktop
 GROQ_KEYCHAIN_ACCOUNT=groq-api-key
 # The golden image's login keychain is locked in an ssh session (nobody typed
 # the password), and an unlock lasts only for the session that made it, so
 # every keychain command unlocks it first. The password is the throwaway VM
-# user's (`lume`, see the VM setup docs), not a secret.
-GROQ_KEYCHAIN_UNLOCK='security unlock-keychain -p lume "$HOME/Library/Keychains/login.keychain-db"'
+# user's (`lume`, see the VM setup docs); set VM_PASSWORD if yours differs.
+# It is sent as the first line of stdin and read by the VM's shell.
+GROQ_KEYCHAIN_FILE='$HOME/Library/Keychains/login.keychain-db'
+# Whether a key may be in the VM's keychain because this run put it there.
+GROQ_KEY_STORED=0
 
-# groq_key_store <key>: saves <key> as the Groq key in the VM's login
-# keychain. -A lets the app read it without the "allow access" prompt nobody
-# is there to click; -U replaces an earlier one.
+# groq_retrace <$- as saved before the set +x>: turns tracing back on if it
+# was on.
+groq_retrace() {
+  case $1 in
+    *x*) set -x ;;
+  esac
+}
+
+# True if GROQ_API_KEY is set and not empty.
+groq_key_present() {
+  local traced=$- present=1
+  { set +x; } 2>/dev/null
+  if [ -n "${GROQ_API_KEY:-}" ]; then present=0; fi
+  groq_retrace "$traced"
+  return "$present"
+}
+
+# groq_key_store [key]: saves <key> (default: $GROQ_API_KEY) as the Groq key
+# in the VM's login keychain. -A lets the app read it without the "allow
+# access" prompt nobody is there to click; -U replaces an earlier one.
 groq_key_store() {
+  local traced=$- status=0
+  { set +x; } 2>/dev/null
+  _groq_key_store "${1-${GROQ_API_KEY:-}}" || status=$?
+  groq_retrace "$traced"
+  return "$status"
+}
+
+# Tracing is off in here (see groq_key_store).
+_groq_key_store() {
   local key=$1 out
   # The key goes into a `security -i` command line, so it must be plain.
   case $key in
     '' | *[!A-Za-z0-9_-]*) die "the API key is empty or has characters the keychain command can't carry" ;;
   esac
+  # Set first: even a store that fails half way may have left a key.
+  GROQ_KEY_STORED=1
   if ! out=$(printf 'add-generic-password -a %s -s %s -w %s -A -U\n' \
     "$GROQ_KEYCHAIN_ACCOUNT" "$GROQ_KEYCHAIN_SERVICE" "$key" |
-    vm "$GROQ_KEYCHAIN_UNLOCK && security -i" 2>&1); then
+    _groq_vm_with_password "security -i" 2>&1); then
     die "could not store the key in the VM's keychain: ${out//"$key"/<key>}"
   fi
 }
 
-# Removes the Groq key from the VM's login keychain (none is fine).
+# _groq_vm_with_password <command>: runs <command> in the VM after unlocking
+# the login keychain there. The VM user's password is the first stdin line
+# (read into a variable by the VM's shell, not an argument); the rest of this
+# function's stdin goes on to <command>. Tracing must be off.
+_groq_vm_with_password() {
+  {
+    printf '%s\n' "${VM_PASSWORD:-lume}"
+    cat
+  } | vm "read -r pw && security unlock-keychain -p \"\$pw\" \"$GROQ_KEYCHAIN_FILE\" && unset pw && $1"
+}
+
+# Removes the Groq key from the VM's login keychain. No key there is fine;
+# anything else that goes wrong is reported (and fails), since then the key
+# may still be in the keychain.
 groq_key_remove() {
-  vm "$GROQ_KEYCHAIN_UNLOCK >/dev/null 2>&1; security delete-generic-password -a $(q "$GROQ_KEYCHAIN_ACCOUNT") -s $(q "$GROQ_KEYCHAIN_SERVICE") >/dev/null 2>&1; true"
+  local traced=$- status=0 out
+  { set +x; } 2>/dev/null
+  # `security` exits 44 (errSecItemNotFound) for an item that isn't there.
+  if out=$(_groq_vm_delete 2>&1); then
+    GROQ_KEY_STORED=0
+  else
+    status=1
+    log "  could not remove the key from the VM's keychain (is it still there?): ${out:-no output}"
+  fi
+  groq_retrace "$traced"
+  return "$status"
+}
+
+# Tracing must be off. Unlocks, then deletes the item; the password is the
+# only stdin line.
+_groq_vm_delete() {
+  printf '%s\n' "${VM_PASSWORD:-lume}" |
+    vm "read -r pw; security unlock-keychain -p \"\$pw\" \"$GROQ_KEYCHAIN_FILE\" >/dev/null 2>&1; unset pw; security delete-generic-password -a $(q "$GROQ_KEYCHAIN_ACCOUNT") -s $(q "$GROQ_KEYCHAIN_SERVICE") >/dev/null 2>&1; rc=\$?; if [ \$rc -eq 0 ] || [ \$rc -eq 44 ]; then exit 0; fi; echo \"security exited with status \$rc\"; exit 1"
+}
+
+# groq_guard_start: from here on, however the run ends (a failed command
+# under `set -e`, die, ^C, a TERM or HUP) the key is removed from the VM's
+# keychain on the way out, and the run's exit status is kept. Call it before
+# the first groq_key_store, and groq_guard_stop when the scenario is done.
+groq_guard_start() {
+  trap 'groq_guard_exit $?' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+}
+
+# Does nothing while a key may still be in the VM's keychain, so the run's
+# exit still tries to remove it.
+groq_guard_stop() {
+  if [ "$GROQ_KEY_STORED" = 1 ]; then
+    return 0
+  fi
+  trap - EXIT INT TERM HUP
+}
+
+groq_guard_exit() {
+  local status=$1
+  trap - EXIT
+  if [ "$GROQ_KEY_STORED" = 1 ]; then
+    log "cleaning up: removing the key from the VM's keychain"
+    if ! groq_key_remove; then
+      log "WARNING: the key may still be in the VM's keychain; reset the VM (tests/e2e/run.sh resets it) before anyone else uses it"
+    fi
+  fi
+  exit "$status"
 }
 
 # Opens an empty TextEdit document in front, to paste into. Needs the VM's
@@ -83,9 +186,14 @@ groq_log_lacks() {
 }
 
 # True if the app's log doesn't hold $GROQ_API_KEY. The key reaches grep
-# through a pipe (process substitution), not an argument or a file.
+# through a pipe (process substitution), not an argument or a file, with
+# tracing off.
 groq_log_lacks_key() {
-  ! app_log | grep -qF -f <(printf '%s' "$GROQ_API_KEY")
+  local traced=$- lacks=0
+  { set +x; } 2>/dev/null
+  if app_log | grep -qF -f <(printf '%s' "$GROQ_API_KEY"); then lacks=1; fi
+  groq_retrace "$traced"
+  return "$lacks"
 }
 
 # Waits up to 20 s for the log to show more than <count> of the lines <pattern>

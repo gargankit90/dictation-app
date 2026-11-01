@@ -11,6 +11,7 @@ E2E_BAD_KEY=gsk_invalid_test_key
 
 e2e_error_bad_key() {
   fresh_app_state
+  groq_guard_start
   groq_key_store "$E2E_BAD_KEY"
   groq_textedit_new
 
@@ -37,7 +38,7 @@ e2e_error_bad_key() {
   collect_log e2e_error_bad_key
 
   # The mock still works: restart on it and paste.
-  groq_key_remove
+  expect "the wrong key is removed from the VM's keychain" groq_key_remove
   fresh_app_state
   groq_textedit_new
   launch --debug-audio-file "$VM_TONE"
@@ -49,4 +50,5 @@ e2e_error_bad_key() {
   expect "the mock run goes through Inserting" \
     test "$phases" = "Recording Transcribing Inserting Idle"
   groq_textedit_quit
+  groq_guard_stop
 }

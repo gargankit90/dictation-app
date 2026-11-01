@@ -59,12 +59,24 @@ tests/e2e/run.sh e2e_error_bad_key                         # a wrong key; no key
 How the key reaches the VM: the app reads it from the login keychain, the
 way a user's Settings window leaves it, so the test does the same in the VM
 (`groq_key_store` in `scenarios/_groq_helpers.sh`) and deletes it right after
-the dictation (`groq_key_remove`; the VM is thrown away at the next reset
-anyway). The key is sent on the stdin of `security -i`, so it is never in a
-process list (host or VM), a file, the app's log or a report; the scenario
-also checks that the app's log doesn't hold it. There is no environment
-variable the app reads, so a release and a debug build have the same one way
-to get a key. Without `GROQ_API_KEY` the scenario is skipped, not failed.
+the dictation (`groq_key_remove`). The key is sent on the stdin of
+`security -i`, so it is never in a process list (host or VM), a file, the
+app's log or a report; the scenario also checks that the app's log doesn't
+hold it. The helpers turn `bash -x` tracing off while they handle the key
+(and put it back), so a trace of a run doesn't hold it either; a scenario
+never expands `$GROQ_API_KEY` itself. The key is removed again however the
+run ends (`groq_guard_start`: an EXIT/INT/TERM/HUP trap that keeps the run's
+exit status), and a removal that fails is reported as a failure with a
+warning that the key may still be in the VM's keychain; reset the VM then.
+`tests/e2e/test-key-handling.sh` (part of the gate, no VM needed) checks all
+of this with a made-up key and a stubbed `vm`.
+
+The golden image's login keychain is locked in an ssh session, so every
+keychain command unlocks it first with the VM user's password: `lume`, the
+throwaway VM user's, or `VM_PASSWORD` if you set it. It travels on stdin too
+and is never logged. There is no environment variable the app reads, so a
+release and a debug build have the same one way to get a key. Without
+`GROQ_API_KEY` the scenario is skipped, not failed.
 
 The paste is read back from TextEdit with `osascript`, so these two need the
 golden image to have Accessibility granted to the app and Automation allowed
