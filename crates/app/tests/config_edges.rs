@@ -117,3 +117,86 @@ fn bad_settings_values_are_rejected_and_leave_the_old_file_alone() {
     assert_eq!(std::fs::read_to_string(config.path()).unwrap(), before);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+fn leftovers(d: &std::path::Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(d)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    v.sort();
+    v
+}
+
+/// Run 2 stress: 16 threads x 100 saves of wildly different lengths through one
+/// `Arc<Config>`, while a reader loads continuously. No save errors, every read
+/// parses to one of the saved values, and no temp files remain.
+#[test]
+fn stress_concurrent_saves_with_a_concurrent_reader() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    const THREADS: usize = 16;
+    let d = dir("stress");
+    let config = Arc::new(Config::new(&d, MemSecretStore::default()));
+    let variant = |t: usize| Settings {
+        model: "m".repeat(1 + t * 37 % 100),
+        ..Settings::default()
+    };
+    config.save_settings(&variant(0)).unwrap();
+    let done = Arc::new(AtomicBool::new(false));
+    let reader = {
+        let (config, done) = (config.clone(), done.clone());
+        std::thread::spawn(move || {
+            let mut reads = 0u32;
+            while !done.load(Ordering::Relaxed) {
+                let s = config.settings().expect("a read never sees a torn file");
+                assert!((0..THREADS).any(|t| s == variant(t)));
+                reads += 1;
+            }
+            reads
+        })
+    };
+    let writers: Vec<_> = (0..THREADS)
+        .map(|t| {
+            let config = config.clone();
+            std::thread::spawn(move || {
+                for _ in 0..100 {
+                    config.save_settings(&variant(t)).unwrap();
+                }
+            })
+        })
+        .collect();
+    for w in writers {
+        w.join().unwrap();
+    }
+    done.store(true, Ordering::Relaxed);
+    assert!(reader.join().unwrap() > 0);
+    let s = config.settings().unwrap();
+    assert!((0..THREADS).any(|t| s == variant(t)));
+    assert_eq!(leftovers(&d).len(), 1);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// A save into a read-only directory fails with an error and leaves nothing behind.
+#[cfg(unix)]
+#[test]
+fn save_into_a_read_only_directory_fails_cleanly() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = dir("ro");
+    let config = Config::new(&d, MemSecretStore::default());
+    config.save_settings(&Settings::default()).unwrap();
+    let before = std::fs::read_to_string(config.path()).unwrap();
+    let names = leftovers(&d);
+    std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let probe = std::fs::File::create(d.join("probe")).is_ok(); // root ignores modes
+    let result = config.save_settings(&Settings {
+        model: "other-model".into(),
+        ..Settings::default()
+    });
+    std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if !probe {
+        assert!(result.is_err(), "save into a read-only dir must error");
+        assert_eq!(std::fs::read_to_string(config.path()).unwrap(), before);
+        assert_eq!(leftovers(&d), names);
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}
