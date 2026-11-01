@@ -14,12 +14,18 @@
 //! interaction, denied, timed out" all become a clear message at dictation
 //! time ([`TranscribeError::KeychainUnavailable`]), never a hang.
 //!
+//! A read that times out can't be cancelled, so [`KeyReads`] allows one read
+//! in flight at a time for the whole app: later rebuilds wait on it (each for
+//! its own timeout) instead of starting reads of their own, and a read that
+//! was started before the last save is not trusted for the rebuild after it.
+//! A locked keychain therefore costs one parked thread, not one per save.
+//!
 //! `--transcriber mock` pins the mock engine: [`LiveEngine::fixed`] never
 //! rebuilds, so saving settings in a test run can't swap in a real provider.
 
-use std::sync::Arc;
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::time::Duration;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use dictation_core::settings::{Provider, Settings};
 use dictation_pipeline::config::{Config, ConfigError};
@@ -48,6 +54,8 @@ pub struct LiveEngine {
     base_url: Option<String>,
     /// How long one keychain read may take.
     key_timeout: Duration,
+    /// The one keychain read allowed in flight, shared by every clone.
+    reads: KeyReads,
 }
 
 impl LiveEngine {
@@ -58,6 +66,7 @@ impl LiveEngine {
             transcribers: Some(transcribers),
             base_url: None,
             key_timeout: KEY_READ_TIMEOUT,
+            reads: KeyReads::default(),
         }
     }
 
@@ -68,6 +77,7 @@ impl LiveEngine {
             transcribers: None,
             base_url: None,
             key_timeout: KEY_READ_TIMEOUT,
+            reads: KeyReads::default(),
         }
     }
 
@@ -98,8 +108,14 @@ impl LiveEngine {
         let Some(transcribers) = &self.transcribers else {
             return;
         };
-        transcribers
-            .update(|| engine_from_config(config, self.base_url.as_deref(), self.key_timeout));
+        transcribers.update(|| {
+            engine_from_config(
+                config,
+                self.base_url.as_deref(),
+                &self.reads,
+                self.key_timeout,
+            )
+        });
         tracing::info!(engine = transcribers.name(), "engine rebuilt");
     }
 
@@ -124,12 +140,14 @@ impl LiveEngine {
 /// Anything that stops one being built becomes [`Engine::Unavailable`], so
 /// dictation reports it.
 ///
-/// The keychain is read on a thread of its own and given `key_timeout`; if
-/// it hasn't answered by then the engine says the key couldn't be read (the
-/// stuck read is abandoned, and its answer, if one ever comes, ignored).
+/// The keychain is read through `reads` and given `key_timeout`; if it
+/// hasn't answered by then the engine says the key couldn't be read. The
+/// stuck read isn't cancelled (it can't be), but it stays the only one:
+/// see [`KeyReads`].
 pub fn engine_from_config<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     base_url: Option<&str>,
+    reads: &KeyReads,
     key_timeout: Duration,
 ) -> Engine {
     let settings = match config.settings() {
@@ -141,7 +159,7 @@ pub fn engine_from_config<S: SecretStore + 'static>(
             )));
         }
     };
-    let key = read_key(config, settings.provider, key_timeout);
+    let key = reads.read(config, settings.provider, key_timeout);
     if let Err(error) = &key {
         // The text never holds a key.
         tracing::warn!(%error, "could not read the API key from the keychain");
@@ -153,39 +171,152 @@ pub fn engine_from_config<S: SecretStore + 'static>(
     }
 }
 
-/// `provider`'s key from the keychain, read on its own thread so a read that
-/// never returns (a locked keychain waiting for a person) costs `timeout`
-/// and no more.
-fn read_key<S: SecretStore + 'static>(
-    config: &Arc<Config<S>>,
+type KeyOutcome = Result<Option<Secret>, SecretError>;
+
+/// Keychain reads with at most one in flight, app-wide.
+///
+/// A keychain read that never returns (a locked keychain waiting for a
+/// person) can't be cancelled; giving up on it only stops waiting. Without a
+/// bound, every settings save would start another read that parks on the
+/// keychain too. So a request first looks for the read already in flight:
+///
+/// - one that is fresh (same provider, started after the last
+///   [`invalidate`](Self::invalidate)) is waited on and its answer shared;
+/// - one that is stale (the provider changed, or a save happened since it
+///   began, so its answer may be the old key) is waited on to finish, within
+///   the same deadline, and then a new read starts.
+///
+/// Either way the waiter's deadline is its own timeout from the call, so a
+/// stuck read costs each rebuild one timeout and no thread.
+#[derive(Clone, Default)]
+pub struct KeyReads {
+    state: Arc<Mutex<ReadState>>,
+}
+
+#[derive(Default)]
+struct ReadState {
+    /// Bumped by every save; a read started before it is stale after it.
+    generation: u64,
+    /// The read whose thread is still running, if any.
+    in_flight: Option<Arc<Read>>,
+}
+
+/// One keychain read: what it asked for and, once it finishes, the answer.
+struct Read {
     provider: Provider,
-    timeout: Duration,
-) -> Result<Option<Secret>, SecretError> {
-    let (send, receive) = mpsc::channel();
-    let reader = Arc::clone(config);
-    let spawned = std::thread::Builder::new()
-        .name("keychain-read".to_owned())
-        .spawn(move || {
-            // The receiver is gone if we gave up; nobody wants the answer then.
-            let _ = send.send(reader.api_key(provider));
-        });
-    if let Err(error) = spawned {
-        return Err(SecretError::Store(format!(
-            "could not start the keychain read: {error}"
-        )));
+    generation: u64,
+    outcome: Mutex<Option<KeyOutcome>>,
+    finished: Condvar,
+}
+
+impl Read {
+    /// The answer, or `None` if `deadline` passes first.
+    fn wait(&self, deadline: Instant) -> Option<KeyOutcome> {
+        let mut outcome = lock(&self.outcome);
+        loop {
+            if let Some(answer) = &*outcome {
+                return Some(answer.clone());
+            }
+            let left = deadline.checked_duration_since(Instant::now())?;
+            outcome = self
+                .finished
+                .wait_timeout(outcome, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
     }
-    match receive.recv_timeout(timeout) {
-        Ok(Ok(key)) => Ok(key),
-        Ok(Err(ConfigError::Secret(error))) => Err(error),
-        // `api_key` only fails in the keychain; ConfigError never holds a key.
-        Ok(Err(other)) => Err(SecretError::Store(other.to_string())),
-        Err(RecvTimeoutError::Timeout) => Err(SecretError::Store(format!(
-            "no answer from the keychain after {} s (locked, or waiting for access to be allowed)",
-            timeout.as_secs()
-        ))),
-        Err(RecvTimeoutError::Disconnected) => Err(SecretError::Store(
-            "the keychain read stopped unexpectedly".to_owned(),
-        )),
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl KeyReads {
+    /// Marks every read in flight as stale: call it after a save, before the
+    /// rebuild that should see what was saved.
+    pub fn invalidate(&self) {
+        lock(&self.state).generation += 1;
+    }
+
+    /// `provider`'s key from the keychain, waiting at most `timeout` (from
+    /// now) for it.
+    fn read<S: SecretStore + 'static>(
+        &self,
+        config: &Arc<Config<S>>,
+        provider: Provider,
+        timeout: Duration,
+    ) -> KeyOutcome {
+        let deadline = Instant::now() + timeout;
+        let wanted = lock(&self.state).generation;
+        loop {
+            let read = match self.in_flight_or_start(config, provider) {
+                Ok(read) => read,
+                Err(error) => return Err(error),
+            };
+            let Some(answer) = read.wait(deadline) else {
+                return Err(SecretError::Store(format!(
+                    "no answer from the keychain after {} s (locked, or waiting for access to be allowed)",
+                    timeout.as_secs()
+                )));
+            };
+            if read.provider == provider && read.generation >= wanted {
+                return answer;
+            }
+            // A stale answer: it's finished now, so the next pass starts a
+            // read of its own (the only one in flight).
+        }
+    }
+
+    /// The read in flight, or a new one if there is none.
+    fn in_flight_or_start<S: SecretStore + 'static>(
+        &self,
+        config: &Arc<Config<S>>,
+        provider: Provider,
+    ) -> Result<Arc<Read>, SecretError> {
+        let mut state = lock(&self.state);
+        if let Some(read) = &state.in_flight {
+            return Ok(Arc::clone(read));
+        }
+        let read = Arc::new(Read {
+            provider,
+            generation: state.generation,
+            outcome: Mutex::new(None),
+            finished: Condvar::new(),
+        });
+        let (reader, shared, task) = (
+            Arc::clone(config),
+            Arc::clone(&self.state),
+            Arc::clone(&read),
+        );
+        std::thread::Builder::new()
+            .name("keychain-read".to_owned())
+            .spawn(move || {
+                let answer = catch_unwind(AssertUnwindSafe(|| reader.api_key(provider)))
+                    .map_or_else(
+                        |_| {
+                            Err(SecretError::Store(
+                                "the keychain read stopped unexpectedly".to_owned(),
+                            ))
+                        },
+                        |result| match result {
+                            Ok(key) => Ok(key),
+                            Err(ConfigError::Secret(error)) => Err(error),
+                            // `api_key` only fails in the keychain; ConfigError never holds a key.
+                            Err(other) => Err(SecretError::Store(other.to_string())),
+                        },
+                    );
+                // Done and no longer in flight in one step, so nobody sees a
+                // finished read as still running.
+                let mut state = lock(&shared);
+                state.in_flight = None;
+                *lock(&task.outcome) = Some(answer);
+                task.finished.notify_all();
+            })
+            .map_err(|error| {
+                SecretError::Store(format!("could not start the keychain read: {error}"))
+            })?;
+        state.in_flight = Some(Arc::clone(&read));
+        Ok(read)
     }
 }
 
@@ -213,12 +344,15 @@ pub fn changed<S: SecretStore + 'static, T>(
     change: impl FnOnce(&Config<S>) -> Result<T, ConfigError>,
 ) -> Result<T, ConfigError> {
     let result = change(config)?;
+    // A keychain read already in flight may have the old key.
+    live.reads.invalidate();
     live.rebuild(config);
     Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Condvar, Mutex};
     use std::time::Duration;
 
     use dictation_core::coordinator::Phase::{Idle, Inserting, Recording, Transcribing};
@@ -307,6 +441,7 @@ mod tests {
             let live = LiveEngine::follow(Transcribers::new(engine_from_config(
                 &config,
                 Some(&server.uri()),
+                &KeyReads::default(),
                 WAIT,
             )))
             .at(&server.uri());
@@ -430,7 +565,7 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let engine = engine_from_config(&config, Some(&server.uri()), WAIT);
+        let engine = engine_from_config(&config, Some(&server.uri()), &KeyReads::default(), WAIT);
         assert_eq!(engine.name(), "remote");
         let audio = dictation_ports::Audio {
             sample_rate: 16_000,
@@ -507,6 +642,7 @@ mod tests {
             transcribers: rig.live.transcribers.clone(),
             base_url: Some(format!("http://127.0.0.1:{port}")),
             key_timeout: WAIT,
+            reads: rig.live.reads.clone(),
         };
         changed(&rig.config, &dead, |c| c.set_api_key(Provider::Groq, KEY)).unwrap();
         assert_eq!(
@@ -715,9 +851,204 @@ mod tests {
         secrets.set_blocked(true);
         let config = Arc::new(Config::new(dir.0.join("config"), secrets.clone()));
         let started = std::time::Instant::now();
-        let engine = engine_from_config(&config, None, Duration::from_millis(100));
+        let engine = engine_from_config(
+            &config,
+            None,
+            &KeyReads::default(),
+            Duration::from_millis(100),
+        );
         assert!(started.elapsed() < Duration::from_secs(5));
         assert_eq!(engine.name(), "unavailable");
         secrets.set_blocked(false); // lets the abandoned read thread end
+    }
+
+    // ---- one keychain read in flight (R3) ----
+
+    /// Runs `f` on `n` threads at once and waits for all of them.
+    fn at_once(n: usize, f: impl Fn(usize) + Send + Sync + 'static) {
+        let f = Arc::new(f);
+        let threads: Vec<_> = (0..n)
+            .map(|i| {
+                let f = Arc::clone(&f);
+                std::thread::spawn(move || f(i))
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_blocked_keychain_gets_one_reader_however_many_rebuilds_and_dictations() {
+        let mut rig = rig_at_startup().await;
+        let before = rig.secrets.get_calls(); // the rig's own startup read
+        rig.secrets.set_blocked(true);
+        rig.live = rig.live.clone().with_key_timeout(Duration::from_millis(30));
+
+        // Startup's read, then Settings saves and dictations on top of it.
+        rig.live.rebuild(&rig.config);
+        for _ in 0..5 {
+            changed(&rig.config, &rig.live, |c| {
+                c.save_settings(&Settings::default())
+            })
+            .unwrap();
+            let reason = message(&rig.dictate().await);
+            assert!(reason.starts_with("Couldn't read your API key from the Keychain"));
+        }
+        // And a burst of rebuilds at the same time.
+        let (live, config) = (rig.live.clone(), rig.config.clone());
+        at_once(8, move |_| live.rebuild(&config));
+        assert_eq!(
+            rig.secrets.get_calls() - before,
+            1,
+            "every rebuild started its own keychain read"
+        );
+
+        // The keychain answers: the next rebuild gets the key, no restart.
+        rig.secrets.set_blocked(false);
+        rig.live = rig.live.clone().with_key_timeout(WAIT);
+        rig.live.rebuild(&rig.config);
+        assert_eq!(rig.dictate().await, pasted());
+        assert!(
+            rig.secrets.get_calls() - before <= 2,
+            "the unblocked rebuild reads once"
+        );
+        rig.finish().await;
+    }
+
+    #[tokio::test]
+    async fn requests_made_while_a_read_is_pending_share_its_answer() {
+        let rig = rig_at_startup().await;
+        let before = rig.secrets.get_calls();
+        rig.secrets.set_blocked(true);
+        let (reads, config) = (KeyReads::default(), rig.config.clone());
+        let answers = Arc::new(Mutex::new(Vec::new()));
+        let waiters = {
+            let answers = Arc::clone(&answers);
+            std::thread::spawn(move || {
+                at_once(6, move |_| {
+                    let answer = reads.read(&config, Provider::Groq, WAIT);
+                    answers.lock().unwrap().push(answer);
+                });
+            })
+        };
+        while rig.secrets.get_calls() == before {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!waiters.is_finished(), "waiters returned while blocked");
+
+        rig.secrets.set_blocked(false);
+        waiters.join().unwrap();
+        assert_eq!(
+            rig.secrets.get_calls() - before,
+            1,
+            "one read served every waiter"
+        );
+        let answers = answers.lock().unwrap();
+        assert_eq!(answers.len(), 6);
+        assert!(answers.iter().all(|a| *a == Ok(Some(Secret::new(KEY)))));
+        drop(answers);
+        rig.finish().await;
+    }
+
+    /// A store whose `get` reads the value, then waits to hand it over, like
+    /// a keychain that was asked before a save and answers after it.
+    #[derive(Clone)]
+    struct SlowStore {
+        inner: MemSecretStore,
+        gate: Arc<(Mutex<bool>, Condvar)>,
+        gets: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl SlowStore {
+        fn open(&self, open: bool) {
+            *self.gate.0.lock().unwrap() = open;
+            self.gate.1.notify_all();
+        }
+    }
+
+    impl SecretStore for SlowStore {
+        fn get(&self, name: &str) -> Result<Option<Secret>, dictation_ports::SecretError> {
+            let value = self.inner.get(name);
+            self.gets.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut open = self.gate.0.lock().unwrap();
+            while !*open {
+                open = self.gate.1.wait(open).unwrap();
+            }
+            value
+        }
+
+        fn set(&self, name: &str, secret: &Secret) -> Result<(), dictation_ports::SecretError> {
+            self.inner.set(name, secret)
+        }
+
+        fn delete(&self, name: &str) -> Result<(), dictation_ports::SecretError> {
+            self.inner.delete(name)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_key_saved_while_a_read_is_pending_beats_the_stale_answer() {
+        let dir = TempDir::new("stale");
+        let store = SlowStore {
+            inner: MemSecretStore::new(),
+            gate: Arc::new((Mutex::new(false), Condvar::new())),
+            gets: Arc::default(),
+        };
+        let config = Arc::new(Config::new(dir.0.join("config"), store.clone()));
+        config.set_api_key(Provider::Groq, WRONG_KEY).unwrap();
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/audio/transcriptions"))
+            .and(header("authorization", format!("Bearer {KEY}").as_str()))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "text": "fresh" })),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/audio/transcriptions"))
+            .respond_with(ResponseTemplate::new(401))
+            .with_priority(10)
+            .mount(&server)
+            .await;
+        let transcribers = Transcribers::new(starting());
+        let live = LiveEngine::follow(transcribers.clone()).at(&server.uri());
+
+        // Startup's read has the old key in hand, but hasn't answered.
+        let startup = live.rebuild_in_background(config.clone()).unwrap();
+        while store.gets.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // The user saves the right key meanwhile; its rebuild queues behind
+        // the startup one.
+        let saved = {
+            let (config, live) = (config.clone(), live.clone());
+            std::thread::spawn(move || {
+                changed(&config, &live, |c| c.set_api_key(Provider::Groq, KEY)).unwrap();
+            })
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        store.open(true); // the stale answer arrives
+        startup.join().unwrap();
+        saved.join().unwrap();
+
+        let audio = dictation_ports::Audio {
+            sample_rate: 16_000,
+            samples: vec![0.1; 1_600],
+        };
+        assert_eq!(
+            dictation_ports::Transcriber::transcribe(&transcribers, &audio)
+                .await
+                .unwrap(),
+            "fresh",
+            "the engine kept the stale key"
+        );
+        assert!(
+            store.gets.load(std::sync::atomic::Ordering::SeqCst) <= 2,
+            "a stale answer costs one more read, never a parallel one"
+        );
     }
 }
