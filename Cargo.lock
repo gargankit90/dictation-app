@@ -985,6 +985,7 @@ dependencies = [
  "keyring",
  "objc2",
  "objc2-av-foundation",
+ "rubato",
  "tracing",
 ]
 

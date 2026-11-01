@@ -46,6 +46,9 @@ wiremock = "0.6.5"
 proptest = "1.12.0"
 handy-keys = "0.3.4"
 handy-recorder = "=0.1.0"
+# The resampler handy-recorder uses, pinned to its version, to compute its
+# output delay (platform::audio::macos).
+rubato = "=5.0.0"
 block2 = "0.6.2"
 objc2 = "0.6.5"
 objc2-av-foundation = { version = "0.3.2", default-features = false }

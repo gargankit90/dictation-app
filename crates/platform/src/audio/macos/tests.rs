@@ -124,24 +124,68 @@ fn input_frames_per_output_sample(samples: &[f32]) -> f64 {
     (last - first) * f64::from(RAMP_FRAMES) / span
 }
 
+/// Records exactly `input_frames` frames of the ramp, starting at frame 0
+/// on every channel, in 10 ms blocks, then stops.
+fn record_exact(
+    device: &Device,
+    mic: &mut MacMicrophone,
+    sample_rate: u32,
+    channels: u16,
+    input_frames: usize,
+) -> Audio {
+    mic.start().unwrap();
+    let block = sample_rate as usize / 100;
+    let mut frame = 0;
+    while frame < input_frames {
+        let frames = block.min(input_frames - frame);
+        #[allow(clippy::cast_precision_loss, reason = "test ramp")]
+        let samples: Vec<f32> = (frame..frame + frames)
+            .flat_map(|f| std::iter::repeat_n(f as f32 / RAMP_FRAMES, usize::from(channels)))
+            .collect();
+        assert!(device.fake.push(&samples), "the stream took the block");
+        frame += frames;
+        thread::sleep(Duration::from_millis(1));
+    }
+    mic.stop().unwrap()
+}
+
+/// M2.3 criterion 4 (#77 M2): a clip is as long as its input, counting the
+/// valid frames the collector kept, and starts with the first input frame.
 #[test]
-fn criterion_2_48_khz_is_resampled_to_16_khz_keeping_the_duration() {
-    let device = device(48_000, 1);
-    let mut mic = device.microphone(Permission::Granted, Duration::ZERO);
-    let _pump = device.pump(48_000, 1, false);
+fn m2_3_criterion_4_the_clip_is_as_long_as_the_input() {
+    for (sample_rate, channels) in [(48_000, 1), (44_100, 2)] {
+        for millis in [200, 1_000] {
+            let device = device(sample_rate, channels);
+            let mut mic = device.microphone(Permission::Granted, Duration::ZERO);
+            let input_frames = sample_rate as usize * millis / 1_000;
 
-    let audio = record(&mut mic, 16_000);
+            let audio = record_exact(&device, &mut mic, sample_rate, channels, input_frames);
 
-    assert_eq!(audio.sample_rate, 16_000);
-    // Each output sample covers three input frames: a second of output is
-    // a second of input.
-    let ratio = input_frames_per_output_sample(&audio.samples) / 3.0;
-    assert!((ratio - 1.0).abs() < 0.01, "duration ratio {ratio}");
-    assert!(audio.duration() >= Duration::from_secs(1));
+            let case = format!("{sample_rate} Hz x{channels}, {millis} ms");
+            assert_eq!(audio.sample_rate, 16_000, "{case}");
+            let expected = input_frames * 16_000 / sample_rate as usize;
+            let actual = audio.samples.len();
+            assert!(
+                actual.abs_diff(expected) * 100 <= expected,
+                "{case}: {actual} frames, expected {expected} within 1%"
+            );
+            // Aligned: output frame k holds input frame k * rate / 16 kHz,
+            // so the leading delay is gone, not just shortened.
+            for k in [expected / 4, expected / 2, expected * 3 / 4] {
+                let input_frame = f64::from(audio.samples[k]) * f64::from(RAMP_FRAMES);
+                #[allow(clippy::cast_precision_loss, reason = "a few thousand frames")]
+                let want = k as f64 * f64::from(sample_rate) / 16_000.0;
+                assert!(
+                    (input_frame - want).abs() < 2.0,
+                    "{case}: output frame {k} holds input frame {input_frame}, expected {want}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
-fn criterion_2_44_1_khz_stereo_is_resampled_and_mixed_to_mono() {
+fn m2_2_criterion_2_44_1_khz_stereo_is_resampled_and_mixed_to_mono() {
     let device = device(44_100, 2);
     let mut mic = device.microphone(Permission::Granted, Duration::ZERO);
     // The ramp on the left channel only, doubled: the mono mix is the ramp.
@@ -151,7 +195,18 @@ fn criterion_2_44_1_khz_stereo_is_resampled_and_mixed_to_mono() {
 
     assert_eq!(audio.sample_rate, 16_000);
     let ratio = input_frames_per_output_sample(&audio.samples) / (44_100.0 / 16_000.0);
-    assert!((ratio - 1.0).abs() < 0.01, "duration ratio {ratio}");
+    assert!((ratio - 1.0).abs() < 0.01, "rate ratio {ratio}");
+}
+
+#[test]
+fn a_16_khz_device_needs_no_resampling_and_skips_nothing() {
+    assert_eq!(resampler_delay(16_000), 0);
+    assert!(resampler_delay(48_000) > 0);
+    let device = device(16_000, 1);
+    let mut mic = device.microphone(Permission::Granted, Duration::ZERO);
+    let audio = record_exact(&device, &mut mic, 16_000, 1, 3_200);
+    assert_eq!(audio.samples.len(), 3_200);
+    assert!(audio.samples[0].abs() < f32::EPSILON);
 }
 
 #[test]

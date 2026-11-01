@@ -76,6 +76,8 @@ pub struct Collector {
     first_audio: Option<Duration>,
     /// Frames collected so far, readable while recording (tests).
     frames: Arc<AtomicU64>,
+    /// Leading frames still to drop: the resampler's delay.
+    skip: usize,
 }
 
 impl Collector {
@@ -86,7 +88,14 @@ impl Collector {
             started,
             first_audio: None,
             frames,
+            skip: 0,
         }
+    }
+
+    /// Drops the first `frames` frames: the delay of `open`'s resampler.
+    fn skipping(mut self, open: &Open) -> Self {
+        self.skip = open.delay;
+        self
     }
 }
 
@@ -97,15 +106,49 @@ impl Sink for Collector {
         }
         // Mono: one sample per frame.
         let real = &chunk.samples[..chunk.valid_frames.min(chunk.samples.len())];
+        let skipped = self.skip.min(real.len());
+        self.skip -= skipped;
+        let real = &real[skipped..];
         self.samples.extend_from_slice(real);
         self.frames.fetch_add(real.len() as u64, Ordering::Relaxed);
     }
 }
 
-/// An open recorder and whether it has failed since it opened.
+/// handy-recorder's resampler chunk size, in input frames
+/// (`capture/resampler.rs`, `RESAMPLER_CHUNK_SIZE`).
+const RESAMPLER_CHUNK_FRAMES: usize = 1024;
+
+/// Leading frames the resampler adds before the first real output frame,
+/// at 16 kHz. handy-recorder delivers them (its `finish` keeps the tail, so
+/// a clip is `input * 16 kHz / rate + delay` frames long) but doesn't expose
+/// the figure, so this builds the same rubato resampler handy-recorder does
+/// (`FrameResampler::new`, pinned versions) and asks it. The adapter tests
+/// check the resulting clip length and alignment, so a change in either
+/// crate fails them.
+fn resampler_delay(device_rate: u32) -> usize {
+    use rubato::{Fft, FixedSync, Resampler, WindowFunction};
+    if device_rate == SAMPLE_RATE {
+        return 0;
+    }
+    Fft::<f32>::new_custom(
+        device_rate as usize,
+        SAMPLE_RATE as usize,
+        RESAMPLER_CHUNK_FRAMES,
+        1,
+        1,
+        WindowFunction::BlackmanHarris2,
+        FixedSync::Input,
+    )
+    .map_or(0, |resampler| resampler.output_delay())
+}
+
+/// An open recorder, whether it has failed since it opened, and its
+/// resampler's delay.
 struct Open {
     recorder: Recorder<Collector>,
     failed: Arc<AtomicBool>,
+    /// [`resampler_delay`] for the device's rate.
+    delay: usize,
 }
 
 impl Open {
@@ -217,14 +260,20 @@ impl MacMicrophone {
         let opened_at = Instant::now();
         let recorder = (self.open)(config(), handler).map_err(|error| audio_error(&error))?;
         let info = recorder.info();
+        let delay = resampler_delay(info.device_format.sample_rate);
         tracing::debug!(
             device = %info.device.name,
             device_rate = info.device_format.sample_rate,
             device_channels = info.device_format.channels,
+            resampler_delay = delay,
             open_ms = opened_at.elapsed().as_millis(),
             "microphone opened"
         );
-        Ok(Open { recorder, failed })
+        Ok(Open {
+            recorder,
+            failed,
+            delay,
+        })
     }
 
     /// Closes the device after [`WARM_FOR`] unless another recording starts
@@ -302,7 +351,7 @@ impl AudioSource for MacMicrophone {
             Some(open) => open,
             None => self.open_device()?,
         };
-        let open = match open.recorder.start(sink) {
+        let open = match open.recorder.start(sink.skipping(&open)) {
             Ok(()) => open,
             Err(StartError { error, sink }) if is_recorder_failure(error.kind()) => {
                 // Failed after the check above: one fresh try.
@@ -311,7 +360,7 @@ impl AudioSource for MacMicrophone {
                 let fresh = self.open_device()?;
                 fresh
                     .recorder
-                    .start(sink)
+                    .start(sink.skipping(&fresh))
                     .map_err(|start| audio_error(&start.error))?;
                 fresh
             }
