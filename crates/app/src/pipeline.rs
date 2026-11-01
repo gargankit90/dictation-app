@@ -1950,6 +1950,10 @@ mod audio_worker_tests {
             queue.push(Discard);
         }
         assert_eq!(kinds(&queue), ["discard"]);
+        // A discard right behind a discard adds nothing.
+        queue.push(Discard);
+        queue.push(Discard);
+        assert_eq!(kinds(&queue), ["discard"]);
         // Then a dictation that stops.
         let (reply, _captured) = oneshot::channel();
         queue.push(Start(100));
