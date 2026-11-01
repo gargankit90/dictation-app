@@ -111,11 +111,12 @@ where
     S: AsRef<str>,
 {
     let mut path = None;
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().peekable();
     while let Some(arg) = args.next() {
         let arg = arg.as_ref();
         if arg == DEBUG_AUDIO_FILE_FLAG {
-            if let Some(value) = args.next() {
+            // A flag after it is not its path (#73).
+            if let Some(value) = args.next_if(|next| !next.as_ref().starts_with("--")) {
                 path = Some(PathBuf::from(value.as_ref()));
             }
         } else if let Some(value) = arg
@@ -310,6 +311,11 @@ mod tests {
         );
         assert_eq!(debug_audio_file(["app", "--press"]), None);
         assert_eq!(debug_audio_file(["app", "--debug-audio-file"]), None);
+        assert_eq!(
+            debug_audio_file(["app", "--debug-audio-file", "--press"]),
+            None,
+            "a flag is not a path (#73)"
+        );
         assert_eq!(debug_audio_file(["app", "--debug-audio-file="]), None);
         assert_eq!(debug_audio_file(["--debug-audio-files=x.wav"]), None);
     }
