@@ -236,10 +236,10 @@ pub fn run() {
 
     let (hotkey, injector) = shell_hotkey();
 
-    // No Dock icon and no focus stolen at launch (#59).
-    let builder = dictation_platform::menu_bar::builder(tauri::Builder::default());
-    // The updater and the native dialogs (M5.4).
-    let builder = updater::plugins(builder);
+    // The updater and the native dialogs (M5.4), then no Dock icon and no
+    // focus stolen at launch (#59).
+    let builder =
+        dictation_platform::menu_bar::builder(updater::plugins(tauri::Builder::default()));
     #[allow(clippy::expect_used)] // No UI exists yet to report a startup failure to.
     let mut app = builder
         // The overlay's non-activating panel (M5.1).
