@@ -110,41 +110,99 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<MacOSLi
     })
 }
 
-/// Reconcile internally tracked modifiers against the actual CGEventFlags from the OS.
-///
-/// This corrects drift caused by missed events (e.g., tap disabled by timeout, system
-/// interruptions like Mission Control or screen lock). Should only be called for
-/// non-FlagsChanged events, where flags reflect the current state with no change pending.
-fn reconcile_modifiers(current: &mut Modifiers, flags: CGEventFlags) {
-    // If OS says a modifier group is NOT held, clear our tracked bits.
-    // This fixes "stuck modifier" from missed release events.
-    if !flags.contains(CGEventFlags::MaskControl) {
-        current.remove(Modifiers::CTRL_LEFT | Modifiers::CTRL_RIGHT);
-    }
-    if !flags.contains(CGEventFlags::MaskShift) {
-        current.remove(Modifiers::SHIFT_LEFT | Modifiers::SHIFT_RIGHT);
-    }
-    if !flags.contains(CGEventFlags::MaskCommand) {
-        current.remove(Modifiers::CMD_LEFT | Modifiers::CMD_RIGHT);
-    }
-    if !flags.contains(CGEventFlags::MaskAlternate) {
-        current.remove(Modifiers::OPT_LEFT | Modifiers::OPT_RIGHT);
-    }
+/// Patched (dictation-app): one modifier group of CGEventFlags with the
+/// device-dependent bits (IOKit's `NX_DEVICE*KEYMASK`) that tell its left
+/// and right keys apart. Hardware keyboard events carry them; events posted
+/// by other apps may not.
+struct ModifierGroup {
+    mask: CGEventFlags,
+    left_device: u64,
+    right_device: u64,
+    left: Modifiers,
+    right: Modifiers,
+}
 
-    // If OS says a modifier group IS held but we have no bits for it,
-    // we missed a press event. Default to left side as fallback.
-    if flags.contains(CGEventFlags::MaskControl) && !current.intersects(Modifiers::CTRL) {
-        current.insert(Modifiers::CTRL_LEFT);
+const MODIFIER_GROUPS: [ModifierGroup; 4] = [
+    ModifierGroup {
+        mask: CGEventFlags::MaskControl,
+        left_device: 0x0000_0001,
+        right_device: 0x0000_2000,
+        left: Modifiers::CTRL_LEFT,
+        right: Modifiers::CTRL_RIGHT,
+    },
+    ModifierGroup {
+        mask: CGEventFlags::MaskShift,
+        left_device: 0x0000_0002,
+        right_device: 0x0000_0004,
+        left: Modifiers::SHIFT_LEFT,
+        right: Modifiers::SHIFT_RIGHT,
+    },
+    ModifierGroup {
+        mask: CGEventFlags::MaskCommand,
+        left_device: 0x0000_0008,
+        right_device: 0x0000_0010,
+        left: Modifiers::CMD_LEFT,
+        right: Modifiers::CMD_RIGHT,
+    },
+    ModifierGroup {
+        mask: CGEventFlags::MaskAlternate,
+        left_device: 0x0000_0020,
+        right_device: 0x0000_0040,
+        left: Modifiers::OPT_LEFT,
+        right: Modifiers::OPT_RIGHT,
+    },
+];
+
+/// Patched (dictation-app): the side-specific modifiers held according to
+/// `flags`, which are authoritative. Per group: not in the flags, neither
+/// side; device bits present, exactly those sides; otherwise (no side
+/// information) the sides in `tracked`, or the left key if none.
+///
+/// Corrects drift from missed events (tap disabled, Mission Control, screen
+/// lock) and gives the snapshot when the listener starts. On FlagsChanged
+/// the flags already include the change, so this is the state after it.
+fn modifiers_from_flags(tracked: Modifiers, flags: CGEventFlags) -> Modifiers {
+    let mut held = Modifiers::empty();
+    for group in &MODIFIER_GROUPS {
+        let both = group.left | group.right;
+        if !flags.contains(group.mask) {
+            continue;
+        }
+        let left = flags.0 & group.left_device != 0;
+        let right = flags.0 & group.right_device != 0;
+        if left || right {
+            held.set(group.left, left);
+            held.set(group.right, right);
+        } else if tracked.intersects(both) {
+            held |= tracked & both;
+        } else {
+            held |= group.left;
+        }
     }
-    if flags.contains(CGEventFlags::MaskShift) && !current.intersects(Modifiers::SHIFT) {
-        current.insert(Modifiers::SHIFT_LEFT);
+    held
+}
+
+/// Patched (dictation-app): the tracked modifiers after a FlagsChanged event
+/// for the side-specific modifier key `changed`. The event's flags decide:
+/// a group absent from them is up whatever was tracked, so a key held when
+/// the listener started can't come out as a press when it is let go. Only
+/// when the group is held and the flags carry no side bits (some synthetic
+/// events) does the changed key toggle, as upstream always did.
+fn after_flags_changed(tracked: Modifiers, changed: Modifiers, flags: CGEventFlags) -> Modifiers {
+    let mut held = modifiers_from_flags(tracked, flags);
+    if let Some(group) = MODIFIER_GROUPS
+        .iter()
+        .find(|g| changed == g.left || changed == g.right)
+    {
+        let both = group.left | group.right;
+        let sided = flags.0 & (group.left_device | group.right_device) != 0;
+        if flags.contains(group.mask) && !sided {
+            held.remove(both);
+            held |= tracked & both;
+            held.toggle(changed);
+        }
     }
-    if flags.contains(CGEventFlags::MaskCommand) && !current.intersects(Modifiers::CMD) {
-        current.insert(Modifiers::CMD_LEFT);
-    }
-    if flags.contains(CGEventFlags::MaskAlternate) && !current.intersects(Modifiers::OPT) {
-        current.insert(Modifiers::OPT_LEFT);
-    }
+    held
 }
 
 /// Context handed to the event tap callback through the refcon pointer.
@@ -184,11 +242,16 @@ unsafe extern "C-unwind" fn event_tap_callback(
             CGEvent::tap_enable(tap.as_ref(), true);
         }
         // Reconcile modifiers: we may have missed events while disabled.
+        // Patched (dictation-app): and say so, since presses and releases
+        // may have been lost and no further event may come to show it.
         if let Ok(mut state) = ctx.state.lock() {
-            reconcile_modifiers(
-                &mut state.current_modifiers,
+            state.current_modifiers = modifiers_from_flags(
+                state.current_modifiers,
                 CGEventSource::flags_state(CGEventSourceStateID::CombinedSessionState),
             );
+            let _ = state
+                .event_sender
+                .send(KeyEvent::resync(state.current_modifiers));
         }
         return event.as_ptr();
     }
@@ -202,8 +265,14 @@ unsafe extern "C-unwind" fn event_tap_callback(
         // Reconcile tracked modifiers against OS flags for non-FlagsChanged events.
         // On FlagsChanged, flags reflect the state *after* the current change, so
         // reconciling would fight with the toggle logic.
+        // Patched (dictation-app): a correction means a modifier change was
+        // missed; report it before the event itself.
         if event_type != CGEventType::FlagsChanged {
-            reconcile_modifiers(&mut state.current_modifiers, flags);
+            let reconciled = modifiers_from_flags(state.current_modifiers, flags);
+            if reconciled != state.current_modifiers {
+                state.current_modifiers = reconciled;
+                let _ = state.event_sender.send(KeyEvent::resync(reconciled));
+            }
         }
 
         // Build side-specific modifiers from internally tracked state + FN from flags
@@ -289,15 +358,16 @@ unsafe extern "C-unwind" fn event_tap_callback(
                         changed_modifier: None,
                     });
                 } else if let Some(modifier_bit) = changed_modifier {
-                    // Regular modifier key — use keycode to toggle the specific bit
-                    let was_set = state.current_modifiers.contains(modifier_bit);
-                    let is_key_down = !was_set;
-
-                    if is_key_down {
-                        state.current_modifiers |= modifier_bit;
+                    // Patched (dictation-app): up or down from the event's
+                    // flags, not by toggling the remembered bit (#80, B1).
+                    // FN has no side and is never tracked: its flag decides.
+                    let is_key_down = if modifier_bit == Modifiers::FN {
+                        flags_have_fn(flags)
                     } else {
-                        state.current_modifiers &= !modifier_bit;
-                    }
+                        state.current_modifiers =
+                            after_flags_changed(state.current_modifiers, modifier_bit, flags);
+                        state.current_modifiers.contains(modifier_bit)
+                    };
 
                     // Re-derive modifiers after update (include FN from flags)
                     let new_modifiers = if flags_have_fn(flags) {
@@ -527,6 +597,14 @@ fn run_event_tap(
     run_loop.add_source(Some(&source), unsafe {
         objc2_core_foundation::kCFRunLoopCommonModes
     });
+    // Patched (dictation-app): start from the modifiers already held, so
+    // letting go of one isn't read as a press (#80, B1).
+    if let Ok(mut state) = state.lock() {
+        state.current_modifiers = modifiers_from_flags(
+            Modifiers::empty(),
+            CGEventSource::flags_state(CGEventSourceStateID::CombinedSessionState),
+        );
+    }
     CGEvent::tap_enable(&tap, true);
 
     // Signal successful initialization, handing back this thread's run loop
@@ -750,5 +828,225 @@ mod tests {
             Modifiers::empty(),
             "stale modifiers must be reconciled away on tap-disable"
         );
+    }
+}
+
+/// Patched (dictation-app): the M1.6 fixes (#80) through the real callback,
+/// with local `CGEvent`s only. No tap is created and nothing is posted, so
+/// these need no permission and don't touch the desktop.
+#[cfg(test)]
+mod dictation_patch_tests {
+    use super::*;
+
+    const OPTION: i64 = 0x3A;
+    const RIGHT_OPTION: i64 = 0x3D;
+    const FUNCTION: i64 = 0x3F;
+    const KEY_A: i64 = 0x00;
+    const LEFT_OPT_DEVICE: u64 = 0x20;
+    const RIGHT_OPT_DEVICE: u64 = 0x40;
+    const NONE: CGEventFlags = CGEventFlags(0);
+
+    fn alt(device: u64) -> CGEventFlags {
+        CGEventFlags(CGEventFlags::MaskAlternate.0 | device)
+    }
+
+    /// The real callback with `tracked` modifiers and no tap, and the
+    /// events it sends.
+    struct Callback {
+        ctx: CallbackCtx,
+        rx: Receiver<KeyEvent>,
+    }
+
+    impl Callback {
+        fn new(tracked: Modifiers) -> Self {
+            let (tx, rx) = mpsc::channel();
+            let mut state = ListenerState::new(tx, None);
+            state.current_modifiers = tracked;
+            let ctx = CallbackCtx {
+                state: Arc::new(Mutex::new(state)),
+                tap: Cell::new(None),
+            };
+            Self { ctx, rx }
+        }
+
+        /// Delivers one event and returns what the callback sent.
+        fn deliver(&self, kind: CGEventType, flags: CGEventFlags, keycode: i64) -> Vec<KeyEvent> {
+            let event = CGEvent::new_keyboard_event(None, keycode as u16, true).unwrap();
+            CGEvent::set_type(Some(&event), kind);
+            CGEvent::set_flags(Some(&event), flags);
+            CGEvent::set_integer_value_field(
+                Some(&event),
+                CGEventField::KeyboardEventKeycode,
+                keycode,
+            );
+            let returned = unsafe {
+                event_tap_callback(
+                    std::ptr::null_mut(),
+                    kind,
+                    NonNull::from(&*event),
+                    &self.ctx as *const CallbackCtx as *mut c_void,
+                )
+            };
+            assert!(!returned.is_null(), "a non-blocking listener never blocks");
+            self.rx.try_iter().collect()
+        }
+
+        /// A FlagsChanged event: (down, modifiers after it).
+        fn flags_changed(&self, flags: CGEventFlags, keycode: i64) -> (bool, Modifiers) {
+            let events = self.deliver(CGEventType::FlagsChanged, flags, keycode);
+            assert_eq!(events.len(), 1, "{events:?}");
+            (events[0].is_key_down, events[0].modifiers)
+        }
+    }
+
+    #[test]
+    fn option_held_at_start_then_released_is_a_release() {
+        // Tracked empty: the worst case, as if the start snapshot missed it.
+        for (keycode, device, side) in [
+            (RIGHT_OPTION, RIGHT_OPT_DEVICE, Modifiers::OPT_RIGHT),
+            (OPTION, LEFT_OPT_DEVICE, Modifiers::OPT_LEFT),
+        ] {
+            let cb = Callback::new(Modifiers::empty());
+            assert_eq!(cb.flags_changed(NONE, keycode), (false, Modifiers::empty()));
+            // The next press and release pair is read correctly.
+            assert_eq!(cb.flags_changed(alt(device), keycode), (true, side));
+            assert_eq!(cb.flags_changed(NONE, keycode), (false, Modifiers::empty()));
+        }
+    }
+
+    #[test]
+    fn right_option_released_while_left_option_stays_held() {
+        let cb = Callback::new(Modifiers::empty());
+        // Both held at start; Right goes up first.
+        assert_eq!(
+            cb.flags_changed(alt(LEFT_OPT_DEVICE), RIGHT_OPTION),
+            (false, Modifiers::OPT_LEFT)
+        );
+        assert_eq!(
+            cb.flags_changed(alt(LEFT_OPT_DEVICE | RIGHT_OPT_DEVICE), RIGHT_OPTION),
+            (true, Modifiers::OPT_LEFT | Modifiers::OPT_RIGHT)
+        );
+        assert_eq!(
+            cb.flags_changed(alt(RIGHT_OPT_DEVICE), OPTION),
+            (false, Modifiers::OPT_RIGHT)
+        );
+        assert_eq!(
+            cb.flags_changed(NONE, RIGHT_OPTION),
+            (false, Modifiers::empty())
+        );
+    }
+
+    #[test]
+    fn flags_without_side_bits_fall_back_to_toggling() {
+        // Events posted without device bits still pair up.
+        let cb = Callback::new(Modifiers::empty());
+        let bare = alt(0);
+        assert_eq!(
+            cb.flags_changed(bare, RIGHT_OPTION),
+            (true, Modifiers::OPT_RIGHT)
+        );
+        assert_eq!(
+            cb.flags_changed(bare, OPTION),
+            (true, Modifiers::OPT_LEFT | Modifiers::OPT_RIGHT)
+        );
+        assert_eq!(
+            cb.flags_changed(bare, RIGHT_OPTION),
+            (false, Modifiers::OPT_LEFT)
+        );
+        // A group missing from the flags is up, without side bits too.
+        assert_eq!(cb.flags_changed(NONE, OPTION), (false, Modifiers::empty()));
+        assert_eq!(cb.flags_changed(NONE, OPTION), (false, Modifiers::empty()));
+    }
+
+    #[test]
+    fn fn_follows_its_flag() {
+        let cb = Callback::new(Modifiers::empty());
+        let fn_flag = CGEventFlags::MaskSecondaryFn;
+        assert_eq!(cb.flags_changed(fn_flag, FUNCTION), (true, Modifiers::FN));
+        assert_eq!(
+            cb.flags_changed(NONE, FUNCTION),
+            (false, Modifiers::empty())
+        );
+        assert_eq!(
+            cb.flags_changed(NONE, FUNCTION),
+            (false, Modifiers::empty())
+        );
+    }
+
+    #[test]
+    fn tap_disabled_sends_a_resync_after_what_came_before() {
+        for kind in [
+            CGEventType::TapDisabledByTimeout,
+            CGEventType::TapDisabledByUserInput,
+        ] {
+            let cb = Callback::new(Modifiers::empty());
+            cb.flags_changed(alt(RIGHT_OPT_DEVICE), RIGHT_OPTION);
+            // The release is lost while the tap is off; nothing else comes.
+            let events = cb.deliver(kind, NONE, 0);
+            assert_eq!(events.len(), 1, "{kind:?}: {events:?}");
+            assert!(events[0].is_resync(), "{kind:?}: {events:?}");
+            // Its modifiers come from the host's real keyboard state, which
+            // this test doesn't control, so they aren't checked.
+        }
+    }
+
+    #[test]
+    fn a_missed_release_seen_on_a_key_event_sends_a_resync_first() {
+        let cb = Callback::new(Modifiers::OPT_RIGHT);
+        let events = cb.deliver(CGEventType::KeyDown, NONE, KEY_A);
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert!(events[0].is_resync());
+        assert_eq!(events[0].modifiers, Modifiers::empty());
+        assert_eq!(events[1].key, Some(Key::A));
+        assert!(!events[1].is_resync());
+    }
+
+    #[test]
+    fn a_key_event_that_agrees_with_the_tracked_state_sends_no_resync() {
+        let cb = Callback::new(Modifiers::OPT_RIGHT);
+        let events = cb.deliver(CGEventType::KeyDown, alt(RIGHT_OPT_DEVICE), KEY_A);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].modifiers, Modifiers::OPT_RIGHT);
+        // Without side bits the tracked side stands.
+        let events = cb.deliver(CGEventType::KeyUp, alt(0), KEY_A);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].modifiers, Modifiers::OPT_RIGHT);
+    }
+
+    #[test]
+    fn modifiers_from_flags_reads_sides() {
+        let all_device = CGEventFlags(
+            CGEventFlags::MaskControl.0
+                | CGEventFlags::MaskShift.0
+                | CGEventFlags::MaskCommand.0
+                | 0x2000
+                | 0x02
+                | 0x10,
+        );
+        assert_eq!(
+            modifiers_from_flags(Modifiers::all(), all_device),
+            Modifiers::CTRL_RIGHT | Modifiers::SHIFT_LEFT | Modifiers::CMD_RIGHT
+        );
+        // No side bits: keep what was tracked, or guess left.
+        let bare = CGEventFlags(CGEventFlags::MaskShift.0 | CGEventFlags::MaskCommand.0);
+        assert_eq!(
+            modifiers_from_flags(Modifiers::SHIFT_RIGHT, bare),
+            Modifiers::SHIFT_RIGHT | Modifiers::CMD_LEFT
+        );
+        assert_eq!(
+            modifiers_from_flags(Modifiers::all(), NONE),
+            Modifiers::empty()
+        );
+    }
+
+    #[test]
+    fn resync_is_distinct_from_other_events() {
+        let resync = KeyEvent::resync(Modifiers::OPT_LEFT);
+        assert!(resync.is_resync());
+        assert!(!resync.is_key_down);
+        let cb = Callback::new(Modifiers::empty());
+        let (_, _) = cb.flags_changed(alt(RIGHT_OPT_DEVICE), RIGHT_OPTION);
+        let events = cb.deliver(CGEventType::KeyDown, alt(RIGHT_OPT_DEVICE), KEY_A);
+        assert!(events.iter().all(|e| !e.is_resync()));
     }
 }

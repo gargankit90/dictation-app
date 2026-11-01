@@ -4,8 +4,10 @@ This product includes or depends on the following third-party software.
 
 handy-keys 0.3.4 (https://github.com/handy-computer/handy-keys)
   Global keyboard listener behind the macOS hotkey
-  (crates/platform/src/hotkey/macos.rs). Used as a dependency; no code
-  copied.
+  (crates/platform/src/hotkey/macos.rs). Vendored with fixes to its macOS
+  event tap callback under third_party/handy-keys (changes listed in
+  third_party/handy-keys/PATCHES.md; licence in
+  third_party/handy-keys/LICENSE).
   MIT License, Copyright (c) 2026 handy-computer
 
 handy-recorder 0.1.0 (https://github.com/handy-computer/handy-recorder)

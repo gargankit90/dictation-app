@@ -276,6 +276,27 @@ pub struct KeyEvent {
 }
 
 impl KeyEvent {
+    /// Patched (dictation-app): the event a macOS listener sends when it had
+    /// to correct its modifier state from the OS: the event tap was disabled
+    /// (by timeout or user input) and re-enabled, or an event's flags showed
+    /// a modifier change it never saw. Presses and releases may have been
+    /// lost in between, so a consumer should drop whatever hold it was
+    /// tracking. `modifiers` is the corrected state; no key and no changed
+    /// modifier, which no other macOS event has.
+    pub const fn resync(modifiers: Modifiers) -> Self {
+        Self {
+            modifiers,
+            key: None,
+            is_key_down: false,
+            changed_modifier: None,
+        }
+    }
+
+    /// Patched (dictation-app): whether this is a [`KeyEvent::resync`].
+    pub const fn is_resync(&self) -> bool {
+        self.key.is_none() && self.changed_modifier.is_none()
+    }
+
     /// Convert this key event to a hotkey definition
     pub fn as_hotkey(&self) -> Result<Hotkey> {
         Hotkey::new(self.modifiers, self.key)
