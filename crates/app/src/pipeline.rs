@@ -19,6 +19,7 @@ use std::time::Duration;
 use dictation_core::coordinator::{Phase, State, step};
 use dictation_core::error::DictationError;
 use dictation_core::events::{Command, Event};
+use dictation_core::text::{Cleaned, Transcript, clean};
 use dictation_ports::{
     Audio, AudioError, AudioSource, Clock, HotkeyError, HotkeyEvent, HotkeySource, InsertError,
     Permission, PermissionStatus, Permissions, TextInserter, TranscribeError, Transcriber,
@@ -150,9 +151,24 @@ impl Pipeline {
     }
 }
 
+/// The event for a transcript once cleaned up (`dictation_core::text`):
+/// the text to insert, or "nothing to paste" (no error). Never logs the
+/// text.
+fn cleaned_event(transcript: &Transcript) -> Event {
+    // No adapter reads the character before the cursor yet, so no smart
+    // leading space (see the `text` module docs).
+    match clean(transcript, None) {
+        Cleaned::Text(text) => Event::TranscriptReady(text),
+        Cleaned::Dropped(why) => {
+            tracing::debug!(?why, "transcript dropped; nothing to paste");
+            Event::TranscriptDropped
+        }
+    }
+}
+
 /// A finished background job, tagged with the job it belongs to.
 enum JobResult {
-    Transcribed(u64, Result<String, TranscribeError>),
+    Transcribed(u64, Result<Transcript, TranscribeError>),
     /// The recording the transcription was waiting for failed.
     AudioFailed(u64, AudioError),
     Inserted(u64, Result<(), InsertError>),
@@ -457,11 +473,12 @@ where
         };
         match result {
             JobResult::Transcribed(job, result) if job == self.job => Some(match result {
-                Ok(text) => Event::TranscriptReady(text),
+                Ok(transcript) => cleaned_event(&transcript),
                 Err(error) => Event::TranscriptionFailed(error.to_string()),
             }),
             JobResult::Inserted(job, result) if job == self.job => Some(match result {
                 Ok(()) => Event::InsertDone,
+                Err(InsertError::SecureInput) => Event::SecureInputBlocked,
                 Err(error) => Event::InsertFailed(error.to_string()),
             }),
             JobResult::AudioFailed(job, error) if job == self.job => Some(
@@ -565,7 +582,7 @@ where
                 }
             };
             tracing::debug!(job, duration = ?audio.duration(), "transcribing");
-            JobResult::Transcribed(job, transcriber.transcribe(&audio).await)
+            JobResult::Transcribed(job, transcriber.transcribe_detailed(&audio).await)
         });
         self.running = Some((task.id(), Job::Transcribe));
     }

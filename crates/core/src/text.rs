@@ -27,7 +27,7 @@ use std::fmt;
 /// Mean `no_speech_prob` (over the segments) at or above which an engine is
 /// taken to say "there was no speech".
 ///
-/// 0.6 is the default `no_speech_threshold` of OpenAI's reference Whisper
+/// 0.6 is the default `no_speech_threshold` of `OpenAI`'s reference Whisper
 /// implementation, which treats a segment above it as silent (in
 /// combination with a low average log-probability, which the API doesn't
 /// return per request). We use the same number rather than inventing one:
@@ -79,6 +79,18 @@ impl Transcript {
             text: text.into(),
             no_speech_prob: None,
         }
+    }
+}
+
+impl From<String> for Transcript {
+    fn from(text: String) -> Self {
+        Self::from_text(text)
+    }
+}
+
+impl From<&str> for Transcript {
+    fn from(text: &str) -> Self {
+        Self::from_text(text)
     }
 }
 

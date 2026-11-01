@@ -114,11 +114,13 @@ fn transition(state: State, event: Event) -> (State, Vec<Command>) {
                 (State::Inserting, vec![Command::Insert(text)])
             }
         }
-        (State::Transcribing, Event::TranscriptDropped) => (State::Idle, Vec::new()),
         (State::Transcribing, Event::TranscriptionFailed(reason)) => {
             fail(DictationError::TranscriptionFailed { reason })
         }
-        (State::Inserting, Event::InsertDone) => (State::Idle, Vec::new()),
+        // Nothing to paste (a dropped transcript) is not an error.
+        (State::Transcribing, Event::TranscriptDropped) | (State::Inserting, Event::InsertDone) => {
+            (State::Idle, Vec::new())
+        }
         (State::Inserting, Event::SecureInputBlocked) => fail(DictationError::SecureInput),
         (State::Inserting, Event::InsertFailed(reason)) => {
             fail(DictationError::InsertFailed { reason })
