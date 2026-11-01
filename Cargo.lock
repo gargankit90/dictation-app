@@ -935,6 +935,7 @@ dependencies = [
  "dictation-platform",
  "dictation-ports",
  "dictation-transcribe",
+ "serde",
  "specta",
  "specta-typescript",
  "tauri",
@@ -945,6 +946,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "wiremock",
 ]
 
 [[package]]
