@@ -108,8 +108,8 @@ impl UiSender {
             }
             if matches!(event, UiEvent::Error(_)) && queue.errors() >= UI_ERRORS_QUEUED {
                 drop(queue);
-                let dropped = self.shared.dropped_errors.fetch_add(1, Ordering::Relaxed) + 1;
-                if dropped % DROPPED_LOG_EVERY == 1 {
+                let dropped = self.count_dropped_error();
+                if log_this_drop(dropped) {
                     tracing::warn!(dropped, "the UI isn't reading; dropping errors");
                 }
                 return;
@@ -118,6 +118,19 @@ impl UiSender {
         }
         self.shared.ready.notify_one();
     }
+}
+
+impl UiSender {
+    /// Counts one more dropped error and returns the total so far.
+    fn count_dropped_error(&self) -> u64 {
+        self.shared.dropped_errors.fetch_add(1, Ordering::Relaxed) + 1
+    }
+}
+
+/// Whether the `dropped`th dropped error is logged: the first, then one in
+/// [`DROPPED_LOG_EVERY`], so a UI that never reads can't flood the log.
+fn log_this_drop(dropped: u64) -> bool {
+    dropped % DROPPED_LOG_EVERY == 1
 }
 
 impl Drop for UiSender {
@@ -286,6 +299,56 @@ mod tests {
         }
     }
 
+    #[test]
+    fn coalescing_keeps_every_error_and_only_the_newest_phase_in_order() {
+        let mut queue = Queue::default();
+        queue.events.extend([
+            phase(Phase::Recording),
+            error(),
+            phase(Phase::Transcribing),
+            UiEvent::Error(DictationError::EmptyTranscript),
+            phase(Phase::Idle),
+        ]);
+        queue.coalesce();
+        assert_eq!(
+            Vec::from(queue.events),
+            [
+                error(),
+                UiEvent::Error(DictationError::EmptyTranscript),
+                phase(Phase::Idle)
+            ]
+        );
+
+        let mut queue = Queue::default();
+        queue.events.extend([error(), error()]);
+        queue.coalesce();
+        assert_eq!(queue.events.len(), 2, "no phase to keep, no error lost");
+
+        let mut queue = Queue::default();
+        queue.events.push_back(phase(Phase::Idle));
+        queue.coalesce();
+        assert_eq!(Vec::from(queue.events), [phase(Phase::Idle)]);
+    }
+
+    #[test]
+    fn dropped_errors_are_counted_and_logged_sparsely() {
+        let (tx, _rx) = ui_channel();
+        assert_eq!((tx.count_dropped_error(), tx.count_dropped_error()), (1, 2));
+        let logged: Vec<u64> = (1..=250).filter(|n| log_this_drop(*n)).collect();
+        assert_eq!(logged, [1, 101, 201]);
+    }
+
+    #[test]
+    fn the_receiver_debug_shows_its_counters() {
+        let (tx, rx) = ui_channel();
+        tx.send(phase(Phase::Idle));
+        let shown = format!("{rx:?}");
+        assert!(
+            shown.contains("queued: 1") && shown.contains("dropped_errors: 0"),
+            "{shown}"
+        );
+    }
+
     #[tokio::test]
     async fn recv_waits_for_an_event_and_ends_when_the_sender_is_gone() {
         let (tx, mut rx) = ui_channel();
@@ -297,7 +360,11 @@ mod tests {
         tokio::task::yield_now().await;
         tx.send(phase(Phase::Recording));
         drop(tx);
-        let (first, end) = reader.await.unwrap();
+        // Bounded: a sender that never closes the channel fails the test.
+        let (first, end) = tokio::time::timeout(std::time::Duration::from_secs(5), reader)
+            .await
+            .expect("recv never ended after the sender was dropped")
+            .unwrap();
         assert_eq!(first, Some(phase(Phase::Recording)));
         assert_eq!(end, None);
     }
@@ -307,8 +374,12 @@ mod tests {
         let (tx, mut rx) = ui_channel();
         tx.send(phase(Phase::Idle));
         drop(tx);
-        assert_eq!(rx.recv().await, Some(phase(Phase::Idle)));
-        assert_eq!(rx.recv().await, None);
+        let bounded = std::time::Duration::from_secs(5);
+        assert_eq!(
+            tokio::time::timeout(bounded, rx.recv()).await,
+            Ok(Some(phase(Phase::Idle)))
+        );
+        assert_eq!(tokio::time::timeout(bounded, rx.recv()).await, Ok(None));
         assert_eq!(rx.try_recv(), Err(TryRecvError::Disconnected));
     }
 }

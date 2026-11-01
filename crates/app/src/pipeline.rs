@@ -578,7 +578,9 @@ where
                 biased;
                 _ = self.shutdown.changed() => break,
                 // Before the keys: those still queued are thrown away.
-                () = keys.overflow.noticed.notified() => self.keys_overflowed(&mut keys),
+                () = keys.overflow.noticed.notified() => {
+                    self.keys_overflowed(&mut keys);
+                }
                 Some(failed) = audio_failures.recv() => {
                     if let Some(event) = self.start_failed(&failed) {
                         self.feed(event);
@@ -612,10 +614,13 @@ where
     /// A hotkey event was dropped (see [`Keys`]): throws away the keys still
     /// queued and cancels, so the pipeline ends without a recording or a
     /// transcription of its own, with no key press needed to get there.
-    fn keys_overflowed(&mut self, keys: &mut Keys) {
-        // A permit left over from an overflow already handled.
+    ///
+    /// Returns how many queued keys it threw away, or `None` if no key was
+    /// dropped after all (a wake-up left over from an overflow already
+    /// handled: the hotkey thread wakes the task once per dropped key).
+    fn keys_overflowed(&mut self, keys: &mut Keys) -> Option<usize> {
         if !keys.overflow.dropped.swap(false, Ordering::AcqRel) {
-            return;
+            return None;
         }
         let mut discarded = 0_usize;
         while keys.rx.try_recv().is_ok() {
@@ -623,6 +628,7 @@ where
         }
         tracing::warn!(discarded, "hotkey events overflowed; cancelled");
         self.feed(Event::CancelPressed);
+        Some(discarded)
     }
 
     /// Whether a Tick is due now, taking it if so; doesn't wait.
@@ -1853,7 +1859,7 @@ mod audio_worker_tests {
         runner.key(HotkeyEvent::Interrupted, Duration::ZERO).await;
         assert_eq!(runner.state, State::Idle);
         keys.overflow.dropped.store(true, Ordering::SeqCst);
-        runner.keys_overflowed(&mut keys);
+        assert_eq!(runner.keys_overflowed(&mut keys), Some(0));
         assert_eq!(runner.state, State::Idle);
         assert!(
             !keys.overflow.dropped.load(Ordering::SeqCst),
@@ -1867,6 +1873,51 @@ mod audio_worker_tests {
         assert_eq!(ui_events.try_recv(), Ok(UiEvent::StateChanged(Recording)));
         assert_eq!(ui_events.try_recv(), Ok(UiEvent::StateChanged(Idle)));
         assert!(ui_events.try_recv().is_err(), "nothing else");
+    }
+
+    /// #91: an overflow throws away every queued key and cancels the
+    /// recording; a leftover wake-up with no dropped key does nothing.
+    #[tokio::test]
+    async fn keys_overflowed_discards_the_queue_and_cancels_only_when_a_key_was_dropped() {
+        let (ui, mut ui_events) = ui_channel();
+        let (_shutdown, shutdown_rx) = watch::channel(false);
+        let (audio, _) = AudioWorker::spawn(ScriptedAudio::new(Vec::new()));
+        let mut runner = Runner::new(
+            FakeHotkey::new(),
+            audio,
+            FixedTranscriber,
+            FakeInserter::new(),
+            FakePermissions::all_granted(),
+            Arc::new(FakeClock::new()),
+            ui,
+            shutdown_rx,
+            tokio::time::interval(Duration::from_millis(250)),
+        );
+        let (keys_tx, keys_rx) = mpsc::channel(KEYS_QUEUED);
+        let mut keys = Keys {
+            rx: keys_rx,
+            overflow: Arc::new(Overflow::default()),
+        };
+        runner.key(HotkeyEvent::Pressed, Duration::ZERO).await;
+        assert!(matches!(runner.state, State::Recording { .. }));
+        for _ in 0..5 {
+            keys_tx
+                .try_send((HotkeyEvent::Released, Duration::from_secs(1)))
+                .unwrap();
+        }
+
+        // No key dropped: nothing is discarded and the recording goes on.
+        assert_eq!(runner.keys_overflowed(&mut keys), None);
+        assert!(matches!(runner.state, State::Recording { .. }));
+        assert!(keys.rx.try_recv().is_ok(), "the queue was left alone");
+
+        // A key was dropped: the other four go too, and the recording ends.
+        keys.overflow.dropped.store(true, Ordering::SeqCst);
+        assert_eq!(runner.keys_overflowed(&mut keys), Some(4));
+        assert_eq!(runner.state, State::Idle);
+        assert!(keys.rx.try_recv().is_err());
+        assert_eq!(ui_events.try_recv(), Ok(UiEvent::StateChanged(Recording)));
+        assert_eq!(ui_events.try_recv(), Ok(UiEvent::StateChanged(Idle)));
     }
 
     /// #81 M1: keys arriving nonstop don't hold off the recording limit:
