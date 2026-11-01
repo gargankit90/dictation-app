@@ -4,7 +4,7 @@
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{AppHandle, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
-use super::OverlaySpec;
+use super::{NativeWindow, OverlaySpec};
 
 pub(super) fn plugin<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("dictation-overlay").build()
@@ -39,6 +39,12 @@ impl<R: Runtime> Window<R> {
 
     pub(super) fn window(&self) -> &WebviewWindow<R> {
         &self.window
+    }
+
+    /// Nothing to read back: there's no panel here.
+    #[allow(clippy::unused_self)] // Same signature as the macOS one.
+    pub(super) fn native(&self) -> Option<NativeWindow> {
+        None
     }
 
     pub(super) fn show(&self) -> tauri::Result<()> {

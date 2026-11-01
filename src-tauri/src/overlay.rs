@@ -37,6 +37,7 @@ fn spec() -> OverlaySpec {
 /// If the window can't be created.
 pub fn start<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<UnboundedSender<UiEvent>> {
     let window = Overlay::create(app, spec())?;
+    log_native_window(&window);
     let (events, receiver) = mpsc::unbounded_channel();
     tauri::async_runtime::spawn(overlay::run(
         receiver,
@@ -47,6 +48,34 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<UnboundedSender<Ui
         ERROR_VISIBLE_FOR,
     ));
     Ok(events)
+}
+
+/// Logs what the native window is (macOS, read on the main thread), so a
+/// change that turns the panel back into a plain window shows: the e2e
+/// scenario `e2e_overlay_focus` checks for `non_activating_panel=true`.
+fn log_native_window<R: Runtime>(window: &Overlay<R>) {
+    let Some(native) = window.native_window() else {
+        return;
+    };
+    let non_activating_panel = native.is_non_activating_panel();
+    let fields = format!(
+        "class={} is_panel={} can_become_key={} can_become_main={} non_activating={} backs_webview={}",
+        native.class,
+        native.is_panel,
+        native.can_become_key,
+        native.can_become_main,
+        native.non_activating,
+        native.backs_webview
+    );
+    if non_activating_panel {
+        tracing::info!(non_activating_panel, native = %fields, "overlay native window");
+    } else {
+        tracing::warn!(
+            non_activating_panel,
+            native = %fields,
+            "overlay native window: not a non-activating panel, so it may take focus"
+        );
+    }
 }
 
 /// The overlay window as `dictation_pipeline::overlay` sees it.

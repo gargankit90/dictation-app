@@ -3,6 +3,9 @@
 # overlay must show (Recording, then Transcribing) and hide again, TextEdit
 # must stay the frontmost app the whole time (sampled every 0.2 s from
 # before the press until after Idle), and the text must land in TextEdit.
+# The overlay's native window must still be the non-activating NSPanel once
+# created (#102 review, M1): the app reads it back on the main thread and
+# logs its class and flags.
 
 # Where the frontmost-app watcher writes in the VM.
 VM_FRONT_LOG="/Users/$VM_USER/e2e-front.txt"
@@ -57,6 +60,9 @@ e2e_overlay_focus() {
   fresh_app_state
   launch_full
   expect "the app starts and logs ready" wait_for_log 'INFO .*ready'
+  log "  $(app_log | grep -m1 'overlay native window' || echo 'no overlay native window line')"
+  expect "the overlay is still a non-activating panel after creation" \
+    wait_for_log 'INFO .*overlay native window non_activating_panel=true .*is_panel=true can_become_key=false can_become_main=false non_activating=true backs_webview=true' 5
   textedit_fresh
   expect "TextEdit is in front before the dictation" test "$(frontmost_app)" = TextEdit
 

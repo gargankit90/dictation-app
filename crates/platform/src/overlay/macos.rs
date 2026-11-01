@@ -3,14 +3,24 @@
 //! No `unsafe` here: `tauri-nspanel` wraps the Objective-C calls. It must
 //! run them on the main thread, so [`Window::show`] and [`Window::hide`]
 //! hand them to Tauri's main-thread queue.
+//!
+//! The webview window comes from Tauri's window list, never from
+//! `Panel::to_window`: that converts the panel back into a plain window (it
+//! unregisters the panel and restores the window's original class), which
+//! would undo the panel on every creation (#102 review, M1).
+//! [`Window::native`] reads the native window back so the shell can log
+//! (and the e2e scenario check) that it's still the panel.
 
+use objc2::ClassType as _;
+use objc2::runtime::NSObjectProtocol as _;
+use objc2_app_kit::NSWindowStyleMask;
 use tauri::plugin::TauriPlugin;
-use tauri::{AppHandle, Runtime, WebviewUrl, WebviewWindow};
+use tauri::{AppHandle, Manager as _, Runtime, WebviewUrl, WebviewWindow};
 use tauri_nspanel::{
     CollectionBehavior, PanelBuilder, PanelHandle, PanelLevel, StyleMask, tauri_panel,
 };
 
-use super::OverlaySpec;
+use super::{NativeWindow, OverlaySpec};
 
 tauri_panel! {
     panel!(OverlayPanel {
@@ -72,7 +82,10 @@ impl<R: Runtime> Window<R> {
                     .visible(false)
             })
             .build()?;
-        let window = panel.to_window().ok_or(tauri::Error::WindowNotFound)?;
+        // Not `panel.to_window()`, which turns the panel back into a window.
+        let window = app
+            .get_webview_window(spec.label)
+            .ok_or(tauri::Error::WindowNotFound)?;
         Ok(Self {
             app: app.clone(),
             window,
@@ -82,6 +95,27 @@ impl<R: Runtime> Window<R> {
 
     pub(super) fn window(&self) -> &WebviewWindow<R> {
         &self.window
+    }
+
+    /// The native window behind the overlay, read on the main thread
+    /// (`None` on any other thread).
+    pub(super) fn native(&self) -> Option<NativeWindow> {
+        objc2_foundation::MainThreadMarker::new()?;
+        let panel: &objc2_app_kit::NSPanel = self.panel.as_panel();
+        // The webview window must be backed by this very object.
+        let backs_webview = self.window.ns_window().is_ok_and(|ns_window| {
+            std::ptr::eq(ns_window.cast_const(), std::ptr::from_ref(panel).cast())
+        });
+        Some(NativeWindow {
+            class: panel.class().name().to_string_lossy().into_owned(),
+            is_panel: panel.isKindOfClass(objc2_app_kit::NSPanel::class()),
+            can_become_key: panel.canBecomeKeyWindow(),
+            can_become_main: panel.canBecomeMainWindow(),
+            non_activating: panel
+                .styleMask()
+                .contains(NSWindowStyleMask::NonactivatingPanel),
+            backs_webview,
+        })
     }
 
     pub(super) fn show(&self) -> tauri::Result<()> {

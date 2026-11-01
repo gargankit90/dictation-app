@@ -40,6 +40,38 @@ pub struct OverlaySpec {
     pub bottom_margin: f64,
 }
 
+/// The overlay's native window, read back after creation (macOS), so a
+/// regression that turns the panel back into a plain window shows in the log
+/// and fails the e2e check (#102 review, M1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeWindow {
+    /// Its Objective-C class name.
+    pub class: String,
+    /// Whether it's an `NSPanel` (or a subclass).
+    pub is_panel: bool,
+    /// `canBecomeKeyWindow`.
+    pub can_become_key: bool,
+    /// `canBecomeMainWindow`.
+    pub can_become_main: bool,
+    /// Whether its style mask has `NSWindowStyleMaskNonactivatingPanel`.
+    pub non_activating: bool,
+    /// Whether the overlay's webview window is backed by this object.
+    pub backs_webview: bool,
+}
+
+impl NativeWindow {
+    /// Whether it's what the overlay needs: a non-activating panel that
+    /// can't become the key or main window, behind the webview window.
+    #[must_use]
+    pub fn is_non_activating_panel(&self) -> bool {
+        self.is_panel
+            && !self.can_become_key
+            && !self.can_become_main
+            && self.non_activating
+            && self.backs_webview
+    }
+}
+
 /// The plugin the overlay needs: `tauri-nspanel`'s on macOS, a no-op
 /// elsewhere. Register it before calling [`Overlay::create`].
 #[must_use]
@@ -74,6 +106,13 @@ impl<R: Runtime> Overlay<R> {
     #[must_use]
     pub fn window(&self) -> &WebviewWindow<R> {
         self.inner.window()
+    }
+
+    /// The native window behind the overlay: on macOS, read on the main
+    /// thread (`None` on any other thread); elsewhere always `None`.
+    #[must_use]
+    pub fn native_window(&self) -> Option<NativeWindow> {
+        self.inner.native()
     }
 
     /// Moves the overlay to the bottom centre of the screen the cursor is on
@@ -159,6 +198,59 @@ pub fn bottom_centre(area: &WorkArea, size: LogicalSize<f64>, margin: f64) -> Lo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn panel() -> NativeWindow {
+        NativeWindow {
+            class: "RawOverlayPanel".into(),
+            is_panel: true,
+            can_become_key: false,
+            can_become_main: false,
+            non_activating: true,
+            backs_webview: true,
+        }
+    }
+
+    #[test]
+    fn a_non_activating_panel_is_what_the_overlay_needs() {
+        assert!(panel().is_non_activating_panel());
+    }
+
+    /// What `Panel::to_window` leaves behind, and every other way off.
+    #[test]
+    fn anything_else_is_not() {
+        let window_again = NativeWindow {
+            class: "TaoWindow".into(),
+            is_panel: false,
+            can_become_key: true,
+            non_activating: false,
+            ..panel()
+        };
+        assert!(!window_again.is_non_activating_panel());
+        for broken in [
+            NativeWindow {
+                is_panel: false,
+                ..panel()
+            },
+            NativeWindow {
+                can_become_key: true,
+                ..panel()
+            },
+            NativeWindow {
+                can_become_main: true,
+                ..panel()
+            },
+            NativeWindow {
+                non_activating: false,
+                ..panel()
+            },
+            NativeWindow {
+                backs_webview: false,
+                ..panel()
+            },
+        ] {
+            assert!(!broken.is_non_activating_panel(), "{broken:?}");
+        }
+    }
 
     #[test]
     fn bottom_centre_of_a_monitor_at_the_origin() {
