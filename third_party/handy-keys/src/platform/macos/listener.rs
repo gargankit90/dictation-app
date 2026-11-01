@@ -213,6 +213,17 @@ fn after_flags_changed(tracked: Modifiers, changed: Modifiers, flags: CGEventFla
 struct CallbackCtx {
     state: Arc<Mutex<ListenerState>>,
     tap: Cell<Option<NonNull<CFMachPort>>>,
+    /// Patched (dictation-app, #89): the modifier flags the session itself
+    /// reports, which the callback asks when a key or mouse event's own
+    /// flags disagree with the tracked state. [`session_flags`] in the
+    /// tap; a fixed answer in tests.
+    session_flags: fn() -> CGEventFlags,
+}
+
+/// The modifier flags of the combined session, hardware and posted events
+/// together, as of now.
+fn session_flags() -> CGEventFlags {
+    CGEventSource::flags_state(CGEventSourceStateID::CombinedSessionState)
 }
 
 /// The callback function for the event tap
@@ -267,8 +278,19 @@ unsafe extern "C-unwind" fn event_tap_callback(
         // reconciling would fight with the toggle logic.
         // Patched (dictation-app): a correction means a modifier change was
         // missed; report it before the event itself.
+        // Patched (dictation-app, #89): flags that disagree may only be the
+        // event's own. Software that posts key or mouse events (remote
+        // desktops, automation, accessibility tools) often gives them flags
+        // with no Option bit and no side bits, though the user is still
+        // holding Option. Before that counted as a missed release and
+        // cancelled the recording. Now the session's own flags decide: if
+        // they still show the tracked modifiers held, the event is not a
+        // sign of anything missed.
         if event_type != CGEventType::FlagsChanged {
-            let reconciled = modifiers_from_flags(state.current_modifiers, flags);
+            let mut reconciled = modifiers_from_flags(state.current_modifiers, flags);
+            if reconciled != state.current_modifiers {
+                reconciled = modifiers_from_flags(state.current_modifiers, (ctx.session_flags)());
+            }
             if reconciled != state.current_modifiers {
                 state.current_modifiers = reconciled;
                 let _ = state.event_sender.send(KeyEvent::resync(reconciled));
@@ -556,6 +578,7 @@ fn run_event_tap(
     let ctx_ptr = Box::into_raw(Box::new(CallbackCtx {
         state: Arc::clone(&state),
         tap: Cell::new(None),
+        session_flags,
     }));
 
     let callback: CGEventTapCallBack = Some(event_tap_callback);
@@ -768,6 +791,7 @@ mod tests {
         CallbackCtx {
             state: Arc::new(Mutex::new(ListenerState::new(tx, None))),
             tap: Cell::new(Some(NonNull::from(&**tap))),
+            session_flags,
         }
     }
 
@@ -886,14 +910,30 @@ mod dictation_patch_tests {
         rx: Receiver<KeyEvent>,
     }
 
+    /// What the session reports in the tests: nothing held, as on a machine
+    /// where nobody touches the keyboard.
+    fn session_nothing_held() -> CGEventFlags {
+        NONE
+    }
+
+    /// The session says Right Option is physically held.
+    fn session_right_option_held() -> CGEventFlags {
+        alt(RIGHT_OPT_DEVICE)
+    }
+
     impl Callback {
         fn new(tracked: Modifiers) -> Self {
+            Self::with_session(tracked, session_nothing_held)
+        }
+
+        fn with_session(tracked: Modifiers, session_flags: fn() -> CGEventFlags) -> Self {
             let (tx, rx) = mpsc::channel();
             let mut state = ListenerState::new(tx, None);
             state.current_modifiers = tracked;
             let ctx = CallbackCtx {
                 state: Arc::new(Mutex::new(state)),
                 tap: Cell::new(None),
+                session_flags,
             };
             Self { ctx, rx }
         }
@@ -1036,6 +1076,48 @@ mod dictation_patch_tests {
         assert_eq!(events[0].modifiers, Modifiers::empty());
         assert_eq!(events[1].key, Some(Key::A));
         assert!(!events[1].is_resync());
+    }
+
+    /// #89: a synthetic key or mouse event whose flags have no Option bit
+    /// (remote desktop, automation, the app's own paste) while the session
+    /// still shows Right Option held is not a missed release: no resync, so
+    /// the recording is not cancelled, and the tracked Option stands.
+    #[test]
+    fn a_synthetic_event_with_other_flags_while_option_is_held_sends_no_resync() {
+        for (name, kind, flags, keycode) in [
+            ("key down, no flags", CGEventType::KeyDown, NONE, KEY_A),
+            ("key up, no flags", CGEventType::KeyUp, NONE, KEY_A),
+            ("mouse down, no flags", CGEventType::LeftMouseDown, NONE, 0),
+            (
+                "key down, only Command",
+                CGEventType::KeyDown,
+                CGEventFlags(CGEventFlags::MaskCommand.0),
+                KEY_A,
+            ),
+        ] {
+            let cb = Callback::with_session(Modifiers::OPT_RIGHT, session_right_option_held);
+            let events = cb.deliver(kind, flags, keycode);
+            assert!(events.iter().all(|e| !e.is_resync()), "{name}: {events:?}");
+            assert_eq!(
+                cb.ctx.state.lock().unwrap().current_modifiers,
+                Modifiers::OPT_RIGHT,
+                "{name}: the tracked Option stands"
+            );
+            // A real release is still caught later: the event is a
+            // FlagsChanged with the session's flags.
+            let (down, modifiers) = cb.flags_changed(NONE, RIGHT_OPTION);
+            assert!(!down && modifiers.is_empty(), "{name}");
+        }
+    }
+
+    /// The other half: when the session also shows Option up, the same event
+    /// is the missed release it always was.
+    #[test]
+    fn the_same_event_is_a_missed_release_when_the_session_shows_option_up() {
+        let cb = Callback::with_session(Modifiers::OPT_RIGHT, session_nothing_held);
+        let events = cb.deliver(CGEventType::LeftMouseDown, NONE, 0);
+        assert!(events[0].is_resync(), "{events:?}");
+        assert_eq!(events[0].modifiers, Modifiers::empty());
     }
 
     #[test]
