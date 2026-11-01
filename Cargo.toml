@@ -8,6 +8,8 @@ members = [
     "crates/app",
     "src-tauri",
 ]
+# Vendored, patched dependencies; not ours to lint or test with the gate.
+exclude = ["third_party"]
 
 [workspace.package]
 version = "0.1.0"
@@ -54,6 +56,12 @@ cpal = { package = "handy-cpal", version = "=0.18.2" }
 block2 = "0.6.2"
 objc2 = "0.6.5"
 objc2-av-foundation = { version = "0.3.2", default-features = false }
+
+# coreaudio-rs 0.14.2 with a fix for its input callback buffer (#77 B2);
+# see third_party/coreaudio-rs/PATCHES.md. Drop it once a fixed release is
+# out and handy-cpal takes it.
+[patch.crates-io]
+coreaudio-rs = { path = "third_party/coreaudio-rs" }
 
 # Every crate opts in with `[lints] workspace = true`. Tests may unwrap
 # (clippy.toml). `clippy::pedantic` is turned on in core's lib.rs, since a

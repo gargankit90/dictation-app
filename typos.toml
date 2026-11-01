@@ -6,4 +6,6 @@ extend-exclude = [
     "package-lock.json",
     "src-tauri/icons/",
     "src-tauri/gen/",
+    # Vendored upstream code, kept as published apart from its patch.
+    "third_party/",
 ]
