@@ -32,11 +32,18 @@ const MARKER_TYPES: [&str; 3] = [
 ];
 
 /// Our private type; its string is the session token of a dictation write.
+/// Only this type marks an item as ours: the `org.nspasteboard` markers are
+/// shared with other apps (password managers mark secrets with them).
 const SESSION_TYPE: &str = "com.dictationapp.session";
 
-/// Types never saved for a restore: our own and the markers.
-fn is_ours(pasteboard_type: &str) -> bool {
-    pasteboard_type == SESSION_TYPE || MARKER_TYPES.contains(&pasteboard_type)
+/// Whether a clipboard item with these types is one of our dictation
+/// writes. On the clipboard at snapshot time it is a stale one (an earlier
+/// restore didn't run or failed), so it is never saved: restoring it would
+/// put a transcript back. Every other item is saved whole, including its
+/// own privacy markers, so a concealed or transient item comes back
+/// concealed or transient.
+fn is_our_write<S: AsRef<str>>(types: &[S]) -> bool {
+    types.iter().any(|t| t.as_ref() == SESSION_TYPE)
 }
 
 fn unavailable(what: &str) -> ClipboardError {
@@ -50,6 +57,9 @@ fn unavailable(what: &str) -> ClipboardError {
 #[derive(Debug, Default)]
 pub struct MacPasteboard {
     tokens: AtomicU64,
+    /// A named pasteboard instead of the general one (tests only, so they
+    /// never touch the user's clipboard).
+    name: Option<String>,
 }
 
 impl MacPasteboard {
@@ -59,8 +69,20 @@ impl MacPasteboard {
         Self::default()
     }
 
-    fn pasteboard() -> Retained<NSPasteboard> {
-        NSPasteboard::generalPasteboard()
+    /// The adapter over the named pasteboard `name`.
+    #[cfg(test)]
+    fn named(name: &str) -> Self {
+        Self {
+            name: Some(name.to_owned()),
+            ..Self::default()
+        }
+    }
+
+    fn pasteboard(&self) -> Retained<NSPasteboard> {
+        match &self.name {
+            None => NSPasteboard::generalPasteboard(),
+            Some(name) => NSPasteboard::pasteboardWithName(&NSString::from_str(name)),
+        }
     }
 
     /// A token that no earlier write in any process has used.
@@ -106,15 +128,19 @@ impl MacPasteboard {
         };
         items
             .iter()
-            .map(|item| ClipboardItem {
-                representations: item
-                    .types()
+            .filter_map(|item| {
+                let types = item.types();
+                let names: Vec<String> = types.iter().map(|t| t.to_string()).collect();
+                if is_our_write(&names) {
+                    return None;
+                }
+                let representations: Vec<(String, Vec<u8>)> = types
                     .iter()
-                    .filter(|t| !is_ours(&t.to_string()))
-                    .filter_map(|t| item.dataForType(&t).map(|d| (t.to_string(), d.to_vec())))
-                    .collect(),
+                    .zip(names)
+                    .filter_map(|(t, name)| item.dataForType(&t).map(|d| (name, d.to_vec())))
+                    .collect();
+                (!representations.is_empty()).then_some(ClipboardItem { representations })
             })
-            .filter(|item| !item.representations.is_empty())
             .collect()
     }
 
@@ -140,7 +166,8 @@ impl Clipboard for MacPasteboard {
         // SAFETY: NSPasteboardTypeString is an immutable AppKit constant,
         // valid for the life of the process.
         let string_type = unsafe { NSPasteboardTypeString };
-        Ok(Self::pasteboard()
+        Ok(self
+            .pasteboard()
             .stringForType(string_type)
             .map(|s| s.to_string()))
     }
@@ -150,7 +177,7 @@ impl Clipboard for MacPasteboard {
         // SAFETY: as in read_text.
         let string_type = unsafe { NSPasteboardTypeString };
         item.setString_forType(&NSString::from_str(text), string_type);
-        if Self::write_items(&Self::pasteboard(), &[item]) {
+        if Self::write_items(&self.pasteboard(), &[item]) {
             Ok(())
         } else {
             Err(unavailable("the pasteboard refused the text"))
@@ -171,7 +198,7 @@ impl Clipboard for MacPasteboard {
             &NSString::from_str(&token),
             &NSString::from_str(SESSION_TYPE),
         );
-        let pasteboard = Self::pasteboard();
+        let pasteboard = self.pasteboard();
         if !Self::write_items(&pasteboard, &[item]) {
             return Err(unavailable("the pasteboard refused the dictation"));
         }
@@ -192,7 +219,7 @@ impl Clipboard for MacPasteboard {
 
     fn snapshot(&self) -> Result<ClipboardSnapshot, ClipboardError> {
         Ok(ClipboardSnapshot::Items(Self::snapshot_items(
-            &Self::pasteboard(),
+            &self.pasteboard(),
         )))
     }
 
@@ -201,7 +228,7 @@ impl Clipboard for MacPasteboard {
         session: &SessionMarker,
         previous: &ClipboardSnapshot,
     ) -> Result<bool, ClipboardError> {
-        let pasteboard = Self::pasteboard();
+        let pasteboard = self.pasteboard();
         if !Self::holds(&pasteboard, session) {
             return Ok(false);
         }
@@ -432,15 +459,183 @@ fn on_main<R: Send, F: FnOnce() -> R + Send>(f: F) -> Option<R> {
 
 #[cfg(test)]
 mod tests {
+    use objc2::msg_send;
+
     use super::*;
 
-    #[test]
-    fn our_types_are_never_saved() {
-        for t in MARKER_TYPES.iter().chain([&SESSION_TYPE]) {
-            assert!(is_ours(t), "{t}");
+    /// A private pasteboard, released when dropped, so tests never touch
+    /// the user's clipboard.
+    struct TestBoard {
+        board: Retained<NSPasteboard>,
+        name: String,
+    }
+
+    impl TestBoard {
+        fn new() -> Self {
+            let board = NSPasteboard::pasteboardWithUniqueName();
+            let name = board.name().to_string();
+            Self { board, name }
         }
-        assert!(!is_ours("public.utf8-plain-text"));
-        assert!(!is_ours("public.png"));
+
+        fn adapter(&self) -> MacPasteboard {
+            MacPasteboard::named(&self.name)
+        }
+
+        /// Another app copies one item with these representations.
+        fn copy(&self, representations: &[(&str, &[u8])]) {
+            let item = NSPasteboardItem::new();
+            for (pasteboard_type, bytes) in representations {
+                item.setData_forType(
+                    &NSData::with_bytes(bytes),
+                    &NSString::from_str(pasteboard_type),
+                );
+            }
+            assert!(MacPasteboard::write_items(&self.board, &[item]));
+        }
+
+        /// Each item's types, in order.
+        fn types(&self) -> Vec<Vec<String>> {
+            self.board.pasteboardItems().map_or_else(Vec::new, |items| {
+                items
+                    .iter()
+                    .map(|item| item.types().iter().map(|t| t.to_string()).collect())
+                    .collect()
+            })
+        }
+
+        fn data(&self, pasteboard_type: &str) -> Option<Vec<u8>> {
+            self.board
+                .dataForType(&NSString::from_str(pasteboard_type))
+                .map(|d| d.to_vec())
+        }
+    }
+
+    impl Drop for TestBoard {
+        fn drop(&mut self) {
+            // SAFETY: releaseGlobally takes no arguments and returns void;
+            // the board is a live NSPasteboard we created.
+            let () = unsafe { msg_send![&*self.board, releaseGlobally] };
+        }
+    }
+
+    const TEXT: &str = "public.utf8-plain-text";
+
+    #[test]
+    fn only_items_with_our_session_type_are_ours() {
+        assert!(is_our_write(&[TEXT, SESSION_TYPE]));
+        assert!(!is_our_write(&[TEXT]));
+        assert!(!is_our_write(&[
+            TEXT,
+            MARKER_TYPES[0],
+            MARKER_TYPES[1],
+            MARKER_TYPES[2]
+        ]));
+        assert!(!is_our_write::<&str>(&[]));
+    }
+
+    // B1: a password manager's concealed, transient item stays so.
+    #[test]
+    fn a_marked_previous_item_is_restored_with_its_markers() {
+        let board = TestBoard::new();
+        let mut copied: Vec<(&str, &[u8])> = vec![(TEXT, b"hunter2")];
+        copied.extend(MARKER_TYPES.iter().map(|m| (*m, &b""[..])));
+        board.copy(&copied);
+        let adapter = board.adapter();
+
+        let saved = adapter.snapshot().unwrap();
+        let session = adapter.write_dictation("dictated").unwrap();
+        assert!(
+            adapter
+                .restore_snapshot_if_unchanged(&session, &saved)
+                .unwrap()
+        );
+
+        let types = board.types();
+        assert_eq!(types.len(), 1);
+        for marker in MARKER_TYPES {
+            assert!(
+                types[0].iter().any(|t| t == marker),
+                "{marker} lost: {types:?}"
+            );
+        }
+        assert!(!types[0].iter().any(|t| t == SESSION_TYPE));
+        assert_eq!(board.data(TEXT).as_deref(), Some(&b"hunter2"[..]));
+    }
+
+    // B1: a stale dictation write (its restore never ran) is never saved,
+    // so no transcript is put back.
+    #[test]
+    fn our_session_item_is_never_restored() {
+        let board = TestBoard::new();
+        let adapter = board.adapter();
+        adapter.write_dictation("stale transcript").unwrap();
+
+        let saved = adapter.snapshot().unwrap();
+        assert_eq!(saved, ClipboardSnapshot::Items(Vec::new()));
+        let session = adapter.write_dictation("new transcript").unwrap();
+        assert!(
+            adapter
+                .restore_snapshot_if_unchanged(&session, &saved)
+                .unwrap()
+        );
+
+        assert_eq!(board.types(), Vec::<Vec<String>>::new());
+        assert_eq!(board.data(TEXT), None);
+    }
+
+    #[test]
+    fn a_stale_write_is_dropped_but_other_items_are_kept() {
+        let board = TestBoard::new();
+        let other = NSPasteboardItem::new();
+        other.setData_forType(&NSData::with_bytes(b"keep"), &NSString::from_str(TEXT));
+        let stale = NSPasteboardItem::new();
+        stale.setData_forType(&NSData::with_bytes(b"stale"), &NSString::from_str(TEXT));
+        stale.setData_forType(
+            &NSData::with_bytes(b"1-2-3"),
+            &NSString::from_str(SESSION_TYPE),
+        );
+        assert!(MacPasteboard::write_items(&board.board, &[other, stale]));
+
+        let saved = board.adapter().snapshot().unwrap();
+        assert_eq!(
+            saved,
+            ClipboardSnapshot::Items(vec![ClipboardItem {
+                representations: vec![(TEXT.into(), b"keep".to_vec())],
+            }])
+        );
+    }
+
+    #[test]
+    fn an_unchanged_clipboard_is_restored() {
+        let board = TestBoard::new();
+        board.copy(&[(TEXT, b"before"), ("public.png", &[0x89, b'P'])]);
+        let adapter = board.adapter();
+        let saved = adapter.snapshot().unwrap();
+        let session = adapter.write_dictation("dictated").unwrap();
+        assert_eq!(board.data(TEXT).as_deref(), Some(&b"dictated"[..]));
+        assert!(
+            adapter
+                .restore_snapshot_if_unchanged(&session, &saved)
+                .unwrap()
+        );
+        assert_eq!(board.data(TEXT).as_deref(), Some(&b"before"[..]));
+        assert_eq!(board.data("public.png"), Some(vec![0x89, b'P']));
+    }
+
+    #[test]
+    fn a_copy_after_the_dictation_is_left_alone() {
+        let board = TestBoard::new();
+        board.copy(&[(TEXT, b"before")]);
+        let adapter = board.adapter();
+        let saved = adapter.snapshot().unwrap();
+        let session = adapter.write_dictation("dictated").unwrap();
+        board.copy(&[(TEXT, b"copied meanwhile")]);
+        assert!(
+            !adapter
+                .restore_snapshot_if_unchanged(&session, &saved)
+                .unwrap()
+        );
+        assert_eq!(board.data(TEXT).as_deref(), Some(&b"copied meanwhile"[..]));
     }
 
     #[test]
@@ -451,13 +646,13 @@ mod tests {
 
     #[test]
     fn a_malformed_session_never_matches() {
-        let pasteboard = MacPasteboard::pasteboard();
+        let board = TestBoard::new();
         assert!(!MacPasteboard::holds(
-            &pasteboard,
+            &board.board,
             &SessionMarker::new("no-colon")
         ));
         assert!(!MacPasteboard::holds(
-            &pasteboard,
+            &board.board,
             &SessionMarker::new("-1:token")
         ));
     }
