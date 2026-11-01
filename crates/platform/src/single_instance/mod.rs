@@ -23,6 +23,10 @@
 //!   `MAX_READERS` at a time, and acknowledges a message once its callback
 //!   has run. A launch that gets no acknowledgement reports an error
 //!   instead of exiting as if its arguments had arrived.
+//! - When the running instance quits, it stops taking messages and answers
+//!   the ones already being acted on before it releases the lock (M1.7.1).
+//!   Otherwise a launch whose message was acted on but not acknowledged
+//!   would retry, find the lock free and run a second instance.
 //!
 //! The socket and lock live in a per-user directory ([`default_dir`]), not
 //! the shared `/tmp` the plugin used.
