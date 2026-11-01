@@ -1120,6 +1120,7 @@ mod capability_tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
+    use tauri_utils::acl::ExecutionContext;
     use tauri_utils::acl::capability::Capability;
     use tauri_utils::acl::manifest::Manifest;
     use tauri_utils::acl::resolved::Resolved;
@@ -1135,6 +1136,97 @@ mod capability_tests {
         let capabilities: BTreeMap<String, Capability> =
             serde_json::from_str(&read("capabilities.json")).unwrap();
         Resolved::resolve(&manifests, capabilities, Target::current()).unwrap()
+    }
+
+    /// The capability files the build script resolved, as JSON, to mutate.
+    fn capability_files() -> serde_json::Value {
+        let out_dir = PathBuf::from(env!("OUT_DIR"));
+        serde_json::from_str(&std::fs::read_to_string(out_dir.join("capabilities.json")).unwrap())
+            .unwrap()
+    }
+
+    fn resolve(capabilities: serde_json::Value) -> Resolved {
+        let out_dir = PathBuf::from(env!("OUT_DIR"));
+        let manifests: BTreeMap<String, Manifest> = serde_json::from_str(
+            &std::fs::read_to_string(out_dir.join("acl-manifests.json")).unwrap(),
+        )
+        .unwrap();
+        let capabilities: BTreeMap<String, Capability> =
+            serde_json::from_value(capabilities).unwrap();
+        Resolved::resolve(&manifests, capabilities, Target::current()).unwrap()
+    }
+
+    /// What the settings window needs and nothing more: every app command,
+    /// from the app's own (local) pages in `main` only, and no other command
+    /// at all, so no tray, menu, resource or window mutation. `Err` names the
+    /// first breach.
+    fn check_main(resolved: &Resolved) -> Result<(), String> {
+        for name in COMMAND_NAMES {
+            if !resolved.allowed_commands.contains_key(*name) {
+                return Err(format!(
+                    "{name} is not allowed; the settings window needs it"
+                ));
+            }
+        }
+        for (command, grants) in &resolved.allowed_commands {
+            if !COMMAND_NAMES.contains(&command.as_str()) {
+                return Err(format!("{command} is allowed"));
+            }
+            for grant in grants {
+                if let ExecutionContext::Remote { url } = &grant.context {
+                    return Err(format!("remote origin {url:?} may call {command}"));
+                }
+                let windows: Vec<&str> = grant.windows.iter().map(|w| w.as_str()).collect();
+                if windows != ["main"] || !grant.webviews.is_empty() {
+                    return Err(format!(
+                        "{command} reaches {windows:?} {:?}",
+                        grant.webviews
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// T2 criterion 3 (#103 P2-01): checked with Tauri's own ACL resolver on
+    /// this build's manifests, and shown to fail if a tray, menu, resource or
+    /// window permission, or a remote origin, is added to the capability.
+    #[test]
+    fn main_capability_denies_native_tray_and_menu_mutation() {
+        let real = capability_files();
+        assert_eq!(check_main(&resolve(real.clone())), Ok(()));
+
+        for permission in [
+            "core:default",
+            "core:tray:default",
+            "core:tray:allow-set-menu",
+            "core:tray:allow-set-visible",
+            "core:menu:default",
+            "core:menu:allow-set-enabled",
+            "core:resources:allow-close",
+            "core:window:allow-hide",
+        ] {
+            let mut widened = real.clone();
+            widened["default"]["permissions"]
+                .as_array_mut()
+                .unwrap()
+                .push(permission.into());
+            let breach = check_main(&resolve(widened));
+            assert!(breach.is_err(), "adding {permission} went unnoticed");
+        }
+
+        let mut remote = real.clone();
+        remote["default"]["remote"] = serde_json::json!({ "urls": ["https://*.example.com"] });
+        let breach = check_main(&resolve(remote)).unwrap_err();
+        assert!(breach.contains("remote origin"), "{breach}");
+
+        let mut narrowed = real;
+        narrowed["default"]["permissions"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|permission| permission != "allow-save-settings");
+        let breach = check_main(&resolve(narrowed)).unwrap_err();
+        assert!(breach.contains("save_settings"), "{breach}");
     }
 
     #[test]
