@@ -32,21 +32,22 @@ vm_osascript() {
 }
 
 # An empty untitled TextEdit document in front, so a paste lands in it.
-# Waits (up to 10 s) until TextEdit is the frontmost app: a Terminal job
-# (vm_terminal) may still be coming to the front when TextEdit is activated,
-# and a paste goes to whatever is in front.
+# An empty untitled TextEdit document in front, so a paste lands in it. Then
+# checks (up to 10 s) that TextEdit really is the frontmost app: a paste goes
+# to whatever is in front, and a Terminal job may still be activating.
 textedit_fresh() {
   local i
   vm_osascript '
     tell application "TextEdit"
       close every document saving no
       make new document
+      activate
     end tell' >/dev/null
+  sleep 1
   for i in $(seq 1 20); do
-    vm_osascript '
-      tell application "TextEdit" to activate
-      tell application "System Events" to get name of first process whose frontmost is true' |
+    vm_osascript 'tell application "System Events" to get name of first process whose frontmost is true' |
       grep -qx TextEdit && return 0
+    vm_osascript 'tell application "TextEdit" to activate' >/dev/null
     sleep 0.5
   done
   log "  TextEdit didn't come to the front"
