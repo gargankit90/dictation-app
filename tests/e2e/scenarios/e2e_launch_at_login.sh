@@ -33,17 +33,28 @@ wait_for_app() {
   return 1
 }
 
-# Powers the VM off and starts it again, with the same disk, and waits for
-# ssh and the GUI session.
+# Restarts macOS inside the VM (a clean shutdown, so what the scenario wrote,
+# such as the removed log, is on disk) and waits for ssh and the GUI session
+# to come back. Dies if the VM did not really reboot.
 reboot_vm() {
+  local before after i
+  before=$(vm "sysctl -n kern.boottime")
   log "rebooting $VM"
-  lume stop "$VM" >/dev/null 2>&1 || true
-  lume run "$VM" --no-display --detach >/dev/null || die "lume run failed"
+  vm "sync"
+  vm "osascript -e 'tell application \"System Events\" to restart'" || true
+  # ssh answers for a while after the restart is asked for: wait for it to go.
+  for i in $(seq 1 120); do
+    vm true 2>/dev/null || break
+    sleep 1
+  done
   wait_for_vm
+  after=$(vm "sysctl -n kern.boottime")
+  [ "$before" != "$after" ] || die "$VM did not reboot"
 }
 
 e2e_launch_at_login() {
   fresh_app_state
+  vm "sync"
   trap login_item_cleanup EXIT
   local status
 
@@ -61,6 +72,9 @@ e2e_launch_at_login() {
   expect "the app starts by itself after the reboot" wait_for_app 180
   expect "it is up and ready" wait_for_log 'INFO .*ready' 60
   expect "it started once" test "$(app_log | grep -c 'INFO .*starting')" = 1
+  # No test flag was given: it was started by the login item, not by us.
+  expect "nothing launched it from the test side" \
+    test "$(app_log | grep -c 'test hook')" = 0
   collect_log e2e_launch_at_login
 
   fresh_app_state
