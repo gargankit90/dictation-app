@@ -92,6 +92,11 @@ Click the menu-bar icon > **Check for updates…**. If there is a newer build it
 tells you what is new and offers **Install and restart**. If there isn't, it
 says _"You're up to date"_. If the update server can't be reached, it says so.
 
+While the project's code is in a private GitHub repository, GitHub refuses
+the update check from outside (it answers "not found" to anyone who isn't
+signed in), so **Check for updates…** will say it couldn't reach the update
+server. Until that changes, install each new build from the DMG you are sent.
+
 ## Something went wrong: the log
 
 dictation-app writes a log that you can send us. It holds what the app did

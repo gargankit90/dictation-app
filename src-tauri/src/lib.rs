@@ -236,7 +236,7 @@ pub fn run() {
     let (hotkey, injector) = shell_hotkey();
 
     #[allow(clippy::expect_used)] // No UI exists yet to report a startup failure to.
-    let app = tauri::Builder::default()
+    let app = updater::plugins(tauri::Builder::default())
         // The overlay's non-activating panel (M5.1).
         .plugin(dictation_platform::overlay::plugin())
         .invoke_handler(commands::builder().invoke_handler())

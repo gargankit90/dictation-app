@@ -780,6 +780,7 @@ dependencies = [
  "dictation-platform",
  "dictation-ports",
  "dictation-transcribe",
+ "reqwest",
  "serde",
  "serde_json",
  "specta",

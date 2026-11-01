@@ -10,8 +10,10 @@
 //! capability, so no window can call them: only this module, from the tray,
 //! starts an update.
 
+use reqwest::Url;
+use reqwest::redirect::Policy;
 use serde_json::Value;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Builder, Runtime};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -95,6 +97,9 @@ pub fn pubkey_configured(updater_config: Option<&Value>) -> bool {
         .is_some_and(|key| !key.trim().is_empty())
 }
 
+const SIGNATURE_MESSAGE: &str =
+    "The update's signature didn't match this app's update key, so it was not installed.";
+
 /// A user-facing reason for a failed check. Raw errors name URLs and
 /// libraries; only their kind helps a tester, and the log has the rest.
 #[must_use]
@@ -106,6 +111,14 @@ pub fn failure_reason(error: &tauri_plugin_updater::Error) -> String {
                 .to_owned()
         }
         Error::EmptyEndpoints => "This build has no update server set.".to_owned(),
+        Error::Minisign(_)
+        | Error::Base64(_)
+        | Error::SignatureUtf8(_)
+        | Error::SignedVersionMismatch { .. }
+        | Error::MissingSignedVersion => SIGNATURE_MESSAGE.to_owned(),
+        Error::InsecureTransportProtocol => {
+            "The update isn't offered over a secure connection, so it was refused.".to_owned()
+        }
         Error::TargetNotFound(_) | Error::TargetsNotFound(_) => {
             "The newest release has no download for this Mac.".to_owned()
         }
@@ -113,6 +126,105 @@ pub fn failure_reason(error: &tauri_plugin_updater::Error) -> String {
             "The update check failed. The log has the details (tray menu > Reveal log).".to_owned()
         }
     }
+}
+
+/// Registers the updater and the native dialogs on `builder`. The shell and
+/// the tests both call this, so a test builds the app with the plugins the
+/// shipped app has (the tray action panics without their state).
+pub fn plugins<R: Runtime>(builder: Builder<R>) -> Builder<R> {
+    builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
+}
+
+/// Whether `plugins.updater.dangerousInsecureTransportProtocol` is on. Only
+/// the local test harness (`scripts/updater-test.sh`) turns it on.
+fn insecure_allowed(updater_config: Option<&Value>) -> bool {
+    updater_config
+        .and_then(|config| config.get("dangerousInsecureTransportProtocol"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// The configured manifest endpoints.
+fn endpoints(updater_config: Option<&Value>) -> Vec<Url> {
+    updater_config
+        .and_then(|config| config.get("endpoints"))
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(Value::as_str)
+                .filter_map(|endpoint| Url::parse(endpoint).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Why a package URL from the manifest must not be fetched, or `None`.
+///
+/// The manifest comes from our endpoint, but its package URL is just data:
+/// the plugin only warns about plain http and follows any host. The package
+/// must be https (unless the test harness allows http), on the endpoint's own
+/// host, and under the endpoint's `/releases/` path (a project's release
+/// assets), so a wrong manifest can't point the download elsewhere. The
+/// signature still protects what gets installed (#134).
+#[must_use]
+pub fn package_url_problem(
+    package: &Url,
+    endpoints: &[Url],
+    insecure_ok: bool,
+) -> Option<&'static str> {
+    if package.scheme() != "https" && !insecure_ok {
+        return Some("The update isn't offered over a secure connection, so it was refused.");
+    }
+    let same_place = endpoints.iter().any(|endpoint| {
+        let prefix = endpoint
+            .path()
+            .find("/releases/")
+            .map_or("/", |at| &endpoint.path()[..at + "/releases/".len()]);
+        package.scheme() == endpoint.scheme()
+            && package.host_str() == endpoint.host_str()
+            && package.port_or_known_default() == endpoint.port_or_known_default()
+            && package.path().starts_with(prefix)
+    });
+    if same_place {
+        None
+    } else {
+        Some("The update isn't hosted where this app expects, so it was refused.")
+    }
+}
+
+/// Whether a download may follow a redirect to `next`: https, on GitHub or
+/// its release-asset hosts (`*.githubusercontent.com`), a few hops at most.
+/// Release assets redirect from github.com to a storage host.
+#[must_use]
+pub fn redirect_allowed(next: &Url, hops: usize) -> bool {
+    hops < 5
+        && next.scheme() == "https"
+        && next
+            .host_str()
+            .is_some_and(|host| host == "github.com" || host.ends_with(".githubusercontent.com"))
+}
+
+/// The updater for this app. With https only (production), redirects are
+/// limited to [`redirect_allowed`]; the test harness (insecure transport on)
+/// keeps the default policy for its local server.
+fn updater_for<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<tauri_plugin_updater::Updater, tauri_plugin_updater::Error> {
+    let mut builder = app.updater_builder();
+    if !insecure_allowed(app.config().plugins.0.get("updater")) {
+        builder = builder.configure_client(|client| {
+            client.redirect(Policy::custom(|attempt| {
+                if redirect_allowed(attempt.url(), attempt.previous().len()) {
+                    attempt.follow()
+                } else {
+                    attempt.stop()
+                }
+            }))
+        });
+    }
+    builder.build()
 }
 
 /// Asks the update server whether a newer release exists.
@@ -127,7 +239,7 @@ pub async fn check<R: Runtime>(app: &AppHandle<R>) -> (Outcome, Option<Update>) 
         return (Outcome::NotConfigured, None);
     }
     let current = app.package_info().version.to_string();
-    let updater = match app.updater() {
+    let updater = match updater_for(app) {
         Ok(updater) => updater,
         Err(error) => {
             tracing::warn!(%error, "could not set up the updater");
@@ -174,22 +286,22 @@ pub async fn check<R: Runtime>(app: &AppHandle<R>) -> (Outcome, Option<Update>) 
 /// A user-facing reason when the download, the signature check or the
 /// install fails.
 pub async fn install<R: Runtime>(app: &AppHandle<R>, update: &Update) -> Result<(), String> {
+    let config = app.config().plugins.0.get("updater");
+    if let Some(problem) = package_url_problem(
+        &update.download_url,
+        &endpoints(config),
+        insecure_allowed(config),
+    ) {
+        tracing::warn!(host = ?update.download_url.host_str(), "update package refused");
+        return Err(problem.to_owned());
+    }
     tracing::info!(version = %update.version, "downloading the update");
     update
         .download_and_install(|_chunk, _total| {}, || tracing::info!("download finished"))
         .await
         .map_err(|error| {
             tracing::warn!(%error, "update failed");
-            match error {
-                tauri_plugin_updater::Error::Minisign(_)
-                | tauri_plugin_updater::Error::Base64(_)
-                | tauri_plugin_updater::Error::SignatureUtf8(_)
-                | tauri_plugin_updater::Error::SignedVersionMismatch { .. }
-                | tauri_plugin_updater::Error::MissingSignedVersion => {
-                    "The download didn't match its signature, so it was not installed.".to_owned()
-                }
-                other => failure_reason(&other),
-            }
+            failure_reason(&error)
         })?;
     tracing::info!(version = %update.version, "update installed; restarting");
     // A restart request (not `restart`) runs the normal exit, so the
@@ -357,14 +469,18 @@ mod tests {
                 "dangerousInsecureTransportProtocol": true,
             }),
         );
-        mock_builder()
-            .plugin(
-                tauri_plugin_updater::Builder::new()
-                    .target("test-target")
-                    .build(),
-            )
-            .build(context)
-            .unwrap()
+        // The same plugin set the shipped app registers (`plugins`), so a
+        // missing registration fails here as it would in the app.
+        plugins(mock_builder()).build(context).unwrap()
+    }
+
+    /// The manifest key the updater looks for on this machine.
+    fn platform_key() -> String {
+        let os = match std::env::consts::OS {
+            "macos" => "darwin",
+            other => other,
+        };
+        format!("{os}-{}", std::env::consts::ARCH)
     }
 
     /// Serves a manifest announcing `version`, whose package is `package`.
@@ -375,7 +491,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "version": version,
                 "notes": "Fixes things.",
-                "platforms": {"test-target": {
+                "platforms": {platform_key(): {
                     "url": format!("{}/package", server.uri()),
                     "signature": TEST_SIGNATURE,
                 }},
@@ -467,5 +583,203 @@ mod tests {
         let (_, update) = check(app.handle()).await;
         let result = update.unwrap().download(|_, _| {}, || {}).await;
         assert!(result.is_err(), "an untrusted signer must not verify");
+    }
+
+    #[test]
+    fn the_shipped_plugin_set_provides_what_the_tray_action_uses() {
+        // The tray action calls `app.dialog()` and `updater_for`; both read
+        // state that only their plugins install, and panic without it (R1).
+        let mut context = mock_context(noop_assets());
+        context.config_mut().plugins.0.insert(
+            "updater".into(),
+            json!({"endpoints": ["https://example.invalid/latest.json"], "pubkey": TEST_PUBKEY}),
+        );
+        let app = plugins(mock_builder()).build(context).unwrap();
+        let _ = app.handle().dialog().message("registered");
+        assert!(updater_for(app.handle()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_manifest_with_a_garbled_signature_gets_the_signature_message() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/latest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "version": "2.0.0",
+                "platforms": {platform_key(): {
+                    "url": format!("{}/package", server.uri()),
+                    "signature": "this is not a signature",
+                }},
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/package"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(&b"test"[..]))
+            .mount(&server)
+            .await;
+        let app = app_for(&server, TEST_PUBKEY);
+        let (outcome, update) = check(app.handle()).await;
+        // Whether the garbled signature is caught at the check or only when
+        // the package is verified, the user is told what it is.
+        let message = match (outcome, update) {
+            (Outcome::Failed { reason }, _) => reason,
+            (Outcome::Available { .. }, Some(update)) => {
+                install(app.handle(), &update).await.unwrap_err()
+            }
+            (outcome, _) => panic!("unexpected {outcome:?}"),
+        };
+        assert_eq!(message, SIGNATURE_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn installing_a_tampered_package_says_why_and_installs_nothing() {
+        let server = serve("2.0.0", b"tampered").await;
+        let app = app_for(&server, TEST_PUBKEY);
+        let (_, update) = check(app.handle()).await;
+        let message = install(app.handle(), &update.unwrap()).await.unwrap_err();
+        assert_eq!(message, SIGNATURE_MESSAGE);
+    }
+
+    #[test]
+    fn signature_failures_share_one_clear_message() {
+        use tauri_plugin_updater::Error;
+        assert_eq!(
+            failure_reason(&Error::MissingSignedVersion),
+            SIGNATURE_MESSAGE
+        );
+        assert_eq!(
+            failure_reason(&Error::SignatureUtf8("x".into())),
+            SIGNATURE_MESSAGE
+        );
+        assert!(failure_reason(&Error::InsecureTransportProtocol).contains("secure connection"));
+    }
+
+    fn url(text: &str) -> Url {
+        Url::parse(text).unwrap()
+    }
+
+    const ENDPOINT: &str =
+        "https://github.com/gargankit90/dictation-app/releases/latest/download/latest.json";
+
+    #[test]
+    fn the_shipped_config_loads_into_the_plugin_and_has_no_key_yet() {
+        // The real tauri.conf.json: a typo in `plugins.updater` would stop
+        // the app at startup, which no other test would notice.
+        // (generate_context! can't run twice in one crate.)
+        let file: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let config = file.pointer("/plugins/updater").cloned();
+        let mut context = mock_context(noop_assets());
+        context
+            .config_mut()
+            .plugins
+            .0
+            .insert("updater".into(), config.clone().unwrap());
+        assert!(
+            !pubkey_configured(config.as_ref()),
+            "the key is the owner's to add"
+        );
+        assert!(!insecure_allowed(config.as_ref()));
+        let endpoints = endpoints(config.as_ref());
+        assert_eq!(endpoints.len(), 1);
+        assert_eq!(endpoints[0].scheme(), "https");
+        plugins(mock_builder()).build(context).unwrap();
+    }
+
+    #[test]
+    fn the_shell_registers_the_plugins_through_plugins() {
+        // `run` can't be built in a test (it starts the real app), so check
+        // the source: the production builder must start from `plugins`.
+        let shell = include_str!("lib.rs");
+        assert!(
+            shell.contains("updater::plugins(tauri::Builder::default())"),
+            "lib.rs must register the updater and dialog plugins via updater::plugins"
+        );
+    }
+
+    #[test]
+    fn a_package_must_be_https_on_the_endpoints_host_and_releases_path() {
+        let endpoints = [url(ENDPOINT)];
+        let good = url(
+            "https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/dictation-app.app.tar.gz",
+        );
+        assert_eq!(package_url_problem(&good, &endpoints, false), None);
+
+        let http = url("http://github.com/gargankit90/dictation-app/releases/download/v1/a.tar.gz");
+        assert!(
+            package_url_problem(&http, &endpoints, false)
+                .unwrap()
+                .contains("secure connection")
+        );
+        let elsewhere =
+            url("https://evil.example/gargankit90/dictation-app/releases/download/v1/a");
+        assert!(
+            package_url_problem(&elsewhere, &endpoints, false)
+                .unwrap()
+                .contains("isn't hosted where")
+        );
+        let other_repo = url("https://github.com/someone/else/releases/download/v1/a.tar.gz");
+        assert!(package_url_problem(&other_repo, &endpoints, false).is_some());
+        let lookalike = url("https://github.com.evil.example/gargankit90/dictation-app/releases/x");
+        assert!(package_url_problem(&lookalike, &endpoints, false).is_some());
+        assert!(package_url_problem(&good, &[], false).is_some());
+    }
+
+    #[test]
+    fn plain_http_is_allowed_only_for_the_local_test_harness() {
+        let endpoints = [url("http://192.168.64.1:8765/latest.json")];
+        let package = url("http://192.168.64.1:8765/dictation-app_0.1.1.app.tar.gz");
+        assert_eq!(package_url_problem(&package, &endpoints, true), None);
+        assert!(package_url_problem(&package, &endpoints, false).is_some());
+        // Even then, another host or port is refused.
+        let other = url("http://192.168.64.1:9999/a.tar.gz");
+        assert!(package_url_problem(&other, &endpoints, true).is_some());
+    }
+
+    #[test]
+    fn redirects_stay_on_https_github_hosts() {
+        assert!(redirect_allowed(
+            &url("https://github.com/x/y/releases/download/v1/a"),
+            0
+        ));
+        assert!(redirect_allowed(
+            &url("https://objects.githubusercontent.com/github-production-release-asset/a"),
+            1
+        ));
+        assert!(redirect_allowed(
+            &url("https://release-assets.githubusercontent.com/a"),
+            4
+        ));
+        assert!(
+            !redirect_allowed(&url("http://github.com/a"), 0),
+            "downgrade to http"
+        );
+        assert!(!redirect_allowed(&url("https://evil.example/a"), 0));
+        assert!(!redirect_allowed(
+            &url("https://githubusercontent.com.evil.example/a"),
+            0
+        ));
+        assert!(
+            !redirect_allowed(&url("https://github.com/a"), 5),
+            "too many hops"
+        );
+    }
+
+    #[test]
+    fn config_readers_cope_with_missing_or_odd_values() {
+        assert!(!insecure_allowed(None));
+        assert!(!insecure_allowed(Some(
+            &json!({"dangerousInsecureTransportProtocol": "yes"})
+        )));
+        assert!(insecure_allowed(Some(
+            &json!({"dangerousInsecureTransportProtocol": true})
+        )));
+        assert!(endpoints(None).is_empty());
+        assert_eq!(
+            endpoints(Some(
+                &json!({"endpoints": ["https://a.example/x", 7, "not a url"]})
+            )),
+            [url("https://a.example/x")]
+        );
     }
 }
