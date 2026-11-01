@@ -49,6 +49,7 @@ pub use clipboard::{
 };
 pub use clock::Clock;
 pub use dictation_core::error::Permission;
+pub use dictation_core::text::Transcript;
 pub use hotkey::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};
 pub use insert::{InsertError, TextInserter};
 pub use permissions::{PermissionError, PermissionStatus, Permissions};
