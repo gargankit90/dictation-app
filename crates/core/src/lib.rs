@@ -8,6 +8,7 @@ pub mod coordinator;
 pub mod error;
 pub mod events;
 pub mod hotkey_spec;
+pub mod redact;
 pub mod retry;
 pub mod settings;
 pub mod text;

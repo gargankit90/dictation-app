@@ -61,9 +61,12 @@ objc2-foundation = { workspace = true, features = [
     "std",
     "NSArray",
     "NSData",
+    "NSError",
     "NSString",
     "NSThread",
 ] }
+# Login item registration (M5.3).
+objc2-service-management = { workspace = true, features = ["std", "objc2", "SMAppService", "objc2-foundation"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # Its fake microphone drives the real capture engine (ring buffer,

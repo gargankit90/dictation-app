@@ -18,6 +18,7 @@ describe("App", () => {
           model: "whisper-large-v3-turbo",
           language: null,
           hotkey: "RightAlt",
+          launch_at_login: false,
         };
       }
       return false; // has_api_key

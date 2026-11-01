@@ -2,6 +2,11 @@
 //! once, exactly one runs, the rest hand it their arguments, and none of
 //! them breaks the running instance's socket.
 #![cfg(unix)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "test helpers fail the test on purpose"
+)]
 
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -119,9 +124,29 @@ fn child_launch() {
     }
 }
 
+/// Rounds of [`concurrent_launches_in_processes_start_one_instance`]: one
+/// race is too few to catch a narrow window, and each costs well under a
+/// second when nothing is wrong.
+const ROUNDS: usize = 5;
+
+/// The longest a launch may take (the primary waits up to 10 s for the
+/// others); a hung one fails its round instead of the whole test run.
+const CHILD_LIMIT: Duration = Duration::from_secs(20);
+
 #[test]
 fn concurrent_launches_in_processes_start_one_instance() {
-    let dir = temp_dir("procs");
+    for round in 0..ROUNDS {
+        race_launches_in_processes(round);
+    }
+}
+
+/// Runs [`LAUNCHES`] launches as separate processes that start at the same
+/// moment, and checks that exactly one ran and the others were forwarded to
+/// it. The primary exits as soon as it has every message, so this also
+/// checks that it doesn't quit before acknowledging the last one (which
+/// would let that launch retry and run a second instance).
+fn race_launches_in_processes(round: usize) {
+    let dir = temp_dir(&format!("procs{round}"));
     let exe = std::env::current_exe().unwrap();
     let start = now_ms() + 500;
     let children: Vec<_> = (0..LAUNCHES)
@@ -137,11 +162,19 @@ fn concurrent_launches_in_processes_start_one_instance() {
                 .unwrap()
         })
         .collect();
+    let deadline = Instant::now() + CHILD_LIMIT;
     let results: Vec<String> = children
         .into_iter()
-        .map(|child| {
+        .map(|mut child| {
+            while child.try_wait().unwrap().is_none() {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    panic!("round {round}: a launch took longer than {CHILD_LIMIT:?}");
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
             let output = child.wait_with_output().unwrap();
-            assert!(output.status.success());
+            assert!(output.status.success(), "round {round}: a launch failed");
             String::from_utf8(output.stdout)
                 .unwrap()
                 .lines()
@@ -158,18 +191,20 @@ fn concurrent_launches_in_processes_start_one_instance() {
         .filter(|r| r.starts_with("primary"))
         .collect();
     let forwarded = results.iter().filter(|r| *r == "forwarded").count();
-    assert_eq!(primaries.len(), 1, "{results:?}");
-    assert_eq!(forwarded, LAUNCHES - 1, "{results:?}");
+    assert_eq!(primaries.len(), 1, "round {round}: {results:?}");
+    assert_eq!(forwarded, LAUNCHES - 1, "round {round}: {results:?}");
     assert_eq!(
         primaries[0],
-        &format!("primary received={} socket_intact=true", LAUNCHES - 1)
+        &format!("primary received={} socket_intact=true", LAUNCHES - 1),
+        "round {round}"
     );
 
     // The instance has exited: its socket is gone and the next launch runs.
     let config = Config::in_dir(&dir, "p");
-    assert!(!config.socket_path().exists());
+    assert!(!config.socket_path().exists(), "round {round}");
     assert!(matches!(
         acquire(&config, &message("next")).unwrap(),
         Launch::Primary(_)
     ));
+    let _ = std::fs::remove_dir_all(&dir);
 }

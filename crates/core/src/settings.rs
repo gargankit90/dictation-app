@@ -11,7 +11,9 @@
 //!   "whisper_model": "…", "language": "en" | "", "hotkey": "RightAlt"}`,
 //!   with `""` meaning "detect the language".
 //! - **v2** (current): `engine` is renamed `provider`, `whisper_model` is
-//!   renamed `model`, and "detect" is `null` instead of `""`.
+//!   renamed `model`, and "detect" is `null` instead of `""`. M5.3 added
+//!   `launch_at_login` (default `false`) without a version bump: a file
+//!   without it loads with the default.
 //!
 //! Fields this version doesn't know (from a newer build, or a hand edit) are
 //! ignored, and missing ones take their defaults, so an old or partial file
@@ -94,6 +96,10 @@ pub struct Settings {
     pub language: Option<String>,
     /// The dictation hotkey, as [`HotkeySpec`] writes it (`RightAlt`).
     pub hotkey: String,
+    /// Whether the app starts when the user logs in (M5.3). The file keeps
+    /// the last value applied; what the settings screen shows is the OS's
+    /// own state, which the user can change in System Settings.
+    pub launch_at_login: bool,
 }
 
 impl Default for Settings {
@@ -105,6 +111,7 @@ impl Default for Settings {
             model: provider.default_model().to_owned(),
             language: None,
             hotkey: HotkeySpec::default().to_string(),
+            launch_at_login: false,
         }
     }
 }
@@ -298,6 +305,7 @@ mod tests {
                 model: "whisper-1".into(),
                 language: None,
                 hotkey: "Ctrl+Space".into(),
+                launch_at_login: false,
             }
         );
         // A language stays a language; no version at all is v1 too.
@@ -306,6 +314,24 @@ mod tests {
         assert_eq!(settings.model, "whisper-large-v3");
         assert_eq!(settings.language.as_deref(), Some("fr"));
         assert_eq!(settings.hotkey, "RightAlt");
+    }
+
+    #[test]
+    fn launch_at_login_defaults_to_off_and_round_trips() {
+        assert!(!Settings::default().launch_at_login);
+        // A file from before M5.3 has no such field.
+        assert!(!from_json(r#"{"version": 2}"#).unwrap().launch_at_login);
+        let on = Settings {
+            launch_at_login: true,
+            ..Settings::default()
+        };
+        let json = to_json(&on).unwrap();
+        assert!(json.contains(r#""launch_at_login": true"#), "{json}");
+        assert_eq!(from_json(&json).unwrap(), on);
+        assert!(matches!(
+            from_json(r#"{"launch_at_login": "yes"}"#),
+            Err(SettingsError::Malformed(_))
+        ));
     }
 
     #[test]
