@@ -1,4 +1,4 @@
-//! Traits for the boundaries to the OS and the network: hotkey, audio, transcriber, text inserter, clipboard, secrets, permissions, clock.
+//! Traits for the boundaries to the OS and the network: hotkey, audio, transcriber, text inserter, clipboard, secrets, permissions, launch at login, clock.
 //!
 //! `platform` implements them for each OS (and as fakes behind its `testing`
 //! feature), `transcribe` implements [`Transcriber`], and `app` runs the
@@ -39,6 +39,7 @@ mod clipboard;
 mod clock;
 mod hotkey;
 mod insert;
+mod launch;
 mod permissions;
 mod secrets;
 mod transcribe;
@@ -52,6 +53,7 @@ pub use dictation_core::error::Permission;
 pub use dictation_core::text::Transcript;
 pub use hotkey::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};
 pub use insert::{InsertError, TextInserter};
+pub use launch::{LaunchAtLogin, LaunchAtLoginError, LaunchAtLoginState};
 pub use permissions::{PermissionError, PermissionStatus, Permissions};
 pub use secrets::{Secret, SecretError, SecretStore};
 pub use transcribe::{TranscribeError, Transcriber};

@@ -18,6 +18,8 @@ pub mod audio;
 pub mod clock;
 pub mod hotkey;
 pub mod insert;
+pub mod launch;
 pub mod permissions;
+pub mod reveal;
 pub mod secrets;
 pub mod secure_input;

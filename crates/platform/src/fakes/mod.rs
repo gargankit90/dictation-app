@@ -6,6 +6,7 @@ mod clipboard;
 mod clock;
 mod hotkey;
 mod inserter;
+mod launch;
 mod permissions;
 mod secrets;
 
@@ -18,6 +19,7 @@ pub use clipboard::MemClipboard;
 pub use clock::FakeClock;
 pub use hotkey::FakeHotkey;
 pub use inserter::FakeInserter;
+pub use launch::FakeLaunchAtLogin;
 pub use permissions::FakePermissions;
 pub use secrets::MemSecretStore;
 
