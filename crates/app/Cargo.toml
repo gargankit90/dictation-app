@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 dictation-core.workspace = true
 dictation-ports.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
 tracing.workspace = true
 

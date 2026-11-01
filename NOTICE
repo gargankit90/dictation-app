@@ -26,3 +26,18 @@ Ideas only, no code: Handy (MIT) for keeping the microphone open briefly
 between dictations; Muesli (MIT) for never waiting on CoreAudio from the
 thread that drives the UI and for treating route changes as a reason to
 reopen the device.
+
+keyring 3.6.3 (https://github.com/hwchen/keyring-rs)
+  The macOS keychain behind the API-key store
+  (crates/platform/src/secrets.rs). Used as a dependency; no code copied.
+  MIT OR Apache-2.0.
+
+tauri-specta 2.0.0-rc.26, specta 2.0.0-rc.26, specta-typescript 0.0.13
+(https://github.com/specta-rs)
+  Typed Tauri commands and the generated src/bindings.ts
+  (src-tauri/src/commands.rs). Used as dependencies. MIT License. Their
+  build-time proc-macros pull in Inflector 0.11.4 (BSD-2-Clause) and paste
+  1.0.15 (MIT OR Apache-2.0).
+
+@tauri-apps/api 2 (https://github.com/tauri-apps/tauri)
+  The invoke function the generated bindings call. Apache-2.0 OR MIT.
