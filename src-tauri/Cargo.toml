@@ -38,5 +38,5 @@ tauri = { workspace = true, features = ["test"] }
 serde_json.workspace = true
 tauri-utils.workspace = true
 dictation-platform = { workspace = true, features = ["testing"] }
-tokio = { workspace = true, features = ["rt", "macros", "time"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
 wiremock.workspace = true

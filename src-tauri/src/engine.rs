@@ -1113,4 +1113,403 @@ mod tests {
             "a stale answer costs one more read, never a parallel one"
         );
     }
+
+    // ---- quitting during a real request (#115) ----
+    //
+    // T1 aborts an OpenAiCompat future directly; these go through the real
+    // pipeline and its `shutdown`, with the engine the settings build,
+    // against a raw local listener that reports what the client did. No
+    // sleep is a proof: each step waits on a fence with an upper bound.
+
+    use std::io::{Read as _, Write as _};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use dictation_ports::{Audio, Transcriber, Transcript};
+    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+
+    /// How the raw provider answers the next connection.
+    enum RawReply {
+        /// Holds the reply: says when the client closes the connection, then
+        /// waits for `release` and sends a 200 with the transcript anyway
+        /// (the reply that would have been pasted), then says so in `sent`.
+        Held {
+            closed: UnboundedSender<()>,
+            release: std::sync::mpsc::Receiver<()>,
+            sent: UnboundedSender<()>,
+        },
+        /// A 503 asking for a 30 s wait before the retry, then closes.
+        Backoff,
+    }
+
+    /// A provider on 127.0.0.1 that counts requests and signals each one
+    /// once it has read it whole. Connections with no reply queued get a
+    /// 200 with [`TRANSCRIPT`].
+    struct RawProvider {
+        url: String,
+        requests: Arc<AtomicUsize>,
+        arrived: UnboundedReceiver<()>,
+        replies: Arc<Mutex<std::collections::VecDeque<RawReply>>>,
+    }
+
+    impl RawProvider {
+        fn start() -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let requests = Arc::new(AtomicUsize::new(0));
+            let (arrived_tx, arrived) = unbounded_channel();
+            let replies = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+            let (count, queue) = (Arc::clone(&requests), Arc::clone(&replies));
+            // Ends with the test process; it holds nothing on disk.
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(stream) = stream else { return };
+                    let (count, arrived) = (Arc::clone(&count), arrived_tx.clone());
+                    let reply = queue.lock().unwrap().pop_front();
+                    std::thread::spawn(move || serve_raw(stream, reply, &count, &arrived));
+                }
+            });
+            Self {
+                url,
+                requests,
+                arrived,
+                replies,
+            }
+        }
+
+        fn queue(&self, reply: RawReply) {
+            self.replies.lock().unwrap().push_back(reply);
+        }
+
+        fn requests(&self) -> usize {
+            self.requests.load(Ordering::SeqCst)
+        }
+    }
+
+    fn serve_raw(
+        mut stream: std::net::TcpStream,
+        reply: Option<RawReply>,
+        count: &AtomicUsize,
+        arrived: &UnboundedSender<()>,
+    ) {
+        if read_raw_request(&mut stream).is_none() {
+            return;
+        }
+        count.fetch_add(1, Ordering::SeqCst);
+        let _ = arrived.send(());
+        let ok = {
+            let body = serde_json::json!({ "text": TRANSCRIPT }).to_string();
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            )
+        };
+        match reply {
+            None => {
+                let _ = stream.write_all(ok.as_bytes());
+            }
+            Some(RawReply::Backoff) => {
+                let _ = stream.write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nretry-after: 30\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                );
+            }
+            Some(RawReply::Held {
+                closed,
+                release,
+                sent,
+            }) => {
+                // Read until the client hangs up (EOF or a reset).
+                let mut buf = [0u8; 256];
+                while matches!(stream.read(&mut buf), Ok(n) if n > 0) {}
+                let _ = closed.send(());
+                let _ = release.recv_timeout(WAIT);
+                let _ = stream.write_all(ok.as_bytes());
+                let _ = sent.send(());
+            }
+        }
+    }
+
+    /// Reads one request: the head, then `content-length` bytes of body.
+    fn read_raw_request(stream: &mut std::net::TcpStream) -> Option<()> {
+        let mut data = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let head_end = loop {
+            let n = stream.read(&mut chunk).ok().filter(|n| *n > 0)?;
+            data.extend_from_slice(&chunk[..n]);
+            if let Some(at) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                break at + 4;
+            }
+        };
+        let head = String::from_utf8_lossy(&data[..head_end]).to_ascii_lowercase();
+        let length: usize = head
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length:"))
+            .and_then(|value| value.trim().parse().ok())
+            .unwrap_or(0);
+        while data.len() < head_end + length {
+            let n = stream.read(&mut chunk).ok().filter(|n| *n > 0)?;
+            data.extend_from_slice(&chunk[..n]);
+        }
+        Some(())
+    }
+
+    /// Waits for one signal on `rx`, or fails the test.
+    async fn fenced(rx: &mut UnboundedReceiver<()>, what: &str) {
+        match tokio::time::timeout(WAIT, rx.recv()).await {
+            Ok(Some(())) => {}
+            Ok(None) => panic!("{what}: the signal's sender is gone"),
+            Err(_) => panic!("timed out waiting for {what}"),
+        }
+    }
+
+    /// The real engine behind the pipeline, and a signal when the pipeline
+    /// lets go of it: the last holder is the transcription job, so once this
+    /// is dropped the job (its request, its backoff) is gone for good.
+    struct DropProbe {
+        inner: Transcribers,
+        dropped: UnboundedSender<()>,
+    }
+
+    impl Drop for DropProbe {
+        fn drop(&mut self) {
+            let _ = self.dropped.send(());
+        }
+    }
+
+    impl Transcriber for DropProbe {
+        async fn transcribe(&self, audio: &Audio) -> Result<String, TranscribeError> {
+            self.inner.transcribe(audio).await
+        }
+
+        async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
+            self.inner.transcribe_detailed(audio).await
+        }
+    }
+
+    /// Settings with a saved key and the engine they build, pointed at
+    /// `provider`.
+    struct RawSetup {
+        dir: TempDir,
+        wav: std::path::PathBuf,
+        transcribers: Transcribers,
+    }
+
+    impl RawSetup {
+        fn new(tag: &str, provider: &RawProvider) -> Self {
+            let dir = TempDir::new(tag);
+            let config = Arc::new(Config::new(dir.0.join("config"), MemSecretStore::new()));
+            let transcribers = Transcribers::new(starting());
+            let live = LiveEngine::follow(transcribers.clone())
+                .at(&provider.url)
+                .with_key_timeout(WAIT);
+            changed(&config, &live, |c| c.set_api_key(Provider::Groq, KEY)).unwrap();
+            assert_eq!(transcribers.name(), "remote");
+            let wav = dir.0.join("speech.wav");
+            let wav_bytes = dictation_core::wav::encode_f32(&vec![0.25; 8_000], 16_000).unwrap();
+            std::fs::write(&wav, wav_bytes).unwrap();
+            Self {
+                dir,
+                wav,
+                transcribers,
+            }
+        }
+    }
+
+    /// One running pipeline with a fake hotkey and inserter.
+    struct Run {
+        pipeline: Pipeline,
+        ui: UiReceiver,
+        hotkey: FakeHotkey,
+        clock: FakeClock,
+        inserter: FakeInserter,
+    }
+
+    impl Run {
+        fn spawn<T: Transcriber + 'static>(wav: &std::path::Path, transcriber: T) -> Self {
+            let hotkey = FakeHotkey::new();
+            let clock = FakeClock::at(Duration::from_secs(100));
+            let inserter = FakeInserter::new();
+            let ports = Ports {
+                hotkey: hotkey.clone(),
+                audio: FileAudioSource::new(wav),
+                transcriber,
+                inserter: inserter.clone(),
+                permissions: FakePermissions::all_granted(),
+                clock: clock.clone(),
+            };
+            let (pipeline, ui) = Pipeline::spawn(ports, PipelineConfig::default()).unwrap();
+            Self {
+                pipeline,
+                ui,
+                hotkey,
+                clock,
+                inserter,
+            }
+        }
+
+        fn press_and_release(&self) {
+            assert!(self.hotkey.emit(HotkeyEvent::Pressed));
+            self.clock.advance(Duration::from_millis(500));
+            assert!(self.hotkey.emit(HotkeyEvent::Released));
+        }
+
+        async fn next(&mut self) -> Option<UiEvent> {
+            tokio::time::timeout(WAIT, self.ui.recv())
+                .await
+                .expect("no UI event in time")
+        }
+
+        /// UI events up to Transcribing: the job has started.
+        async fn until_transcribing(&mut self) {
+            for phase in [Recording, Transcribing] {
+                assert_eq!(self.next().await, Some(UiEvent::StateChanged(phase)));
+            }
+        }
+
+        /// Stops the pipeline, which must not wait for the provider, and
+        /// returns every UI event it sent after that.
+        async fn shut_down(self) -> (Vec<UiEvent>, FakeInserter) {
+            let Self {
+                pipeline,
+                mut ui,
+                inserter,
+                ..
+            } = self;
+            tokio::time::timeout(WAIT, pipeline.shutdown())
+                .await
+                .expect("shutdown waited for the provider");
+            let mut rest = Vec::new();
+            while let Some(event) = tokio::time::timeout(WAIT, ui.recv())
+                .await
+                .expect("the UI stream didn't end after shutdown")
+            {
+                rest.push(event);
+            }
+            (rest, inserter)
+        }
+    }
+
+    /// After a shutdown, a new pipeline on the same engine dictates normally.
+    async fn a_fresh_pipeline_pastes(setup: &RawSetup, provider: &mut RawProvider) {
+        let mut run = Run::spawn(&setup.wav, setup.transcribers.clone());
+        run.press_and_release();
+        let mut events = Vec::new();
+        while let Some(event) = run.next().await {
+            let idle = event == UiEvent::StateChanged(Idle);
+            events.push(event);
+            if idle {
+                break;
+            }
+        }
+        assert_eq!(events, pasted());
+        assert_eq!(run.inserter.inserted(), [TRANSCRIPT]);
+        fenced(&mut provider.arrived, "the fresh pipeline's request").await;
+        run.pipeline.shutdown().await;
+    }
+
+    fn no_insert(after: &[UiEvent], inserter: &FakeInserter) {
+        assert!(
+            !after.contains(&UiEvent::StateChanged(Inserting)),
+            "inserting after shutdown: {after:?}"
+        );
+        assert!(inserter.inserted().is_empty(), "pasted after shutdown");
+    }
+
+    #[tokio::test]
+    async fn pipeline_shutdown_closes_real_http_without_retry_or_insert() {
+        let mut provider = RawProvider::start();
+        let (closed_tx, mut closed) = unbounded_channel();
+        let (sent_tx, mut sent) = unbounded_channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        provider.queue(RawReply::Held {
+            closed: closed_tx,
+            release: release_rx,
+            sent: sent_tx,
+        });
+        let setup = RawSetup::new("quit-in-flight", &provider);
+        let (dropped_tx, mut dropped) = unbounded_channel();
+        let mut run = Run::spawn(
+            &setup.wav,
+            DropProbe {
+                inner: setup.transcribers.clone(),
+                dropped: dropped_tx,
+            },
+        );
+
+        run.press_and_release();
+        run.until_transcribing().await;
+        fenced(&mut provider.arrived, "the request").await;
+        // Quit while the provider holds the reply: shutdown returns without it.
+        let (after, inserter) = run.shut_down().await;
+        // The request was cancelled: the client closed the connection, and
+        // the job holding it is gone.
+        fenced(&mut closed, "the client to close the connection").await;
+        fenced(&mut dropped, "the transcription job to be dropped").await;
+        // The reply the user would have had pasted arrives late.
+        release.send(()).unwrap();
+        fenced(&mut sent, "the late reply").await;
+
+        no_insert(&after, &inserter);
+        assert_eq!(provider.requests(), 1, "retried after shutdown");
+        a_fresh_pipeline_pastes(&setup, &mut provider).await;
+        assert_eq!(provider.requests(), 2);
+        drop(setup.dir);
+    }
+
+    /// Writes nothing; signals each time the engine logs that it is waiting
+    /// to retry (its `retrying` debug line).
+    #[derive(Clone)]
+    struct RetrySignal(UnboundedSender<()>);
+
+    impl std::io::Write for RetrySignal {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if String::from_utf8_lossy(buf).contains(" retrying ") {
+                let _ = self.0.send(());
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn pipeline_shutdown_during_retry_backoff_sends_no_retry_or_insert() {
+        // The test's runtime has one thread, so the engine logs here.
+        let (retrying_tx, mut retrying) = unbounded_channel();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_ansi(false)
+            .with_writer(move || RetrySignal(retrying_tx.clone()))
+            .finish();
+        let _logging = tracing::subscriber::set_default(subscriber);
+
+        let mut provider = RawProvider::start();
+        provider.queue(RawReply::Backoff);
+        let setup = RawSetup::new("quit-in-backoff", &provider);
+        let (dropped_tx, mut dropped) = unbounded_channel();
+        let mut run = Run::spawn(
+            &setup.wav,
+            DropProbe {
+                inner: setup.transcribers.clone(),
+                dropped: dropped_tx,
+            },
+        );
+
+        run.press_and_release();
+        run.until_transcribing().await;
+        fenced(&mut provider.arrived, "the first request").await;
+        // The 503 came back and the engine is waiting out its 30 s.
+        fenced(&mut retrying, "the engine to back off").await;
+        let (after, inserter) = run.shut_down().await;
+        // The job, and the retry it was waiting to send, are gone: no second
+        // request can follow.
+        fenced(&mut dropped, "the transcription job to be dropped").await;
+
+        no_insert(&after, &inserter);
+        assert_eq!(provider.requests(), 1, "retried after shutdown");
+        a_fresh_pipeline_pastes(&setup, &mut provider).await;
+        assert_eq!(provider.requests(), 2);
+        drop(setup.dir);
+    }
 }
