@@ -23,7 +23,7 @@ dictation-pipeline.workspace = true
 dictation-platform.workspace = true
 dictation-ports.workspace = true
 dictation-transcribe.workspace = true
-tauri = { workspace = true, features = ["tray-icon"] }
+tauri = { workspace = true, features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-single-instance.workspace = true
 tauri-specta.workspace = true
 serde.workspace = true
@@ -35,6 +35,7 @@ tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 dictation-platform = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 wiremock.workspace = true

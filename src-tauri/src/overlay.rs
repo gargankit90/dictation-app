@@ -1,0 +1,126 @@
+//! The overlay window (M5.1): shows Recording, Transcribing and errors
+//! without taking focus. [`start`] creates the window
+//! (`dictation_platform::overlay`) and runs `dictation_pipeline::overlay`
+//! against it; this module only connects the two and sends each view to the
+//! page (`src/overlay/`) as [`EVENT`].
+
+use dictation_pipeline::overlay::{self, ERROR_VISIBLE_FOR, OverlaySurface, OverlayView};
+use dictation_pipeline::pipeline::UiEvent;
+use dictation_platform::overlay::{Overlay, OverlaySpec};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, EventTarget, LogicalSize, Runtime};
+use tokio::sync::mpsc::{self, UnboundedSender};
+
+/// The overlay window's label; `capabilities/overlay.json` names it.
+pub const LABEL: &str = "overlay";
+/// The one event the overlay page listens to (`src/overlay/view.ts`).
+pub const EVENT: &str = "overlay-view";
+
+fn spec() -> OverlaySpec {
+    OverlaySpec {
+        label: LABEL,
+        page: "overlay.html",
+        // Room for a two-line error; the window is transparent around the
+        // pill the page draws.
+        size: LogicalSize::new(420.0, 72.0),
+        bottom_margin: 16.0,
+    }
+}
+
+/// Creates the overlay window, hidden, and starts showing the pipeline's
+/// events on it. Returns where to send those events. Call on the main
+/// thread, inside the Tauri runtime, after registering
+/// `dictation_platform::overlay::plugin`.
+///
+/// # Errors
+///
+/// If the window can't be created.
+pub fn start<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<UnboundedSender<UiEvent>> {
+    let window = Overlay::create(app, spec())?;
+    let (events, receiver) = mpsc::unbounded_channel();
+    tauri::async_runtime::spawn(overlay::run(
+        receiver,
+        Surface {
+            app: app.clone(),
+            window,
+        },
+        ERROR_VISIBLE_FOR,
+    ));
+    Ok(events)
+}
+
+/// The overlay window as `dictation_pipeline::overlay` sees it.
+struct Surface<R: Runtime> {
+    app: AppHandle<R>,
+    window: Overlay<R>,
+}
+
+impl<R: Runtime> OverlaySurface for Surface<R> {
+    fn show(&mut self, view: &OverlayView) {
+        // The page first, so the window never shows the previous state.
+        if let Err(error) = self.app.emit_to(
+            EventTarget::webview_window(LABEL),
+            EVENT,
+            Payload::from(view),
+        ) {
+            tracing::warn!(%error, "could not update the overlay");
+        }
+        let shown = match view {
+            OverlayView::Hidden => self.window.hide(),
+            _ => self.window.show(),
+        };
+        if let Err(error) = shown {
+            tracing::warn!(%error, "could not show or hide the overlay");
+        }
+    }
+}
+
+/// [`EVENT`]'s payload: `OverlayView` in `src/overlay/view.ts`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "state", rename_all = "lowercase")]
+enum Payload<'a> {
+    Hidden,
+    Recording,
+    Transcribing,
+    Error { message: &'a str },
+}
+
+impl<'a> From<&'a OverlayView> for Payload<'a> {
+    fn from(view: &'a OverlayView) -> Self {
+        match view {
+            OverlayView::Hidden => Self::Hidden,
+            OverlayView::Recording => Self::Recording,
+            OverlayView::Transcribing => Self::Transcribing,
+            OverlayView::Error { message } => Self::Error { message },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The JSON the page's `parseView` reads (`src/overlay/Overlay.test.tsx`).
+    #[test]
+    fn payloads_match_the_page() {
+        let error = OverlayView::Error {
+            message: "No speech was recognised.".to_owned(),
+        };
+        let cases = [
+            (OverlayView::Hidden, r#"{"state":"hidden"}"#),
+            (OverlayView::Recording, r#"{"state":"recording"}"#),
+            (OverlayView::Transcribing, r#"{"state":"transcribing"}"#),
+            (
+                error,
+                r#"{"state":"error","message":"No speech was recognised."}"#,
+            ),
+        ];
+        for (view, json) in cases {
+            assert_eq!(
+                serde_json::to_string(&Payload::from(&view)).unwrap(),
+                json,
+                "{view:?}"
+            );
+        }
+    }
+}
