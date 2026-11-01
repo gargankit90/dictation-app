@@ -9,7 +9,6 @@
 /// so a command left out here can't be called from any window.
 pub const COMMAND_NAMES: &[&str] = &[
     "get_settings",
-    "launch_at_login_supported",
     "save_settings",
     "set_api_key",
     "has_api_key",

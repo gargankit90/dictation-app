@@ -72,17 +72,6 @@ pub async fn get_settings(
     .await
 }
 
-/// Whether this system can start the app at login (macOS 13 and later), so
-/// the settings screen can switch the option off with a note.
-#[tauri::command]
-#[specta::specta]
-pub async fn launch_at_login_supported(login: State<'_, LoginItem>) -> Result<bool, String> {
-    let login = Arc::clone(&login.0);
-    tauri::async_runtime::spawn_blocking(move || launch::is_supported(&*login))
-        .await
-        .map_err(|_| "the settings task crashed".to_owned())
-}
-
 /// Saves the settings: the login item first, then the file with whatever the
 /// OS ended up with, then the engine is rebuilt.
 ///
@@ -306,7 +295,6 @@ pub async fn test_api_key(
 pub fn builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
         get_settings,
-        launch_at_login_supported,
         save_settings,
         set_api_key,
         has_api_key,
@@ -364,11 +352,10 @@ mod tests {
     }
 
     #[test]
-    fn criterion_2_the_bindings_have_exactly_the_six_commands() {
+    fn criterion_2_the_bindings_have_exactly_the_five_commands() {
         let bindings = std::fs::read_to_string(committed()).unwrap();
         for command in [
             "getSettings",
-            "launchAtLoginSupported",
             "saveSettings",
             "setApiKey",
             "hasApiKey",
@@ -381,8 +368,22 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 6,
+            commands, 5,
             "a command was added; check it doesn't return a key"
+        );
+    }
+
+    #[test]
+    fn the_app_requires_macos_13_for_the_login_item_api() {
+        // SMAppService is macOS 13+; the adapter calls it without a check.
+        let config = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"),
+        )
+        .unwrap();
+        let config: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(
+            config["bundle"]["macOS"]["minimumSystemVersion"], "13.0",
+            "raise the minimum before using a newer macOS API, never lower it"
         );
     }
 

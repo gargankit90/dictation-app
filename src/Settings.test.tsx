@@ -26,8 +26,6 @@ class Backend {
     launch_at_login: false,
   };
   keys: Record<Provider, boolean> = { groq: false, openai: false };
-  /** What `launch_at_login_supported` answers (false before macOS 13). */
-  launchSupported = true;
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
   testResult: KeyTestError | Error | null = null;
   /** Fails the command named, with the message (a string, as the app sends). */
@@ -53,8 +51,6 @@ class Backend {
     switch (command) {
       case "get_settings":
         return this.settings;
-      case "launch_at_login_supported":
-        return this.launchSupported;
       case "save_settings":
         this.settings = args.settings as Settings_Serialize;
         return null;
@@ -540,7 +536,6 @@ describe("criterion 3: the key is never rendered back", () => {
     expect([...used].sort()).toEqual([
       "get_settings",
       "has_api_key",
-      "launch_at_login_supported",
       "save_settings",
       "set_api_key",
     ]);
@@ -884,16 +879,6 @@ describe("launch at login", () => {
     await screen.findByText("Settings saved.");
     const saved = backend.named("save_settings");
     expect((saved[0]?.args.settings as Settings_Serialize).launch_at_login).toBe(true);
-  });
-
-  it("switches the option off with a note where there is no login item", async () => {
-    backend.launchSupported = false;
-    await open();
-    expect(box().disabled).toBe(true);
-    expect(screen.getByText(/needs macOS 13 or later/)).toBeTruthy();
-    type("Language", "de");
-    click("Save");
-    await screen.findByText("Settings saved.");
   });
 
   it("keeps a typed hotkey when the login item could not change", async () => {

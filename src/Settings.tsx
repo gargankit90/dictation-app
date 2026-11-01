@@ -58,8 +58,6 @@ export function Settings() {
   // follows the OS, and a save leaves the login item alone: the user may have
   // changed it in System Settings while this window was hidden.
   const [launchEdited, setLaunchEdited] = useState(false);
-  // False on a system with no login item (macOS before 13).
-  const [launchSupported, setLaunchSupported] = useState(true);
   const [keyInput, setKeyInput] = useState("");
   const [keyStatus, setKeyStatus] = useState<KeyStatus>(CHECKING);
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -96,10 +94,7 @@ export function Settings() {
     const state = { cancelled: false };
     void (async () => {
       try {
-        const [result, supported] = await Promise.all([
-          commands.getSettings(),
-          commands.launchAtLoginSupported(),
-        ]);
+        const result = await commands.getSettings();
         if (state.cancelled) return;
         if (result.status === "error") {
           setLoadError(messageOf(result.error));
@@ -110,7 +105,6 @@ export function Settings() {
         setLanguage(result.data.language ?? "");
         setHotkey(result.data.hotkey);
         setLaunchAtLogin(result.data.launch_at_login);
-        if (supported.status === "ok") setLaunchSupported(supported.data);
         await checkKeySaved(result.data.provider);
       } catch {
         if (!state.cancelled) setLoadError(BROKEN);
@@ -451,7 +445,6 @@ export function Settings() {
                 id="launch-at-login"
                 type="checkbox"
                 checked={launchAtLogin}
-                disabled={!launchSupported}
                 aria-describedby="launch-at-login-hint"
                 onChange={(event) => {
                   if (saving) return;
@@ -463,9 +456,8 @@ export function Settings() {
               Launch at login
             </label>
             <p id="launch-at-login-hint" className="hint">
-              {launchSupported
-                ? "Starts dictation-app in the menu bar when you log in. Takes effect when you save. You can also change it in System Settings, General, Login Items."
-                : "Not available on this version of macOS (it needs macOS 13 or later)."}
+              Starts dictation-app in the menu bar when you log in. Takes effect when you save. You
+              can also change it in System Settings, General, Login Items.
             </p>
           </div>
 
