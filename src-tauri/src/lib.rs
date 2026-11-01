@@ -54,7 +54,7 @@ use dictation_pipeline::stand_ins::{GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
 #[cfg(debug_assertions)]
 use dictation_pipeline::test_hooks::SyntheticHotkey;
-use dictation_pipeline::ui_events::UiReceiver;
+use dictation_pipeline::ui_events::{UiReceiver, UiSender};
 use dictation_platform::audio::{FileAudioSource, SystemMicrophone};
 use dictation_platform::clock::SystemClock;
 use dictation_platform::hotkey::SystemHotkey;
@@ -68,7 +68,6 @@ use dictation_transcribe::mock::MockTranscriber;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Manager, RunEvent, WindowEvent};
-use tokio::sync::mpsc::UnboundedSender;
 
 const QUIT_ID: &str = "quit";
 const SETTINGS_ID: &str = "settings";
@@ -519,15 +518,12 @@ fn show_settings(app: &AppHandle) {
 /// Logs each state change (never the transcript), passes each event to the
 /// overlay, and shows a dictation error as the tray's title and tooltip
 /// until the next recording starts.
-async fn show_ui_events(
-    app: AppHandle,
-    mut events: UiReceiver,
-    overlay: Option<UnboundedSender<UiEvent>>,
-) {
+async fn show_ui_events(app: AppHandle, mut events: UiReceiver, overlay: Option<UiSender>) {
     while let Some(event) = events.recv().await {
         if let Some(overlay) = &overlay {
-            // Fails only once the overlay has stopped, at shutdown.
-            let _ = overlay.send(event.clone());
+            // Bounded and never blocks (#112): a stalled overlay can't hold
+            // up the tray or grow the queue.
+            overlay.send(event.clone());
         }
         match event {
             UiEvent::StateChanged(phase) => {
