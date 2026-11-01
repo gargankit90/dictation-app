@@ -27,6 +27,7 @@ ALL_SCENARIOS=(
   e2e_hold_release e2e_held_at_launch
   e2e_error_bad_key e2e_real_groq
   e2e_overlay_focus
+  e2e_dmg_install
   e2e_launch_at_login
 )
 # Scenarios that need something the VM may lack (a microphone, a Groq key):
