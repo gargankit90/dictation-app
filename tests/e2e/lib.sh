@@ -99,7 +99,16 @@ fresh_app_state() {
 # -n starts a new process even if one runs (as a second launch from the
 # command line would); the single-instance plugin then forwards and exits.
 launch() {
-  vm "open -n $(q "$VM_APP") --args $(q "$@")"
+  # The engine is chosen when the app starts, so only a first launch gets
+  # --transcriber. Scenarios run on the mock (no key, no network) unless
+  # they set E2E_TRANSCRIBER=settings for a real provider (M4.4).
+  local engine=()
+  if [ "$(app_count)" = 0 ]; then
+    engine=(--transcriber "${E2E_TRANSCRIBER:-mock}")
+  fi
+  # -g: don't bring the app to the front, or the paste would miss the
+  # window the scenario put there.
+  vm "open -g -n $(q "$VM_APP") --args $(q ${engine[@]+"${engine[@]}"} "$@")"
 }
 
 app_count() {

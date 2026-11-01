@@ -39,6 +39,36 @@ from the VM.
 | `e2e_startup` | M1.5 #1 | The app starts (first launch with `--debug-audio-file`, so the press needs no mic permission) (`ready` in the log) and one copy runs. A second launch with `--press` is forwarded (`test hook event=Pressed from="a second launch"`) and the pipeline starts recording. Still only one process; the app was set up once. |
 | `e2e_press_release` | M1.5 #2, M2.2 #1 | A first launch with `--debug-audio-file ~/e2e-fixtures/tone-16k.wav --press`, a second with `--release` a second later. The app records the fixture, not the mic; the log shows `Recording Transcribing Inserting Idle` in that order, and the stand-in transcript isn't in it. |
 | `e2e_real_mic` | M2.2 | Skipped unless `E2E_REAL_MIC=1`. `--press`, then `--release`, recording the VM's real microphone: no permission error or microphone failure, and the full state sequence. Needs the mic granted in the golden image and an input device in the VM. |
+| `e2e_error_bad_key` | M4.4 #2 | The VM's login keychain gets the invalid key `gsk_invalid_test_key`; the app starts on the real engine (`--transcriber settings`) and dictates the tone fixture. Groq's 401 shows as `The provider rejected your API key…` in the log (`shown to the user`), the phases are `Recording Transcribing Idle` (nothing inserted), TextEdit stays empty, and a second dictation fails the same way (the app is still usable). Then the app restarts on the mock and a dictation pastes `This is a test dictation.`. Real request to Groq, so the VM needs internet; needs no key from you. |
+| `e2e_real_groq` | M4.4 #1 | Skipped unless `GROQ_API_KEY` is set in the environment of the run. The VM makes a WAV of a sentence with `say`, the key goes into the VM's keychain for the dictation only, and the text pasted into TextEdit must contain at least 80% of the sentence's words. See "Real Groq" below. |
+
+## Real Groq (opt-in)
+
+The scenarios run on the mock engine: `launch` passes `--transcriber mock` to
+a first launch (the engine is chosen when the app starts; a forwarded second
+launch can't change it). `e2e_error_bad_key` and `e2e_real_groq` set
+`E2E_TRANSCRIBER=settings` for their first launch instead, which is the
+app's default: the provider, model and language from the settings and the
+provider's key from the keychain.
+
+```sh
+GROQ_API_KEY=gsk_... tests/e2e/run.sh e2e_real_groq        # a real key, a real request
+tests/e2e/run.sh e2e_error_bad_key                         # a wrong key; no key needed
+```
+
+How the key reaches the VM: the app reads it from the login keychain, the
+way a user's Settings window leaves it, so the test does the same in the VM
+(`groq_key_store` in `scenarios/_groq_helpers.sh`) and deletes it right after
+the dictation (`groq_key_remove`; the VM is thrown away at the next reset
+anyway). The key is sent on the stdin of `security -i`, so it is never in a
+process list (host or VM), a file, the app's log or a report; the scenario
+also checks that the app's log doesn't hold it. There is no environment
+variable the app reads, so a release and a debug build have the same one way
+to get a key. Without `GROQ_API_KEY` the scenario is skipped, not failed.
+
+The paste is read back from TextEdit with `osascript`, so these two need the
+golden image to have Accessibility granted to the app and Automation allowed
+for `osascript` to control TextEdit (M4.3).
 
 ## Requirements on the host
 
@@ -83,8 +113,8 @@ from the VM.
   microphone permission and no prompt appears. Without that flag the first
   press shows the macOS microphone prompt and, until it's allowed, logs
   `Microphone permission is missing.` (`e2e_real_mic`).
-- **Paste:** still a stand-in (`crates/app/src/stand_ins.rs`), so no
-  Accessibility prompt.
+- **Paste:** the real inserter since M4.1, which needs Accessibility (the
+  scenarios that read TextEdit back; see "Real Groq").
 
 ## Adding a scenario
 

@@ -16,7 +16,7 @@ for scenario_file in "$E2E_DIR"/scenarios/*.sh; do
   . "$scenario_file"
 done
 
-ALL_SCENARIOS=(e2e_startup e2e_press_release e2e_real_mic)
+ALL_SCENARIOS=(e2e_startup e2e_press_release e2e_real_mic e2e_error_bad_key e2e_real_groq)
 APP_PATH=target/debug/bundle/macos/$APP_NAME.app
 build=1
 reset=1
