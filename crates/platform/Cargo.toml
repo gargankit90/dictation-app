@@ -45,7 +45,7 @@ objc2-core-graphics = { workspace = true, features = [
     "CGEventTypes",
     "CGRemoteOperation",
 ] }
-objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSError", "NSProcessInfo", "NSString"] }
+objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSError", "NSString"] }
 # Login item registration (M5.3).
 objc2-service-management = { workspace = true, features = ["std", "objc2", "SMAppService", "objc2-foundation"] }
 
