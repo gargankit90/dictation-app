@@ -417,11 +417,13 @@ fn handle_flags(
             tracing::warn!(
                 ?event,
                 from,
+                delivered,
                 "test hook: not delivered; nothing is listening"
             );
             return Err(Rejected);
         }
-        tracing::info!(?event, from, "test hook: delivered");
+        // This line's text is what the e2e scenarios wait for.
+        tracing::info!(?event, from, delivered, "test hook");
     }
     Ok(())
 }
