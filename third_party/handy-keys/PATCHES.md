@@ -37,6 +37,15 @@ All in `src/platform/macos/listener.rs` unless noted.
    key or mouse event's flags correct the tracked modifiers (a change was
    missed). Presses and releases may have been lost in both cases, and with
    a held hotkey no further event may ever arrive to show it.
+   `FlagsChanged` events are reconciled too (#85 review round 1, B1): their
+   flags describe every modifier, so a change to any tracked modifier other
+   than the event's own key (another group, the other side of the same
+   group, or anything at all on a Caps Lock or Fn event) is a missed press
+   or release. The callback sends a resync with just the missed changes,
+   then the event itself. Before, a missed Right Option release followed by
+   Shift cleared Option silently and the Shift event read as the hotkey's
+   release, so the recording was transcribed instead of discarded. Normal
+   typing explains its own change and sends none.
 5. `src/types/hotkey.rs`: `KeyEvent::resync(modifiers)` and
    `KeyEvent::is_resync()`. A resync has no key and no changed modifier,
    which no other macOS event has. `HotkeyManager` needs no change: it
@@ -76,6 +85,14 @@ run loop and teardown, the unreachable `keycode == 0x3F` branch.
 >    indefinitely. Suggested fix: send an event (as the Windows and Linux
 >    backends do with synthetic releases), e.g. a key-less resync event or
 >    releases for modifiers that reconciliation cleared.
+>
+>    The same holds when a modifier's release is missed and the next event
+>    is another modifier's `FlagsChanged`: its flags show the first one up,
+>    but `FlagsChanged` is never reconciled, so the stale bit stays set (and,
+>    once direction comes from the flags as in 1, it is cleared with no
+>    event of its own). A consumer can't tell that from a real release.
+>    Suggested fix: on `FlagsChanged`, reconcile every modifier other than
+>    the event's own key and report any correction before the event.
 >
 > Reproduction without a tap: call the callback with local `CGEvent`s (see
 > the tests in this fork). We have a patch with tests and can open a PR.

@@ -344,6 +344,36 @@ unsafe extern "C-unwind" fn event_tap_callback(
                 // as FlagsChanged but isn't a traditional modifier
                 let lock_key = keycode_to_key(keycode);
 
+                // Patched (dictation-app): the flags describe every
+                // modifier, not just this event's key. Reconcile them all;
+                // any change other than this key's own means a press or
+                // release was missed, so report it before the event (#85,
+                // review round 1, B1). Caps Lock and Fn change no tracked
+                // modifier, so for them every change is unexplained.
+                let explained = match changed_modifier {
+                    Some(bit) if bit != Modifiers::FN => bit,
+                    _ => Modifiers::empty(),
+                };
+                let before = state.current_modifiers;
+                let after = if explained.is_empty() {
+                    modifiers_from_flags(before, flags)
+                } else {
+                    after_flags_changed(before, explained, flags)
+                };
+                if (before ^ after) & !explained != Modifiers::empty() {
+                    // The missed changes alone; this key's comes next.
+                    let _ = state.event_sender.send(KeyEvent::resync(
+                        (after & !explained) | (before & explained),
+                    ));
+                }
+                state.current_modifiers = after;
+                // As reconciled; Fn is never tracked.
+                let modifiers = if flags_have_fn(flags) {
+                    after | Modifiers::FN
+                } else {
+                    after
+                };
+
                 // Handle lock keys specially - they come through FlagsChanged
                 // but don't change our tracked modifier state
                 if let Some(key) = lock_key {
@@ -361,11 +391,10 @@ unsafe extern "C-unwind" fn event_tap_callback(
                     // Patched (dictation-app): up or down from the event's
                     // flags, not by toggling the remembered bit (#80, B1).
                     // FN has no side and is never tracked: its flag decides.
+                    // The tracked state was updated above.
                     let is_key_down = if modifier_bit == Modifiers::FN {
                         flags_have_fn(flags)
                     } else {
-                        state.current_modifiers =
-                            after_flags_changed(state.current_modifiers, modifier_bit, flags);
                         state.current_modifiers.contains(modifier_bit)
                     };
 
@@ -917,11 +946,19 @@ mod dictation_patch_tests {
     #[test]
     fn right_option_released_while_left_option_stays_held() {
         let cb = Callback::new(Modifiers::empty());
-        // Both held at start; Right goes up first.
-        assert_eq!(
-            cb.flags_changed(alt(LEFT_OPT_DEVICE), RIGHT_OPTION),
-            (false, Modifiers::OPT_LEFT)
+        // Both held at start and the snapshot missed them; Right goes up
+        // first. Left's press was never seen: a resync, then the release.
+        let events = cb.deliver(
+            CGEventType::FlagsChanged,
+            alt(LEFT_OPT_DEVICE),
+            RIGHT_OPTION,
         );
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert!(events[0].is_resync());
+        assert_eq!(events[0].modifiers, Modifiers::OPT_LEFT);
+        assert!(!events[1].is_key_down);
+        assert_eq!(events[1].modifiers, Modifiers::OPT_LEFT);
+        assert_eq!(events[1].changed_modifier, Some(Modifiers::OPT_RIGHT));
         assert_eq!(
             cb.flags_changed(alt(LEFT_OPT_DEVICE | RIGHT_OPT_DEVICE), RIGHT_OPTION),
             (true, Modifiers::OPT_LEFT | Modifiers::OPT_RIGHT)
@@ -1037,6 +1074,161 @@ mod dictation_patch_tests {
             modifiers_from_flags(Modifiers::all(), NONE),
             Modifiers::empty()
         );
+    }
+
+    const SHIFT: i64 = 0x38;
+    const RIGHT_SHIFT: i64 = 0x3C;
+    const COMMAND: i64 = 0x37;
+    const RIGHT_COMMAND: i64 = 0x36;
+    const CAPS_LOCK: i64 = 0x39;
+
+    /// #85 review round 1, B1: Right Option's release is missed and the
+    /// next event is another modifier key's, whose flags no longer have
+    /// Option. That must come out as a resync, not as Option's release.
+    #[test]
+    fn a_missed_release_seen_on_another_modifier_sends_a_resync_first() {
+        let shift = CGEventFlags::MaskShift.0;
+        let cmd = CGEventFlags::MaskCommand.0;
+        let caps = CGEventFlags::MaskAlphaShift.0;
+        let fn_flag = CGEventFlags::MaskSecondaryFn.0;
+        // (name, keycode, flags, the event that follows the resync)
+        let cases = [
+            (
+                "left shift",
+                SHIFT,
+                shift | 0x02,
+                Some(Modifiers::SHIFT_LEFT),
+            ),
+            (
+                "right shift",
+                RIGHT_SHIFT,
+                shift | 0x04,
+                Some(Modifiers::SHIFT_RIGHT),
+            ),
+            (
+                "shift, no side bits",
+                SHIFT,
+                shift,
+                Some(Modifiers::SHIFT_LEFT),
+            ),
+            ("left cmd", COMMAND, cmd | 0x08, Some(Modifiers::CMD_LEFT)),
+            (
+                "right cmd, no side bits",
+                RIGHT_COMMAND,
+                cmd,
+                Some(Modifiers::CMD_RIGHT),
+            ),
+            ("caps lock", CAPS_LOCK, caps, None),
+            ("fn", FUNCTION, fn_flag, Some(Modifiers::FN)),
+        ];
+        for (name, keycode, flags, changed) in cases {
+            for opt in [alt(RIGHT_OPT_DEVICE), alt(0)] {
+                let cb = Callback::new(Modifiers::empty());
+                assert_eq!(
+                    cb.flags_changed(opt, RIGHT_OPTION),
+                    (true, Modifiers::OPT_RIGHT),
+                    "{name}"
+                );
+                // Right Option's release never arrives.
+                let events = cb.deliver(CGEventType::FlagsChanged, CGEventFlags(flags), keycode);
+                assert_eq!(events.len(), 2, "{name}: {events:?}");
+                assert!(events[0].is_resync(), "{name}: {events:?}");
+                assert!(
+                    !events[0].modifiers.contains(Modifiers::OPT_RIGHT),
+                    "{name}: {events:?}"
+                );
+                assert!(!events[1].is_resync(), "{name}: {events:?}");
+                assert!(events[1].is_key_down, "{name}: {events:?}");
+                assert_eq!(events[1].changed_modifier, changed, "{name}: {events:?}");
+                assert!(
+                    !events[1].modifiers.contains(Modifiers::OPT_RIGHT),
+                    "{name}: {events:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_missed_other_side_change_on_the_same_group_sends_a_resync() {
+        // Both Options tracked; Right's release says Left is up too.
+        let cb = Callback::new(Modifiers::OPT_LEFT | Modifiers::OPT_RIGHT);
+        let events = cb.deliver(CGEventType::FlagsChanged, NONE, RIGHT_OPTION);
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert!(events[0].is_resync());
+        // The resync has only the missed change; Right's release follows.
+        assert_eq!(events[0].modifiers, Modifiers::OPT_RIGHT);
+        assert!(!events[1].is_key_down);
+        assert_eq!(events[1].modifiers, Modifiers::empty());
+    }
+
+    /// Normal typing while Right Option is held, and while nothing is:
+    /// every event explains its own change, so no resync and the hold
+    /// stays intact until its own release.
+    #[test]
+    fn other_modifiers_and_keys_never_resync() {
+        let shift = CGEventFlags::MaskShift.0;
+        let cmd = CGEventFlags::MaskCommand.0;
+        let caps = CGEventFlags::MaskAlphaShift.0;
+        let fn_flag = CGEventFlags::MaskSecondaryFn.0;
+        for sided in [true, false] {
+            let side = |bits: u64| if sided { bits } else { 0 };
+            for held in [true, false] {
+                let opt = if held {
+                    alt(side(RIGHT_OPT_DEVICE)).0
+                } else {
+                    0
+                };
+                let cb = Callback::new(Modifiers::empty());
+                if held {
+                    cb.flags_changed(CGEventFlags(opt), RIGHT_OPTION);
+                }
+                let sequence = [
+                    (CGEventType::FlagsChanged, shift | side(0x02), SHIFT),
+                    (CGEventType::KeyDown, shift | side(0x02), KEY_A),
+                    (CGEventType::KeyUp, shift | side(0x02), KEY_A),
+                    (CGEventType::FlagsChanged, 0, SHIFT),
+                    (CGEventType::FlagsChanged, shift | side(0x04), RIGHT_SHIFT),
+                    (CGEventType::FlagsChanged, 0, RIGHT_SHIFT),
+                    (CGEventType::FlagsChanged, cmd | side(0x08), COMMAND),
+                    (CGEventType::KeyDown, cmd | side(0x08), KEY_A),
+                    (CGEventType::FlagsChanged, 0, COMMAND),
+                    (CGEventType::FlagsChanged, cmd | side(0x10), RIGHT_COMMAND),
+                    (CGEventType::FlagsChanged, 0, RIGHT_COMMAND),
+                    (CGEventType::FlagsChanged, caps, CAPS_LOCK),
+                    (CGEventType::KeyDown, caps, KEY_A),
+                    (CGEventType::FlagsChanged, 0, CAPS_LOCK),
+                    (CGEventType::FlagsChanged, fn_flag, FUNCTION),
+                    (CGEventType::KeyDown, fn_flag, KEY_A),
+                    (CGEventType::FlagsChanged, 0, FUNCTION),
+                    (CGEventType::LeftMouseDown, 0, 0),
+                    (CGEventType::LeftMouseUp, 0, 0),
+                ];
+                for (kind, flags, keycode) in sequence {
+                    let events = cb.deliver(kind, CGEventFlags(flags | opt), keycode);
+                    for event in &events {
+                        assert!(
+                            !event.is_resync(),
+                            "sided={sided} held={held} {kind:?} {keycode}: {events:?}"
+                        );
+                        assert_eq!(
+                            event.modifiers.contains(Modifiers::OPT_RIGHT),
+                            held,
+                            "sided={sided} held={held} {kind:?} {keycode}: {events:?}"
+                        );
+                    }
+                }
+                if held {
+                    assert_eq!(
+                        cb.flags_changed(NONE, RIGHT_OPTION),
+                        (false, Modifiers::empty())
+                    );
+                }
+                assert_eq!(
+                    cb.ctx.state.lock().unwrap().current_modifiers,
+                    Modifiers::empty()
+                );
+            }
+        }
     }
 
     #[test]
