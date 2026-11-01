@@ -57,14 +57,20 @@ tests/e2e/run.sh e2e_error_bad_key                         # a wrong key; no key
 ```
 
 How the key reaches the VM: the app reads it from the login keychain, the
-way a user's Settings window leaves it, so the test does the same in the VM
-(`groq_key_store` in `scenarios/_groq_helpers.sh`) and deletes it right after
-the dictation (`groq_key_remove`). The key is sent on the stdin of
-`security -i`, so it is never in a process list (host or VM), a file, the
-app's log or a report; the scenario also checks that the app's log doesn't
-hold it. The helpers turn `bash -x` tracing off while they handle the key
-(and put it back), so a trace of a run doesn't hold it either; a scenario
-never expands `$GROQ_API_KEY` itself. The key is removed again however the
+way a user's Settings window leaves it, so the test has the app put it
+there. The debug build takes two flags that run in a process of their own,
+then exit: `--debug-set-api-key-stdin` (the key is read from stdin, never an
+argument) and `--debug-delete-api-key`; both go through the same code as the
+Settings window (`groq_key_store` and `groq_key_remove` in
+`scenarios/_groq_helpers.sh`). The app has to create the item itself: an item
+made by the `security` tool doesn't list the app in its access list, so
+macOS prompts when the app reads it and nobody is there to click. A release
+build ignores both flags. The key is sent on the stdin of ssh, so it is never
+in a process list (host or VM), a file, the app's log or a report; the
+scenario also checks that the app's log doesn't hold it. The helpers turn
+`bash -x` tracing off while they handle the key (and put it back), so a
+trace of a run doesn't hold it either; a scenario never expands
+`$GROQ_API_KEY` itself. The key is removed again however the
 run ends (`groq_guard_start`: an EXIT/INT/TERM/HUP trap that keeps the run's
 exit status), and a removal that fails is reported as a failure with a
 warning that the key may still be in the VM's keychain; reset the VM then.
@@ -74,7 +80,7 @@ of this with a made-up key and a stubbed `vm`.
 The golden image's login keychain is locked in an ssh session, so every
 keychain command unlocks it first with the VM user's password: `lume`, the
 throwaway VM user's, or `VM_PASSWORD` if you set it. It travels on stdin too
-and is never logged. There is no environment variable the app reads, so a
+and is never logged. The app reads no environment variable for a key, so a
 release and a debug build have the same one way to get a key. Without
 `GROQ_API_KEY` the scenario is skipped, not failed.
 

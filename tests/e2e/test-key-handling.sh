@@ -60,8 +60,8 @@ vm() {
   in=$(cat)
   printf '%s\n' "$in" >>"$STUB/stdin"
   case $* in
-    *"security -i"*) : >"$STUB/stored" ;;
-    *delete-generic-password*)
+    *--debug-set-api-key-stdin*) : >"$STUB/stored" ;;
+    *--debug-delete-api-key*)
       if [ "${STUB_DELETE_STATUS:-0}" != 0 ]; then
         echo "cannot reach the keychain"
         return "$STUB_DELETE_STATUS"
@@ -130,6 +130,10 @@ check "the key went to the VM on stdin" has "$SENTINEL" "$tmp/ok/stdin"
 check "so did the VM password" has "$PW_SENTINEL" "$tmp/ok/stdin"
 check "neither secret is in the output or in a VM command's arguments" no_secret_outside_stdin ok
 check "the key is removed once, not again by the exit cleanup" test "$(deletes ok)" = 1
+check "the key is stored by the app's own hook, not the security tool" \
+  has "Contents/MacOS/dictation-app --debug-set-api-key-stdin" "$tmp/ok/args"
+check "and removed by the app's hook" has "--debug-delete-api-key" "$tmp/ok/args"
+check "the security tool never touches the key" lacks "generic-password" "$tmp/ok/args"
 
 # --- bash -x ---------------------------------------------------------------
 TRACE=1 run_case traced e2e_real_groq "$KEY"
@@ -187,7 +191,7 @@ check "and says the key may still be there" has "may still be" "$tmp/delete_fail
 # --- the key must be plain, so it can't carry a command --------------------
 run_case odd_key e2e_real_groq GROQ_API_KEY="abc def;touch x"
 check "a key with odd characters is refused" test "$(status_of odd_key)" != 0
-check "and is never sent" test ! -e "$tmp/odd_key/stdin" -o "$(grep -c add-generic-password "$tmp/odd_key/stdin" || true)" = 0
+check "and is never sent" test ! -e "$tmp/odd_key/args" -o "$(grep -c -e --debug-set-api-key-stdin "$tmp/odd_key/args" || true)" = 0
 check "and nothing was left to remove" test ! -e "$tmp/odd_key/deletes"
 
 echo "key handling tests: $passed passed, $failed failed"
