@@ -36,6 +36,10 @@ pub enum TranscribeError {
     /// The provider couldn't be reached.
     #[error("network error: {0}")]
     Network(String),
+    /// The provider answered with a redirect (3xx), which is never followed
+    /// (requests go only to the configured provider). Holds the HTTP status.
+    #[error("the provider answered with a redirect (HTTP {0}), which isn't followed")]
+    Redirected(u16),
     /// The provider or engine returned an error or a response we can't read.
     #[error("transcription engine error: {0}")]
     Engine(String),
@@ -68,6 +72,9 @@ impl TranscribeError {
             Self::Network(_) => {
                 "Couldn't reach the provider. Check your internet connection.".to_owned()
             }
+            Self::Redirected(_) => "The provider answered with a redirect, which the app \
+                 doesn't follow. Check the provider's address."
+                .to_owned(),
             Self::Engine(detail) => format!("Something went wrong: {detail}."),
         }
     }

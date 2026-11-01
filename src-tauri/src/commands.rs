@@ -177,6 +177,13 @@ fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
             KeyTestKind::Keychain,
             "Couldn't read your API key from the Keychain.".to_owned(),
         ),
+        // Never followed, so retrying won't help (#86).
+        TranscribeError::Redirected(status) => KeyTestError::new(
+            KeyTestKind::Server,
+            format!(
+                "{name} answered with a redirect (HTTP {status}), which isn't followed, so the key couldn't be checked. Check the provider's address."
+            ),
+        ),
         TranscribeError::Engine(detail) => KeyTestError::new(
             KeyTestKind::Server,
             format!(
@@ -497,6 +504,26 @@ mod tests {
                 assert!(error.message.contains(words), "{}", error.message);
                 assert!(error.message.contains("Groq"), "{}", error.message);
                 assert!(!error.message.contains(TYPED));
+            }
+        }
+
+        /// #86: a 3xx says redirects aren't followed, not "try again later".
+        #[tokio::test]
+        async fn a_redirect_has_its_own_message() {
+            for status in [301, 302, 307, 308] {
+                let server = provider(status, TYPED).await;
+                let (result, _) = run(Some(TYPED), None, &server).await;
+                let error = result.unwrap_err();
+                assert_eq!(error.kind, KeyTestKind::Server, "HTTP {status}");
+                assert!(
+                    error.message.starts_with("Groq answered with a redirect")
+                        && error.message.contains(&format!("HTTP {status}"))
+                        && error.message.contains("isn't followed"),
+                    "{}",
+                    error.message
+                );
+                assert!(!error.message.contains("later"), "{}", error.message);
+                assert!(!error.message.contains(TYPED), "{}", error.message);
             }
         }
 

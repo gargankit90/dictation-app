@@ -43,22 +43,45 @@ pub const TIMEOUT: Duration = Duration::from_secs(15);
 /// be reached, and [`TranscribeError::Engine`] for a server error or any
 /// other reply.
 pub async fn check_key(config: Config, key: Secret) -> Result<(), TranscribeError> {
-    let config = Config {
+    check_key_within(config, key, TIMEOUT).await
+}
+
+/// [`check_key`] with another time budget; tests use a short one instead of
+/// waiting out the real 15 seconds. The app calls [`check_key`].
+///
+/// # Errors
+///
+/// As [`check_key`].
+pub async fn check_key_within(
+    config: Config,
+    key: Secret,
+    timeout: Duration,
+) -> Result<(), TranscribeError> {
+    let engine = OpenAiCompat::new(check_config(config, timeout), key)?;
+    engine.transcribe_verbose(&clip()).await.map(|_| ())
+}
+
+/// What the check sends, whatever the dictation `config` says: no language
+/// (the clip is silence), its own `timeout` and a single attempt.
+fn check_config(config: Config, timeout: Duration) -> Config {
+    Config {
         language: None,
-        timeout: TIMEOUT,
+        timeout,
         retry: RetryPolicy {
             max_attempts: 1,
             ..config.retry
         },
         ..config
-    };
-    let engine = OpenAiCompat::new(config, key)?;
+    }
+}
+
+/// [`CLIP`] of silence at [`SAMPLE_RATE`]: 4,000 samples.
+fn clip() -> Audio {
     let samples = usize::try_from(CLIP.as_millis() * u128::from(SAMPLE_RATE) / 1000).unwrap_or(0);
-    let clip = Audio {
+    Audio {
         sample_rate: SAMPLE_RATE,
         samples: vec![0.0; samples],
-    };
-    engine.transcribe_verbose(&clip).await.map(|_| ())
+    }
 }
 
 #[cfg(test)]
@@ -92,6 +115,37 @@ mod tests {
         server
     }
 
+    #[test]
+    fn the_budget_is_fifteen_seconds_and_the_clip_is_a_quarter_second() {
+        assert_eq!(TIMEOUT, Duration::from_secs(15));
+        let clip = clip();
+        assert_eq!(clip.sample_rate, 16_000);
+        assert_eq!(clip.samples.len(), 4_000);
+        assert!(clip.samples.iter().all(|s| *s == 0.0));
+    }
+
+    /// The check's own policy replaces the dictation's, field by field.
+    #[test]
+    fn the_check_replaces_language_timeout_and_retries() {
+        let dictation = Config {
+            language: Some("de".into()),
+            timeout: Duration::from_secs(600),
+            retry: RetryPolicy {
+                max_attempts: 5,
+                ..RetryPolicy::default()
+            },
+            ..Config::from_preset(GROQ)
+        };
+        let checked = check_config(dictation.clone(), TIMEOUT);
+        assert_eq!(checked.language, None);
+        assert_eq!(checked.timeout, TIMEOUT);
+        assert_eq!(checked.retry.max_attempts, 1);
+        // Everything else is the caller's.
+        assert_eq!(checked.base_url, dictation.base_url);
+        assert_eq!(checked.model, dictation.model);
+        assert_eq!(checked.retry.base_delay, dictation.retry.base_delay);
+    }
+
     #[tokio::test]
     async fn a_good_key_succeeds_even_when_the_clip_has_no_words() {
         let server = serve(
@@ -102,22 +156,79 @@ mod tests {
         assert_eq!(check_key(config(&server), Secret::new(KEY)).await, Ok(()));
     }
 
+    /// The parts of a multipart body: `(name, content)` in order.
+    fn parts(request: &wiremock::Request) -> Vec<(String, Vec<u8>)> {
+        let content_type = request
+            .headers
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let boundary = content_type.split("boundary=").nth(1).unwrap();
+        let delimiter = format!("--{boundary}").into_bytes();
+        let body = &request.body;
+        let at = |from: usize, needle: &[u8]| {
+            body[from..]
+                .windows(needle.len())
+                .position(|w| w == needle)
+                .map(|i| from + i)
+        };
+        let mut parts = Vec::new();
+        let mut start = at(0, &delimiter).unwrap() + delimiter.len();
+        while let Some(next) = at(start, &delimiter) {
+            // `start` follows a delimiter: CRLF, headers, a blank line, then
+            // the content up to the CRLF before the next delimiter.
+            let part = &body[start + 2..next - 2];
+            let split = part.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+            let headers = String::from_utf8_lossy(&part[..split]);
+            let name = headers
+                .split("name=\"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap();
+            parts.push((name.to_owned(), part[split + 4..].to_vec()));
+            start = next + delimiter.len();
+        }
+        parts
+    }
+
+    /// The upload is exactly what the provider needs to judge the key: 0.25 s
+    /// of 16 kHz mono 16-bit silence, the check's model and format, and no
+    /// language, even when the dictation is set to one.
     #[tokio::test]
-    async fn the_request_is_a_short_silent_wav_with_the_provider_model() {
+    async fn check_key_uploads_exactly_250ms_mono_silence() {
         let server =
             serve(ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": ""}))).await;
-        check_key(config(&server), Secret::new(KEY)).await.unwrap();
+        let dictation = Config {
+            language: Some("de".into()),
+            timeout: Duration::from_secs(600),
+            ..config(&server)
+        };
+        check_key(dictation, Secret::new(KEY)).await.unwrap();
         let requests = server.received_requests().await.unwrap();
-        let body = String::from_utf8_lossy(&requests[0].body).into_owned();
-        assert!(body.contains("whisper-large-v3-turbo"), "the model");
-        assert!(body.contains("RIFF"), "a WAV file");
-        // 0.25 s of 16-bit mono at 16 kHz plus the header, nothing bigger.
-        assert!(
-            requests[0].body.len() < 10_000,
-            "{}",
-            requests[0].body.len()
-        );
-        assert!(!body.contains("name=\"language\""), "no language");
+        assert_eq!(requests.len(), 1);
+        let parts = parts(&requests[0]);
+        let names: Vec<&str> = parts.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["file", "model", "response_format"], "no language");
+        let text = |name: &str| {
+            let (_, content) = parts.iter().find(|(n, _)| n == name).unwrap();
+            String::from_utf8(content.clone()).unwrap()
+        };
+        assert_eq!(text("model"), "whisper-large-v3-turbo");
+        assert_eq!(text("response_format"), "verbose_json");
+
+        let (_, wav) = parts.iter().find(|(n, _)| n == "file").unwrap();
+        let mut reader = hound::WavReader::new(std::io::Cursor::new(wav)).unwrap();
+        let spec = reader.spec();
+        assert_eq!(spec.sample_rate, 16_000);
+        assert_eq!(spec.channels, 1);
+        assert_eq!(spec.bits_per_sample, 16);
+        assert_eq!(spec.sample_format, hound::SampleFormat::Int);
+        let samples: Vec<i16> = reader.samples::<i16>().map(Result::unwrap).collect();
+        assert_eq!(samples.len(), 4_000, "250 ms at 16 kHz");
+        assert!(samples.iter().all(|s| *s == 0), "silence");
     }
 
     #[tokio::test]
