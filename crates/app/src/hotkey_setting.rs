@@ -349,14 +349,18 @@ impl HotkeyChange {
     }
 }
 
-/// What saving Settings does with its hotkey field: switch the listener to
-/// it, or, if that fails, put the hotkey that still listens back into
-/// `settings`, so the file never claims a hotkey that doesn't work. Call
-/// before writing the file; if writing fails, [`HotkeyChange::undo`].
+/// What saving Settings does with its hotkey field: write it in canonical
+/// form and switch the listener to it, or, if that fails, put the hotkey that
+/// still listens back into `settings`, so the file never claims a hotkey that
+/// doesn't work. Call before writing the file; if writing fails,
+/// [`HotkeyChange::undo`].
 pub fn apply(control: &HotkeyControl, settings: &mut Settings) -> HotkeyChange {
     let Ok(wanted) = settings.hotkey.parse::<HotkeySpec>() else {
         return HotkeyChange::Invalid;
     };
+    // Saved the way the app writes it (`leftalt` becomes `LeftAlt`), so the
+    // file and the form match what the log and errors say.
+    settings.hotkey = wanted.to_string();
     let previous = control.spec();
     match control.switch(wanted) {
         Ok(Switched::Unchanged) => HotkeyChange::Unchanged,

@@ -314,6 +314,30 @@ async fn failed_reregistration_keeps_the_old_hotkey_and_says_why() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_hotkey_is_saved_in_canonical_form() {
+    let dir = TempDir::new("canonical");
+    let file = dir.settings_file();
+    let mut app = App::start(&file);
+    assert_eq!(
+        app.save(&file, " ctrl+SHIFT+space "),
+        HotkeyChange::Switched {
+            previous: HotkeySpec::default()
+        }
+    );
+    assert_eq!(file.settings().unwrap().hotkey, "Ctrl+Shift+Space");
+    assert!(matches!(
+        app.save(&file, "leftalt"),
+        HotkeyChange::Switched { .. }
+    ));
+    assert_eq!(file.settings().unwrap().hotkey, "LeftAlt");
+    // The same key written differently is the same hotkey: nothing changes.
+    assert_eq!(app.save(&file, "LEFTALT"), HotkeyChange::Unchanged);
+    assert_eq!(file.settings().unwrap().hotkey, "LeftAlt");
+    app.dictate_with(spec("LeftAlt")).await;
+    app.pipeline.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn saving_the_same_hotkey_reregisters_nothing() {
     let dir = TempDir::new("same");
     let file = saved_with_hotkey(&dir, "F6");
