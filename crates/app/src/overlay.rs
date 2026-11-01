@@ -221,6 +221,22 @@ mod tests {
     }
 
     #[test]
+    fn an_error_message_never_carries_a_key() {
+        let mut model = OverlayModel::default();
+        let key = "gsk_abcdefghijklmnop1234567890";
+        let change = model
+            .on_event(&UiEvent::Error(DictationError::TranscriptionFailed {
+                reason: format!("401 Unauthorized for key {key}"),
+            }))
+            .expect("an error is a change");
+        let OverlayView::Error { message } = change.view else {
+            panic!("expected an error view");
+        };
+        assert!(!message.contains(key), "{message}");
+        assert!(message.contains("[key hidden]"), "{message}");
+    }
+
+    #[test]
     fn going_idle_keeps_the_error_until_it_expires() {
         let mut model = OverlayModel::default();
         model.on_event(&error());
