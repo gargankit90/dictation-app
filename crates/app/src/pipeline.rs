@@ -800,10 +800,12 @@ mod tests {
 
     use super::*;
 
-    /// Captures nothing, instantly.
-    struct SilentAudio(bool);
+    /// Captures 300 ms of constant signal, instantly: long and loud enough
+    /// to reach the transcriber (silence and clips under 200 ms don't, and
+    /// a job that ended at once would race with the results the tests send).
+    struct BurstAudio(bool);
 
-    impl AudioSource for SilentAudio {
+    impl AudioSource for BurstAudio {
         fn start(&mut self) -> Result<(), AudioError> {
             self.0 = true;
             Ok(())
@@ -813,7 +815,7 @@ mod tests {
             self.0 = false;
             Ok(Audio {
                 sample_rate: 16_000,
-                samples: Vec::new(),
+                samples: vec![0.1; 4_800],
             })
         }
 
@@ -845,7 +847,7 @@ mod tests {
     fn runner(inserter: &FakeInserter) -> (TestRunner, watch::Sender<bool>) {
         let (ui, _) = mpsc::unbounded_channel();
         let (shutdown, shutdown_rx) = watch::channel(false);
-        let (audio, _) = AudioWorker::spawn(SilentAudio(false));
+        let (audio, _) = AudioWorker::spawn(BurstAudio(false));
         let runner = Runner::new(
             FakeHotkey::new(),
             audio,
