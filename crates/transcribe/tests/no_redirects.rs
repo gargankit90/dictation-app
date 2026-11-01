@@ -77,3 +77,23 @@ async fn check_key_does_not_follow_redirects() {
         assert_untouched(&provider, &other).await;
     }
 }
+
+/// What Test key shows for a 3xx is the engine's detail: it names the HTTP
+/// status (so the user sees a clear reason) and holds neither the redirect
+/// target nor the key.
+#[tokio::test]
+async fn a_redirect_error_names_the_status_and_leaks_nothing() {
+    for status in STATUSES {
+        let (provider, other) = servers(status).await;
+        let error = check_key(config(&provider), Secret::new(KEY))
+            .await
+            .unwrap_err();
+        let TranscribeError::Engine(detail) = &error else {
+            panic!("{status}: {error:?}");
+        };
+        assert!(detail.contains(&format!("HTTP {status}")), "{detail}");
+        assert!(!detail.contains(&other.uri()), "{detail}");
+        assert!(!detail.contains(KEY), "{detail}");
+        assert!(!format!("{error:?}").contains(KEY));
+    }
+}
