@@ -13,7 +13,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use dictation_ports::{
     Clipboard, ClipboardError, ClipboardItem, ClipboardSnapshot, InsertError, SessionMarker,
 };
-use objc2::rc::Retained;
+use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{NSPasteboard, NSPasteboardItem, NSPasteboardTypeString, NSPasteboardWriting};
 use objc2_core_graphics::{
@@ -198,54 +198,63 @@ impl MacPasteboard {
     }
 }
 
+/// Each method runs in its own autorelease pool: the pipeline calls them on
+/// Tokio's blocking threads, which have none, so Cocoa's autoreleased
+/// objects would otherwise leak. Results leave the pool as owned Rust data.
 impl Clipboard for MacPasteboard {
     fn read_text(&self) -> Result<Option<String>, ClipboardError> {
-        // SAFETY: NSPasteboardTypeString is an immutable AppKit constant,
-        // valid for the life of the process.
-        let string_type = unsafe { NSPasteboardTypeString };
-        Ok(self
-            .pasteboard()
-            .stringForType(string_type)
-            .map(|s| s.to_string()))
+        autoreleasepool(|_| {
+            // SAFETY: NSPasteboardTypeString is an immutable AppKit constant,
+            // valid for the life of the process.
+            let string_type = unsafe { NSPasteboardTypeString };
+            Ok(self
+                .pasteboard()
+                .stringForType(string_type)
+                .map(|s| s.to_string()))
+        })
     }
 
     fn write_text(&self, text: &str) -> Result<(), ClipboardError> {
-        let item = NSPasteboardItem::new();
-        // SAFETY: as in read_text.
-        let string_type = unsafe { NSPasteboardTypeString };
-        item.setString_forType(&NSString::from_str(text), string_type);
-        if Self::write_items(&self.pasteboard(), &[item]) {
-            Ok(())
-        } else {
-            Err(unavailable("the pasteboard refused the text"))
-        }
+        autoreleasepool(|_| {
+            let item = NSPasteboardItem::new();
+            // SAFETY: as in read_text.
+            let string_type = unsafe { NSPasteboardTypeString };
+            item.setString_forType(&NSString::from_str(text), string_type);
+            if Self::write_items(&self.pasteboard(), &[item]) {
+                Ok(())
+            } else {
+                Err(unavailable("the pasteboard refused the text"))
+            }
+        })
     }
 
     fn write_dictation(&self, text: &str) -> Result<SessionMarker, ClipboardError> {
-        let token = self.next_token();
-        let item = NSPasteboardItem::new();
-        // SAFETY: as in read_text.
-        let string_type = unsafe { NSPasteboardTypeString };
-        item.setString_forType(&NSString::from_str(text), string_type);
-        let empty = NSData::new();
-        for marker in MARKER_TYPES {
-            item.setData_forType(&empty, &NSString::from_str(marker));
-        }
-        item.setString_forType(
-            &NSString::from_str(&token),
-            &NSString::from_str(SESSION_TYPE),
-        );
-        let pasteboard = self.pasteboard();
-        let writers = Self::prepare(&[item]);
-        // Held until the change count is read, so it is this write's.
-        let _writing = writing();
-        if !Self::commit(&pasteboard, &writers) {
-            return Err(unavailable("the pasteboard refused the dictation"));
-        }
-        Ok(SessionMarker::new(format!(
-            "{}:{token}",
-            pasteboard.changeCount()
-        )))
+        autoreleasepool(|_| {
+            let token = self.next_token();
+            let item = NSPasteboardItem::new();
+            // SAFETY: as in read_text.
+            let string_type = unsafe { NSPasteboardTypeString };
+            item.setString_forType(&NSString::from_str(text), string_type);
+            let empty = NSData::new();
+            for marker in MARKER_TYPES {
+                item.setData_forType(&empty, &NSString::from_str(marker));
+            }
+            item.setString_forType(
+                &NSString::from_str(&token),
+                &NSString::from_str(SESSION_TYPE),
+            );
+            let pasteboard = self.pasteboard();
+            let writers = Self::prepare(&[item]);
+            // Held until the change count is read, so it is this write's.
+            let _writing = writing();
+            if !Self::commit(&pasteboard, &writers) {
+                return Err(unavailable("the pasteboard refused the dictation"));
+            }
+            Ok(SessionMarker::new(format!(
+                "{}:{token}",
+                pasteboard.changeCount()
+            )))
+        })
     }
 
     fn restore_if_unchanged(
@@ -258,9 +267,11 @@ impl Clipboard for MacPasteboard {
     }
 
     fn snapshot(&self) -> Result<ClipboardSnapshot, ClipboardError> {
-        Ok(ClipboardSnapshot::Items(Self::snapshot_items(
-            &self.pasteboard(),
-        )))
+        autoreleasepool(|_| {
+            Ok(ClipboardSnapshot::Items(Self::snapshot_items(
+                &self.pasteboard(),
+            )))
+        })
     }
 
     fn restore_snapshot_if_unchanged(
@@ -268,44 +279,46 @@ impl Clipboard for MacPasteboard {
         session: &SessionMarker,
         previous: &ClipboardSnapshot,
     ) -> Result<bool, ClipboardError> {
-        let pasteboard = self.pasteboard();
-        // Nothing to build if the clipboard already changed.
-        if !Self::holds(&pasteboard, session) {
-            return Ok(false);
-        }
-        // Build every item (copying a possibly large snapshot into NSData)
-        // before the final check, not between it and the write.
-        let items = match previous {
-            ClipboardSnapshot::Items(items) => Self::items_from(items),
-            ClipboardSnapshot::Text(None) => Vec::new(),
-            ClipboardSnapshot::Text(Some(text)) => {
-                let item = NSPasteboardItem::new();
-                // SAFETY: as in read_text.
-                let string_type = unsafe { NSPasteboardTypeString };
-                item.setString_forType(&NSString::from_str(text), string_type);
-                vec![item]
+        autoreleasepool(|_| {
+            let pasteboard = self.pasteboard();
+            // Nothing to build if the clipboard already changed.
+            if !Self::holds(&pasteboard, session) {
+                return Ok(false);
             }
-        };
-        let writers = Self::prepare(&items);
-        #[cfg(test)]
-        if let Some(hook) = &self.before_commit {
-            (hook.0)();
-        }
-        // The commit, kept minimal: re-check, then clear and write, holding
-        // our writers' lock so none of this process's writes gets between.
-        // NSPasteboard has no compare-and-swap, so another process can
-        // still copy between this check and clearContents (a few pasteboard
-        // server round trips; its copy is then replaced). AppKit offers no
-        // way to close that window, only to keep it this small.
-        let _writing = writing();
-        if !Self::holds(&pasteboard, session) {
-            return Ok(false);
-        }
-        if Self::commit(&pasteboard, &writers) {
-            Ok(true)
-        } else {
-            Err(unavailable("the pasteboard refused the restore"))
-        }
+            // Build every item (copying a possibly large snapshot into NSData)
+            // before the final check, not between it and the write.
+            let items = match previous {
+                ClipboardSnapshot::Items(items) => Self::items_from(items),
+                ClipboardSnapshot::Text(None) => Vec::new(),
+                ClipboardSnapshot::Text(Some(text)) => {
+                    let item = NSPasteboardItem::new();
+                    // SAFETY: as in read_text.
+                    let string_type = unsafe { NSPasteboardTypeString };
+                    item.setString_forType(&NSString::from_str(text), string_type);
+                    vec![item]
+                }
+            };
+            let writers = Self::prepare(&items);
+            #[cfg(test)]
+            if let Some(hook) = &self.before_commit {
+                (hook.0)();
+            }
+            // The commit, kept minimal: re-check, then clear and write, holding
+            // our writers' lock so none of this process's writes gets between.
+            // NSPasteboard has no compare-and-swap, so another process can
+            // still copy between this check and clearContents (a few pasteboard
+            // server round trips; its copy is then replaced). AppKit offers no
+            // way to close that window, only to keep it this small.
+            let _writing = writing();
+            if !Self::holds(&pasteboard, session) {
+                return Ok(false);
+            }
+            if Self::commit(&pasteboard, &writers) {
+                Ok(true)
+            } else {
+                Err(unavailable("the pasteboard refused the restore"))
+            }
+        })
     }
 }
 
@@ -340,14 +353,17 @@ impl MacPasteKeys {
     }
 }
 
+/// In an autorelease pool, like [`MacPasteboard`]'s methods.
 impl PasteKeys for MacPasteKeys {
     fn paste(&self) -> Result<(), InsertError> {
-        if !is_accessibility_trusted() {
-            return Err(InsertError::PermissionDenied);
-        }
-        let chord = paste_chord(Os::MacOs, layout::command_char_lookup());
-        tracing::debug!(key_code = chord.key_code, "pasting");
-        Self::post(chord)
+        autoreleasepool(|_| {
+            if !is_accessibility_trusted() {
+                return Err(InsertError::PermissionDenied);
+            }
+            let chord = paste_chord(Os::MacOs, layout::command_char_lookup());
+            tracing::debug!(key_code = chord.key_code, "pasting");
+            Self::post(chord)
+        })
     }
 }
 
