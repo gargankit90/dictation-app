@@ -169,12 +169,8 @@ async fn an_empty_file_does_not_crash_and_returns_to_idle() {
     let mut run = spawn(source_for(&wav));
     let events = run.dictate_once().await;
     assert_eq!(events.last(), Some(&UiEvent::StateChanged(Phase::Idle)));
-    // Whatever reached the transcriber (if anything) is empty.
-    assert!(
-        run.transcribed()
-            .iter()
-            .all(|audio| audio.samples.is_empty())
-    );
+    // Empty audio never reaches the transcriber (#69).
+    assert!(run.transcribed().is_empty());
     // The pipeline is still alive: a second dictation also completes.
     let events = run.dictate_once().await;
     assert_eq!(events.last(), Some(&UiEvent::StateChanged(Phase::Idle)));
@@ -182,18 +178,15 @@ async fn an_empty_file_does_not_crash_and_returns_to_idle() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_very_short_file_is_delivered_as_is() {
+async fn a_very_short_file_is_not_transcribed() {
     let samples = [1_000i16, -1_000, 2_000, -2_000, 0];
     let wav = TempWav::new("short.wav", 16_000, &samples);
     let mut run = spawn(source_for(&wav));
     let events = run.dictate_once().await;
     assert_eq!(events.last(), Some(&UiEvent::StateChanged(Phase::Idle)));
     let calls = run.transcribed();
-    // M2.2 doesn't drop short clips (that's a later milestone): if it was
-    // transcribed, it's exactly the file.
-    for audio in &calls {
-        assert_eq!(audio.samples.len(), samples.len());
-    }
+    // Under 200 ms: dropped before the transcriber (#69).
+    assert!(calls.is_empty());
     run.pipeline.shutdown().await;
 }
 
@@ -221,7 +214,7 @@ async fn a_missing_file_is_an_error_not_a_transcription() {
 async fn a_48_khz_file_reaches_the_pipeline_at_its_own_rate() {
     // FileAudioSource doesn't resample: the pipeline gets the file's rate
     // and every sample, so a transcriber can't mistake its duration.
-    let samples: Vec<i16> = (0..4_800).map(|n| (n % 1_000) as i16).collect();
+    let samples: Vec<i16> = (0..14_400).map(|n| (n % 1_000) as i16).collect();
     let wav = TempWav::new("48k.wav", 48_000, &samples);
     let mut run = spawn(source_for(&wav));
     run.dictate_once().await;
@@ -229,7 +222,7 @@ async fn a_48_khz_file_reaches_the_pipeline_at_its_own_rate() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].sample_rate, 48_000);
     assert_eq!(calls[0].samples.len(), samples.len());
-    assert_eq!(calls[0].duration(), Duration::from_millis(100));
+    assert_eq!(calls[0].duration(), Duration::from_millis(300));
     run.pipeline.shutdown().await;
 }
 

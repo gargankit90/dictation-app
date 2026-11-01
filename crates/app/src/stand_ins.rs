@@ -5,24 +5,29 @@
 //! Each is replaced by its real adapter in a later milestone. Unlike the
 //! `platform` fakes they can't be scripted; they just let a dictation run.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use dictation_ports::{
     Audio, AudioError, AudioSource, InsertError, Permission, PermissionError, PermissionStatus,
     Permissions, TextInserter, TranscribeError, Transcriber,
 };
 
+/// The sample rate of [`ToneAudio`]'s recordings.
+const SAMPLE_RATE: u32 = 16_000;
+
 /// The text [`FixedTranscriber`] returns.
 pub const FIXED_TRANSCRIPT: &str = "This is a test dictation.";
 
-/// Records silence: [`stop`](AudioSource::stop) returns as many zero
-/// samples at 16 kHz as the recording lasted, up to one second.
+/// Records a tone: [`stop`](AudioSource::stop) returns one second of a
+/// 440 Hz tone at 16 kHz, however long the recording lasted. It is loud and
+/// long enough for the pipeline to send it on to the transcriber; real
+/// silence never gets that far ([`dictation_core::audio_math::assess`]).
 #[derive(Debug, Default)]
-pub struct SilentAudio {
+pub struct ToneAudio {
     started: Option<Instant>,
 }
 
-impl AudioSource for SilentAudio {
+impl AudioSource for ToneAudio {
     fn start(&mut self) -> Result<(), AudioError> {
         if self.started.is_some() {
             return Err(AudioError::AlreadyRecording);
@@ -32,18 +37,17 @@ impl AudioSource for SilentAudio {
     }
 
     fn stop(&mut self) -> Result<Audio, AudioError> {
-        let started = self.started.take().ok_or(AudioError::NotRecording)?;
-        let length = started.elapsed().min(Duration::from_secs(1));
-        // At most 16 000 samples, so the cast can't truncate.
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "0..=16_000"
-        )]
-        let samples = (length.as_secs_f64() * 16_000.0) as usize;
+        self.started.take().ok_or(AudioError::NotRecording)?;
+        let samples = (0..SAMPLE_RATE)
+            .map(|n| {
+                #[allow(clippy::cast_precision_loss, reason = "n < 16_000")]
+                let t = n as f32 / SAMPLE_RATE as f32;
+                0.5 * (2.0 * std::f32::consts::PI * 440.0 * t).sin()
+            })
+            .collect();
         Ok(Audio {
-            sample_rate: 16_000,
-            samples: vec![0.0; samples],
+            sample_rate: SAMPLE_RATE,
+            samples,
         })
     }
 
@@ -122,16 +126,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn silent_audio_records_silence_once_started() {
-        let mut audio = SilentAudio::default();
+    fn tone_audio_records_a_second_of_tone_once_started() {
+        let mut audio = ToneAudio::default();
         assert_eq!(audio.stop(), Err(AudioError::NotRecording));
         audio.start().unwrap();
         assert!(audio.is_recording());
         assert_eq!(audio.start(), Err(AudioError::AlreadyRecording));
         let captured = audio.stop().unwrap();
         assert_eq!(captured.sample_rate, 16_000);
-        assert!(captured.samples.len() <= 16_000);
-        assert!(captured.samples.iter().all(|&s| s == 0.0));
+        assert_eq!(captured.samples.len(), 16_000);
+        assert_eq!(
+            dictation_core::audio_math::assess(
+                &captured.samples,
+                captured.sample_rate,
+                dictation_core::audio_math::DEFAULT_SILENCE_THRESHOLD
+            ),
+            dictation_core::audio_math::Verdict::Transcribe
+        );
 
         audio.start().unwrap();
         audio.discard();

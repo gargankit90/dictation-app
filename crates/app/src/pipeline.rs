@@ -16,6 +16,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
+use dictation_core::audio_math::{self, Verdict};
 use dictation_core::coordinator::{Phase, State, step};
 use dictation_core::error::DictationError;
 use dictation_core::events::{Command, Event};
@@ -566,6 +567,18 @@ where
                     );
                 }
             };
+            // Nothing worth sending: no request, no invented words (#69, #72).
+            // The empty transcript takes the coordinator's EmptyTranscript
+            // path back to Idle.
+            let verdict = audio_math::assess(
+                &audio.samples,
+                audio.sample_rate,
+                audio_math::DEFAULT_SILENCE_THRESHOLD,
+            );
+            if verdict != Verdict::Transcribe {
+                tracing::info!(job, ?verdict, duration = ?audio.duration(), "not transcribing");
+                return JobResult::Transcribed(job, Ok(String::new()));
+            }
             tracing::debug!(job, duration = ?audio.duration(), "transcribing");
             JobResult::Transcribed(job, transcriber.transcribe(&audio).await)
         });

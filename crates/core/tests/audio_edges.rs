@@ -114,9 +114,9 @@ fn silence_threshold_at_and_near_the_default_boundary() {
         !is_silent(&at, DEFAULT_SILENCE_THRESHOLD),
         "exactly at: speech"
     );
-    let below = vec![0.009_9f32; 16_000];
+    let below = vec![DEFAULT_SILENCE_THRESHOLD * 0.99; 16_000];
     assert!(is_silent(&below, DEFAULT_SILENCE_THRESHOLD), "just below");
-    let above = vec![-0.010_1f32; 16_000];
+    let above = vec![-DEFAULT_SILENCE_THRESHOLD * 1.01; 16_000];
     assert!(!is_silent(&above, DEFAULT_SILENCE_THRESHOLD), "just above");
 }
 
