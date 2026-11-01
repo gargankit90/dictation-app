@@ -7,7 +7,8 @@
 //! tray's title and tooltip until the next recording. A second launch
 //! forwards its flags to the running app through the single-instance
 //! plugin and exits. Debug builds act on the test flags (`--press`,
-//! `--release`, `--debug-audio-file`, `--debug-save-audio`; see [`flags`]);
+//! `--release`, `--debug-audio-file`, `--debug-save-audio`, `--mock-text`;
+//! see [`flags`]);
 //! release builds ignore them and have no way to inject key events or
 //! audio.
 //!
@@ -150,10 +151,10 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(
             move |_app, argv, _cwd| {
                 let launch = flags::parse(&argv, flags::TEST_FLAGS);
-                if launch.configure_audio() {
+                if launch.configure_pipeline() {
                     tracing::warn!(
                         from = SECOND_LAUNCH,
-                        "ignoring the debug audio flags; they only work on the first launch"
+                        "ignoring the debug audio and mock text flags; they only work on the first launch"
                     );
                 }
                 handle_flags(forward.as_ref(), launch, SECOND_LAUNCH);
@@ -208,7 +209,10 @@ fn setup(app: &mut App, hotkey: ShellHotkey, injector: Option<&Injector>) -> any
     let launch = flags::parse(&argv, flags::TEST_FLAGS);
     // Only one engine so far; an enum that delegates comes with the second.
     let flags::TranscriberChoice::Mock = launch.transcriber.unwrap_or_default();
-    let transcriber = MockTranscriber::default();
+    let transcriber = launch
+        .mock_text
+        .clone()
+        .map_or_else(MockTranscriber::default, MockTranscriber::new);
     tracing::info!(
         transcriber = flags::TranscriberChoice::Mock.name(),
         "engine"

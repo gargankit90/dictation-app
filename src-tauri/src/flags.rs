@@ -12,6 +12,11 @@
 //!   (debug mode). Both choose how the pipeline is built, so only the first
 //!   launch's count; a second launch's are logged and ignored.
 //!
+//! - `--mock-text <text>` makes the mock transcriber answer with that text
+//!   instead of its default, so a test can look for it where it is pasted.
+//!   Like the audio flags it shapes the pipeline, so only the first
+//!   launch's counts.
+//!
 //! A release build treats them like any other unknown flag: logged and
 //! ignored.
 //!
@@ -26,6 +31,10 @@ use dictation_pipeline::test_hooks::{
     DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, PRESS_FLAG, RELEASE_FLAG,
 };
 use dictation_ports::HotkeyEvent;
+
+/// `--mock-text <text>` (or `=<text>`): what the mock transcriber answers
+/// (debug builds only).
+pub const MOCK_TEXT_FLAG: &str = "--mock-text";
 
 /// Whether this build acts on the test hooks.
 pub const TEST_FLAGS: bool = cfg!(debug_assertions);
@@ -80,6 +89,9 @@ pub struct LaunchFlags {
     pub audio_file: Option<PathBuf>,
     /// Save every recording as a WAV (debug builds only).
     pub save_audio: bool,
+    /// The text the mock transcriber answers with (debug builds only); the
+    /// last one given wins.
+    pub mock_text: Option<String>,
     /// The engine `--transcriber` asked for; the last one wins.
     pub transcriber: Option<TranscriberChoice>,
     /// Engine names `--transcriber` was given that no engine has.
@@ -89,10 +101,10 @@ pub struct LaunchFlags {
 }
 
 impl LaunchFlags {
-    /// Whether these flags would change how the pipeline is built, which
-    /// only the first launch can do.
-    pub fn configure_audio(&self) -> bool {
-        self.audio_file.is_some() || self.save_audio
+    /// Whether these flags would change how the pipeline is built (its
+    /// audio or its mock transcript), which only the first launch can do.
+    pub fn configure_pipeline(&self) -> bool {
+        self.audio_file.is_some() || self.save_audio || self.mock_text.is_some()
     }
 }
 
@@ -113,6 +125,22 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
             },
             other if test_flags && audio_file_value(other).is_some() => {
                 flags.audio_file = audio_file_value(other).map(PathBuf::from);
+            }
+            MOCK_TEXT_FLAG if test_flags => match args.next() {
+                Some(text) => flags.mock_text = Some(text.clone()),
+                None => flags.ignored.push(arg.clone()),
+            },
+            other
+                if test_flags
+                    && other
+                        .strip_prefix(MOCK_TEXT_FLAG)
+                        .and_then(|rest| rest.strip_prefix('='))
+                        .is_some() =>
+            {
+                flags.mock_text = other
+                    .strip_prefix(MOCK_TEXT_FLAG)
+                    .and_then(|rest| rest.strip_prefix('='))
+                    .map(str::to_owned);
             }
             TRANSCRIBER_FLAG => match args.next() {
                 Some(name) => flags.transcriber(name),
@@ -251,7 +279,7 @@ mod tests {
         assert!(flags.save_audio);
         assert_eq!(flags.events, [Pressed]);
         assert!(flags.ignored.is_empty());
-        assert!(flags.configure_audio());
+        assert!(flags.configure_pipeline());
 
         let flags = parse(&argv(&["--debug-audio-file=/tmp/b c.wav"]), true);
         assert_eq!(flags.audio_file, Some(PathBuf::from("/tmp/b c.wav")));
@@ -265,7 +293,31 @@ mod tests {
         assert_eq!(flags.ignored, ["--debug-audio-file"]);
         let flags = parse(&argv(&["--debug-audio-file="]), true);
         assert_eq!(flags.ignored, ["--debug-audio-file="]);
-        assert!(!flags.configure_audio());
+        assert!(!flags.configure_pipeline());
+    }
+
+    #[test]
+    fn debug_builds_take_the_mock_text_in_either_form() {
+        let flags = parse(&argv(&["--mock-text", "hello world", "--press"]), true);
+        assert_eq!(flags.mock_text.as_deref(), Some("hello world"));
+        assert_eq!(flags.events, [Pressed]);
+        assert!(flags.ignored.is_empty());
+        assert!(flags.configure_pipeline());
+
+        let flags = parse(&argv(&["--mock-text=a=b", "--mock-text=last"]), true);
+        assert_eq!(flags.mock_text.as_deref(), Some("last"));
+        // The flag without a value is ignored, and so is nothing else.
+        let flags = parse(&argv(&["--mock-text"]), true);
+        assert_eq!(flags.mock_text, None);
+        assert_eq!(flags.ignored, ["--mock-text"]);
+        assert!(!flags.configure_pipeline());
+    }
+
+    #[test]
+    fn release_builds_ignore_the_mock_text() {
+        let flags = parse(&argv(&["--mock-text", "x", "--mock-text=y"]), false);
+        assert_eq!(flags.mock_text, None);
+        assert_eq!(flags.ignored, ["--mock-text", "x", "--mock-text=y"]);
     }
 
     #[test]
