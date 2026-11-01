@@ -34,6 +34,8 @@ tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+# The mock runtime, for the ACL invocation tests (M5.1 B1).
+tauri = { workspace = true, features = ["test"] }
 serde_json.workspace = true
 tauri-utils.workspace = true
 dictation-platform = { workspace = true, features = ["testing"] }

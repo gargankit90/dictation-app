@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "overlay",
-  "description": "The overlay window (M5.1): it only listens to the overlay-view event the app sends it. No commands and nothing else from core:. Checked by src/overlay/capability.test.ts.",
+  "description": "The overlay window (M5.1): it only listens to the overlay-view event the app sends it. No app commands (the app ACL manifest in build.rs grants them to main only) and nothing else from core:. Checked by src/overlay/capability.test.ts and commands::capability_tests, which invoke the commands from an overlay window and expect a refusal.",
   "windows": ["overlay"],
   "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
 }
