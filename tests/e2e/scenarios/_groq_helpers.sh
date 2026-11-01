@@ -10,6 +10,11 @@
 
 GROQ_KEYCHAIN_SERVICE=com.dictationapp.desktop
 GROQ_KEYCHAIN_ACCOUNT=groq-api-key
+# The golden image's login keychain is locked in an ssh session (nobody typed
+# the password), and an unlock lasts only for the session that made it, so
+# every keychain command unlocks it first. The password is the throwaway VM
+# user's (`lume`, see the VM setup docs), not a secret.
+GROQ_KEYCHAIN_UNLOCK='security unlock-keychain -p lume "$HOME/Library/Keychains/login.keychain-db"'
 
 # groq_key_store <key>: saves <key> as the Groq key in the VM's login
 # keychain. -A lets the app read it without the "allow access" prompt nobody
@@ -22,14 +27,14 @@ groq_key_store() {
   esac
   if ! out=$(printf 'add-generic-password -a %s -s %s -w %s -A -U\n' \
     "$GROQ_KEYCHAIN_ACCOUNT" "$GROQ_KEYCHAIN_SERVICE" "$key" |
-    vm "security -i" 2>&1); then
+    vm "$GROQ_KEYCHAIN_UNLOCK && security -i" 2>&1); then
     die "could not store the key in the VM's keychain: ${out//"$key"/<key>}"
   fi
 }
 
 # Removes the Groq key from the VM's login keychain (none is fine).
 groq_key_remove() {
-  vm "security delete-generic-password -a $(q "$GROQ_KEYCHAIN_ACCOUNT") -s $(q "$GROQ_KEYCHAIN_SERVICE") >/dev/null 2>&1; true"
+  vm "$GROQ_KEYCHAIN_UNLOCK >/dev/null 2>&1; security delete-generic-password -a $(q "$GROQ_KEYCHAIN_ACCOUNT") -s $(q "$GROQ_KEYCHAIN_SERVICE") >/dev/null 2>&1; true"
 }
 
 # Opens an empty TextEdit document in front, to paste into. Needs the VM's
