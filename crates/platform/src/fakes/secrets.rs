@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 
 use dictation_ports::{Secret, SecretError, SecretStore};
 
@@ -10,12 +11,18 @@ use super::lock;
 #[derive(Debug, Clone, Default)]
 pub struct MemSecretStore {
     state: Arc<Mutex<State>>,
+    /// While `true`, every call waits (see [`MemSecretStore::set_blocked`]).
+    blocked: Arc<(Mutex<bool>, Condvar)>,
+    /// How many `get` calls have started (see [`MemSecretStore::get_calls`]).
+    gets: Arc<AtomicUsize>,
 }
 
 #[derive(Debug, Default)]
 struct State {
     secrets: HashMap<String, Secret>,
     denied: bool,
+    /// Makes every call fail with [`SecretError::Store`] and this text.
+    failing: Option<String>,
 }
 
 impl MemSecretStore {
@@ -31,10 +38,43 @@ impl MemSecretStore {
         lock(&self.state).denied = denied;
     }
 
+    /// Makes every call fail with [`SecretError::Store`] saying `reason`
+    /// (a locked keychain, say) until set back to `None`.
+    pub fn set_failing(&self, reason: Option<&str>) {
+        lock(&self.state).failing = reason.map(str::to_owned);
+    }
+
+    /// While `blocked`, every call waits, like a real keychain that is
+    /// waiting for a person to unlock it or allow access. Setting it back
+    /// to `false` lets the waiting calls go on.
+    pub fn set_blocked(&self, blocked: bool) {
+        let (flag, wake) = &*self.blocked;
+        *lock(flag) = blocked;
+        wake.notify_all();
+    }
+
+    /// How many [`get`](SecretStore::get) calls have started, counting the
+    /// ones still waiting while the store is blocked. Tests use it to check
+    /// that reads aren't piling up.
+    #[must_use]
+    pub fn get_calls(&self) -> usize {
+        self.gets.load(Ordering::SeqCst)
+    }
+
     fn with_access<T>(&self, f: impl FnOnce(&mut State) -> T) -> Result<T, SecretError> {
+        {
+            let (flag, wake) = &*self.blocked;
+            let mut blocked = lock(flag);
+            while *blocked {
+                blocked = wake.wait(blocked).unwrap_or_else(PoisonError::into_inner);
+            }
+        }
         let mut state = lock(&self.state);
         if state.denied {
             return Err(SecretError::AccessDenied);
+        }
+        if let Some(reason) = &state.failing {
+            return Err(SecretError::Store(reason.clone()));
         }
         Ok(f(&mut state))
     }
@@ -42,6 +82,7 @@ impl MemSecretStore {
 
 impl SecretStore for MemSecretStore {
     fn get(&self, name: &str) -> Result<Option<Secret>, SecretError> {
+        self.gets.fetch_add(1, Ordering::SeqCst);
         self.with_access(|state| state.secrets.get(name).cloned())
     }
 
@@ -78,6 +119,24 @@ mod tests {
     }
 
     #[test]
+    fn get_calls_counts_reads_that_have_started_even_if_blocked() {
+        let store = MemSecretStore::new();
+        assert_eq!(store.get_calls(), 0);
+        store.get("groq").unwrap();
+        store.set("groq", &Secret::new("fake")).unwrap();
+        assert_eq!(store.get_calls(), 1, "only reads count");
+
+        store.set_blocked(true);
+        let blocked = store.clone();
+        let reader = std::thread::spawn(move || blocked.get("groq"));
+        while store.get_calls() < 2 {
+            std::thread::yield_now();
+        }
+        store.set_blocked(false);
+        assert_eq!(reader.join().unwrap().unwrap(), Some(Secret::new("fake")));
+    }
+
+    #[test]
     fn deleting_a_missing_secret_succeeds() {
         assert_eq!(MemSecretStore::new().delete("nothing"), Ok(()));
     }
@@ -96,5 +155,43 @@ mod tests {
 
         store.set_access_denied(false);
         assert_eq!(store.get("groq").unwrap(), Some(Secret::new("kept")));
+    }
+
+    #[test]
+    fn a_failing_store_fails_every_call_with_its_reason_until_cleared() {
+        let store = MemSecretStore::new();
+        store.set("groq", &Secret::new("kept")).unwrap();
+        store.set_failing(Some("locked"));
+        let locked = Err(SecretError::Store("locked".to_owned()));
+        assert_eq!(store.get("groq"), locked);
+        assert_eq!(store.set("groq", &Secret::new("lost")), locked.map(|_| ()));
+        assert!(store.delete("groq").is_err());
+
+        store.set_failing(None);
+        assert_eq!(store.get("groq").unwrap(), Some(Secret::new("kept")));
+    }
+
+    #[test]
+    fn a_blocked_store_waits_until_released() {
+        let store = MemSecretStore::new();
+        store.set("groq", &Secret::new("kept")).unwrap();
+        store.set_blocked(true);
+        let (done, finished) = std::sync::mpsc::channel();
+        let reader = store.clone();
+        let thread = std::thread::spawn(move || done.send(reader.get("groq")).unwrap());
+        assert!(
+            finished
+                .recv_timeout(std::time::Duration::from_millis(200))
+                .is_err(),
+            "returned while blocked"
+        );
+        store.set_blocked(false);
+        assert_eq!(
+            finished
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap(),
+            Ok(Some(Secret::new("kept")))
+        );
+        thread.join().unwrap();
     }
 }

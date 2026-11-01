@@ -22,3 +22,4 @@ pub mod overlay;
 pub mod permissions;
 pub mod secrets;
 pub mod secure_input;
+pub mod single_instance;

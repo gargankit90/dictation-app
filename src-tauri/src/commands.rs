@@ -8,6 +8,10 @@
 //! (and on macOS, show an access prompt), so every command runs on the
 //! blocking pool, never the main thread.
 //!
+//! `save_settings` and `set_api_key` also rebuild the speech-to-text engine
+//! from what was saved (M4.4, [`crate::engine`]), so the next dictation uses
+//! the new provider, model, language or key without a restart.
+//!
 //! `test_api_key` (M3.4) is the one command that sends a key anywhere but
 //! the keychain: to the provider, in the `Authorization` header, with a short
 //! silent clip. It returns nothing but success or a [`KeyTestError`] whose
@@ -24,6 +28,8 @@ use dictation_transcribe::openai_compat::{self, Preset};
 use serde::Serialize;
 use tauri::State;
 
+use crate::engine::{self, LiveEngine};
+
 /// Where the bindings go, relative to `src-tauri/`.
 pub const BINDINGS_PATH: &str = "../src/bindings.ts";
 
@@ -34,7 +40,7 @@ pub struct AppConfig(pub Arc<Config<KeychainSecretStore>>);
 /// message the UI shows (never a key).
 async fn on_config<T: Send + 'static>(
     state: &State<'_, AppConfig>,
-    call: impl FnOnce(&Config<KeychainSecretStore>) -> Result<T, ConfigError> + Send + 'static,
+    call: impl FnOnce(&Arc<Config<KeychainSecretStore>>) -> Result<T, ConfigError> + Send + 'static,
 ) -> Result<T, String> {
     let config = Arc::clone(&state.0);
     tauri::async_runtime::spawn_blocking(move || call(&config))
@@ -50,14 +56,22 @@ async fn on_config<T: Send + 'static>(
 #[tauri::command]
 #[specta::specta]
 pub async fn get_settings(state: State<'_, AppConfig>) -> Result<Settings, String> {
-    on_config(&state, Config::settings).await
+    on_config(&state, |config| config.settings()).await
 }
 
 /// Validates and saves the settings.
 #[tauri::command]
 #[specta::specta]
-pub async fn save_settings(state: State<'_, AppConfig>, settings: Settings) -> Result<(), String> {
-    on_config(&state, move |config| config.save_settings(&settings)).await
+pub async fn save_settings(
+    state: State<'_, AppConfig>,
+    engine: State<'_, LiveEngine>,
+    settings: Settings,
+) -> Result<(), String> {
+    let live = engine.inner().clone();
+    on_config(&state, move |config| {
+        engine::changed(config, &live, |config| config.save_settings(&settings))
+    })
+    .await
 }
 
 /// Stores `key` as `provider`'s API key in the keychain. Write-only.
@@ -65,10 +79,15 @@ pub async fn save_settings(state: State<'_, AppConfig>, settings: Settings) -> R
 #[specta::specta]
 pub async fn set_api_key(
     state: State<'_, AppConfig>,
+    engine: State<'_, LiveEngine>,
     provider: Provider,
     key: String,
 ) -> Result<(), String> {
-    on_config(&state, move |config| config.set_api_key(provider, &key)).await
+    let live = engine.inner().clone();
+    on_config(&state, move |config| {
+        engine::changed(config, &live, |config| config.set_api_key(provider, &key))
+    })
+    .await
 }
 
 /// Whether `provider` has an API key stored.
@@ -128,6 +147,10 @@ fn provider_name(provider: Provider) -> &'static str {
 fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
     let name = provider_name(provider);
     match error {
+        TranscribeError::MissingKey => KeyTestError::new(
+            KeyTestKind::NoKey,
+            format!("No {name} API key is saved yet. Paste one first."),
+        ),
         TranscribeError::InvalidKey => KeyTestError::new(
             KeyTestKind::InvalidKey,
             format!(
@@ -147,6 +170,12 @@ fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
         TranscribeError::Network(_) => KeyTestError::new(
             KeyTestKind::Network,
             format!("Couldn't reach {name}. Check your internet connection and try again."),
+        ),
+        // The key test reads the keychain itself and reports its errors
+        // (`KeyTestKind::Keychain`); these two come from the dictation engine.
+        TranscribeError::KeyPending | TranscribeError::KeychainUnavailable(_) => KeyTestError::new(
+            KeyTestKind::Keychain,
+            "Couldn't read your API key from the Keychain.".to_owned(),
         ),
         TranscribeError::Engine(detail) => KeyTestError::new(
             KeyTestKind::Server,
@@ -571,5 +600,106 @@ mod tests {
                 "https://api.openai.com/v1"
             );
         }
+    }
+}
+
+/// The capabilities the UI gets (M1.7, #82 M1), checked with Tauri's own
+/// ACL resolver against the manifests and capabilities the build script
+/// produced for this build.
+#[cfg(test)]
+mod capability_tests {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    use tauri_utils::acl::capability::Capability;
+    use tauri_utils::acl::manifest::Manifest;
+    use tauri_utils::acl::resolved::Resolved;
+    use tauri_utils::platform::Target;
+
+    use crate::command_names::COMMAND_NAMES;
+
+    fn resolved() -> Resolved {
+        let out_dir = PathBuf::from(env!("OUT_DIR"));
+        let read = |name: &str| std::fs::read_to_string(out_dir.join(name)).unwrap();
+        let manifests: BTreeMap<String, Manifest> =
+            serde_json::from_str(&read("acl-manifests.json")).unwrap();
+        let capabilities: BTreeMap<String, Capability> =
+            serde_json::from_str(&read("capabilities.json")).unwrap();
+        Resolved::resolve(&manifests, capabilities, Target::current()).unwrap()
+    }
+
+    #[test]
+    fn criterion_m1_7_2_main_may_call_only_the_app_commands() {
+        let resolved = resolved();
+        let allowed: Vec<&str> = resolved
+            .allowed_commands
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut expected = COMMAND_NAMES.to_vec();
+        expected.sort_unstable();
+        assert_eq!(allowed, expected, "nothing from core: or any plugin");
+        for commands in resolved.allowed_commands.values() {
+            for command in commands {
+                let windows: Vec<&str> = command
+                    .windows
+                    .iter()
+                    .map(|pattern| pattern.as_str())
+                    .collect();
+                assert_eq!(windows, ["main"]);
+                assert!(command.webviews.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn criterion_m1_7_2_the_tray_and_menus_are_out_of_reach() {
+        let allowed = resolved().allowed_commands;
+        for command in [
+            "plugin:tray|get_by_id",
+            "plugin:tray|remove_by_id",
+            "plugin:tray|set_visible",
+            "plugin:tray|set_menu",
+            "plugin:menu|set_enabled",
+            "plugin:resources|close",
+            "plugin:window|hide",
+            "plugin:event|listen",
+        ] {
+            assert!(!allowed.contains_key(command), "{command} is allowed");
+        }
+    }
+
+    #[test]
+    fn criterion_m1_7_2_the_capability_file_lists_exactly_the_commands() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("capabilities");
+        let files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(files, ["default.json"], "one capability file");
+        let capability: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("default.json")).unwrap())
+                .unwrap();
+        let expected: Vec<String> = COMMAND_NAMES
+            .iter()
+            .map(|name| format!("allow-{}", name.replace('_', "-")))
+            .collect();
+        assert_eq!(capability["permissions"], serde_json::json!(expected));
+        assert_eq!(capability["windows"], serde_json::json!(["main"]));
+        assert!(capability.get("remote").is_none());
+    }
+
+    #[test]
+    fn the_command_names_are_the_registered_commands() {
+        let bindings = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(super::BINDINGS_PATH),
+        )
+        .unwrap();
+        let invoked: Vec<&str> = bindings
+            .split("__TAURI_INVOKE(\"")
+            .skip(1)
+            .filter_map(|rest| rest.split_once('"').map(|(name, _)| name))
+            .collect();
+        assert_eq!(invoked, COMMAND_NAMES);
     }
 }

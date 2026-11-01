@@ -5,15 +5,27 @@
 //!
 //! [`SyntheticHotkey`] wraps the real [`HotkeySource`] and adds an
 //! [`Injector`]; the shell parses each launch's flags with [`hook_events`]
-//! (a second launch's arrive through the single-instance plugin) and injects
+//! (a second launch's arrive through the single-instance socket) and injects
 //! them. These are test hooks, not a feature: nothing else sends synthetic
 //! keys.
+//!
+//! `--debug-set-api-key-stdin` and `--debug-delete-api-key` store and remove
+//! the Groq API key through the same [`Config`] the Settings window uses
+//! ([`KeyCommand`], [`run_key_command`]), so a test makes the app itself the
+//! keychain item's owner. An item made by another tool (`security`) isn't
+//! trusted by the app, and macOS asks the user before the app may read it.
 
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use dictation_core::error::DictationError;
-use dictation_ports::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource, Permission};
+use dictation_core::settings::Provider;
+use dictation_ports::{
+    HotkeyError, HotkeyEvent, HotkeySink, HotkeySource, Permission, SecretStore,
+};
+
+use crate::config::{Config, MAX_KEY_LEN};
 
 /// The flag that injects [`HotkeyEvent::Pressed`].
 pub const PRESS_FLAG: &str = "--press";
@@ -24,6 +36,71 @@ pub const RELEASE_FLAG: &str = "--release";
 pub const DEBUG_AUDIO_FILE_FLAG: &str = "--debug-audio-file";
 /// `--debug-save-audio`: save every recording as a WAV (debug mode).
 pub const DEBUG_SAVE_AUDIO_FLAG: &str = "--debug-save-audio";
+
+/// `--debug-set-api-key-stdin`: store the Groq API key read from stdin (never
+/// an argument, which any local process can read) and exit.
+pub const DEBUG_SET_API_KEY_FLAG: &str = "--debug-set-api-key-stdin";
+/// `--debug-delete-api-key`: remove the Groq API key and exit.
+pub const DEBUG_DELETE_API_KEY_FLAG: &str = "--debug-delete-api-key";
+
+/// What a key hook asks for. The process does it and exits instead of
+/// starting the app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyCommand {
+    /// `--debug-set-api-key-stdin`.
+    Set,
+    /// `--debug-delete-api-key`.
+    Delete,
+}
+
+impl KeyCommand {
+    /// The key hook `flag` is, if it is one.
+    #[must_use]
+    pub fn from_flag(flag: &str) -> Option<Self> {
+        match flag {
+            DEBUG_SET_API_KEY_FLAG => Some(Self::Set),
+            DEBUG_DELETE_API_KEY_FLAG => Some(Self::Delete),
+            _ => None,
+        }
+    }
+}
+
+/// Does `command` for [`Provider::Groq`] through `config`, the way the
+/// Settings window would: `Set` reads the key from `stdin` and stores it
+/// ([`Config::set_api_key`], which trims and validates it), `Delete` removes
+/// it. Returns what to tell the user, which never holds the key.
+///
+/// # Errors
+///
+/// A message (without the key) if stdin can't be read or isn't a valid key,
+/// or the keychain refuses.
+pub fn run_key_command<S: SecretStore>(
+    command: KeyCommand,
+    config: &Config<S>,
+    mut stdin: impl Read,
+) -> Result<&'static str, String> {
+    match command {
+        KeyCommand::Set => {
+            // One byte over the longest key, so too long is reported as such.
+            let mut input = Vec::new();
+            stdin
+                .by_ref()
+                .take(MAX_KEY_LEN as u64 * 4 + 1)
+                .read_to_end(&mut input)
+                .map_err(|error| format!("could not read the key from stdin: {}", error.kind()))?;
+            let key = String::from_utf8(input)
+                .map_err(|_| "the key on stdin is not valid UTF-8".to_owned())?;
+            config
+                .set_api_key(Provider::Groq, &key)
+                .map(|()| "API key stored")
+                .map_err(|error| error.to_string())
+        }
+        KeyCommand::Delete => config
+            .delete_api_key(Provider::Groq)
+            .map(|()| "API key deleted")
+            .map_err(|error| error.to_string()),
+    }
+}
 
 /// The WAV `--debug-audio-file` names in `args`, if any; the last one wins.
 /// A flag without a value names nothing.
@@ -179,7 +256,7 @@ mod tests {
     use std::sync::mpsc;
 
     use HotkeyEvent::{CancelPressed, Pressed, Released};
-    use dictation_platform::fakes::FakeHotkey;
+    use dictation_platform::fakes::{FakeHotkey, MemSecretStore};
 
     use super::*;
 
@@ -304,5 +381,120 @@ mod tests {
             .join()
             .unwrap();
         assert_eq!(rx.try_iter().collect::<Vec<_>>(), [Pressed]);
+    }
+
+    const DUMMY_KEY: &str = "gsk_dummy_not_a_real_key_0123456789";
+
+    fn key_config() -> (Config<MemSecretStore>, MemSecretStore) {
+        let secrets = MemSecretStore::new();
+        (Config::new(std::env::temp_dir(), secrets.clone()), secrets)
+    }
+
+    fn stored(secrets: &MemSecretStore) -> Option<String> {
+        secrets
+            .get("groq-api-key")
+            .unwrap()
+            .map(|secret| secret.expose().to_owned())
+    }
+
+    #[test]
+    fn key_flags_map_to_their_commands() {
+        assert_eq!(
+            KeyCommand::from_flag(DEBUG_SET_API_KEY_FLAG),
+            Some(KeyCommand::Set)
+        );
+        assert_eq!(
+            KeyCommand::from_flag(DEBUG_DELETE_API_KEY_FLAG),
+            Some(KeyCommand::Delete)
+        );
+        assert_eq!(KeyCommand::from_flag("--debug-set-api-key"), None);
+        assert_eq!(KeyCommand::from_flag(PRESS_FLAG), None);
+    }
+
+    #[test]
+    fn set_stores_the_key_from_stdin_trimmed() {
+        let (config, secrets) = key_config();
+        let message = run_key_command(
+            KeyCommand::Set,
+            &config,
+            format!("{DUMMY_KEY}\n").as_bytes(),
+        );
+        assert_eq!(message, Ok("API key stored"));
+        assert_eq!(stored(&secrets).as_deref(), Some(DUMMY_KEY));
+    }
+
+    #[test]
+    fn set_replaces_an_earlier_key() {
+        let (config, secrets) = key_config();
+        run_key_command(KeyCommand::Set, &config, "gsk_first".as_bytes()).unwrap();
+        run_key_command(KeyCommand::Set, &config, DUMMY_KEY.as_bytes()).unwrap();
+        assert_eq!(stored(&secrets).as_deref(), Some(DUMMY_KEY));
+    }
+
+    #[test]
+    fn delete_removes_the_key_and_is_fine_without_one() {
+        let (config, secrets) = key_config();
+        run_key_command(KeyCommand::Set, &config, DUMMY_KEY.as_bytes()).unwrap();
+        assert_eq!(
+            run_key_command(KeyCommand::Delete, &config, std::io::empty()),
+            Ok("API key deleted")
+        );
+        assert_eq!(stored(&secrets), None);
+        assert_eq!(
+            run_key_command(KeyCommand::Delete, &config, std::io::empty()),
+            Ok("API key deleted")
+        );
+    }
+
+    #[test]
+    fn set_rejects_a_bad_key_and_stores_nothing() {
+        let (config, secrets) = key_config();
+        let long = "k".repeat(MAX_KEY_LEN + 1);
+        let cases: [&[u8]; 5] = [
+            b"",
+            b"  \n",
+            b"two words",
+            &[0xff, 0xfe, b'a'],
+            long.as_bytes(),
+        ];
+        for input in cases {
+            let error = run_key_command(KeyCommand::Set, &config, input).unwrap_err();
+            assert!(!error.is_empty());
+            assert_eq!(stored(&secrets), None, "{error}");
+        }
+    }
+
+    #[test]
+    fn a_failing_keychain_is_reported_without_the_key() {
+        let (config, secrets) = key_config();
+        secrets.set_access_denied(true);
+        let error = run_key_command(KeyCommand::Set, &config, DUMMY_KEY.as_bytes()).unwrap_err();
+        assert!(error.contains("denied"), "{error}");
+        assert!(!error.contains(DUMMY_KEY), "{error}");
+        let error = run_key_command(KeyCommand::Delete, &config, std::io::empty()).unwrap_err();
+        assert!(error.contains("denied"), "{error}");
+    }
+
+    #[test]
+    fn an_unreadable_stdin_is_reported_without_the_input() {
+        struct Broken;
+        impl Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("secret details"))
+            }
+        }
+        let (config, _) = key_config();
+        let error = run_key_command(KeyCommand::Set, &config, Broken).unwrap_err();
+        assert!(error.contains("could not read"), "{error}");
+        assert!(!error.contains("secret details"), "{error}");
+    }
+
+    #[test]
+    fn only_as_much_stdin_as_a_key_could_need_is_read() {
+        let (config, secrets) = key_config();
+        let huge = "k".repeat(100_000);
+        let error = run_key_command(KeyCommand::Set, &config, huge.as_bytes()).unwrap_err();
+        assert!(error.contains("too long"), "{error}");
+        assert_eq!(stored(&secrets), None);
     }
 }

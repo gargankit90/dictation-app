@@ -57,6 +57,8 @@ of the VM's desktop at the end (`<scenario>.png`, taken through the
 | `e2e_hold_release` | #90, M1.6 #4 | A real Right Option hold (down, 1.5 s, up) posted from Terminal.app: one `Recording … Idle` sequence and the transcript in TextEdit, with no synthetic `--press` flag in the log. However it ends, the key is released (see "Key cleanup"). |
 | `e2e_held_at_launch` | #90, M1.6 B1 | Right Option down, then the app starts and stays up 5 s with the key still held: no Recording. The key goes up: still nothing. Then a normal hold: exactly one `Recording … Idle` sequence. |
 | `e2e_overlay_focus` | M5.1 #3 | The full app with the tone and the mock transcriber, TextEdit in front. `--press`: the log shows `overlay shown state=recording` and the app has a 420x72 window at the status level (25) on screen, read with `CGWindowListCopyWindowInfo` through JXA over ssh (`cua-driver list_windows` leaves such windows out); a screenshot is saved as `e2e_overlay_focus.recording.png`. `--release`: `overlay shown state=transcribing`, back to Idle, `overlay hidden`, and the window is off screen again. The frontmost app, sampled with `lsappinfo` every 0.2 s from before the press until after Idle, is always TextEdit, and TextEdit holds exactly `hello world`. |
+| `e2e_error_bad_key` | M4.4 #2 | The VM's login keychain gets the invalid key `gsk_invalid_test_key`; the app starts on the real engine (`--transcriber settings`) and dictates the tone fixture. Groq's 401 shows as `The provider rejected your API key…` in the log (`shown to the user`), the phases are `Recording Transcribing Idle` (nothing inserted), TextEdit stays empty, and a second dictation fails the same way (the app is still usable). Then the app restarts on the mock and a dictation pastes `This is a test dictation.`. Real request to Groq, so the VM needs internet; needs no key from you. |
+| `e2e_real_groq` | M4.4 #1 | Skipped unless `GROQ_API_KEY` is set in the environment of the run. The VM makes a WAV of a sentence with `say`, the key goes into the VM's keychain for the dictation only, and the text pasted into TextEdit must contain at least 80% of the sentence's words. See "Real Groq" below. |
 
 ## Key cleanup
 
@@ -89,6 +91,52 @@ ssh -i ~/.ssh/dictation_vm_ed25519 -o HostKeyAlias=dictation-vm lume@$(lume get 
 
 `after_key_down` dies right after the down is posted (a failed launch);
 `mid_hold` dies inside the hold job between its down and up.
+
+## Real Groq (opt-in)
+
+The scenarios run on the mock engine: `launch` passes `--transcriber mock` to
+a first launch (the engine is chosen when the app starts; a forwarded second
+launch can't change it). `e2e_error_bad_key` and `e2e_real_groq` set
+`E2E_TRANSCRIBER=settings` for their first launch instead, which is the
+app's default: the provider, model and language from the settings and the
+provider's key from the keychain.
+
+```sh
+GROQ_API_KEY=gsk_... tests/e2e/run.sh e2e_real_groq        # a real key, a real request
+tests/e2e/run.sh e2e_error_bad_key                         # a wrong key; no key needed
+```
+
+How the key reaches the VM: the app reads it from the login keychain, the
+way a user's Settings window leaves it, so the test has the app put it
+there. The debug build takes two flags that run in a process of their own,
+then exit: `--debug-set-api-key-stdin` (the key is read from stdin, never an
+argument) and `--debug-delete-api-key`; both go through the same code as the
+Settings window (`groq_key_store` and `groq_key_remove` in
+`scenarios/_groq_helpers.sh`). The app has to create the item itself: an item
+made by the `security` tool doesn't list the app in its access list, so
+macOS prompts when the app reads it and nobody is there to click. A release
+build ignores both flags. The key is sent on the stdin of ssh, so it is never
+in a process list (host or VM), a file, the app's log or a report; the
+scenario also checks that the app's log doesn't hold it. The helpers turn
+`bash -x` tracing off while they handle the key (and put it back), so a
+trace of a run doesn't hold it either; a scenario never expands
+`$GROQ_API_KEY` itself. The key is removed again however the
+run ends (`groq_guard_start`: an EXIT/INT/TERM/HUP trap that keeps the run's
+exit status), and a removal that fails is reported as a failure with a
+warning that the key may still be in the VM's keychain; reset the VM then.
+`tests/e2e/test-key-handling.sh` (part of the gate, no VM needed) checks all
+of this with a made-up key and a stubbed `vm`.
+
+The golden image's login keychain is locked in an ssh session, so every
+keychain command unlocks it first with the VM user's password: `lume`, the
+throwaway VM user's, or `VM_PASSWORD` if you set it. It travels on stdin too
+and is never logged. The app reads no environment variable for a key, so a
+release and a debug build have the same one way to get a key. Without
+`GROQ_API_KEY` the scenario is skipped, not failed.
+
+The paste is read back from TextEdit with `osascript`, so these two need the
+golden image to have Accessibility granted to the app and Automation allowed
+for `osascript` to control TextEdit (M4.3).
 
 ## Requirements on the host
 

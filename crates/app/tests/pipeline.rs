@@ -356,7 +356,7 @@ async fn criterion_3_transcriber_error_shows_error_and_inserts_nothing() {
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
             UiEvent::Error(DictationError::TranscriptionFailed {
-                reason: "transcription timed out".into()
+                reason: TranscribeError::Timeout.user_message()
             }),
             UiEvent::StateChanged(Idle),
         ]

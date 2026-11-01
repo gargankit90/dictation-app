@@ -68,5 +68,6 @@ step npx vitest run
 # Spelling and guards
 step typos
 step scripts/test-guards.sh
+step tests/e2e/test-key-handling.sh
 
 printf '\ngate: all checks passed\n'
