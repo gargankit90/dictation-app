@@ -13,7 +13,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd -P)
 tmp=$(mktemp -d)
-trap 'pkill -f "$tmp/" 2>/dev/null; rm -rf "$tmp"' EXIT
+trap 'pkill -f "$tmp/" 2>/dev/null || true; rm -rf "$tmp"' EXIT
 # KEEP=1 keeps the cases' files for a look: tests/e2e/test-runner.sh prints where.
 if [ "${KEEP:-0}" = 1 ]; then trap 'echo "cases kept in $tmp" >&2' EXIT; fi
 
