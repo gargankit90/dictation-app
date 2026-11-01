@@ -39,5 +39,14 @@
       "signingIdentity": "dictation-app Dev",
       "entitlements": "./Entitlements.plist"
     }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/gargankit90/dictation-app/releases/latest/download/latest.json"
+      ],
+      "pubkey": "",
+      "requireSignedVersion": true
+    }
   }
 }

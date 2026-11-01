@@ -38,6 +38,7 @@ pub mod engine;
 mod flags;
 mod logging;
 mod overlay;
+mod updater;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -467,8 +468,15 @@ fn handle_flags(
 fn build_tray(app: &App) -> tauri::Result<()> {
     let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, None::<&str>)?;
     let reveal = MenuItem::with_id(app, REVEAL_LOG_ID, "Reveal log", true, None::<&str>)?;
+    let updates = MenuItem::with_id(
+        app,
+        updater::CHECK_ID,
+        updater::CHECK_LABEL,
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit dictation-app", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&settings, &reveal, &quit])?;
+    let menu = Menu::with_items(app, &[&settings, &updates, &reveal, &quit])?;
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip(TOOLTIP)
         .menu(&menu)
@@ -480,6 +488,8 @@ fn build_tray(app: &App) -> tauri::Result<()> {
                 show_settings(app);
             } else if event.id() == REVEAL_LOG_ID {
                 reveal_log(app);
+            } else if event.id() == updater::CHECK_ID {
+                updater::check_from_tray(app);
             }
         });
     if let Some(icon) = app.default_window_icon() {
