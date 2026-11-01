@@ -18,6 +18,10 @@
 //!   app. They run in their own process, never in a running app, so a
 //!   forwarded second launch ignores them.
 //!
+//! - `--debug-launch-at-login-on`, `-off` and `-status` set or print the
+//!   login item (M5.3) through the same code as the Settings window, then
+//!   exit, again in a process of their own.
+//!
 //! - `--mock-text <text>` makes the mock transcriber answer with that text
 //!   instead of its default, so a test can look for it where it is pasted.
 //!   Like the audio flags it shapes the pipeline, so only the first
@@ -41,7 +45,8 @@
 use std::path::PathBuf;
 
 use dictation_pipeline::test_hooks::{
-    DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, KeyCommand, PRESS_FLAG, RELEASE_FLAG,
+    DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, KeyCommand, LaunchCommand, PRESS_FLAG,
+    RELEASE_FLAG,
 };
 use dictation_ports::HotkeyEvent;
 
@@ -114,6 +119,9 @@ pub struct LaunchFlags {
     /// The API key commands, in order (debug builds only): done instead of
     /// starting the app.
     pub key_commands: Vec<KeyCommand>,
+    /// The launch-at-login commands, in order (debug builds only): done
+    /// instead of starting the app.
+    pub launch_commands: Vec<LaunchCommand>,
     /// The text the mock transcriber answers with (debug builds only); the
     /// last one given wins.
     pub mock_text: Option<String>,
@@ -156,6 +164,11 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
             DEBUG_SAVE_AUDIO_FLAG if test_flags => flags.save_audio = true,
             key_flag if test_flags && KeyCommand::from_flag(key_flag).is_some() => {
                 flags.key_commands.extend(KeyCommand::from_flag(key_flag));
+            }
+            login_flag if test_flags && LaunchCommand::from_flag(login_flag).is_some() => {
+                flags
+                    .launch_commands
+                    .extend(LaunchCommand::from_flag(login_flag));
             }
             // A flag right after it is not its path (#73): the path is missing,
             // so this one is ignored with a warning and the next flag still acts.
@@ -488,6 +501,27 @@ mod tests {
         assert_eq!(flags.events, [Pressed]);
         assert!(flags.ignored.is_empty());
         assert!(parse(&argv(&["--press"]), true).key_commands.is_empty());
+    }
+
+    #[test]
+    fn debug_builds_take_the_launch_at_login_commands_in_order() {
+        let flags = parse(
+            &argv(&[
+                "--debug-launch-at-login-on",
+                "--debug-launch-at-login-status",
+                "--debug-launch-at-login-off",
+            ]),
+            true,
+        );
+        assert_eq!(
+            flags.launch_commands,
+            [LaunchCommand::On, LaunchCommand::Status, LaunchCommand::Off]
+        );
+        assert!(flags.ignored.is_empty());
+        // Release builds treat them as unknown flags.
+        let flags = parse(&argv(&["--debug-launch-at-login-on"]), false);
+        assert!(flags.launch_commands.is_empty());
+        assert_eq!(flags.ignored, ["--debug-launch-at-login-on"]);
     }
 
     #[test]

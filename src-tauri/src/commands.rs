@@ -21,8 +21,9 @@ use std::sync::Arc;
 
 use dictation_core::settings::{Provider, Settings};
 use dictation_pipeline::config::{self, Config, ConfigError};
+use dictation_pipeline::launch::{self, LaunchProblem};
 use dictation_platform::secrets::KeychainSecretStore;
-use dictation_ports::{SecretStore, TranscribeError};
+use dictation_ports::{LaunchAtLogin, SecretStore, TranscribeError};
 use dictation_transcribe::check_key::check_key;
 use dictation_transcribe::openai_compat::{self, Preset};
 use serde::Serialize;
@@ -35,6 +36,9 @@ pub const BINDINGS_PATH: &str = "../src/bindings.ts";
 
 /// The settings file and keys the commands use.
 pub struct AppConfig(pub Arc<Config<KeychainSecretStore>>);
+
+/// The OS's login item for the launch-at-login setting (M5.3).
+pub struct LoginItem(pub Arc<dyn LaunchAtLogin>);
 
 /// Runs `call` on the config on the blocking pool; errors become the
 /// message the UI shows (never a key).
@@ -52,26 +56,55 @@ async fn on_config<T: Send + 'static>(
         })
 }
 
-/// The saved settings (the defaults if none were saved).
+/// The saved settings (the defaults if none were saved), with
+/// `launch_at_login` as the OS reports it: the user may have changed the
+/// login item in System Settings since the last save.
 #[tauri::command]
 #[specta::specta]
-pub async fn get_settings(state: State<'_, AppConfig>) -> Result<Settings, String> {
-    on_config(&state, |config| config.settings()).await
+pub async fn get_settings(
+    state: State<'_, AppConfig>,
+    login: State<'_, LoginItem>,
+) -> Result<Settings, String> {
+    let login = Arc::clone(&login.0);
+    on_config(&state, move |config| {
+        Ok(launch::with_os_state(&*login, config.settings()?))
+    })
+    .await
 }
 
-/// Validates and saves the settings.
+/// Saves the settings: the login item first, then the file with whatever the
+/// OS ended up with, then the engine is rebuilt.
+///
+/// If the login item couldn't be changed, everything else is still saved and
+/// the error says why (and what to do, if the user has to approve it).
+fn save_with_login<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    live: &LiveEngine,
+    login: &dyn LaunchAtLogin,
+    mut settings: Settings,
+) -> Result<Option<LaunchProblem>, ConfigError> {
+    let problem = launch::apply(login, &mut settings).err();
+    engine::changed(config, live, |config| config.save_settings(&settings))?;
+    Ok(problem)
+}
+
+/// Validates and saves the settings, and applies the launch-at-login choice
+/// to the OS.
 #[tauri::command]
 #[specta::specta]
 pub async fn save_settings(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
+    login: State<'_, LoginItem>,
     settings: Settings,
 ) -> Result<(), String> {
     let live = engine.inner().clone();
-    on_config(&state, move |config| {
-        engine::changed(config, &live, |config| config.save_settings(&settings))
+    let login = Arc::clone(&login.0);
+    let problem = on_config(&state, move |config| {
+        save_with_login(config, &live, &*login, settings)
     })
-    .await
+    .await?;
+    problem.map_or(Ok(()), |problem| Err(problem.to_string()))
 }
 
 /// Stores `key` as `provider`'s API key in the keychain. Write-only.
@@ -377,6 +410,20 @@ mod tests {
     }
 
     #[test]
+    fn the_app_requires_macos_13_for_the_login_item_api() {
+        // SMAppService is macOS 13+; the adapter calls it without a check.
+        let config = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"),
+        )
+        .unwrap();
+        let config: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(
+            config["bundle"]["macOS"]["minimumSystemVersion"], "13.0",
+            "raise the minimum before using a newer macOS API, never lower it"
+        );
+    }
+
+    #[test]
     fn the_ui_default_models_match_core() {
         let providers = std::fs::read_to_string(
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/providers.ts"),
@@ -438,8 +485,91 @@ mod tests {
         let fields = field_names(settings);
         assert_eq!(
             fields,
-            ["version", "provider", "model", "language", "hotkey"]
+            [
+                "version",
+                "provider",
+                "model",
+                "language",
+                "hotkey",
+                "launch_at_login"
+            ]
         );
+    }
+
+    mod launch_at_login {
+        use dictation_platform::fakes::{FakeLaunchAtLogin, MemSecretStore};
+        use dictation_ports::LaunchAtLoginState;
+
+        use super::super::*;
+
+        fn config() -> (Arc<Config<MemSecretStore>>, std::path::PathBuf) {
+            let dir = std::env::temp_dir().join(format!(
+                "dictation-login-test-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            (Arc::new(Config::new(&dir, MemSecretStore::new())), dir)
+        }
+
+        fn on() -> Settings {
+            Settings {
+                launch_at_login: true,
+                ..Settings::default()
+            }
+        }
+
+        #[test]
+        fn saving_applies_the_choice_to_the_os_and_the_file_keeps_the_result() {
+            let (config, dir) = config();
+            let login = FakeLaunchAtLogin::new();
+            let live = LiveEngine::fixed();
+            let problem = save_with_login(&config, &live, &login, on()).unwrap();
+            assert_eq!(problem, None);
+            assert_eq!(login.state(), Ok(LaunchAtLoginState::Enabled));
+            assert!(config.settings().unwrap().launch_at_login);
+
+            // The user turns it off in System Settings; the screen shows
+            // that, and saving something else doesn't turn it back on.
+            login.set_state(LaunchAtLoginState::Disabled);
+            let shown = launch::with_os_state(&login, config.settings().unwrap());
+            assert!(!shown.launch_at_login);
+            assert_eq!(
+                save_with_login(&config, &live, &login, shown).unwrap(),
+                None
+            );
+            assert!(!config.settings().unwrap().launch_at_login);
+            assert_eq!(login.calls(), [true]);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        #[test]
+        fn a_refused_login_item_still_saves_the_other_settings() {
+            let (config, dir) = config();
+            let login = FakeLaunchAtLogin::new();
+            login.enabling_gives(LaunchAtLoginState::RequiresApproval);
+            let settings = Settings {
+                language: Some("de".into()),
+                ..on()
+            };
+            let problem = save_with_login(&config, &LiveEngine::fixed(), &login, settings).unwrap();
+            assert_eq!(problem, Some(LaunchProblem::NeedsApproval));
+            let saved = config.settings().unwrap();
+            assert_eq!(saved.language.as_deref(), Some("de"));
+            assert!(!saved.launch_at_login, "not claimed as on");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        #[test]
+        fn invalid_settings_are_not_saved() {
+            let (config, dir) = config();
+            let login = FakeLaunchAtLogin::new();
+            let bad = Settings {
+                model: String::new(),
+                ..on()
+            };
+            assert!(save_with_login(&config, &LiveEngine::fixed(), &login, bad).is_err());
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     mod key_test {

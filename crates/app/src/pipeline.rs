@@ -943,6 +943,84 @@ mod tests {
         joined.unwrap()
     }
 
+    /// A log sink the test reads back.
+    #[derive(Clone, Default)]
+    struct LogBuffer(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuffer {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl LogBuffer {
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    /// #65 and M5.3 criterion 1: a whole dictation, logged at every level
+    /// (trace includes the debug "step" line that prints each event and its
+    /// commands), never prints the transcript, and a failure's text carries
+    /// no key. Checks the log text through the tracing subscriber.
+    #[tokio::test]
+    async fn criterion_1_the_step_log_and_error_logs_hold_no_transcript_or_key() {
+        const SECRET_WORDS: &str = "private words about the merger";
+        const KEY: &str = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
+        let buffer = LogBuffer::default();
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        let _logging = tracing::subscriber::set_default(subscriber);
+
+        let inserter = FakeInserter::new();
+        let (mut runner, _shutdown) = runner(&inserter);
+        // A dictation that works: the transcript is the TranscriptReady
+        // event and the Insert command, both logged by `step`.
+        key(&mut runner, HotkeyEvent::Pressed, 0);
+        key(&mut runner, HotkeyEvent::Released, 500);
+        deliver(
+            &mut runner,
+            JobResult::Transcribed(1, Ok(SECRET_WORDS.into())),
+        );
+        let inserted = next_insert(&mut runner).await;
+        deliver(&mut runner, inserted);
+        assert_eq!(inserter.inserted(), [SECRET_WORDS]);
+        // One that fails with a provider message holding a key. (An engine
+        // never copies a reply body into its error; see
+        // `dictation-transcribe`'s `provider_bodies_never_reach_the_error`.)
+        key(&mut runner, HotkeyEvent::Pressed, 1_000);
+        key(&mut runner, HotkeyEvent::Released, 1_500);
+        let reply = format!("Invalid key {KEY}");
+        deliver(
+            &mut runner,
+            JobResult::Transcribed(3, Err(TranscribeError::Engine(reply))),
+        );
+        assert_eq!(runner.state, State::Idle);
+
+        let log = buffer.text();
+        assert!(log.contains("step"), "the step line was logged:\n{log}");
+        assert!(log.contains("dictation failed"), "{log}");
+        assert!(!log.contains("merger"), "transcript in the log:\n{log}");
+        assert!(
+            !log.contains("private words"),
+            "transcript in the log:\n{log}"
+        );
+        assert!(!log.contains(KEY), "key in the log:\n{log}");
+        assert!(
+            log.contains(&format!("len: {}", SECRET_WORDS.len())),
+            "the length is shown instead:\n{log}"
+        );
+    }
+
     #[tokio::test]
     async fn a_late_transcript_from_an_earlier_dictation_is_never_inserted() {
         let inserter = FakeInserter::new();

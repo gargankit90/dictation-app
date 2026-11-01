@@ -1,16 +1,18 @@
 //! Speech to text.
 
+use std::fmt;
 use std::future::Future;
 
 use thiserror::Error;
 
+use dictation_core::redact;
 use dictation_core::text::Transcript;
 
 use crate::Audio;
 
 /// Why a [`Transcriber::transcribe`] failed. The messages never contain the
 /// audio, the transcript or the API key.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Clone, PartialEq, Eq, Error)]
 pub enum TranscribeError {
     /// No API key is stored for the provider.
     #[error("no API key is saved")]
@@ -22,7 +24,7 @@ pub enum TranscribeError {
     /// The keychain couldn't give the key: it is locked, needs the user to
     /// allow access, refused, or didn't answer in time. The text says why
     /// and never holds the key.
-    #[error("couldn't read the API key from the keychain: {0}")]
+    #[error("couldn't read the API key from the keychain: {}", redact::summary(.0))]
     KeychainUnavailable(String),
     /// The provider rejected the API key.
     #[error("the API key is missing or invalid")]
@@ -33,16 +35,50 @@ pub enum TranscribeError {
     /// The request took too long.
     #[error("transcription timed out")]
     Timeout,
-    /// The provider couldn't be reached.
-    #[error("network error: {0}")]
+    /// The provider couldn't be reached. The text is a short summary that
+    /// holds no key, transcript or provider reply body (#41): `Display`
+    /// cuts it to one short line with any key hidden
+    /// ([`dictation_core::redact::summary`]), as a backstop.
+    #[error("network error: {}", redact::summary(.0))]
     Network(String),
     /// The provider answered with a redirect (3xx), which is never followed
     /// (requests go only to the configured provider). Holds the HTTP status.
     #[error("the provider answered with a redirect (HTTP {0}), which isn't followed")]
     Redirected(u16),
     /// The provider or engine returned an error or a response we can't read.
-    #[error("transcription engine error: {0}")]
+    /// Same rule as [`Network`](Self::Network): a short summary such as
+    /// "the provider failed (HTTP 503)", never the reply body.
+    #[error("transcription engine error: {}", redact::summary(.0))]
     Engine(String),
+}
+
+/// Like the derived `Debug`, but the text of a variant shows as its
+/// [`summary`](dictation_core::redact::summary), so logging `?error` can't
+/// leak a key or a reply body either.
+impl fmt::Debug for TranscribeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingKey => f.write_str("MissingKey"),
+            Self::KeyPending => f.write_str("KeyPending"),
+            Self::KeychainUnavailable(text) => f
+                .debug_tuple("KeychainUnavailable")
+                .field(&redact::summary(text))
+                .finish(),
+            Self::InvalidKey => f.write_str("InvalidKey"),
+            Self::RateLimited => f.write_str("RateLimited"),
+            Self::Timeout => f.write_str("Timeout"),
+            Self::Network(text) => f
+                .debug_tuple("Network")
+                .field(&redact::summary(text))
+                .finish(),
+            // Holds only the HTTP status, never the Location header or a body.
+            Self::Redirected(status) => f.debug_tuple("Redirected").field(status).finish(),
+            Self::Engine(text) => f
+                .debug_tuple("Engine")
+                .field(&redact::summary(text))
+                .finish(),
+        }
+    }
 }
 
 impl TranscribeError {
@@ -75,7 +111,7 @@ impl TranscribeError {
             Self::Redirected(_) => "The provider answered with a redirect, which the app \
                  doesn't follow. Check the provider selected in Settings."
                 .to_owned(),
-            Self::Engine(detail) => format!("Something went wrong: {detail}."),
+            Self::Engine(detail) => format!("Something went wrong: {}.", redact::summary(detail)),
         }
     }
 }
@@ -168,6 +204,44 @@ mod tests {
         ];
         for (error, message) in cases {
             assert_eq!(error.user_message(), message, "{error:?}");
+        }
+    }
+
+    /// #41: whatever a provider or library puts in these strings, the text
+    /// that reaches the info log (`Display`) and the user is one short line
+    /// without a key.
+    #[test]
+    fn display_and_user_message_hide_keys_and_cut_long_bodies() {
+        let key = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
+        let body = format!(
+            "{{\"error\": \"Invalid key {key}\"}}\n{}",
+            "echoed audio ".repeat(80)
+        );
+        for error in [
+            TranscribeError::Network(body.clone()),
+            TranscribeError::Engine(body.clone()),
+            TranscribeError::KeychainUnavailable(body),
+        ] {
+            for text in [error.to_string(), error.user_message()] {
+                assert!(!text.contains(key), "{text}");
+                assert!(!text.contains('\n'), "{text}");
+                assert!(text.chars().count() < 300, "{text}");
+            }
+            let debug = format!("{error:?}");
+            assert!(!debug.contains(key) && debug.len() < 300, "{debug}");
+        }
+    }
+
+    /// The redirect error carries only the status: neither the target URL
+    /// (which may hold a key in its query) nor a body can reach any output.
+    #[test]
+    fn redirected_shows_only_the_status() {
+        let error = TranscribeError::Redirected(302);
+        assert_eq!(format!("{error:?}"), "Redirected(302)");
+        let shown = [error.to_string(), error.user_message()];
+        for text in shown {
+            assert!(!text.contains("http"), "{text}");
+            assert!(!text.contains('\n') && text.chars().count() < 300, "{text}");
         }
     }
 

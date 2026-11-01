@@ -35,6 +35,7 @@
       "icons/icon.ico"
     ],
     "macOS": {
+      "minimumSystemVersion": "13.0",
       "signingIdentity": "dictation-app Dev",
       "entitlements": "./Entitlements.plist"
     }
