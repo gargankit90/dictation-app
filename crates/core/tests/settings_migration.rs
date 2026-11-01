@@ -101,6 +101,7 @@ fn expected(known: &Known) -> Settings {
         model: known.model.clone(),
         language: known.language.clone(),
         hotkey: known.hotkey.to_owned(),
+        launch_at_login: false,
     }
 }
 
