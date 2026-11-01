@@ -249,10 +249,7 @@ impl KeyReads {
         let deadline = Instant::now() + timeout;
         let wanted = lock(&self.state).generation;
         loop {
-            let read = match self.in_flight_or_start(config, provider) {
-                Ok(read) => read,
-                Err(error) => return Err(error),
-            };
+            let read = self.in_flight_or_start(config, provider)?;
             let Some(answer) = read.wait(deadline) else {
                 return Err(SecretError::Store(format!(
                     "no answer from the keychain after {} s (locked, or waiting for access to be allowed)",
@@ -945,10 +942,11 @@ mod tests {
             1,
             "one read served every waiter"
         );
-        let answers = answers.lock().unwrap();
-        assert_eq!(answers.len(), 6);
-        assert!(answers.iter().all(|a| *a == Ok(Some(Secret::new(KEY)))));
-        drop(answers);
+        {
+            let answers = answers.lock().unwrap();
+            assert_eq!(answers.len(), 6);
+            assert!(answers.iter().all(|a| *a == Ok(Some(Secret::new(KEY)))));
+        }
         rig.finish().await;
     }
 
