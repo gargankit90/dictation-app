@@ -1,7 +1,7 @@
 use objc2_audio_toolbox::{
-    kAudioOutputUnitProperty_SetInputCallback, kAudioUnitProperty_SetRenderCallback,
-    kAudioUnitProperty_StreamFormat, AURenderCallbackStruct, AudioUnitRender,
-    AudioUnitRenderActionFlags,
+    kAudioOutputUnitProperty_SetInputCallback, kAudioUnitErr_TooManyFramesToProcess,
+    kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitProperty_SetRenderCallback,
+    AURenderCallbackStruct, AudioUnitRender, AudioUnitRenderActionFlags,
 };
 use objc2_core_audio_types::{AudioBuffer, AudioBufferList, AudioTimeStamp};
 
@@ -9,10 +9,12 @@ use super::audio_format::LinearPcmFlags;
 use super::{AudioUnit, Element, Scope};
 use crate::error::{self, Error};
 use crate::OSStatus;
+use std::convert::TryFrom;
 use std::mem;
 use std::os::raw::c_void;
 use std::ptr::NonNull;
-use std::slice;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 pub use self::action_flags::ActionFlags;
 pub use self::data::Data;
@@ -33,6 +35,131 @@ pub type InputProcFn = dyn FnMut(
 /// This type allows us to safely wrap a boxed `RenderCallback` to use within the input proc.
 pub struct InputProcFnWrapper {
     callback: Box<InputProcFn>,
+}
+
+/// Patched (PATCHES.md): the fewest frames an input buffer holds, in case the
+/// unit and the device can't say how many a callback may ask for.
+const MIN_INPUT_BUFFER_FRAMES: u32 = 4096;
+
+/// Patched (PATCHES.md): the one-buffer `AudioBufferList` an input callback
+/// renders into, and the allocation behind it.
+///
+/// It is allocated once, off the audio thread, with room for the largest
+/// callback. The callback only changes the length the buffer reports
+/// ([`InputBufferRef::set_len`]), so the audio thread never allocates, and
+/// `Drop` frees the allocation with the capacity it was made with.
+pub(crate) struct InputBuffer {
+    buffer: InputBufferRef,
+}
+
+/// What the input callback holds of its [`InputBuffer`].
+#[derive(Clone, Copy)]
+pub(crate) struct InputBufferRef {
+    list: *mut AudioBufferList,
+    data: *mut u8,
+    capacity: usize,
+}
+
+impl InputBuffer {
+    /// `capacity` zeroed bytes of `n_channels` interleaved audio.
+    pub(crate) fn new(capacity: usize, n_channels: u32) -> Self {
+        let mut data = mem::ManuallyDrop::new(vec![0u8; capacity]);
+        let capacity = data.capacity();
+        let data = data.as_mut_ptr();
+        let list = Box::into_raw(Box::new(AudioBufferList {
+            mNumberBuffers: 1,
+            mBuffers: [AudioBuffer {
+                mNumberChannels: n_channels,
+                mDataByteSize: u32::try_from(capacity).unwrap_or(u32::MAX),
+                mData: data as *mut _,
+            }],
+        }));
+        InputBuffer {
+            buffer: InputBufferRef {
+                list,
+                data,
+                capacity,
+            },
+        }
+    }
+
+    /// For the callback; valid while `self` lives.
+    pub(crate) fn as_ref(&self) -> InputBufferRef {
+        self.buffer
+    }
+}
+
+impl Drop for InputBuffer {
+    fn drop(&mut self) {
+        let InputBufferRef {
+            list,
+            data,
+            capacity,
+        } = self.buffer;
+        // SAFETY: `list` came from `Box::into_raw` and `data` from a
+        // `Vec<u8>` of exactly `capacity`, both in `new`, and are freed only
+        // here. Length 0 is within the capacity, and `u8` needs no drop.
+        unsafe {
+            drop(Box::from_raw(list));
+            drop(Vec::from_raw_parts(data, 0, capacity));
+        }
+    }
+}
+
+impl InputBufferRef {
+    /// The list to render into.
+    pub(crate) fn list(self) -> *mut AudioBufferList {
+        self.list
+    }
+
+    /// Makes the buffer report `bytes` bytes at the start of the allocation
+    /// (`AudioUnitRender` may change its pointer and size). Returns false,
+    /// changing nothing, if `bytes` doesn't fit. Never allocates.
+    ///
+    /// # Safety
+    ///
+    /// The [`InputBuffer`] this came from must be alive, and nothing else may
+    /// use its list during the call.
+    pub(crate) unsafe fn set_len(self, bytes: usize) -> bool {
+        let size = match u32::try_from(bytes) {
+            Ok(size) if bytes <= self.capacity => size,
+            _ => return false,
+        };
+        // SAFETY: the caller keeps the list alive and unshared; it holds one
+        // buffer (`mNumberBuffers: 1`).
+        let buffer = unsafe { &mut (*self.list).mBuffers[0] };
+        buffer.mData = self.data as *mut _;
+        buffer.mDataByteSize = size;
+        true
+    }
+}
+
+/// Patched (PATCHES.md): the most frames an input callback may ask for: the
+/// largest of the current I/O buffer size, the unit's maximum frames per
+/// slice, the device's largest I/O buffer size (macOS) and
+/// [`MIN_INPUT_BUFFER_FRAMES`].
+fn max_input_frames(unit: &AudioUnit, current: u32) -> u32 {
+    let per_slice: u32 = unit
+        .get_property(
+            kAudioUnitProperty_MaximumFramesPerSlice,
+            Scope::Global,
+            Element::Output,
+        )
+        .unwrap_or(0);
+    #[cfg(target_os = "macos")]
+    let device_max: u32 = unit
+        .get_property::<objc2_core_audio_types::AudioValueRange>(
+            objc2_core_audio::kAudioDevicePropertyBufferFrameSizeRange,
+            Scope::Global,
+            Element::Output,
+        )
+        .map_or(0, |range| range.mMaximum as u32);
+    #[cfg(not(target_os = "macos"))]
+    let device_max: u32 = 0;
+    current
+        .max(per_slice)
+        .max(device_max)
+        .max(MIN_INPUT_BUFFER_FRAMES)
 }
 
 /// Arguments given to the render callback function.
@@ -566,13 +693,13 @@ impl AudioUnit {
         //
         // First, get the current buffer size for pre-allocating the `AudioBuffer`s.
         #[cfg(target_os = "macos")]
-        let mut buffer_frame_size: u32 = {
+        let buffer_frame_size: u32 = {
             let id = objc2_core_audio::kAudioDevicePropertyBufferFrameSize;
             let buffer_frame_size: u32 = self.get_property(id, Scope::Global, Element::Output)?;
             buffer_frame_size
         };
         #[cfg(any(target_os = "ios", target_os = "tvos", target_os = "visionos"))]
-        let mut buffer_frame_size: u32 = {
+        let buffer_frame_size: u32 = {
             let id = objc2_audio_toolbox::kAudioSessionProperty_CurrentHardwareIOBufferDuration;
             let seconds: f32 = super::audio_session_get_property(id)?;
             let id = objc2_audio_toolbox::kAudioSessionProperty_CurrentHardwareSampleRate;
@@ -585,26 +712,16 @@ impl AudioUnit {
             return Err(Error::NonInterleavedInputOnlySupportsMono);
         }
 
-        let data_byte_size = buffer_frame_size * sample_bytes as u32 * n_channels;
-        let mut data = vec![0u8; data_byte_size as usize];
-        let mut buffer_capacity = data_byte_size as usize;
-        let audio_buffer = AudioBuffer {
-            mDataByteSize: data_byte_size,
-            mNumberChannels: n_channels,
-            mData: data.as_mut_ptr() as *mut _,
-        };
-        // Relieve ownership of the `Vec` until we're ready to drop the `AudioBufferList`.
-        // TODO: This leaks the len & capacity fields, since only the buffer pointer is released
-        mem::forget(data);
-
-        let audio_buffer_list = Box::new(AudioBufferList {
-            mNumberBuffers: 1,
-            mBuffers: [audio_buffer],
-        });
-
-        // Relinquish ownership of the audio buffer list. Instead, we'll store a raw pointer and
-        // convert it back into a `Box` when `free_input_callback` is next called.
-        let audio_buffer_list_ptr = Box::into_raw(audio_buffer_list);
+        // Patched (PATCHES.md): allocate room for the largest callback here,
+        // off the audio thread; the callback only sets the length it uses.
+        // `InputCallback` owns the buffer and frees it with its real capacity.
+        let bytes_per_frame = sample_bytes * n_channels as usize;
+        let max_frames = max_input_frames(self, buffer_frame_size) as usize;
+        let buffer = InputBuffer::new(max_frames * bytes_per_frame, n_channels);
+        let input_buffer = buffer.as_ref();
+        let audio_buffer_list_ptr = input_buffer.list();
+        let oversized = Arc::new(AtomicU64::new(0));
+        let oversized_in_callback = Arc::clone(&oversized);
 
         // Here, we call the given input callback function within a closure that matches the
         // arguments of the required coreaudio "input_proc".
@@ -618,43 +735,17 @@ impl AudioUnit {
                                   in_number_frames: u32,
                                   _io_data: *mut AudioBufferList|
               -> OSStatus {
-            // If the buffer size has changed, ensure the AudioBuffer is the correct size.
-            if buffer_frame_size != in_number_frames {
-                unsafe {
-                    // Retrieve the up-to-date stream format.
-                    let id = kAudioUnitProperty_StreamFormat;
-                    let asbd =
-                        match super::get_property(audio_unit, id, Scope::Output, Element::Input) {
-                            Err(err) => return err.as_os_status(),
-                            Ok(asbd) => asbd,
-                        };
-                    let stream_format = match super::StreamFormat::from_asbd(asbd) {
-                        Err(err) => return err.as_os_status(),
-                        Ok(fmt) => fmt,
-                    };
-                    let sample_bytes = stream_format.sample_format.size_in_bytes();
-                    let n_channels = stream_format.channels;
-                    let data_byte_size =
-                        in_number_frames as usize * sample_bytes * n_channels as usize;
-                    let ptr = (*audio_buffer_list_ptr).mBuffers.as_ptr() as *mut AudioBuffer;
-                    let len = (*audio_buffer_list_ptr).mNumberBuffers as usize;
-
-                    let buffers: &mut [AudioBuffer] = slice::from_raw_parts_mut(ptr, len);
-                    let old_capacity = buffer_capacity;
-                    for buffer in buffers {
-                        let current_len = buffer.mDataByteSize as usize;
-                        let audio_buffer_ptr = buffer.mData as *mut u8;
-                        let mut vec: Vec<u8> =
-                            Vec::from_raw_parts(audio_buffer_ptr, current_len, old_capacity);
-                        vec.resize(data_byte_size, 0u8);
-
-                        buffer_capacity = vec.capacity();
-                        buffer.mData = vec.as_mut_ptr() as *mut _;
-                        buffer.mDataByteSize = data_byte_size as u32;
-                        mem::forget(vec);
-                    }
-                }
-                buffer_frame_size = in_number_frames;
+            // Patched (PATCHES.md): no stream format query and no reallocation
+            // here. The client format is fixed while the callback is set (the
+            // unit converts the device's audio to it), and the buffer has room
+            // for the largest callback; a larger one is counted and skipped.
+            let data_byte_size = in_number_frames as usize * bytes_per_frame;
+            // SAFETY: `InputCallback` keeps the buffer alive until the callback
+            // is replaced or the unit is torn down, and only this callback uses
+            // its list while the unit runs.
+            if !unsafe { input_buffer.set_len(data_byte_size) } {
+                oversized_in_callback.fetch_add(1, Ordering::Relaxed);
+                return kAudioUnitErr_TooManyFramesToProcess;
             }
 
             unsafe {
@@ -712,8 +803,9 @@ impl AudioUnit {
         )?;
 
         let input_callback = super::InputCallback {
-            buffer_list: audio_buffer_list_ptr,
+            buffer,
             callback: input_proc_fn_wrapper_ptr as *mut InputProcFnWrapper,
+            oversized,
         };
         self.free_input_callback();
         self.maybe_input_callback = Some(input_callback);
@@ -737,28 +829,26 @@ impl AudioUnit {
     pub fn free_input_callback(&mut self) -> Option<Box<InputProcFnWrapper>> {
         if let Some(input_callback) = self.maybe_input_callback.take() {
             let super::InputCallback {
-                buffer_list,
-                callback,
+                buffer, callback, ..
             } = input_callback;
-            unsafe {
-                // Take ownership over the AudioBufferList in order to safely free it.
-                let buffer_list: Box<AudioBufferList> = Box::from_raw(buffer_list);
-                // Free the allocated data from the individual audio buffers.
-                let ptr = buffer_list.mBuffers.as_ptr();
-                let len = buffer_list.mNumberBuffers as usize;
-                let buffers: &[AudioBuffer] = slice::from_raw_parts(ptr, len);
-                for &buffer in buffers {
-                    let ptr = buffer.mData as *mut u8;
-                    let len = buffer.mDataByteSize as usize;
-                    let cap = len;
-                    let _ = Vec::from_raw_parts(ptr, len, cap);
-                }
-                // Take ownership over the callback so that it can be freed.
-                let callback: Box<InputProcFnWrapper> = Box::from_raw(callback);
-                return Some(callback);
-            }
+            // Patched (PATCHES.md): frees the buffer with the capacity it was
+            // allocated with, not its current length.
+            drop(buffer);
+            // SAFETY: `callback` came from `Box::into_raw` in
+            // `set_input_callback` and is taken out of `self` here, once.
+            let callback: Box<InputProcFnWrapper> = unsafe { Box::from_raw(callback) };
+            return Some(callback);
         }
         None
+    }
+
+    /// Patched (PATCHES.md): input callbacks skipped because they asked for
+    /// more frames than the buffer allocated for them holds. Each one is a
+    /// gap in the input; it should stay 0.
+    pub fn input_callback_oversized_blocks(&self) -> u64 {
+        self.maybe_input_callback
+            .as_ref()
+            .map_or(0, |callback| callback.oversized.load(Ordering::Relaxed))
     }
 }
 
@@ -779,4 +869,179 @@ extern "C-unwind" fn input_proc(
         in_number_frames,
         io_data,
     )
+}
+
+/// Patched (PATCHES.md): the input buffer and callback across frame-count
+/// changes, under an allocator that counts allocations and checks the size
+/// the buffer is freed with.
+#[cfg(test)]
+mod patch_tests {
+    use super::*;
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+    use std::ptr;
+    use std::sync::atomic::AtomicUsize;
+
+    struct Checked;
+
+    thread_local! {
+        /// Count this thread's allocations.
+        static COUNTING: Cell<bool> = const { Cell::new(false) };
+        static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
+    }
+    /// The allocation to watch, and the size it was freed with.
+    static WATCHED: AtomicUsize = AtomicUsize::new(0);
+    static FREED_WITH: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+    unsafe impl GlobalAlloc for Checked {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let _ = COUNTING.try_with(|counting| {
+                if counting.get() {
+                    let _ = ALLOCATIONS.try_with(|n| n.set(n.get() + 1));
+                }
+            });
+            // SAFETY: forwarded unchanged.
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if ptr as usize == WATCHED.load(Ordering::SeqCst) {
+                FREED_WITH.store(layout.size(), Ordering::SeqCst);
+            }
+            // SAFETY: forwarded unchanged.
+            unsafe { System.dealloc(ptr, layout) }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            let _ = COUNTING.try_with(|counting| {
+                if counting.get() {
+                    let _ = ALLOCATIONS.try_with(|n| n.set(n.get() + 1));
+                }
+            });
+            // SAFETY: forwarded unchanged.
+            unsafe { System.realloc(ptr, layout, new_size) }
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: Checked = Checked;
+
+    /// Allocations `f` makes on this thread.
+    fn allocations_in<R>(f: impl FnOnce() -> R) -> (R, usize) {
+        ALLOCATIONS.with(|n| n.set(0));
+        COUNTING.with(|c| c.set(true));
+        let result = f();
+        COUNTING.with(|c| c.set(false));
+        (result, ALLOCATIONS.with(Cell::get))
+    }
+
+    fn reported(buffer: InputBufferRef) -> (*mut c_void, u32) {
+        // SAFETY: the test owns the live buffer.
+        let audio_buffer = unsafe { (*buffer.list()).mBuffers[0] };
+        (audio_buffer.mData, audio_buffer.mDataByteSize)
+    }
+
+    /// Pure Rust, so it also runs under Miri, which checks the
+    /// deallocation layout itself.
+    #[test]
+    fn the_buffer_grows_and_shrinks_in_place_and_frees_its_capacity() {
+        let buffer = InputBuffer::new(4096, 1);
+        let handle = buffer.as_ref();
+        let data = handle.data as *mut c_void;
+        let (fits, allocations) = allocations_in(|| {
+            // SAFETY: the buffer is alive and only used here.
+            [2048, 4096, 1024, 0, 4096, 256].map(|bytes| unsafe { handle.set_len(bytes) })
+        });
+        assert_eq!(fits, [true; 6]);
+        assert_eq!(allocations, 0);
+        assert_eq!(reported(handle), (data, 256));
+
+        // SAFETY: as above.
+        assert!(!unsafe { handle.set_len(4097) });
+        assert_eq!(reported(handle), (data, 256), "unchanged");
+
+        WATCHED.store(handle.data as usize, Ordering::SeqCst);
+        drop(buffer);
+        assert_eq!(FREED_WITH.swap(usize::MAX, Ordering::SeqCst), 4096);
+        WATCHED.store(0, Ordering::SeqCst);
+    }
+
+    /// M2.3 criterion 2 (#77 B2): the real callback closure on a real HAL
+    /// input unit. The unit is never initialized or started, so nothing
+    /// records and `AudioUnitRender` returns `kAudioUnitErr_Uninitialized`
+    /// after the callback has sized the buffer.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[cfg_attr(miri, ignore = "calls CoreAudio")]
+    fn the_input_callback_survives_growth_shrink_and_teardown() {
+        use crate::audio_unit::macos_helpers::{
+            audio_unit_from_device_id_uninitialized, get_default_device_id,
+        };
+        use objc2_audio_toolbox::kAudioUnitErr_Uninitialized;
+
+        let Some(device) = get_default_device_id(true) else {
+            eprintln!("no input device; skipped");
+            return;
+        };
+        let mut unit = audio_unit_from_device_id_uninitialized(device, true).unwrap();
+        // Interleaved stereo f32 at the device's rate, as cpal asks for.
+        let format = super::super::StreamFormat {
+            sample_rate: unit.input_stream_format().unwrap().sample_rate,
+            sample_format: super::super::SampleFormat::F32,
+            flags: LinearPcmFlags::IS_FLOAT | LinearPcmFlags::IS_PACKED,
+            channels: 2,
+        };
+        unit.set_stream_format(format, Scope::Output, Element::Input)
+            .unwrap();
+        type Args = super::Args<data::Raw>;
+        unit.set_input_callback(|_: Args| Ok(())).unwrap();
+
+        let (buffer, wrapper) = {
+            let callback = unit.maybe_input_callback.as_ref().unwrap();
+            (callback.buffer.as_ref(), callback.callback)
+        };
+        let bytes_per_frame = 4 * 2;
+        let max_frames = (buffer.capacity / bytes_per_frame) as u32;
+        assert!(max_frames >= MIN_INPUT_BUFFER_FRAMES, "{}", max_frames);
+
+        let mut flags: AudioUnitRenderActionFlags = AudioUnitRenderActionFlags(0);
+        // SAFETY: a plain C struct; all zeros is a valid (empty) timestamp.
+        let mut time: AudioTimeStamp = unsafe { mem::zeroed() };
+        let mut call = |frames: u32| {
+            // SAFETY: `wrapper` is the unit's live callback, called from one
+            // thread, as CoreAudio would.
+            let wrapper = unsafe { &mut *wrapper };
+            (wrapper.callback)(
+                NonNull::from(&mut flags),
+                NonNull::from(&mut time),
+                1,
+                frames,
+                ptr::null_mut(),
+            )
+        };
+
+        let frames = [512, 1024, 256, max_frames, 1, 4096.min(max_frames), 128];
+        let (statuses, allocations) = allocations_in(|| frames.map(&mut call));
+        assert_eq!(statuses, [kAudioUnitErr_Uninitialized; 7]);
+        assert_eq!(allocations, 0, "the callback allocated");
+        assert_eq!(
+            reported(buffer),
+            (buffer.data as *mut c_void, 128 * bytes_per_frame as u32)
+        );
+
+        // Too big: counted and skipped, before rendering, without allocating.
+        let (status, allocations) = allocations_in(|| call(max_frames + 1));
+        assert_eq!(status, kAudioUnitErr_TooManyFramesToProcess);
+        assert_eq!(allocations, 0);
+        assert_eq!(unit.input_callback_oversized_blocks(), 1);
+
+        WATCHED.store(buffer.data as usize, Ordering::SeqCst);
+        drop(unit);
+        assert_eq!(
+            FREED_WITH.swap(usize::MAX, Ordering::SeqCst),
+            buffer.capacity,
+            "freed with its real capacity"
+        );
+        WATCHED.store(0, Ordering::SeqCst);
+    }
 }

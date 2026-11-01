@@ -27,7 +27,6 @@ use objc2_audio_toolbox::{
     AudioUnit as InnerAudioUnit, AudioUnitGetProperty, AudioUnitInitialize, AudioUnitSetProperty,
     AudioUnitUninitialize,
 };
-use objc2_core_audio_types::AudioBufferList;
 
 use crate::error::Error;
 use std::mem;
@@ -86,9 +85,12 @@ pub struct AudioUnit {
 }
 
 struct InputCallback {
-    // The audio buffer list to which input data is rendered.
-    buffer_list: *mut AudioBufferList,
+    // The audio buffer list to which input data is rendered. Patched
+    // (PATCHES.md): it owns its allocation and knows its capacity.
+    buffer: render_callback::InputBuffer,
     callback: *mut render_callback::InputProcFnWrapper,
+    // Patched: callbacks skipped as too large for `buffer`.
+    oversized: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 macro_rules! try_os_status {

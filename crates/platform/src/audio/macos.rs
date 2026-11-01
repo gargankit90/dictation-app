@@ -6,7 +6,11 @@
 //! (`rtrb`) and never allocates, locks or blocks; a delivery thread drains
 //! the ring, mixes to mono and resamples to 16 kHz (`rubato`, a sinc
 //! resampler) and hands fixed-size chunks to our [`Collector`] sink, which
-//! may allocate since it isn't on the audio thread.
+//! may allocate since it isn't on the audio thread. That holds below cpal
+//! too only because coreaudio-rs is patched (`third_party/coreaudio-rs`,
+//! `PATCHES.md`): 0.14.2's input callback wrapper reallocated its buffer on
+//! the audio thread when the callback's frame count changed, and freed it
+//! with the wrong capacity at teardown (#77 B2).
 //!
 //! On top of that this adapter decides when the device is open:
 //!
