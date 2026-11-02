@@ -3,18 +3,28 @@
 //!
 //! The tap is `ListenOnly` (#173): `KeyboardListener::new()` blocks no
 //! hotkeys, and the patched handy-keys then creates a listen-only tap, which
-//! sees every key and can swallow none. The window server never waits for a
-//! listen-only tap. It waits for an active filter's answer to every event,
-//! and when Accessibility was turned off while the app ran, that wait froze
-//! the whole Mac's keyboard and mouse. The app starts the tap only while
-//! `AXIsProcessTrusted` says yes (the paste needs Accessibility anyway).
+//! sees every key and can swallow none. Before, it was an active filter
+//! (`CGEventTapOptions::Default`) that returned every event unchanged, and
+//! turning Accessibility off in System Settings while the app ran stopped
+//! all keyboard input to every app until the app quit (the owner's Mac had
+//! to be forced off; reproduced in the VM, `e2e_accessibility_revoked`). The
+//! window server enforces the revocation on the tap at once, and an active
+//! filter holds up every key event behind it; a listen-only tap holds up
+//! nothing. The app starts the tap only while `AXIsProcessTrusted` says yes
+//! (the paste needs Accessibility anyway).
 //!
-//! The tap must also go the moment Accessibility does (#173): the listener
-//! thread asks for the permission every [`TRUST_POLL`] and, once it's gone,
-//! removes the tap and reports [`HotkeyEvent::Failed`]; the supervisor in
-//! the app shows the guidance and starts a new tap once it is granted again.
-//! The patched handy-keys never re-enables a tap the system disabled
-//! (`TapDisabledByTimeout`, #49) while the permission is missing.
+//! The tap also goes as soon as the app can tell Accessibility is gone: the
+//! listener thread asks every [`TRUST_POLL`] and, once it's gone, removes
+//! the tap and reports [`HotkeyEvent::Failed`]; the supervisor in the app
+//! shows the guidance and starts a new tap once it is granted again (a grant
+//! does reach the running app). The patched handy-keys never re-enables a
+//! tap the system disabled (`TapDisabledByTimeout`, #49) while the
+//! permission is missing. On macOS 15.6 a revocation doesn't reach the
+//! running process: `AXIsProcessTrusted`, `CGPreflight*EventAccess` and AX
+//! calls all keep answering yes until it quits (only a new process, even a
+//! child, sees it), and the listen-only tap keeps working. So the app keeps
+//! dictating until it is relaunched, and then shows the guidance; the check
+//! is for systems that do tell the process.
 //!
 //! The tap sees every key, so nothing here logs or keeps them: only the
 //! [`HotkeyEvent`]s the matcher produces leave this module.
