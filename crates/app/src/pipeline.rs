@@ -607,6 +607,19 @@ where
     }
 }
 
+/// What the permissions say about a hotkey press
+/// ([`Runner::press_permissions`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PressPermissions {
+    /// Everything is granted: the press records.
+    Ready,
+    /// The OS was just asked to prompt for the microphone; the user hasn't
+    /// answered yet.
+    Asking,
+    /// This permission is missing: the press shows the error.
+    Missing(Permission),
+}
+
 struct Runner<H, T, I, P, C> {
     state: State,
     hotkey: H,
@@ -785,9 +798,12 @@ where
 
     fn key_event(&self, key: HotkeyEvent, at: Duration) -> Option<Event> {
         Some(match key {
-            HotkeyEvent::Pressed => match self.missing_permission() {
-                Some(permission) => Event::PermissionMissing(permission),
-                None => Event::HotkeyPressed(at),
+            HotkeyEvent::Pressed => match self.press_permissions() {
+                PressPermissions::Ready => Event::HotkeyPressed(at),
+                PressPermissions::Missing(permission) => Event::PermissionMissing(permission),
+                // The macOS prompt is up: nothing to show yet (#161), and
+                // the coordinator stays Idle, so nothing records or pastes.
+                PressPermissions::Asking => return None,
             },
             HotkeyEvent::Released => Event::HotkeyReleased(at),
             HotkeyEvent::CancelPressed => Event::CancelPressed,
@@ -797,25 +813,40 @@ where
         })
     }
 
-    /// The first permission dictation lacks, asking the OS to prompt for it
-    /// if the user hasn't been asked yet. Checked only when idle: a press
-    /// while busy is ignored by the coordinator anyway.
-    fn missing_permission(&self) -> Option<Permission> {
+    /// Whether a press may record, asking the OS to prompt for a
+    /// permission the user hasn't been asked for yet. Checked only when
+    /// idle: a press while busy is ignored by the coordinator anyway.
+    ///
+    /// An undetermined microphone is [`PressPermissions::Asking`], not
+    /// missing (#161): the prompt is on screen and the user may still
+    /// allow it, and then the next press records. Only a refusal (or a
+    /// prompt that couldn't be shown) is the error. Accessibility has no
+    /// such state on macOS (refused reads as undetermined), so it is
+    /// missing either way.
+    fn press_permissions(&self) -> PressPermissions {
         if self.state != State::Idle {
-            return None;
+            return PressPermissions::Ready;
         }
-        [Permission::Microphone, Permission::Accessibility]
-            .into_iter()
-            .find(|&permission| match self.permissions.check(permission) {
-                PermissionStatus::Granted => false,
-                PermissionStatus::Denied => true,
+        for permission in [Permission::Microphone, Permission::Accessibility] {
+            match self.permissions.check(permission) {
+                PermissionStatus::Granted => {}
+                PermissionStatus::Denied => return PressPermissions::Missing(permission),
                 PermissionStatus::NotDetermined => {
-                    if let Err(error) = self.permissions.request(permission) {
+                    let asked = self.permissions.request(permission);
+                    if let Err(error) = &asked {
                         tracing::warn!(?permission, %error, "permission request failed");
                     }
-                    true
+                    return match (permission, asked) {
+                        (Permission::Microphone, Ok(())) => {
+                            tracing::info!("waiting for the microphone prompt's answer");
+                            PressPermissions::Asking
+                        }
+                        _ => PressPermissions::Missing(permission),
+                    };
                 }
-            })
+            }
+        }
+        PressPermissions::Ready
     }
 
     fn job_event(&self, joined: Result<(task::Id, JobResult), JoinError>) -> Option<Event> {

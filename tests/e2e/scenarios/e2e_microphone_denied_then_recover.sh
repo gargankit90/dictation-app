@@ -1,4 +1,5 @@
 # T4b, #126: a first-time user who denies the microphone, then allows it.
+# M5.7, #161: no error while the prompt is up; Relaunch from the tray.
 #
 # Only in the test VM's clone (dictation-vm or dictation-vm-2), never the
 # golden image: the app's microphone permission is reset there
@@ -7,20 +8,24 @@
 # --debug-audio-file, which also skips the permission check), on the mock
 # transcriber answering MOCK_TEXT.
 #
-# 1. A press: macOS shows its microphone prompt; "Don’t Allow" is pressed
-#    (ax.js, in UserNotificationCenter). The app logs the answer
+# 1. Before any press the tray menu has no Relaunch. A press: the app logs
+#    that it waits for the prompt and macOS shows it; while it is up there
+#    is no error anywhere (#161): none in the log, the overlay hidden, the
+#    tray's title and tooltip plain, no Relaunch offered. "Don’t Allow" is
+#    pressed (ax.js, in UserNotificationCenter). The app logs the answer
 #    (`microphone prompt answered granted=false`); the scenario fails if the
 #    denial was never reached.
-# 2. Another press: the actionable error (where to allow it, and to reopen
-#    the app) in the log, rendered in the overlay and in the tray's tooltip;
-#    no second prompt; the app never left Idle; nothing pasted, the clipboard
+# 2. Another press: the actionable error (where to allow it, and to
+#    relaunch from the menu bar) in the log, rendered in the overlay and in
+#    the tray's tooltip, and Relaunch offered in the tray menu; no second
+#    prompt; the app never left Idle; nothing pasted, the clipboard
 #    untouched. Settings opens and closes.
 # 3. The microphone is allowed in System Settings › Privacy & Security ›
 #    Microphone (its switch for the app, pressed through AX). A press in the
 #    running app is only logged: macOS doesn't tell a running app about this
-#    grant (T4b, docs/ENGINEERING.md), which is why the error says to reopen
-#    it. Quit from the tray, a relaunch, and a dictation records the real
-#    microphone with no permission error.
+#    grant (T4b, docs/ENGINEERING.md), which is why the error says to
+#    relaunch it. Relaunch from the tray menu, and a dictation records the
+#    real microphone with no permission error.
 #
 # However it ends, the grant is restored (mic_restore, the cleanup hook): if
 # the scenario didn't see the grant work, the permission is reset again and
@@ -32,7 +37,9 @@
 
 MIC_BUNDLE_ID=com.dictationapp.desktop
 # DictationError::PermissionMissing(Microphone)'s text (crates/core).
-MIC_ERROR="Microphone permission is missing. Allow it in Privacy & Security, Microphone, then reopen the app."
+MIC_ERROR="Microphone is off. Allow it in Privacy & Security, Microphone, then relaunch from the menu bar."
+# The tray menu's item while the microphone is denied (src-tauri).
+MIC_RELAUNCH="Relaunch dictation-app"
 MIC_PROMPT_APP=UserNotificationCenter
 MIC_PROMPT_TEXT="would like to access the microphone"
 MIC_SETTINGS_URL='x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'
@@ -82,6 +89,24 @@ mic_prompt_answer() {
   return 1
 }
 
+# The microphone prompt is on screen within 15 s.
+mic_prompt_showing() {
+  ax_ok wait-text "$MIC_PROMPT_APP" "" "$MIC_PROMPT_TEXT" 15 >/dev/null
+}
+
+# The tray menu has no Relaunch item: ax.js lists the items it found
+# instead.
+tray_has_no_relaunch() {
+  local said status=0
+  said=$(ax tray-click "$APP_NAME" "Relaunch" 2>&1) || status=$?
+  log "  tray: $said"
+  [ "$status" != 0 ] || return 1
+  case $said in
+    *"no menu item starting with"*"Quit dictation-app"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # No microphone prompt is on screen (UserNotificationCenter has no window,
 # or isn't running).
 no_mic_prompt() {
@@ -105,9 +130,10 @@ mic_switch() {
 # with no permission error, recorded, and pasted the mock's text (or, if the
 # VM's microphone heard only silence, dropped it as e2e_real_mic allows).
 mic_dictation_records() {
-  local before phases mark recordings
+  local before phases mark recordings errors
   mark=$(phase_mark)
   before=$(idle_count)
+  errors=$(log_count "shown to the user error=$MIC_ERROR")
   recordings=$(log_count 'state changed phase=Recording')
   launch --press
   wait_for_log_count 'state changed phase=Recording' $((recordings + 1)) 10 || {
@@ -120,7 +146,7 @@ mic_dictation_records() {
   wait_for_idle_count $((before + 1)) 20 || return 1
   phases=$(phases_since "$mark")
   log "  phases: $phases"
-  if app_log | grep -q 'Microphone permission is missing'; then
+  if [ "$(log_count "shown to the user error=$MIC_ERROR")" -gt "$errors" ]; then
     log "  the permission error is in the log"
     return 1
   fi
@@ -157,7 +183,7 @@ mic_restore() {
 }
 
 e2e_microphone_denied_then_recover() {
-  local switch said
+  local switch said ready
   MIC_EVIDENCE="$OUT_DIR/e2e_microphone_denied_then_recover.evidence.txt"
   : >"$MIC_EVIDENCE"
   arm_key_cleanup e2e_microphone_denied_then_recover
@@ -177,10 +203,21 @@ e2e_microphone_denied_then_recover() {
   expect "with no debug audio file" \
     sh -c "! printf '%s' \"\$1\" | grep -q 'debug-audio-file'" _ "$(app_log)"
 
-  # 1. The first press asks; the user says no.
+  # 1. The first press asks, with no error while the prompt is up (#161);
+  # the user says no.
+  expect "before any press the tray offers no Relaunch" tray_has_no_relaunch
+  textedit_front
   launch --press
-  expect "the press says the microphone is missing" \
-    wait_for_log "dictation failed error=Microphone permission is missing" 10
+  expect "the press waits for the prompt's answer" \
+    wait_for_log 'waiting for the microphone prompt' 10
+  expect "macOS shows its prompt" mic_prompt_showing
+  screenshot e2e_microphone_denied_then_recover.prompt
+  expect "no error is shown while the prompt is up" \
+    test "$(log_count 'shown to the user error=')" = 0
+  expect "the overlay shows nothing" overlay_shows "$OVERLAY_HIDDEN"
+  expect "the tray shows no error" tray_shows "" "$TRAY_TOOLTIP"
+  expect "and offers no Relaunch" test "$(log_count 'tray relaunch item')" = 0
+  expect "the app stayed Idle (no phase logged)" test -z "$(logged_phases)"
   expect "macOS asks, and Don’t Allow is pressed" mic_prompt_answer "Don’t Allow"
   expect "the app got the refusal (the denial stage was reached)" \
     wait_for_log 'microphone prompt answered granted=false' 10
@@ -193,13 +230,18 @@ e2e_microphone_denied_then_recover() {
   expect "System Settings lists the app with its switch off" test "$switch" = unchecked
   quit_system_settings
 
+  sleep 1
+  expect "answering it showed no error either" \
+    test "$(log_count 'shown to the user error=')" = 0
+
   # 2. Pressing again: the error, nothing else.
   launch --press
   expect "a second press shows the actionable error" \
-    wait_for_log_count "shown to the user error=$MIC_ERROR" 2 10
+    wait_for_log_count "shown to the user error=$MIC_ERROR" 1 10
   expect "the overlay renders it" overlay_shows "shown: $MIC_ERROR"
   screenshot e2e_microphone_denied_then_recover.error
   expect "and the tray's tooltip has it" tray_shows "$TRAY_ERROR_TITLE" "$TRAY_TOOLTIP: $MIC_ERROR"
+  expect "the tray menu offers Relaunch" wait_for_log 'tray relaunch item offered=true' 5
   expect "macOS doesn't ask again" no_mic_prompt
   launch --release
   sleep 2
@@ -220,7 +262,7 @@ e2e_microphone_denied_then_recover() {
   expect "and reads back on" test "$switch" = checked
   quit_system_settings
   # What the running app does now: macOS doesn't tell it (T4b), so this is
-  # only recorded; the error's advice is to reopen the app.
+  # only recorded; the error's advice is to relaunch the app.
   said=$(log_count "shown to the user error=$MIC_ERROR")
   launch --press
   sleep 2
@@ -233,10 +275,13 @@ e2e_microphone_denied_then_recover() {
     log "  without a relaunch the app recorded (macOS told it this time)"
     mic_evidence "grant without a relaunch: took effect"
   fi
-  expect "Quit from the tray ends the app by itself" quit_from_tray
-  clear_app_log
-  launch --mock-text "$MOCK_TEXT"
-  expect "the app restarts" wait_for_log 'INFO .*ready'
+  # Relaunch from the tray: the same arguments (the mock), a new process.
+  ready=$(log_count 'INFO .*ready')
+  expect "Relaunch is pressed in the tray menu" \
+    job_says "clicked $MIC_RELAUNCH" ax tray-click "$APP_NAME" "Relaunch"
+  expect "the app relaunches" wait_for_log 'relaunching from the tray' 10
+  expect "and is back" wait_for_log_count 'INFO .*ready' $((ready + 1)) 30
+  expect "one app is running" app_count_is 1
   textedit_fresh
   set_clipboard "$MIC_SENTINEL"
   if mic_dictation_records; then

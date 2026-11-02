@@ -13,9 +13,14 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd -P)
 tmp=$(mktemp -d)
-trap 'pkill -f "$tmp/" 2>/dev/null || true; rm -rf "$tmp"' EXIT
-# KEEP=1 keeps the cases' files for a look: tests/e2e/test-runner.sh prints where.
-if [ "${KEEP:-0}" = 1 ]; then trap 'echo "cases kept in $tmp" >&2' EXIT; fi
+# However the run ends (passed, failed or interrupted), no fixture process
+# outlives it, KEEP=1 or not (#164); KEEP=1 keeps the cases' files for a
+# look and prints where.
+. "$root/tests/e2e/fixture_cleanup.sh"
+trap finish_run EXIT
+# An interrupt ends the run through the same EXIT trap.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 passed=0
 failed=0
@@ -444,6 +449,53 @@ check "textedit_is_empty: a document with text is not empty" test "$(status_of t
 run_case textedit_exact 'vm() { esc_b64 "a\nb\n"; }; textedit_is "$(esc_b64 "a\nb\n")" && ! textedit_is "$(esc_b64 "a\nb")"'
 check "TextEdit's text is compared exactly, a trailing newline too" \
   test "$(status_of textedit_exact)" = 0
+
+# #164: a run in miniature ends its fixtures however it ends, KEEP=1 or not,
+# and only KEEP=1 keeps its files. It has a longsleep, and a job holding a
+# /bin/sleep (no $tmp in its command line) that answers TERM by starting
+# another longsleep, as a held-key job starts a release. That /bin/sleep is
+# told apart from other runs' by its argument, 602.<this runner's pid>: a
+# machine-wide match on "/bin/sleep 602" made two runners fail each other.
+held_sleep="602.$$"
+cleanup_case() { # name, KEEP, how the run ends: pass, fail or term
+  local dir="$tmp/cleanup-$1" status=0
+  mkdir -p "$dir"
+  ln -s /bin/sleep "$dir/longsleep"
+  KEEP=$2 HELD_SLEEP=$held_sleep bash -c '
+    tmp=$1
+    . "$2/tests/e2e/fixture_cleanup.sh"
+    trap finish_run EXIT
+    trap "exit 143" TERM
+    # Not on the runner'"'"'s output: a survivor would hold a pipe open.
+    "$tmp/longsleep" 600 >/dev/null 2>&1 &
+    bash -c "trap \"\$0 601 &\" TERM; /bin/sleep $HELD_SLEEP & wait" "$tmp/longsleep" >/dev/null 2>&1 &
+    sleep 0.5
+    case $3 in
+      pass) exit 0 ;;
+      fail) exit 1 ;;
+      term) kill -TERM $$ ;;
+    esac
+  ' _ "$dir" "$root" "$3" >/dev/null 2>"$dir.err" || status=$?
+  echo "$status" >"$dir.status"
+}
+no_fixture_left() { # dir
+  [ -z "$(pgrep -f "$1/" || true)" ] && [ -z "$(pgrep -fx "/bin/sleep $held_sleep" || true)" ]
+}
+for how in pass:0 fail:1 term:143; do
+  for keep in 1 0; do
+    cleanup_case "${how%%:*}-keep$keep" "$keep" "${how%%:*}"
+    dir="$tmp/cleanup-${how%%:*}-keep$keep"
+    check "#164: a run that ends by ${how%%:*} with KEEP=$keep keeps its status" \
+      test "$(cat "$dir.status")" = "${how#*:}"
+    check "and leaves no fixture process" no_fixture_left "$dir"
+    if [ "$keep" = 1 ]; then
+      check "and keeps its files, saying where" has "cases kept in $dir" "$dir.err"
+      check "(they are there)" test -L "$dir/longsleep"
+    else
+      check "and removes its files" test ! -e "$dir"
+    fi
+  done
+done
 
 echo "runner tests: $passed passed, $failed failed"
 [ "$failed" = 0 ]
