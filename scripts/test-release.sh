@@ -74,7 +74,11 @@ STUB
 cat >"$stubs/codesign" <<'STUB'
 #!/usr/bin/env bash
 case " $* " in
-  *" -dvv "*) echo "Authority=dictation-app Dev" >&2 ;;
+  *" -dvv "*)
+    if [ -n "${FAKE_ADHOC:-}" ]; then echo "Signature=adhoc" >&2; else
+      printf 'Executable=x\nAuthority=dictation-app Dev\nTeamIdentifier=not set\n' >&2
+    fi
+    ;;
 esac
 exit 0
 STUB
@@ -236,7 +240,9 @@ run_release 0.3.1 && fail "a version that isn't tauri.conf.json's passed"
 grep -q 'has version 0.3.0, not 0.3.1' "$work/out.txt" || fail "no version mismatch message"
 [ ! -e "$calls/npm" ] || fail "a version mismatch built"
 run_release "not-a-version" && fail "a bad version passed"
+FAKE_ADHOC=1 run_release "$VERSION" && fail "an app not signed dictation-app Dev passed"
+grep -q 'is not signed "dictation-app Dev"' "$work/out.txt" || fail "no signing message"
 FAKE_KEY_MISSING=1 run_release "$VERSION" && fail "a missing Keychain item passed"
 grep -q 'no Keychain item with service dictation-app-updater-key' "$work/out.txt" || fail "no missing-key message"
 [ ! -e "$calls/npm" ] || fail "a missing key built"
-pass "a wrong version or a missing Keychain item is refused"
+pass "a wrong version, an app not signed dictation-app Dev or a missing Keychain item is refused"

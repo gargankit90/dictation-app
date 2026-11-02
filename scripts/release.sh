@@ -101,7 +101,7 @@ pubkey=$(jq -r '.plugins.updater.pubkey // ""' "$conf")
 
 if [ "$publish" = 1 ]; then
   [ -z "$(git status --porcelain)" ] || die "--publish needs a clean tree (commit or remove the changes)"
-  git tag --points-at HEAD | grep -qx "v$version" ||
+  grep -qx "v$version" <<<"$(git tag --points-at HEAD)" ||
     die "--publish needs tag v$version on HEAD (git tag v$version, after the version PR is merged)"
   command -v gh >/dev/null || die "gh is not installed"
   gh auth status >/dev/null 2>&1 || die "gh is not logged in (gh auth login)"
@@ -113,7 +113,7 @@ case $(uname -m) in
   *) die "unknown architecture $(uname -m)" ;;
 esac
 
-security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\"" ||
+grep -q "\"$IDENTITY\"" <<<"$(security find-identity -p codesigning 2>/dev/null || true)" ||
   die "no \"$IDENTITY\" certificate in the keychain (scripts/make-dev-cert.sh); a release is never ad hoc"
 
 # An OpenSSL that can check a minisign signature (Ed25519 and BLAKE2b-512);
@@ -122,8 +122,9 @@ openssl_bin=""
 for candidate in "${OPENSSL:-}" openssl /opt/homebrew/bin/openssl /usr/local/bin/openssl; do
   [ -n "$candidate" ] || continue
   command -v "$candidate" >/dev/null || continue
-  if "$candidate" list -digest-algorithms 2>/dev/null | grep -qi 'blake2b512' &&
-    "$candidate" list -public-key-algorithms 2>/dev/null | grep -qi 'ed25519'; then
+  # Captured first, so grep -q can't cut a pipe short (pipefail).
+  if grep -qi 'blake2b512' <<<"$("$candidate" list -digest-algorithms 2>/dev/null || true)" &&
+    grep -qi 'ed25519' <<<"$("$candidate" list -public-key-algorithms 2>/dev/null || true)"; then
     openssl_bin=$(command -v "$candidate")
     break
   fi
@@ -204,7 +205,7 @@ verify_update() {
     echo "release: the signature's trusted comment does not verify" >&2
     return 1
   }
-  printf '%s\n' "$comment" | tr '\t' '\n' | grep -qxF "version:$want" || {
+  grep -qxF "version:$want" <<<"$(tr '\t' '\n' <<<"$comment")" || {
     echo "release: the signature is not bound to version $want" >&2
     return 1
   }
@@ -259,8 +260,10 @@ dmg=$(find "$bundle/dmg" -name '*.dmg' -print -quit 2>/dev/null || true)
 [ -n "$dmg" ] || die "no DMG under $bundle/dmg"
 
 codesign --verify --deep --strict "$app_dir" || die "the app's signature does not verify"
-codesign -dvv "$app_dir" 2>&1 | grep -q "^Authority=$IDENTITY\$" ||
-  die "the app is not signed \"$IDENTITY\""
+# Captured first: `grep -q` would end the pipe early and, with pipefail,
+# fail it.
+signature=$(codesign -dvv "$app_dir" 2>&1)
+grep -qx "Authority=$IDENTITY" <<<"$signature" || die "the app is not signed \"$IDENTITY\""
 scripts/check-dmg.sh "$dmg"
 
 verify_update "$pubkey" "$archive" "$(cat "$archive.sig")" "$version" ||
