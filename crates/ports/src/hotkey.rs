@@ -20,7 +20,14 @@ pub enum HotkeyEvent {
     /// The source stopped listening by itself (macOS: the event tap died,
     /// e.g. after Accessibility was revoked). It is the last event before
     /// the sink is dropped; [`HotkeySource::start`] works again afterwards.
+    /// A source that restarts itself (the app's supervised hotkey) keeps
+    /// the sink instead and sends [`Restored`](Self::Restored) once it
+    /// listens again.
     Failed,
+    /// The source listens again after a [`Failed`](Self::Failed): it was
+    /// restarted (the app's supervised hotkey). Nothing is held; the next
+    /// press is a new one.
+    Restored,
 }
 
 /// Receives [`HotkeyEvent`]s. Real sources call it on their own thread (an

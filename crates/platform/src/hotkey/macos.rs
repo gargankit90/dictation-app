@@ -144,7 +144,7 @@ fn listen(
                 sink(HotkeyEvent::Interrupted);
             }
             Ok(event) => {
-                if let Some(out) = to_input(&event).and_then(|i| matcher.on_input(i)) {
+                if let Some(out) = matched(&mut matcher, &event) {
                     sink(out);
                 }
             }
@@ -159,20 +159,42 @@ fn listen(
     }
 }
 
-/// Converts a `handy-keys` event, or `None` for events the matcher doesn't
-/// need (Fn, Caps Lock, mouse buttons, keys no spec can name).
-fn to_input(event: &KeyEvent) -> Option<KeyInput> {
+/// A `handy-keys` event, converted for the matcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Raw {
+    /// A modifier or a key a spec can name.
+    Input(KeyInput),
+    /// A key no spec can name (Caps Lock, Page Up, a mouse button), with the
+    /// modifiers it reports: it can't press the hotkey, but it can end a
+    /// hold whose release was missed (#47).
+    Unmapped(Held),
+}
+
+/// What `event` makes the matcher report, if anything.
+fn matched(matcher: &mut HotkeyMatcher, event: &KeyEvent) -> Option<HotkeyEvent> {
+    match to_input(event)? {
+        Raw::Input(input) => matcher.on_input(input),
+        Raw::Unmapped(held) => matcher.on_unmapped(held),
+    }
+}
+
+/// Converts a `handy-keys` event, or `None` for a change of Fn, which has no
+/// side and which no spec can name.
+fn to_input(event: &KeyEvent) -> Option<Raw> {
+    let held = to_held(event.modifiers);
     let key = match event.key {
-        // Fn has no side and no spec can name it.
         None if event.changed_modifier == Some(Modifiers::FN) => return None,
         None => None,
-        Some(key) => Some(to_key(key)?),
+        Some(key) => match to_key(key) {
+            Some(key) => Some(key),
+            None => return Some(Raw::Unmapped(held)),
+        },
     };
-    Some(KeyInput {
-        held: to_held(event.modifiers),
+    Some(Raw::Input(KeyInput {
+        held,
         key,
         down: event.is_key_down,
-    })
+    }))
 }
 
 fn to_held(modifiers: Modifiers) -> Held {
@@ -299,7 +321,7 @@ mod tests {
         let mut matcher = HotkeyMatcher::new(spec);
         events
             .iter()
-            .filter_map(|e| to_input(e).and_then(|i| matcher.on_input(i)))
+            .filter_map(|e| matched(&mut matcher, e))
             .collect()
     }
 
@@ -321,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn fn_caps_lock_and_mouse_are_ignored() {
+    fn fn_is_ignored_and_caps_lock_and_mouse_only_carry_modifiers() {
         assert_eq!(
             to_input(&modifier_event(Modifiers::FN, Modifiers::FN, true)),
             None
@@ -332,7 +354,7 @@ mod tests {
                 handy_keys::Key::CapsLock,
                 true
             )),
-            None
+            Some(Raw::Unmapped(Held::NONE))
         );
         assert_eq!(
             to_input(&key_event(
@@ -340,8 +362,47 @@ mod tests {
                 handy_keys::Key::MouseLeft,
                 true
             )),
-            None
+            Some(Raw::Unmapped(Held::NONE.with(Modifier::Alt, Hand::Right)))
         );
+    }
+
+    /// #47, the second case: a key no spec names (Page Up) after a missed
+    /// Right Option release carries the real, empty modifiers, which end the
+    /// stuck hold; the next press of the hotkey then works. Before, the
+    /// event was dropped whole and the hotkey stayed "held".
+    #[test]
+    fn an_unmapped_key_after_a_missed_release_unsticks_the_hotkey() {
+        let r = Modifiers::OPT_RIGHT;
+        let events = run(
+            HotkeySpec::default(),
+            &[
+                modifier_event(r, r, true),
+                // Right Option's release is missed; Page Up and a click come
+                // with nothing held.
+                key_event(Modifiers::empty(), handy_keys::Key::PageUp, true),
+                key_event(Modifiers::empty(), handy_keys::Key::PageUp, false),
+                key_event(Modifiers::empty(), handy_keys::Key::MouseLeft, true),
+                // A fresh press and release are both heard.
+                modifier_event(r, r, true),
+                modifier_event(Modifiers::empty(), r, false),
+            ],
+        );
+        assert_eq!(events, [Pressed, Released, Pressed, Released]);
+    }
+
+    #[test]
+    fn an_unmapped_key_while_really_held_keeps_the_hold() {
+        let r = Modifiers::OPT_RIGHT;
+        let events = run(
+            HotkeySpec::default(),
+            &[
+                modifier_event(r, r, true),
+                key_event(r, handy_keys::Key::PageUp, true),
+                key_event(r, handy_keys::Key::CapsLock, true),
+                modifier_event(Modifiers::empty(), r, false),
+            ],
+        );
+        assert_eq!(events, [Pressed, Released]);
     }
 
     #[test]
@@ -575,6 +636,8 @@ mod tests {
                 CancelPressed => Event::CancelPressed,
                 Interrupted => Event::HotkeyInterrupted,
                 Failed => Event::HotkeyFailed,
+                // Only a supervisor sends it, never the adapter.
+                dictation_ports::HotkeyEvent::Restored => continue,
             };
             let (next, out) = coordinator::step(state, event);
             state = next;

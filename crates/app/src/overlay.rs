@@ -78,6 +78,8 @@ impl OverlayModel {
                 OverlayView::Error { .. } => return None,
                 _ => OverlayView::Hidden,
             },
+            // The hotkey error, if it still shows, goes with its timer.
+            UiEvent::HotkeyRestored => return None,
             UiEvent::Error(error) => {
                 // Always a change, even with the same text: it restarts the
                 // timer.

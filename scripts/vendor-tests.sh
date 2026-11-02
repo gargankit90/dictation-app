@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Runs the patch tests of the vendored crates in third_party/ (#88, P1-02).
-# They are not workspace members (root Cargo.toml `exclude`), so no other
-# gate step runs them. They hold the callback regressions for #77 (CoreAudio
-# buffer capacity) and #80 (hotkey decode) and are macOS-only code.
+# Runs the unit tests of the vendored crates in third_party/ (#88, P1-02):
+# all of each crate's library tests, which include our patch tests (the
+# callback regressions for #77, CoreAudio buffer capacity, and #80, hotkey
+# decode, macOS-only code). The crates are not workspace members (root
+# Cargo.toml `exclude`), so no other gate step runs them; a failing test
+# fails the gate. Their integration tests are left out: handy-keys'
+# `synthetic_input` posts real key events and `macos_ipc_quiescence` counts
+# WindowServer messages over a 5 s idle window, so both need Accessibility
+# and a machine nobody is typing on (handy-keys' TESTING.md).
 #
 # Each crate is built standalone, so it needs its own lock file. It is seeded
 # from the app's Cargo.lock, so the crates are tested against the dependency
@@ -19,10 +24,10 @@ if [ "$(uname -s)" != Darwin ]; then
   exit 0
 fi
 
-# crate dir : cargo test filter
+# The crates whose library tests run.
 crates=(
-  "third_party/handy-keys:dictation_patch"
-  "third_party/coreaudio-rs:patch_tests"
+  third_party/handy-keys
+  third_party/coreaudio-rs
 )
 
 host=$(rustc -vV | sed -n 's/^host: //p')
@@ -49,9 +54,7 @@ seeded=()
 cleanup() { [ ${#seeded[@]} -eq 0 ] || rm -f "${seeded[@]}"; }
 trap cleanup EXIT
 
-for entry in "${crates[@]}"; do
-  dir=${entry%%:*}
-  filter=${entry##*:}
+for dir in "${crates[@]}"; do
   lock="$dir/Cargo.lock"
   if [ -e "$lock" ]; then
     echo "vendor-tests: $lock exists; remove it first" >&2
@@ -62,9 +65,9 @@ for entry in "${crates[@]}"; do
   # cargo drops the packages the crate doesn't use and resolves any it needs
   # that the app doesn't have (dev-dependencies).
   status=0
-  printf '\n==> cargo test %s --lib %s\n' "$dir" "$filter"
+  printf '\n==> cargo test %s --lib\n' "$dir"
   CARGO_TARGET_DIR="$PWD/target/vendor-$(basename "$dir")" \
-    cargo test --manifest-path "$dir/Cargo.toml" --lib "$filter" || status=$?
+    cargo test --manifest-path "$dir/Cargo.toml" --lib || status=$?
 
   # Every package built on this Mac that the app builds too must have the
   # version the app has (a few are there twice, so compare name+version).
