@@ -25,7 +25,9 @@ HOST=${HOST:-192.168.64.1}
 PORT=${PORT:-8765}
 OLD_VERSION=${OLD_VERSION:-0.1.0}
 NEW_VERSION=${NEW_VERSION:-0.1.1}
-dir=target/updater-test
+# UPDATER_TEST_DIR: where the key, builds and manifest go (the e2e scenario
+# e2e_update_keeps_permissions uses its own); under target/, git-ignored.
+dir=${UPDATER_TEST_DIR:-target/updater-test}
 base=http://$HOST:$PORT
 
 sign_config='{}'

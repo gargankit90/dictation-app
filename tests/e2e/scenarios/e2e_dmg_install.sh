@@ -1,12 +1,19 @@
-# M5.4 criterion 2 (the scripted part): install the way the tester README
-# says. The DMG goes into the VM as a browser download would leave it (with
-# the quarantine flag), is mounted, the app is copied out, the README's one
-# `xattr` command clears the quarantine, and a first dictation (mock
-# transcriber, tone fixture) pastes into TextEdit. The app that runs is the
-# one from the DMG, replacing the build run.sh installed.
+# M5.4 criterion 3: install the way docs/TESTERS.md says, in a freshly
+# restored VM. The DMG goes into the VM as a browser download would leave it
+# (with the quarantine flag), is mounted, the app is copied out, and the
+# guide's own `xattr` command (read from docs/TESTERS.md, so the guide can't
+# drift from what is tested) clears the quarantine. A first dictation (mock
+# transcriber, tone fixture) pastes into TextEdit. Then the guide's sections
+# 3 to 5: both permissions hold (permissions_hold), the made-up key is typed
+# into Settings, Test key and Save work against the local provider (the
+# T4a seam), and a dictation pastes the provider's transcript. The app that
+# runs is the one from the DMG, replacing the build run.sh installed.
 #
 # What it cannot check: the Gatekeeper dialog itself and the Microphone and
-# Accessibility prompts (a person does those; see the PR's "How to check").
+# Accessibility prompts (the golden image has both granted to the app signed
+# `dictation-app Dev`, as a tester's Mac has once they allowed them).
+
+TESTERS_DOC=docs/TESTERS.md
 
 VM_DMG_DIR="/Users/$VM_USER/Downloads"
 VM_DMG_MOUNT="/Users/$VM_USER/e2e-dmg-mount"
@@ -65,8 +72,15 @@ e2e_dmg_install() {
   vm "xattr -rw com.apple.quarantine '0083;$(printf '%x' "$(date +%s)");Safari;' $(q "$VM_APP")"
   expect "the app starts out quarantined" \
     vm "xattr -p com.apple.quarantine $(q "$VM_APP")"
-  vm "xattr -dr com.apple.quarantine $(q "$VM_APP")"
-  expect "the README's xattr command clears the quarantine" e2e_not_quarantined "$VM_APP"
+  # The guide's command, for /Applications; the VM's user installs into
+  # ~/Applications (see above), so only the path is swapped.
+  local doc_command vm_command
+  doc_command=$(grep -m 1 '^xattr -dr com.apple.quarantine /Applications/dictation-app.app$' "$TESTERS_DOC" || true)
+  expect "docs/TESTERS.md has the quarantine command" test -n "$doc_command"
+  vm_command=${doc_command//\/Applications\/dictation-app.app/$(q "$VM_APP")}
+  log "  running the guide's command: $vm_command"
+  [ -z "$vm_command" ] || vm "$vm_command"
+  expect "the guide's xattr command clears the quarantine" e2e_not_quarantined "$VM_APP"
 
   # README step 5: a first dictation.
   launch_full
@@ -78,7 +92,51 @@ e2e_dmg_install() {
   expect "the transcript is in TextEdit" test "$text" = "$MOCK_TEXT"
   expect "one app is running" test "$(app_count)" = 1
 
-  collect_log e2e_dmg_install
+  collect_log e2e_dmg_install-mock
   textedit_close
   vm "rm -f $(q "$VM_DMG_DIR/$name")"
+
+  e2e_dmg_guide_steps
+}
+
+# The guide's sections 3 to 5 with the app from the DMG: permissions, the key
+# in Settings, a first dictation on the local provider.
+e2e_dmg_guide_steps() {
+  local version
+  version=$(vm "defaults read $(q "$VM_APP/Contents/Info") CFBundleShortVersionString")
+  arm_key_cleanup e2e_dmg_install
+  KEY_CLEANUP_HOOK=provider_cleanup
+
+  # Section 3: Microphone and Accessibility.
+  expect "section 3: Microphone and Accessibility hold" permissions_hold "$version"
+
+  # Section 4: the key, typed into Settings (no key saved before).
+  fresh_app_state
+  settings_reset
+  groq_key_remove
+  expect "the local provider starts" provider_start "$PROVIDER_GOOD_KEY"
+  expect "the app starts on the local provider" launch_on_provider
+  expect "with no key saved yet" wait_for_log 'engine settings provider=groq .*has_key=false'
+  expect "section 4: Settings… opens from the tray" open_settings
+  expect "the key is typed into the key field" \
+    ax_ok secret-set "$APP_NAME" "$SETTINGS_WINDOW" api-key "$PROVIDER_GOOD_KEY"
+  expect "Test key" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Test key"
+  expect "says the key works" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "The key works." 15
+  expect "the test reached the local provider with the typed key" provider_request_has 1 auth=good
+  GROQ_KEY_STORED=1
+  expect "Save" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Save
+  expect "says Key saved" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Key saved" 15
+  expect "the engine is rebuilt with the key" wait_for_log 'engine settings provider=groq .*has_key=true'
+  expect "closing the window hides it" close_settings
+
+  # Section 5: dictate.
+  textedit_fresh
+  expect "section 5: the first dictation ends Idle" dictate_once 1
+  expect "it was sent with the saved key" provider_request_has 2 auth=good
+  expect "TextEdit holds the transcript" textedit_is "$(esc_b64 "$PROVIDER_TEXT")"
+  expect "two requests in all (Test key and the dictation)" provider_requests_are 2
+
+  [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_dmg_install
+  collect_log e2e_dmg_install
+  key_scenario_end
 }
