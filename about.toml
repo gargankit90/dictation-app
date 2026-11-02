@@ -25,5 +25,6 @@ targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 # Build tools and tests are not in the app.
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
-# Our own crates are `publish = false` with no licence field.
+# Our own crates are MIT (see LICENSE) but `publish = false`; the notice lists
+# third-party code only.
 private = { ignore = true }
