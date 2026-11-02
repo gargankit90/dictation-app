@@ -154,9 +154,12 @@ impl Delivery {
                     died = !self.dead;
                     self.dead = true;
                 }
-                // Esc says nothing about the hotkey, and a source doesn't
+                // Esc and a shortcut say nothing about whether the hotkey
+                // is down (its release still comes), and a source doesn't
                 // restore itself.
-                HotkeyEvent::CancelPressed | HotkeyEvent::Restored => {}
+                HotkeyEvent::CancelPressed
+                | HotkeyEvent::ShortcutPressed
+                | HotkeyEvent::Restored => {}
             }
             self.send(event);
         } else if generation == self.pending {
@@ -167,8 +170,11 @@ impl Delivery {
                     self.pending_held = false;
                     self.pending_failed = true;
                 }
-                // Esc before the switch is the old hotkey's business.
-                HotkeyEvent::CancelPressed | HotkeyEvent::Restored => {}
+                // Esc or a shortcut before the switch is the old hotkey's
+                // business.
+                HotkeyEvent::CancelPressed
+                | HotkeyEvent::ShortcutPressed
+                | HotkeyEvent::Restored => {}
             }
         }
         died

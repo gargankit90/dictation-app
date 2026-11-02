@@ -806,7 +806,10 @@ where
                 PressPermissions::Asking => return None,
             },
             HotkeyEvent::Released => Event::HotkeyReleased(at),
-            HotkeyEvent::CancelPressed => Event::CancelPressed,
+            // A shortcut on the hotkey's modifier (#172) drops the recording
+            // exactly as Esc does: quietly, with nothing transcribed or
+            // pasted; outside a recording it changes nothing.
+            HotkeyEvent::CancelPressed | HotkeyEvent::ShortcutPressed => Event::CancelPressed,
             HotkeyEvent::Interrupted => Event::HotkeyInterrupted,
             HotkeyEvent::Failed => Event::HotkeyFailed,
             HotkeyEvent::Restored => return None,
@@ -1316,6 +1319,78 @@ mod tests {
         assert_eq!(runner.state, State::Inserting);
         // Only the (never-ending) transcription; no insert was started.
         assert_eq!(runner.jobs.len(), 1);
+        runner.jobs.abort_all();
+        while runner.jobs.join_next().await.is_some() {}
+        assert!(inserter.inserted().is_empty());
+    }
+
+    /// M5.9 criterion 1 (#172): a shortcut on the hotkey's modifier drops
+    /// the recording it started, at any hold length: back to Idle with no
+    /// transcription, no insert and no error; its release then does
+    /// nothing, and the next hold dictates as usual.
+    #[tokio::test]
+    async fn criterion_1_a_shortcut_drops_the_recording_quietly() {
+        let inserter = FakeInserter::new();
+        let (mut runner, _shutdown) = runner(&inserter);
+        let (ui, mut ui_events) = ui_channel();
+        runner.ui = ui;
+        for (start, shortcut_at, release_at) in [(0, 100, 150), (1_000, 1_500, 1_700)] {
+            key(&mut runner, HotkeyEvent::Pressed, start);
+            assert!(matches!(runner.state, State::Recording { .. }));
+            key(&mut runner, HotkeyEvent::ShortcutPressed, shortcut_at);
+            assert_eq!(runner.state, State::Idle);
+            key(&mut runner, HotkeyEvent::Released, release_at);
+            assert_eq!(runner.state, State::Idle);
+            assert_eq!(runner.job, 0, "nothing was transcribed");
+        }
+        let mut phases = Vec::new();
+        while let Ok(event) = ui_events.try_recv() {
+            match event {
+                UiEvent::StateChanged(phase) => phases.push(phase),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert_eq!(
+            phases,
+            [Phase::Recording, Phase::Idle, Phase::Recording, Phase::Idle]
+        );
+        // A shortcut outside a recording changes nothing.
+        key(&mut runner, HotkeyEvent::ShortcutPressed, 2_000);
+        assert_eq!(runner.state, State::Idle);
+        // The next hold dictates.
+        key(&mut runner, HotkeyEvent::Pressed, 3_000);
+        key(&mut runner, HotkeyEvent::Released, 3_500);
+        assert_eq!((runner.state, runner.job), (State::Transcribing, 1));
+        runner.jobs.abort_all();
+        while runner.jobs.join_next().await.is_some() {}
+        assert!(inserter.inserted().is_empty());
+    }
+
+    /// M5.9 criterion 5 (#172): a transcript with no letter or digit (the
+    /// provider's "." for a short, near-silent recording) is dropped like
+    /// silence: back to Idle, nothing inserted (so the clipboard is never
+    /// touched), no error shown.
+    #[tokio::test]
+    async fn criterion_5_a_transcript_with_no_words_is_never_inserted() {
+        let inserter = FakeInserter::new();
+        let (mut runner, _shutdown) = runner(&inserter);
+        let (ui, mut ui_events) = ui_channel();
+        runner.ui = ui;
+        for (n, text) in [".", " ... ", "?!", "\u{3002}"].into_iter().enumerate() {
+            let at = n as u64 * 1_000;
+            key(&mut runner, HotkeyEvent::Pressed, at);
+            key(&mut runner, HotkeyEvent::Released, at + 500);
+            let job = runner.job;
+            deliver(
+                &mut runner,
+                JobResult::Transcribed(job, Ok(Transcript::from_text(text)), Some('a')),
+            );
+            assert_eq!(runner.state, State::Idle, "{text:?}");
+        }
+        while let Ok(event) = ui_events.try_recv() {
+            assert!(!matches!(event, UiEvent::Error(_)), "{event:?}");
+        }
+        // Only the (never-ending) transcriptions ran; no insert ever did.
         runner.jobs.abort_all();
         while runner.jobs.join_next().await.is_some() {}
         assert!(inserter.inserted().is_empty());

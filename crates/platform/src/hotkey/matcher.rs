@@ -75,12 +75,19 @@ pub struct KeyInput {
 ///   is down don't release it.
 /// - `CancelPressed` when Escape goes down, whatever else is held.
 /// - Key repeats never produce a second `Pressed` or `CancelPressed`.
+///
+/// The OS adapters call [`on_key`](Self::on_key) and
+/// [`on_unmapped_key`](Self::on_unmapped_key), which add one rule to those:
+/// `ShortcutPressed` once per hold when a key other than Esc goes down while
+/// a modifier-only spec is held (#172).
 #[derive(Debug, Clone)]
 pub struct HotkeyMatcher {
     spec: HotkeySpec,
     active: bool,
     key_held: bool,
     escape_held: bool,
+    /// `ShortcutPressed` was sent for the current hold.
+    shortcut_sent: bool,
 }
 
 impl HotkeyMatcher {
@@ -92,6 +99,7 @@ impl HotkeyMatcher {
             active: false,
             key_held: false,
             escape_held: false,
+            shortcut_sent: false,
         }
     }
 
@@ -101,7 +109,35 @@ impl HotkeyMatcher {
         *self = Self::new(self.spec);
     }
 
-    /// The event `input` produces, if any.
+    /// What the OS adapter calls for a modifier or a key a spec can name:
+    /// [`on_input`](Self::on_input), or else `ShortcutPressed` if `input` is
+    /// a key other than Esc going down while a modifier-only spec is held
+    /// (the user is typing a shortcut on the hotkey's modifier, #172).
+    pub fn on_key(&mut self, input: KeyInput) -> Option<HotkeyEvent> {
+        let typed = input.down && input.key.is_some_and(|key| key != Key::Escape);
+        self.on_input(input).or_else(|| self.shortcut(typed))
+    }
+
+    /// What the OS adapter calls for a key no spec can name (Page Up, Caps
+    /// Lock): [`on_unmapped`](Self::on_unmapped), or else `ShortcutPressed`
+    /// if `key_down` (it went down; a mouse button never counts) while a
+    /// modifier-only spec is held.
+    pub fn on_unmapped_key(&mut self, held: Held, key_down: bool) -> Option<HotkeyEvent> {
+        self.on_unmapped(held).or_else(|| self.shortcut(key_down))
+    }
+
+    /// `ShortcutPressed` if a key went down (`typed`) during a hold of a
+    /// modifier-only spec, once per hold.
+    fn shortcut(&mut self, typed: bool) -> Option<HotkeyEvent> {
+        if typed && self.active && self.spec.key().is_none() && !self.shortcut_sent {
+            self.shortcut_sent = true;
+            return Some(HotkeyEvent::ShortcutPressed);
+        }
+        None
+    }
+
+    /// The event `input` produces, if any, by the spec alone (no
+    /// `ShortcutPressed`; see [`on_key`](Self::on_key)).
     pub fn on_input(&mut self, input: KeyInput) -> Option<HotkeyEvent> {
         let mut completes = false;
         if let Some(key) = input.key {
@@ -149,6 +185,7 @@ impl HotkeyMatcher {
         if self.active {
             if !(required && key_ok) {
                 self.active = false;
+                self.shortcut_sent = false;
                 return Some(HotkeyEvent::Released);
             }
         } else if completes && required && exact && key_ok {
@@ -162,7 +199,7 @@ impl HotkeyMatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use HotkeyEvent::{CancelPressed, Pressed, Released};
+    use HotkeyEvent::{CancelPressed, Pressed, Released, ShortcutPressed};
 
     const RIGHT_ALT: Held = Held::NONE.with(Modifier::Alt, Hand::Right);
 
@@ -478,6 +515,166 @@ mod tests {
             Some(CancelPressed)
         );
         assert_eq!(matcher.on_input(key(ctrl, Key::Space, true)), Some(Pressed));
+    }
+
+    /// What the adapters call: `on_key` for every event.
+    fn run_keys(spec: &str, inputs: &[KeyInput]) -> Vec<HotkeyEvent> {
+        let mut matcher = HotkeyMatcher::new(spec.parse().unwrap());
+        inputs.iter().filter_map(|&i| matcher.on_key(i)).collect()
+    }
+
+    /// M5.9 criterion 1 (#172): with a modifier-only hotkey, a key pressed
+    /// while it is held is a shortcut, sent once per hold (repeats and a
+    /// second key add nothing); the release still follows, and the next
+    /// hold starts afresh.
+    #[test]
+    fn criterion_1_a_key_while_a_modifier_only_hotkey_is_held_is_a_shortcut() {
+        for (spec, hand_mod) in [("RightCmd", Modifier::Cmd), ("RightAlt", Modifier::Alt)] {
+            let held = Held::NONE.with(hand_mod, Hand::Right);
+            let events = run_keys(
+                spec,
+                &[
+                    modifier(held, true),
+                    key(held, Key::Letter('C'), true),
+                    key(held, Key::Letter('C'), true),
+                    key(held, Key::Letter('C'), false),
+                    key(held, Key::Letter('V'), true),
+                    key(held, Key::Letter('V'), false),
+                    modifier(Held::NONE, false),
+                    // The next hold, alone: a dictation again.
+                    modifier(held, true),
+                    modifier(Held::NONE, false),
+                    // And the next one is a shortcut again.
+                    modifier(held, true),
+                    key(held, Key::Space, true),
+                    modifier(Held::NONE, false),
+                ],
+            );
+            assert_eq!(
+                events,
+                [
+                    Pressed,
+                    ShortcutPressed,
+                    Released,
+                    Pressed,
+                    Released,
+                    Pressed,
+                    ShortcutPressed,
+                    Released
+                ],
+                "{spec}"
+            );
+        }
+    }
+
+    #[test]
+    fn criterion_1_the_modifier_alone_or_with_other_modifiers_still_records() {
+        let shift = RIGHT_ALT.with(Modifier::Shift, Hand::Left);
+        let events = run_keys(
+            "RightAlt",
+            &[
+                modifier(RIGHT_ALT, true),
+                modifier(shift, true),
+                modifier(RIGHT_ALT, false),
+                // A key's release (pressed before the hold) is not typing.
+                key(RIGHT_ALT, Key::Letter('E'), false),
+                modifier(Held::NONE, false),
+            ],
+        );
+        assert_eq!(events, [Pressed, Released]);
+    }
+
+    #[test]
+    fn esc_while_a_modifier_only_hotkey_is_held_cancels_and_is_no_shortcut() {
+        let events = run_keys(
+            "RightAlt",
+            &[
+                modifier(RIGHT_ALT, true),
+                key(RIGHT_ALT, Key::Escape, true),
+                key(RIGHT_ALT, Key::Escape, true),
+                key(RIGHT_ALT, Key::Escape, false),
+                modifier(Held::NONE, false),
+            ],
+        );
+        assert_eq!(events, [Pressed, CancelPressed, Released]);
+    }
+
+    /// A key typed while nothing is held, or with a modifier that isn't the
+    /// hotkey, is nobody's business.
+    #[test]
+    fn keys_outside_a_hold_are_not_shortcuts() {
+        let left = Held::NONE.with(Modifier::Alt, Hand::Left);
+        let events = run_keys(
+            "RightAlt",
+            &[
+                key(Held::NONE, Key::Letter('A'), true),
+                modifier(left, true),
+                key(left, Key::Letter('A'), true),
+                modifier(Held::NONE, false),
+            ],
+        );
+        assert!(events.is_empty(), "{events:?}");
+    }
+
+    /// Criterion 1: combination hotkeys keep today's behaviour; other keys
+    /// while one is held send nothing.
+    #[test]
+    fn criterion_1_combination_hotkeys_are_unchanged() {
+        let ctrl_shift = Held::NONE
+            .with(Modifier::Ctrl, Hand::Left)
+            .with(Modifier::Shift, Hand::Left);
+        let events = run_keys(
+            "Ctrl+Shift+Space",
+            &[
+                key(ctrl_shift, Key::Space, true),
+                key(ctrl_shift, Key::Letter('A'), true),
+                key(ctrl_shift, Key::Letter('A'), false),
+                key(ctrl_shift, Key::Space, false),
+            ],
+        );
+        assert_eq!(events, [Pressed, Released]);
+        // F13 alone, with a key typed while it is held.
+        let events = run_keys(
+            "F13",
+            &[
+                key(Held::NONE, Key::F(13), true),
+                key(Held::NONE, Key::Letter('A'), true),
+                key(Held::NONE, Key::F(13), false),
+            ],
+        );
+        assert_eq!(events, [Pressed, Released]);
+    }
+
+    #[test]
+    fn an_unmapped_key_down_during_a_hold_is_a_shortcut_once() {
+        let mut matcher = HotkeyMatcher::new("RightAlt".parse().unwrap());
+        assert_eq!(matcher.on_key(modifier(RIGHT_ALT, true)), Some(Pressed));
+        assert_eq!(matcher.on_unmapped_key(RIGHT_ALT, false), None);
+        assert_eq!(
+            matcher.on_unmapped_key(RIGHT_ALT, true),
+            Some(ShortcutPressed)
+        );
+        assert_eq!(matcher.on_unmapped_key(RIGHT_ALT, true), None);
+        // A missed release still ends the hold first (#47).
+        assert_eq!(matcher.on_unmapped_key(Held::NONE, true), Some(Released));
+        assert_eq!(matcher.on_unmapped_key(Held::NONE, true), None);
+    }
+
+    /// After a reset (a lost keyboard) the next hold can be a shortcut again.
+    #[test]
+    fn reset_forgets_a_shortcut_sent() {
+        let mut matcher = HotkeyMatcher::new("RightAlt".parse().unwrap());
+        matcher.on_key(modifier(RIGHT_ALT, true));
+        assert_eq!(
+            matcher.on_key(key(RIGHT_ALT, Key::Letter('C'), true)),
+            Some(ShortcutPressed)
+        );
+        matcher.reset();
+        assert_eq!(matcher.on_key(modifier(RIGHT_ALT, true)), Some(Pressed));
+        assert_eq!(
+            matcher.on_key(key(RIGHT_ALT, Key::Letter('C'), true)),
+            Some(ShortcutPressed)
+        );
     }
 
     #[test]

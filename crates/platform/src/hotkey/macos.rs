@@ -173,15 +173,17 @@ enum Raw {
     Input(KeyInput),
     /// A key no spec can name (Caps Lock, Page Up, a mouse button), with the
     /// modifiers it reports: it can't press the hotkey, but it can end a
-    /// hold whose release was missed (#47).
-    Unmapped(Held),
+    /// hold whose release was missed (#47). `key_down` if it is a keyboard
+    /// key going down, which during a hold of a modifier-only hotkey is a
+    /// shortcut (#172); a mouse button never is.
+    Unmapped { held: Held, key_down: bool },
 }
 
 /// What `event` makes the matcher report, if anything.
 fn matched(matcher: &mut HotkeyMatcher, event: &KeyEvent) -> Option<HotkeyEvent> {
     match to_input(event)? {
-        Raw::Input(input) => matcher.on_input(input),
-        Raw::Unmapped(held) => matcher.on_unmapped(held),
+        Raw::Input(input) => matcher.on_key(input),
+        Raw::Unmapped { held, key_down } => matcher.on_unmapped_key(held, key_down),
     }
 }
 
@@ -194,7 +196,10 @@ fn to_input(event: &KeyEvent) -> Option<Raw> {
         None => None,
         Some(key) => match to_key(key) {
             Some(key) => Some(key),
-            None => return Some(Raw::Unmapped(held)),
+            None => {
+                let key_down = event.is_key_down && is_typed(key);
+                return Some(Raw::Unmapped { held, key_down });
+            }
         },
     };
     Some(Raw::Input(KeyInput {
@@ -202,6 +207,17 @@ fn to_input(event: &KeyEvent) -> Option<Raw> {
         key,
         down: event.is_key_down,
     }))
+}
+
+/// Whether an unmapped key is one a person types (Page Up, Delete, a
+/// keypad key), so pressing it with the hotkey's modifier is a shortcut. A
+/// mouse button isn't, nor is Caps Lock, a lock rather than a key.
+fn is_typed(key: handy_keys::Key) -> bool {
+    use handy_keys::Key as K;
+    !matches!(
+        key,
+        K::MouseLeft | K::MouseRight | K::MouseMiddle | K::MouseX1 | K::MouseX2 | K::CapsLock
+    )
 }
 
 fn to_held(modifiers: Modifiers) -> Held {
@@ -300,7 +316,9 @@ mod tests {
 
     use dictation_core::coordinator::{self, MAX_RECORDING, State};
     use dictation_core::events::{Command, Event};
-    use dictation_ports::HotkeyEvent::{CancelPressed, Failed, Interrupted, Pressed, Released};
+    use dictation_ports::HotkeyEvent::{
+        CancelPressed, Failed, Interrupted, Pressed, Released, ShortcutPressed,
+    };
 
     use super::*;
 
@@ -361,7 +379,10 @@ mod tests {
                 handy_keys::Key::CapsLock,
                 true
             )),
-            Some(Raw::Unmapped(Held::NONE))
+            Some(Raw::Unmapped {
+                held: Held::NONE,
+                key_down: false
+            })
         );
         assert_eq!(
             to_input(&key_event(
@@ -369,7 +390,10 @@ mod tests {
                 handy_keys::Key::MouseLeft,
                 true
             )),
-            Some(Raw::Unmapped(Held::NONE.with(Modifier::Alt, Hand::Right)))
+            Some(Raw::Unmapped {
+                held: Held::NONE.with(Modifier::Alt, Hand::Right),
+                key_down: false
+            })
         );
     }
 
@@ -397,6 +421,11 @@ mod tests {
         assert_eq!(events, [Pressed, Released, Pressed, Released]);
     }
 
+    /// A click, Caps Lock or an unmapped key's release while the hotkey is
+    /// really held keeps the hold; an unmapped key going down (right
+    /// Option+Page Up) is a
+    /// shortcut (#172), sent once, and the hold still ends only at the
+    /// release.
     #[test]
     fn an_unmapped_key_while_really_held_keeps_the_hold() {
         let r = Modifiers::OPT_RIGHT;
@@ -404,12 +433,53 @@ mod tests {
             HotkeySpec::default(),
             &[
                 modifier_event(r, r, true),
-                key_event(r, handy_keys::Key::PageUp, true),
+                key_event(r, handy_keys::Key::MouseLeft, true),
+                key_event(r, handy_keys::Key::MouseLeft, false),
                 key_event(r, handy_keys::Key::CapsLock, true),
+                key_event(r, handy_keys::Key::PageUp, false),
+                key_event(r, handy_keys::Key::PageUp, true),
+                key_event(r, handy_keys::Key::PageUp, true),
                 modifier_event(Modifiers::empty(), r, false),
             ],
         );
-        assert_eq!(events, [Pressed, Released]);
+        assert_eq!(events, [Pressed, ShortcutPressed, Released]);
+    }
+
+    /// #172 from the OS's events: right Command+C and +V with the hotkey on
+    /// Right Command are shortcuts, not dictations; right Command alone
+    /// still presses and releases.
+    #[test]
+    fn right_command_shortcuts_from_handy_keys_events() {
+        let r = Modifiers::CMD_RIGHT;
+        let events = run(
+            "RightCmd".parse().unwrap(),
+            &[
+                modifier_event(r, r, true),
+                key_event(r, handy_keys::Key::C, true),
+                key_event(r, handy_keys::Key::C, false),
+                modifier_event(Modifiers::empty(), r, false),
+                modifier_event(r, r, true),
+                key_event(r, handy_keys::Key::V, true),
+                key_event(r, handy_keys::Key::V, true),
+                key_event(r, handy_keys::Key::V, false),
+                modifier_event(Modifiers::empty(), r, false),
+                modifier_event(r, r, true),
+                modifier_event(Modifiers::empty(), r, false),
+            ],
+        );
+        assert_eq!(
+            events,
+            [
+                Pressed,
+                ShortcutPressed,
+                Released,
+                Pressed,
+                ShortcutPressed,
+                Released,
+                Pressed,
+                Released
+            ]
+        );
     }
 
     #[test]
@@ -640,7 +710,7 @@ mod tests {
             let event = match event {
                 Pressed => Event::HotkeyPressed(now),
                 Released => Event::HotkeyReleased(now),
-                CancelPressed => Event::CancelPressed,
+                CancelPressed | ShortcutPressed => Event::CancelPressed,
                 Interrupted => Event::HotkeyInterrupted,
                 Failed => Event::HotkeyFailed,
                 // Only a supervisor sends it, never the adapter.
@@ -698,16 +768,17 @@ mod tests {
         }
     }
 
+    /// Other modifiers, Caps Lock and Fn while the hotkey is held don't end
+    /// the dictation; a key does (#172:
+    /// `right_command_shortcuts_from_handy_keys_events`).
     #[test]
-    fn other_modifiers_and_keys_while_held_do_not_cancel() {
+    fn other_modifiers_while_held_do_not_cancel() {
         let (sl, sr) = (Modifiers::SHIFT_LEFT, Modifiers::SHIFT_RIGHT);
         let (cl, cr) = (Modifiers::CMD_LEFT, Modifiers::CMD_RIGHT);
         let fun = Modifiers::FN;
         let out = outputs(&[
             modifier_event(RIGHT, RIGHT, true),
             modifier_event(RIGHT | sl, sl, true),
-            key_event(RIGHT | sl, handy_keys::Key::A, true),
-            key_event(RIGHT | sl, handy_keys::Key::A, false),
             modifier_event(RIGHT, sl, false),
             modifier_event(RIGHT | sr, sr, true),
             modifier_event(RIGHT, sr, false),

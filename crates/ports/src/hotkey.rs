@@ -12,6 +12,15 @@ pub enum HotkeyEvent {
     Released,
     /// The cancel key (Esc) was pressed.
     CancelPressed,
+    /// A key went down while a modifier-only hotkey (`RightCmd`,
+    /// `RightAlt`) was held: the user is typing a shortcut on that modifier
+    /// (right Command+C), not dictating (#172). The recording the press
+    /// started is dropped quietly, and the shortcut reaches the app it was
+    /// meant for (the source never swallows keys). Sent once per hold; the
+    /// hotkey's release still follows. Never sent for a hotkey with a key
+    /// (`Ctrl+Shift+Space`), nor for Esc, which sends
+    /// [`CancelPressed`](Self::CancelPressed).
+    ShortcutPressed,
     /// The source lost track of the keyboard for a while (macOS: its event
     /// tap was paused and resumed, or a modifier change was missed), so a
     /// release may never come. Any hold in progress is over: drop what it
