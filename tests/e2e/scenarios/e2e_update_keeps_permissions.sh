@@ -34,7 +34,6 @@ VM_UPD_DIR="/Users/$VM_USER/e2e-update"
 VM_UPD_SERVER="$VM_FIXTURES/update-server.pl"
 UPD_OLD=0.1.0
 UPD_NEW=0.1.1
-UPD_WINDOW=""
 UPD_SIGNATURE_TEXT="signature didn't match this app's update key"
 UPD_SERVER_STOPPED=1
 
@@ -122,27 +121,45 @@ upd_installed_version() {
   vm "defaults read $(q "$VM_APP/Contents/Info") CFBundleShortVersionString"
 }
 
-# upd_dialog <text> <button>: a dialog of the app's shows <text>; presses
-# <button>. Says what was on screen if not.
+# The update dialogs have no parent window, so macOS shows them through
+# CFUserNotificationDisplayAlert: they are UserNotificationCenter's windows,
+# like the microphone prompt, not the app's.
+UPD_DIALOG_APP=UserNotificationCenter
+
+# upd_dialog <text> <button>: within about 30 s a dialog shows <text>;
+# presses <button> in it. Saves both UI trees if not.
 upd_dialog() {
-  local text=$1 button=$2
-  if ax_ok wait-window "$APP_NAME" "$UPD_WINDOW" 20 &&
-    ax_ok wait-text "$APP_NAME" "$UPD_WINDOW" "$text" 10 &&
-    { ax_ok press "$APP_NAME" "$UPD_WINDOW" "$button" ||
-      { [ "$button" = OK ] && ax_ok press "$APP_NAME" "$UPD_WINDOW" Ok; }; }; then
-    return 0
-  fi
+  local text=$1 button=$2 i
+  for i in $(seq 1 20); do
+    if ax wait-text "$UPD_DIALOG_APP" "" "$text" 1 >/dev/null 2>&1; then
+      if ax_ok press "$UPD_DIALOG_APP" "" "$button"; then
+        return 0
+      fi
+      # The system's default button: "OK" (some versions say "Ok").
+      if [ "$button" = OK ] && ax_ok press "$UPD_DIALOG_APP" "" Ok; then
+        return 0
+      fi
+      break
+    fi
+    sleep 0.5
+  done
+  log "  no dialog with [$text] and a [$button] button"
+  {
+    echo "--- $UPD_DIALOG_APP"
+    ax windows "$UPD_DIALOG_APP" 2>&1
+    ax dump "$UPD_DIALOG_APP" 2>&1
+  } >"$OUT_DIR/e2e_update_keeps_permissions-dialog-$(date +%H%M%S).ax.txt" || true
   dump_ui "e2e_update_keeps_permissions-$(date +%H%M%S)"
   return 1
 }
 
-# No dialog came up within <secs>.
+# No update dialog came up within <secs>: no "is available" or "update"
+# text in a UserNotificationCenter window (it may not even be running).
 upd_no_dialog() {
-  local secs=$1 said
+  local secs=$1
   sleep "$secs"
-  said=$(ax windows "$APP_NAME") || return 1
-  log "  windows: $said"
-  [ "${said%% *}" = 0 ]
+  ! ax wait-text "$UPD_DIALOG_APP" "" "is available" 1 >/dev/null 2>&1 &&
+    ! ax wait-text "$UPD_DIALOG_APP" "" "dictation-app" 1 >/dev/null 2>&1
 }
 
 upd_tray_check() {
