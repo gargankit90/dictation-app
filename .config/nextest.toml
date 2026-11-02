@@ -6,6 +6,12 @@
 slow-timeout = { period = "30s", terminate-after = 2 }
 fail-fast = false
 
+# #150: a test that drains a deliberately stalled queue must fail within
+# seconds if the queue is not bounded, not run until a CI timeout.
+[[profile.default.overrides]]
+filter = 'test(a_stalled_overlay_stays_bounded_and_ends_on_the_current_phase)'
+slow-timeout = { period = "5s", terminate-after = 1 }
+
 [profile.ci]
 retries = 0
 failure-output = "immediate-final"

@@ -2045,10 +2045,48 @@ mod capability_tests {
         assert!(overlay.get("remote").is_none());
     }
 
+    /// A directory of its own under the temporary one, removed when this is
+    /// dropped, on a normal return and on unwind (#143). The name has the
+    /// pid, a counter and the time, so two fixtures in one process, even with
+    /// the same window labels, never share their files, and a reused pid
+    /// never meets a leftover.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(what: &str) -> Self {
+            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos();
+            Self(std::env::temp_dir().join(format!(
+                "dictation-acl-{}-{n}-{nanos}-{what}",
+                std::process::id()
+            )))
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            // Doesn't follow symlinks: removes them, not their targets.
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The app and its windows, then the directory they wrote to: fields
+    /// drop in this order, so the directory goes last.
+    struct AclApp {
+        windows: Vec<WebviewWindow<MockRuntime>>,
+        _app: App<MockRuntime>,
+        scratch: Scratch,
+    }
+
     /// The app on Tauri's mock runtime with this build's ACL and the real
     /// command handler, its settings in a fresh directory (no keychain call
-    /// is made by the commands invoked below), and a window per label.
-    fn app_with_windows(labels: &[&str]) -> (App<MockRuntime>, Vec<WebviewWindow<MockRuntime>>) {
+    /// is made by the commands invoked below; the directory is removed when
+    /// the fixture is dropped), and a window per label.
+    fn app_with_windows(labels: &[&str]) -> AclApp {
         let manifests = manifests();
         let resolved = resolved();
         assert!(resolved.has_app_acl, "build.rs declares the app manifest");
@@ -2058,11 +2096,8 @@ mod capability_tests {
             .invoke_handler(super::builder::<MockRuntime>().invoke_handler())
             .build(context)
             .unwrap();
-        let dir = std::env::temp_dir().join(format!(
-            "dictation-acl-{}-{}",
-            std::process::id(),
-            labels.join("-")
-        ));
+        let scratch = Scratch::new(&labels.join("-"));
+        let dir = scratch.0.clone();
         app.manage(AppConfig(std::sync::Arc::new(
             dictation_pipeline::config::Config::new(
                 &dir,
@@ -2088,7 +2123,46 @@ mod capability_tests {
                     .unwrap()
             })
             .collect();
-        (app, windows)
+        AclApp {
+            windows,
+            _app: app,
+            scratch,
+        }
+    }
+
+    /// #143: the fixture's directory is gone after a normal return and after
+    /// an unwind, and two fixtures with the same labels get different ones.
+    #[test]
+    fn the_acl_fixture_removes_its_directory_and_never_shares_one() {
+        let (first, second) = (Scratch::new("main"), Scratch::new("main"));
+        assert_ne!(first.0, second.0);
+        let dir = first.0.clone();
+        std::fs::create_dir_all(dir.join("nested")).unwrap();
+        std::fs::write(dir.join("nested").join("file"), "{}").unwrap();
+        drop(first);
+        assert!(!dir.exists(), "left behind after a normal return");
+
+        let dir = second.0.clone();
+        std::fs::create_dir_all(&dir).unwrap();
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _owned = second;
+            panic!("a failing test");
+        }));
+        assert!(unwound.is_err());
+        assert!(!dir.exists(), "left behind after an unwind");
+    }
+
+    /// A command that writes (a save) leaves nothing once the fixture is
+    /// dropped.
+    #[test]
+    fn the_acl_fixture_leaves_nothing_behind_after_a_save() {
+        let fixture = app_with_windows(&[MAIN]);
+        let dir = fixture.scratch.0.clone();
+        let saved = invoke(&fixture.windows[0], "save_settings", args("save_settings"));
+        assert!(saved.is_ok(), "{saved:?}");
+        assert!(dir.exists(), "the save should have written under {dir:?}");
+        drop(fixture);
+        assert!(!dir.exists(), "{dir:?} left behind");
     }
 
     /// The app itself, without a window to hide or a process to restart.
@@ -2136,9 +2210,9 @@ mod capability_tests {
     /// window of this app; the ACL refuses before the command runs.
     #[test]
     fn criterion_m5_1_2_the_overlay_may_not_invoke_any_app_command() {
-        let (_app, windows) = app_with_windows(&[OVERLAY]);
+        let fixture = app_with_windows(&[OVERLAY]);
         for command in COMMAND_NAMES {
-            let error = invoke(&windows[0], command, args(command)).unwrap_err();
+            let error = invoke(&fixture.windows[0], command, args(command)).unwrap_err();
             let message = error.to_string();
             assert!(message.contains("not allowed"), "{command}: {message}");
         }
@@ -2168,8 +2242,8 @@ mod capability_tests {
     /// resolver; this is the same ACL at run time.)
     #[test]
     fn the_settings_window_may_invoke_all_ten_app_commands() {
-        let (_app, windows) = app_with_windows(&[MAIN, OVERLAY]);
-        let (main, overlay) = (&windows[0], &windows[1]);
+        let fixture = app_with_windows(&[MAIN, OVERLAY]);
+        let (main, overlay) = (&fixture.windows[0], &fixture.windows[1]);
         for command in COMMAND_NAMES {
             let reached = match *command {
                 // No keychain, network or OS prompt: the onboarding ones

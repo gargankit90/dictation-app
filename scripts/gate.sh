@@ -35,6 +35,11 @@ step npx prettier --check .
 
 # Rust lint and dependencies
 step cargo clippy --workspace --all-targets -- -D warnings
+# The platform crate on its own, without feature `testing`: the workspace run
+# above has it on (app dev-depends on platform with it), so production code
+# that reaches for `crate::fakes`, or warns only without the fakes, would pass
+# it (#48). Only the library, as shipped.
+step cargo clippy -p dictation-platform -- -D warnings
 step cargo deny check
 step cargo machete
 # The pipeline holds no Tauri types (docs/ENGINEERING.md, M1.3).

@@ -476,16 +476,27 @@ mod tests {
             tx.send(error());
         }
         tx.send(UiEvent::StateChanged(Phase::Recording));
-        assert!(rx.queued() <= UI_EVENTS_QUEUED, "{} queued", rx.queued());
+        assert!(
+            rx.queued() <= UI_EVENTS_QUEUED,
+            "the overlay channel is not bounded: {} events queued, at most {UI_EVENTS_QUEUED} allowed",
+            rx.queued()
+        );
         assert_eq!(
             rx.dropped_errors(),
-            1000 - u64::try_from(UI_ERRORS_QUEUED).unwrap()
+            1000 - u64::try_from(UI_ERRORS_QUEUED).unwrap(),
+            "the overlay channel is not bounded: errors were kept beyond {UI_ERRORS_QUEUED}"
         );
 
-        // It reads again.
+        // It reads again. `run` ends once the closed queue is empty; if the
+        // queue were not bounded it would show every event, so a bound on
+        // the (virtual) time it takes fails the test with a message, not a
+        // CI timeout (#150). A `run` that never yields is stopped by the
+        // test's own time limit in .config/nextest.toml.
         let recorder = Recorder::default();
         drop(tx);
-        run(rx, recorder.clone(), VISIBLE).await;
+        tokio::time::timeout(VISIBLE * 10, run(rx, recorder.clone(), VISIBLE))
+            .await
+            .expect("the overlay channel is not bounded: run did not end after the queue closed");
         let views = recorder.views();
         assert_eq!(views.last(), Some(&OverlayView::Recording), "{views:?}");
         let errors = views

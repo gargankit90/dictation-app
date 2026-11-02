@@ -88,7 +88,8 @@ jobs:
           du -sh target 2>/dev/null || true
 
   # The Mac-only code in dictation-platform (hotkey, Accessibility, Secure
-  # Input): build, lint and test it on its own, with --all-features (#10).
+  # Input): build, lint and test it on its own, with --all-features (#10), then
+  # lint and doctest it without feature `testing` (#48).
   macos:
     name: Platform crate (macOS)
     runs-on: [self-hosted, macOS, owner-mac]
@@ -117,6 +118,11 @@ jobs:
       - run: cargo clippy -p dictation-platform --all-targets --all-features -- -D warnings
       - run: cargo nextest run -p dictation-platform --all-features --profile ci
       - run: cargo test -p dictation-platform --doc --all-features
+      # And as shipped, without feature `testing` (#48): Mac-only production
+      # code must compile and lint without the fakes, and the compile_fail
+      # doctest that guards `fakes` runs only here.
+      - run: cargo clippy -p dictation-platform -- -D warnings
+      - run: cargo test -p dictation-platform --doc
       # The vendored hotkey and CoreAudio crates are not workspace members, so
       # nothing above runs their patch tests (#77, #80, #88).
       - run: scripts/vendor-tests.sh

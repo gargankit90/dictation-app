@@ -1,18 +1,31 @@
 # M5.5a criterion 4 (#83): the paste chord uses the key that types "v" in
 # the selected keyboard layout (the real TIS/UCKeyTranslate lookup), on
-# AZERTY (French), Dvorak and Russian. For each, the input source is
-# switched in the VM (fixtures/input-source.js, run in Terminal so the switch
-# reaches the GUI session; enabled first if the clone doesn't have it), a
-# dictation goes into TextEdit, and TextEdit must hold the transcript. The
-# layout is checked again after the dictation, not between bringing TextEdit
-# forward and dictating: a Terminal job would take the front (and the paste). On
-# Dvorak, V is where QWERTY has "." (key 47): a chord sent on QWERTY's V
-# (key 9) is ⌘K there and pastes nothing. The layout the VM started on is
-# put back, and the sources the scenario enabled are disabled again, however
-# the scenario ends.
+# AZERTY (French), Dvorak, Russian, Dvorak Right-Handed and Turkish. For each,
+# the input source is switched in the VM (fixtures/input-source.js, run in
+# Terminal so the switch reaches the GUI session; enabled first if the clone
+# doesn't have it), a dictation goes into TextEdit, and TextEdit must hold
+# the transcript. The layout is checked again after the dictation, not between
+# bringing TextEdit forward and dictating: a Terminal job would take the front
+# (and the paste).
+#
+# Which layouts prove the lookup (#136): the key that types V under ⌘ (what
+# the app's UCKeyTranslate lookup returns; read on macOS 15 from every
+# installed layout) is key 9, QWERTY's V, on AZERTY and Russian, so they
+# prove no regression, not the lookup. It is 47 on Dvorak, 43 on Dvorak
+# Right-Handed and 8 on Turkish: there a chord sent on QWERTY's key 9 is
+# another shortcut or nothing, so the transcript lands only if the lookup
+# works. (Colemak keeps V on key 9 under ⌘, and Workman is not installed.)
+# The layout the VM started on is put back, and the sources the scenario
+# enabled are disabled again, however the scenario ends.
 
 VM_INPUT_SOURCE="$VM_FIXTURES/input-source.js"
-LAYOUTS=(com.apple.keylayout.French com.apple.keylayout.Dvorak com.apple.keylayout.Russian)
+LAYOUTS=(
+  com.apple.keylayout.French
+  com.apple.keylayout.Dvorak
+  com.apple.keylayout.Russian
+  com.apple.keylayout.Dvorak-Right
+  com.apple.keylayout.Turkish-Standard
+)
 LAYOUT_ORIGINAL=""
 LAYOUT_ADDED=()
 

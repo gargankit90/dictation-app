@@ -93,14 +93,22 @@ cat >"$tmp/bin/ssh" <<'FAKE'
 for last; do :; done
 exec bash -c "$last"
 FAKE
+# A job that outlives every wait the cases make (10 minutes): only a TERM ends
+# it. Its path holds $tmp, so the exit trap's pkill -f "$tmp/" reaps it too.
+ln -s /bin/sleep "$tmp/longsleep"
 chmod +x "$tmp/bin/"* "$tmp/jobbin/"*
 
 # --- The harness each case runs in a bash of its own ----------------------------
 #
 # Switches:
 #   STUB_REAL_VM=1       keep lib.sh's vm (ssh is the fake above)
-#   STUB_TERMINAL        run (default): "Terminal" runs the job; stale: it
-#                        writes a done file with another job's token instead
+#   STUB_TERMINAL        run (default): "Terminal" runs the job to its end before
+#                        `open` returns, so the first poll finds the result and
+#                        no poll count or clock decides the case; async: it
+#                        starts the job in the background (for the cases about
+#                        a job that outlasts its deadline, or is waited for);
+#                        stale: it writes a done file with another job's token
+#                        instead
 #   STUB_PLANT_OLD_DONE  an earlier job's done file is there before the start
 #   STUB_PREP_STATUS     status of the job's preparation step
 #   STUB_FAST_SLEEP=1    the host's sleep takes 0.05 s (the deadlines count
@@ -137,7 +145,8 @@ if [ "${STUB_REAL_VM:-0}" != 1 ]; then
       "open -a Terminal "*)
         eval "file=${cmd#open -a Terminal }"
         case ${STUB_TERMINAL:-run} in
-          run) PATH="$STUB/../jobbin:$PATH" bash "$file" >/dev/null 2>&1 </dev/null & ;;
+          run) PATH="$STUB/../jobbin:$PATH" bash "$file" >/dev/null 2>&1 </dev/null ;;
+          async) PATH="$STUB/../jobbin:$PATH" bash "$file" >/dev/null 2>&1 </dev/null & ;;
           stale) printf 'an-earlier-job-token 0\n' >"${file%.command}.done" ;;
         esac
         return 0
@@ -214,10 +223,11 @@ err() { echo "$tmp/case-$1/stderr"; }
 calls() { echo "$tmp/case-$1/calls"; }
 
 # A scenario through run_scenario; prints its result as the case's output.
-# With the fast sleep, vm_terminal's default 30 polls are only about 1.5 s,
-# which a job (a bash and fake osascripts) can miss on a busy machine; 400
-# polls (about 20 s) leave room. A case that tests the deadline sets its own
-# (a later env assignment wins).
+# The fake Terminal runs each job to its end before `open` returns (see
+# STUB_TERMINAL), so a case never races a poll count against a job that a busy
+# machine has not scheduled yet (#149: a 20 s budget of 0.05 s polls ran out
+# under load). A case that tests the deadline sets its own (a later env
+# assignment wins), with a job that cannot end before it.
 scenario_case() {
   local name=$1 scenario=$2
   shift 2
@@ -233,18 +243,22 @@ check "vm returns the guest command's status" test "$(status_of vm_status)" = 7
 run_case vm_stdin 'printf "piped through\n" | vm cat' STUB_REAL_VM=1
 check "vm passes its stdin to the guest command" test "$(out_of vm_stdin)" = "piped through"
 
-run_case vm_deadline 'start=$SECONDS; s=0; VM_CMD_TIMEOUT=2 vm "sleep 30" || s=$?; echo "$s $((SECONDS - start))"' \
+# A command that would run for a minute: the deadline (2 s) is far from both
+# that end and the bound below, so a loaded machine cannot blur them (#149).
+run_case vm_deadline 'start=$SECONDS; s=0; VM_CMD_TIMEOUT=2 vm "sleep 60" || s=$?; echo "$s $((SECONDS - start))"' \
   STUB_REAL_VM=1
 read -r vm_status vm_took <"$(stdout vm_deadline)"
 check "a guest command past its deadline returns 124" test "$vm_status" = 124
-check "and is cancelled at the deadline, not when it ends" test "$vm_took" -le 5
+check "and is cancelled at the deadline, not when it ends" test "$vm_took" -le 40
 check "and says so" has "no answer within 2s" "$(err vm_deadline)"
 
 run_case vm_fast 'start=$SECONDS; for i in 1 2 3 4 5; do x=$(vm "echo hi"); done; echo "$x $((SECONDS - start))"' \
   STUB_REAL_VM=1
 read -r vm_fast_out vm_fast_took <"$(stdout vm_fast)"
 check "vm's output comes back through \$(...)" test "$vm_fast_out" = hi
-check "the deadline's watcher doesn't hold up a \$(vm ...)" test "$vm_fast_took" -le 2
+# Held up, each of the five calls would wait out the watcher's one-second
+# sleep: 5 s at least. 3 s leaves room for a busy machine (#149).
+check "the deadline's watcher doesn't hold up a \$(vm ...)" test "$vm_fast_took" -le 3
 
 # --- vm_terminal: the guest's status, deadlines, stale results ---------------------
 
@@ -256,12 +270,33 @@ run_case term_exit 'vm_terminal "echo before failing; exit 23"'
 check "a guest exit status of 23 is vm_terminal's status" test "$(status_of term_exit)" = 23
 check "and the job's output still comes back" test "$(out_of term_exit)" = "before failing"
 
-run_case term_deadline 'start=$SECONDS; s=0; VM_TERMINAL_TIMEOUT=2 vm_terminal "/bin/sleep 8" || s=$?; echo "$s $((SECONDS - start))"'
+# A job that takes a while is waited for, and its result is the answer: the
+# case that used to be every scenario's, now kept for itself, with a wait
+# (3000 polls, over two minutes) that only a hung job would use up.
+run_case term_late 'vm_terminal "/bin/sleep 0.5; echo late"' STUB_TERMINAL=async STUB_FAST_SLEEP=1 VM_TERMINAL_TIMEOUT=3000
+check "a Terminal job that ends a while after it started is waited for" test "$(status_of term_late)" = 0
+check "and its output comes back" test "$(out_of term_late)" = late
+
+# The job outlasts the deadline (2 s) by far, so only the deadline can end the
+# wait, and a loaded machine cannot make the job finish first (#149). It also
+# outlasts job_gone's 30 s wait below, so it is gone only if the deadline
+# really cancelled it (T5 R1).
+run_case term_deadline "start=\$SECONDS; s=0; VM_TERMINAL_TIMEOUT=2 vm_terminal '$tmp/longsleep 600' || s=\$?; echo \"\$s \$((SECONDS - start))\"" \
+  STUB_TERMINAL=async
 read -r term_status term_took <"$(stdout term_deadline)"
 check "a Terminal job past its deadline fails (124)" test "$term_status" = 124
-check "at the deadline" test "$term_took" -le 6
+check "at the deadline" test "$term_took" -le 20
 check "and says it was cancelled" has "did not finish in 2s" "$(err term_deadline)"
-check "and the job is killed" sh -c "! pgrep -f '$tmp/case-term_deadline/case-vm/run/[j]ob-' >/dev/null"
+# pkill only sends TERM: wait for the job to be gone rather than look once.
+job_gone() { # case: true once no job of the case runs, within 30 s
+  local i
+  for i in $(seq 1 300); do
+    pgrep -f "$tmp/case-$1/case-vm/run/[j]ob-" >/dev/null || return 0
+    sleep 0.1
+  done
+  return 1
+}
+check "and the job is killed" job_gone term_deadline
 
 run_case term_stale 'vm_terminal "echo the real job"' STUB_TERMINAL=stale
 check "a done file with another job's token is refused (125)" test "$(status_of term_stale)" = 125
@@ -297,7 +332,9 @@ scenario_case hold_guest_fails e2e_hold_release STUB_OSA_STATUS=1
 check "a guest exit status of 1 with the expected output fails the scenario" \
   test "$(out_of hold_guest_fails)" = FAIL
 
-scenario_case held_timeout e2e_hold_release STUB_OSA_SLEEP=3 VM_TERMINAL_TIMEOUT=10
+# The osascript of the first job sleeps 30 s, the wait is 10 polls of 0.05 s:
+# the job cannot end first however slowly the polls run (#149).
+scenario_case held_timeout e2e_hold_release STUB_TERMINAL=async STUB_OSA_SLEEP=30 VM_TERMINAL_TIMEOUT=10
 check "Terminal jobs past their deadline fail the scenario" test "$(out_of held_timeout)" = FAIL
 check "the deadline is reported" has "did not finish" "$(err held_timeout)"
 
@@ -390,6 +427,19 @@ check "the provider's requests are counted and read from its events" \
 run_case textedit_unread 'vm() { return 124; }; textedit_is ""'
 check "an empty TextEdit: a document that can't be read fails, not empty" \
   test "$(status_of textedit_unread)" != 0
+
+# The harness stubs textedit_text; these cases use the real one (lib_full.sh)
+# over a stubbed vm.
+run_case textedit_empty_unread '. tests/e2e/lib_full.sh; vm() { return 124; }; textedit_is_empty'
+check "textedit_is_empty: a document that can't be read is not empty (#153)" \
+  test "$(status_of textedit_empty_unread)" != 0
+check "and says so" has "could not read TextEdit" "$(err textedit_empty_unread)"
+
+run_case textedit_empty_blank '. tests/e2e/lib_full.sh; vm() { printf " \n\n"; }; textedit_is_empty'
+check "textedit_is_empty: a blank document is empty" test "$(status_of textedit_empty_blank)" = 0
+
+run_case textedit_empty_text '. tests/e2e/lib_full.sh; vm() { printf "pasted\n"; }; textedit_is_empty'
+check "textedit_is_empty: a document with text is not empty" test "$(status_of textedit_empty_text)" != 0
 
 run_case textedit_exact 'vm() { esc_b64 "a\nb\n"; }; textedit_is "$(esc_b64 "a\nb\n")" && ! textedit_is "$(esc_b64 "a\nb")"'
 check "TextEdit's text is compared exactly, a trailing newline too" \

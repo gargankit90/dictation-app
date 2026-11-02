@@ -55,6 +55,10 @@ All in `src/platform/macos/listener.rs` unless noted.
    (`CGEventSourceFlagsState`, the same source as the snapshot at start)
    and reconciles to those; only if they show the change too is it a missed
    release and a resync.
+   The tap-disable pseudo-event handler asks the same seam
+   (`CallbackCtx::session_flags`), so its test gives it fixed flags and a
+   modifier held on the real keyboard while the gate runs can't fail it
+   (#156).
 5. `src/types/hotkey.rs`: `KeyEvent::resync(modifiers)` and
    `KeyEvent::is_resync()`. A resync has no key and no changed modifier,
    which no other macOS event has. `HotkeyManager` needs no change: it

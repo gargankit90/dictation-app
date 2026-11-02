@@ -189,6 +189,20 @@ describe("the microphone step", () => {
     await heading("Allow Accessibility");
   });
 
+  it("stays on the step when the microphone goes from not asked to refused (#159)", async () => {
+    // A permission that changes is not a permission that was granted: only
+    // "granted" moves the step on, so a refusal never asks for the next step.
+    render(<Onboarding onFinished={() => undefined} />);
+    await heading("Allow the microphone");
+
+    backend.microphone = "denied";
+    windowShown();
+    await screen.findByText(/The microphone is turned off for dictation-app/u);
+    expect(await heading("Allow the microphone")).toBeTruthy();
+    expect(backend.named("set_onboarding_step")).toEqual([]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("sends a refused microphone to System Settings", async () => {
     backend.microphone = "denied";
     render(<Onboarding onFinished={() => undefined} />);
@@ -227,6 +241,23 @@ describe("the Accessibility step", () => {
     backend.accessibility = "granted";
     windowShown();
     await heading("Add your API key");
+  });
+});
+
+describe("the Accessibility step refused", () => {
+  it("stays on the step when Accessibility goes from not asked to refused (#159)", async () => {
+    backend.microphone = "granted";
+    backend.step = "accessibility";
+    render(<Onboarding onFinished={() => undefined} />);
+    await heading("Allow Accessibility");
+
+    backend.accessibility = "denied";
+    windowShown();
+    await waitFor(() => {
+      expect(backend.named("get_onboarding").length).toBeGreaterThanOrEqual(2);
+    });
+    expect(await heading("Allow Accessibility")).toBeTruthy();
+    expect(backend.named("set_onboarding_step")).toEqual([]);
   });
 });
 

@@ -101,8 +101,14 @@ run_case() {
   if [ "$scenario" = e2e_error_bad_key ]; then tail=true; fi
   local flags=(-e)
   if [ "${TRACE:-0}" = 1 ]; then flags=(-x); fi
+  # perl puts SIGINT back to its default first. A job started with `&` by a
+  # shell without job control (a gate run in the background, a CI wrapper)
+  # inherits SIGINT as *ignored*, and bash can neither trap nor be stopped by
+  # a signal that was ignored when it started: the INT cases would run to the
+  # end and exit 0 (#147). Nothing else here depends on the load.
   set +e
   env ROOT="$root" STUB="$dir" VM_PASSWORD="$PW_SENTINEL" "$@" \
+    perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die "exec: $!"' \
     bash "${flags[@]}" -c '. "$STUB/../harness.sh"; '"$scenario"'; '"$tail" \
     >"$dir/out" 2>"$dir/err" </dev/null
   echo $? >"$dir/status"
@@ -163,10 +169,16 @@ run_case textedit_fails e2e_real_groq "$KEY" STUB_TEXTEDIT_STATUS=24
 check "a failing TextEdit setup: the status is kept" test "$(status_of textedit_fails)" = 24
 check "a failing TextEdit setup: the key is removed" test ! -e "$tmp/textedit_fails/stored"
 
-for signal in INT TERM HUP; do
-  run_case "signal_$signal" e2e_real_groq "$KEY" STUB_LAUNCH_SIGNAL=$signal
-  check "$signal after the store: the key is removed" test ! -e "$tmp/signal_$signal/stored"
-  check "$signal after the store: the run still fails" test "$(status_of "signal_$signal")" != 0
+# The status is 128 + the signal number, and must be exactly that: a run that
+# ignored the signal and finished would exit 0, one that died of it without
+# its cleanup would leave the key.
+for signal in INT:130 TERM:143 HUP:129; do
+  name=${signal%:*}
+  expected=${signal#*:}
+  run_case "signal_$name" e2e_real_groq "$KEY" STUB_LAUNCH_SIGNAL=$name
+  check "$name after the store: the key is removed" test ! -e "$tmp/signal_$name/stored"
+  check "$name after the store: the run fails with $expected" test "$(status_of "signal_$name")" = "$expected"
+  check "$name after the store: the cleanup ran" test "$(deletes "signal_$name")" = 1
 done
 
 run_case bad_key_fails e2e_error_bad_key STUB_LAUNCH_STATUS=25

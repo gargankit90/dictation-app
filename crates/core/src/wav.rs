@@ -59,7 +59,7 @@ pub fn f32_to_i16(sample: f32) -> i16 {
 /// [`WavError::InvalidSampleRate`] for a zero or overflowing rate and
 /// [`WavError::TooLong`] if the data doesn't fit the WAV size fields.
 pub fn encode_f32(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>, WavError> {
-    let mut wav = header(samples.len(), sample_rate)?;
+    let mut wav = with_header(samples.len(), sample_rate)?;
     for &sample in samples {
         wav.extend_from_slice(&f32_to_i16(sample).to_le_bytes());
     }
@@ -72,15 +72,28 @@ pub fn encode_f32(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>, WavError
 ///
 /// As for [`encode_f32`].
 pub fn encode_i16(samples: &[i16], sample_rate: u32) -> Result<Vec<u8>, WavError> {
-    let mut wav = header(samples.len(), sample_rate)?;
+    let mut wav = with_header(samples.len(), sample_rate)?;
     for &sample in samples {
         wav.extend_from_slice(&sample.to_le_bytes());
     }
     Ok(wav)
 }
 
-/// The 44 header bytes, in a buffer with room for the samples.
-fn header(sample_count: usize, sample_rate: u32) -> Result<Vec<u8>, WavError> {
+/// The header in a buffer with room for `sample_count` samples. The room is
+/// reserved only once the header is known to be valid, and for samples the
+/// caller already holds in memory.
+fn with_header(sample_count: usize, sample_rate: u32) -> Result<Vec<u8>, WavError> {
+    let header = header(sample_count, sample_rate)?;
+    // `header` checked that the data fits 32 bits, and the caller has that
+    // many samples in memory.
+    let mut wav = Vec::with_capacity(HEADER_LEN + sample_count * usize::from(BYTES_PER_SAMPLE));
+    wav.extend_from_slice(&header);
+    Ok(wav)
+}
+
+/// The 44 header bytes, on the stack: nothing is allocated for a header
+/// whose samples don't exist (#54).
+fn header(sample_count: usize, sample_rate: u32) -> Result<[u8; HEADER_LEN], WavError> {
     let block_align = CHANNELS * BYTES_PER_SAMPLE;
     let byte_rate = sample_rate
         .checked_mul(u32::from(block_align))
@@ -94,20 +107,28 @@ fn header(sample_count: usize, sample_rate: u32) -> Result<Vec<u8>, WavError> {
         .ok_or(WavError::TooLong(sample_count))?;
     let riff_len = data_len + 36;
 
-    let mut wav = Vec::with_capacity(HEADER_LEN + data_len as usize);
-    wav.extend_from_slice(b"RIFF");
-    wav.extend_from_slice(&riff_len.to_le_bytes());
-    wav.extend_from_slice(b"WAVE");
-    wav.extend_from_slice(b"fmt ");
-    wav.extend_from_slice(&FMT_CHUNK_LEN.to_le_bytes());
-    wav.extend_from_slice(&FORMAT_PCM.to_le_bytes());
-    wav.extend_from_slice(&CHANNELS.to_le_bytes());
-    wav.extend_from_slice(&sample_rate.to_le_bytes());
-    wav.extend_from_slice(&byte_rate.to_le_bytes());
-    wav.extend_from_slice(&block_align.to_le_bytes());
-    wav.extend_from_slice(&BITS_PER_SAMPLE.to_le_bytes());
-    wav.extend_from_slice(b"data");
-    wav.extend_from_slice(&data_len.to_le_bytes());
+    let parts: [&[u8]; 13] = [
+        b"RIFF",
+        &riff_len.to_le_bytes(),
+        b"WAVE",
+        b"fmt ",
+        &FMT_CHUNK_LEN.to_le_bytes(),
+        &FORMAT_PCM.to_le_bytes(),
+        &CHANNELS.to_le_bytes(),
+        &sample_rate.to_le_bytes(),
+        &byte_rate.to_le_bytes(),
+        &block_align.to_le_bytes(),
+        &BITS_PER_SAMPLE.to_le_bytes(),
+        b"data",
+        &data_len.to_le_bytes(),
+    ];
+    let mut wav = [0; HEADER_LEN];
+    let mut at = 0;
+    for part in parts {
+        wav[at..at + part.len()].copy_from_slice(part);
+        at += part.len();
+    }
+    debug_assert_eq!(at, HEADER_LEN);
     Ok(wav)
 }
 
@@ -213,7 +234,8 @@ mod tests {
 
     #[test]
     fn rejects_audio_too_long_for_the_size_fields() {
-        // Only the length is checked before allocating, so no 4 GiB buffer.
+        // The header is built on the stack: even the largest valid length
+        // reserves nothing (#54).
         let too_many = (u32::MAX as usize - 36) / 2 + 1;
         assert_eq!(
             header(too_many, SAMPLE_RATE),

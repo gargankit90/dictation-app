@@ -52,8 +52,11 @@ pub enum Event {
     /// Nothing was pasted because a password field has focus (Secure
     /// Input); the user's clipboard was not touched.
     SecureInputBlocked,
-    /// A required permission is missing: on a hotkey press, so recording
-    /// must not start, or revoked while recording, which discards it.
+    /// A required permission is missing. On a hotkey press in `Idle`,
+    /// recording must not start and an error is shown. If it is revoked
+    /// while `Recording`, the recording is discarded and an error is shown
+    /// (M1.1). If the app learns it only as the recording stops, in
+    /// `Transcribing`, the dictation fails with that error (M2.3).
     PermissionMissing(Permission),
 }
 

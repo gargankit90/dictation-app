@@ -390,8 +390,17 @@ log_gap_ms() {
 
 # --- TextEdit and processes, small predicates for expect -----------------------
 
+# TextEdit's document is empty (blank counts). A document that can't be read
+# is not empty: a read that fails (the VM's deadline, an AppleScript timeout,
+# TextEdit busy in a modal loop) prints nothing, and nothing must not pass
+# for an empty document (#153).
 textedit_is_empty() {
-  [ -z "$(textedit_text | tr -d '[:space:]')" ]
+  local text
+  if ! text=$(textedit_text); then
+    log "  could not read TextEdit's text"
+    return 1
+  fi
+  [ -z "$(printf '%s' "$text" | tr -d '[:space:]')" ]
 }
 
 # app_count_is <n> [seconds]: true once exactly <n> copies run, within
