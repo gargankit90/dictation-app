@@ -922,18 +922,22 @@ mod tests {
             "{:?}",
             started.elapsed()
         );
-        // The listener was dropped: its key channel is closed.
-        assert!(
-            harness
-                .keys
-                .send(modifier_event(none(), RIGHT, false))
-                .is_err()
-        );
         assert_eq!(
-            harness.events.recv_timeout(STOP_POLL * 4),
+            harness.events.recv_timeout(WAIT),
             Err(mpsc::RecvTimeoutError::Disconnected),
             "the thread ended and dropped the sink"
         );
+        // The listener was dropped too: its key channel closes as the
+        // thread ends, which may trail Failed by a moment.
+        let deadline = Instant::now() + WAIT;
+        while harness
+            .keys
+            .send(modifier_event(none(), RIGHT, false))
+            .is_ok()
+        {
+            assert!(Instant::now() < deadline, "the listener was never dropped");
+            thread::sleep(STOP_POLL);
+        }
         harness.trusted.store(true, Ordering::SeqCst);
         harness.hotkey.start(Box::new(|_| {})).unwrap();
         assert!(harness.listeners.recv_timeout(WAIT).is_ok());
