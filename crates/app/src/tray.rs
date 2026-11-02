@@ -1,7 +1,8 @@
 //! What the tray shows next to its icon, driven by the pipeline's
 //! [`UiEvent`]s: a dictation error until the next recording starts (T2),
 //! "Hotkey unavailable" for as long as the hotkey doesn't work (#88), and a
-//! Relaunch item in its menu while the microphone is denied (M5.7, #161).
+//! Relaunch item in its menu while the microphone is denied (M5.7, #161) or
+//! the hotkey doesn't work (#173).
 //!
 //! [`TrayStatus`] is pure; the shell applies each [`TrayView`] it returns to
 //! the tray icon's title, tooltip and menu.
@@ -33,7 +34,10 @@ pub struct TrayView {
     pub detail: Option<String>,
     /// Whether the menu offers Relaunch: the microphone is denied, and a
     /// grant made in System Settings reaches the app only after a relaunch
-    /// (`docs/ENGINEERING.md`).
+    /// (`docs/ENGINEERING.md`); or the hotkey doesn't work, most often
+    /// because Accessibility is off (#173). A grant of Accessibility
+    /// normally brings the hotkey back by itself; Relaunch is the way out
+    /// if it doesn't.
     pub relaunch: bool,
 }
 
@@ -81,7 +85,8 @@ impl TrayStatus {
     ///
     /// Relaunch is offered from the microphone's denial error until a
     /// recording starts (the microphone works after all); the error going
-    /// away doesn't hide it, since only a relaunch picks up a grant.
+    /// away doesn't hide it, since only a relaunch picks up a grant. It is
+    /// also offered while the hotkey doesn't work.
     pub fn on_event(&mut self, event: &UiEvent) -> Option<TrayView> {
         match event {
             UiEvent::Error(DictationError::HotkeyFailed) => {
@@ -101,7 +106,7 @@ impl TrayStatus {
             }
             UiEvent::StateChanged(_) => return None,
         }
-        let relaunch = self.microphone_denied;
+        let relaunch = self.microphone_denied || self.hotkey_down;
         let view = match (&self.error, self.hotkey_down) {
             (Some(error), _) => TrayView {
                 title: Some(DICTATION_FAILED.to_owned()),
@@ -161,7 +166,8 @@ mod tests {
         view.map(|view| view.relaunch)
     }
 
-    // M5.7 criterion 2: Relaunch shows only while the microphone is denied.
+    // M5.7 criterion 2: Relaunch shows only while the microphone is denied
+    // (or, since #173, the hotkey doesn't work: see below).
     #[test]
     fn m5_7_criterion_2_relaunch_is_offered_only_while_the_microphone_is_denied() {
         let mut tray = TrayStatus::default();
@@ -173,10 +179,6 @@ mod tests {
                     Permission::Accessibility
                 )))
             ),
-            Some(false)
-        );
-        assert_eq!(
-            relaunch(tray.on_event(&UiEvent::Error(DictationError::HotkeyFailed))),
             Some(false)
         );
         assert!(!tray.view().relaunch);
@@ -200,6 +202,32 @@ mod tests {
         );
         // Denied again (the start failed for want of it): back.
         assert_eq!(relaunch(tray.on_event(&microphone_denied())), Some(true));
+    }
+
+    /// #173: while the hotkey doesn't work (Accessibility turned off), the
+    /// menu offers Relaunch; once it is back, it doesn't.
+    #[test]
+    fn relaunch_is_offered_while_the_hotkey_is_down() {
+        let mut tray = TrayStatus::default();
+        let shown = tray
+            .on_event(&UiEvent::Error(DictationError::HotkeyFailed))
+            .unwrap();
+        assert!(shown.relaunch);
+        assert_eq!(shown.title.as_deref(), Some(HOTKEY_UNAVAILABLE));
+        // A dictation error over it keeps it.
+        assert_eq!(relaunch(tray.on_event(&no_key())), Some(true));
+        assert_eq!(
+            tray.on_event(&UiEvent::StateChanged(Phase::Recording)),
+            Some(TrayView {
+                title: Some(HOTKEY_UNAVAILABLE.to_owned()),
+                detail: Some(DictationError::HotkeyFailed.to_string()),
+                relaunch: true,
+            })
+        );
+        assert_eq!(
+            tray.on_event(&UiEvent::HotkeyRestored),
+            Some(TrayView::default())
+        );
     }
 
     #[test]
@@ -278,7 +306,8 @@ mod tests {
             Some(TrayView {
                 title: Some(DICTATION_FAILED.to_owned()),
                 detail: Some(no_key_text()),
-                relaunch: false,
+                // The hotkey is still down (#173).
+                relaunch: true,
             })
         );
         assert_eq!(
@@ -292,8 +321,15 @@ mod tests {
         let mut tray = TrayStatus::default();
         tray.on_event(&UiEvent::Error(DictationError::HotkeyFailed));
         tray.on_event(&no_key());
-        assert_eq!(tray.on_event(&UiEvent::HotkeyRestored), None);
-        assert_eq!(tray.view().detail, Some(no_key_text()));
+        // The error stays; only the Relaunch the hotkey offered goes (#173).
+        assert_eq!(
+            tray.on_event(&UiEvent::HotkeyRestored),
+            Some(TrayView {
+                title: Some(DICTATION_FAILED.to_owned()),
+                detail: Some(no_key_text()),
+                relaunch: false,
+            })
+        );
         // The hotkey failing again replaces it: that's what matters now.
         assert_eq!(
             title(tray.on_event(&UiEvent::Error(DictationError::HotkeyFailed))),
