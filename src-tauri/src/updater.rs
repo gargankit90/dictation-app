@@ -2,9 +2,13 @@
 //!
 //! The plugin reads its endpoint list and the minisign **public** key from
 //! `plugins.updater` in `tauri.conf.json` and refuses any package whose
-//! signature doesn't verify against that key. An empty `pubkey` means the
-//! owner hasn't approved a key yet (see `docs/releasing.md`): the menu item
+//! signature doesn't verify against that key. The key is the owner's
+//! (M5.4); an empty `pubkey` would mean a build without one, and the menu item
 //! then says so instead of failing in a way a tester can't read.
+//!
+//! The app checks once at launch (quietly: it speaks up only to offer an
+//! update) and whenever the tray item is chosen. Nothing is installed until
+//! the user picks "Install and restart".
 //!
 //! The plugin's own commands (`check`, `download`, `install`) are not in any
 //! capability, so no window can call them: only this module, from the tray,
@@ -310,14 +314,58 @@ pub async fn install<R: Runtime>(app: &AppHandle<R>, update: &Update) -> Result<
     Ok(())
 }
 
+/// Who asked for a check: the tray item tells the user every outcome; the
+/// check at launch speaks up only when there is an update to offer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trigger {
+    /// "Check for updates…" in the tray.
+    Tray,
+    /// The quiet check when the app starts.
+    Launch,
+}
+
+impl Trigger {
+    /// Whether the user sees `outcome` (when no update is offered).
+    #[must_use]
+    pub fn shows(self, outcome: &Outcome) -> bool {
+        match self {
+            Self::Tray => true,
+            Self::Launch => matches!(outcome, Outcome::Available { .. }),
+        }
+    }
+}
+
+/// Whether to check for updates at launch: always for a person's launch; a
+/// scripted test launch (the mock engine or a WAV for audio) only when it
+/// asks with `--debug-update-check`, so an update dialog can't take the focus
+/// from the window a test pastes into.
+#[must_use]
+pub fn check_at_launch_wanted(scripted: bool, asked: bool) -> bool {
+    !scripted || asked
+}
+
 /// The tray item: checks, tells the user, and installs if they say yes.
 /// Runs on the async runtime; the dialogs are native and don't block it.
 pub fn check_from_tray<R: Runtime>(app: &AppHandle<R>) {
+    spawn_check(app, Trigger::Tray);
+}
+
+/// The check at launch: offers an update if there is one; otherwise only
+/// logs (no dialog for "up to date" or an offline Mac).
+pub fn check_at_launch<R: Runtime>(app: &AppHandle<R>) {
+    tracing::info!("checking for updates at launch");
+    spawn_check(app, Trigger::Launch);
+}
+
+fn spawn_check<R: Runtime>(app: &AppHandle<R>, trigger: Trigger) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let (outcome, update) = check(&app).await;
         let (title, text) = outcome.message();
         let Some(update) = update else {
+            if !trigger.shows(&outcome) {
+                return;
+            }
             let kind = match outcome {
                 Outcome::Failed { .. } => MessageDialogKind::Error,
                 _ => MessageDialogKind::Info,
@@ -360,6 +408,36 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn the_launch_check_speaks_only_to_offer_an_update() {
+        let up_to_date = Outcome::UpToDate {
+            current: "0.1.0".into(),
+        };
+        let failed = Outcome::Failed {
+            reason: "offline".into(),
+        };
+        let available = Outcome::Available {
+            current: "0.1.0".into(),
+            version: "0.1.1".into(),
+            notes: None,
+        };
+        for outcome in [&Outcome::NotConfigured, &up_to_date, &failed, &available] {
+            assert!(Trigger::Tray.shows(outcome), "{outcome:?}");
+        }
+        assert!(Trigger::Launch.shows(&available));
+        assert!(!Trigger::Launch.shows(&up_to_date));
+        assert!(!Trigger::Launch.shows(&failed));
+        assert!(!Trigger::Launch.shows(&Outcome::NotConfigured));
+    }
+
+    #[test]
+    fn a_scripted_launch_checks_only_when_asked() {
+        assert!(check_at_launch_wanted(false, false));
+        assert!(check_at_launch_wanted(false, true));
+        assert!(!check_at_launch_wanted(true, false));
+        assert!(check_at_launch_wanted(true, true));
+    }
 
     #[test]
     fn an_empty_or_missing_key_is_not_configured() {
@@ -659,11 +737,14 @@ mod tests {
         Url::parse(text).unwrap()
     }
 
-    const ENDPOINT: &str =
-        "https://github.com/gargankit90/dictation-app/releases/latest/download/latest.json";
+    /// The owner's endpoint (M5.4): the public releases repository.
+    const ENDPOINT: &str = "https://github.com/gargankit90/dictation-app-releases/releases/latest/download/latest.json";
+
+    /// The owner's minisign public key (M5.4, `docs/milestones/M5.4.md`).
+    const OWNER_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2QzgwRjE3M0E5NkQ3OEYKUldTUDE1WTZGdy9JOWpxTlNIUjA4ampTb2pSdkFHdENZVjA4TEtBSkkwVW5zNHFTZkNmSURRWHAK";
 
     #[test]
-    fn the_shipped_config_loads_into_the_plugin_and_has_no_key_yet() {
+    fn the_shipped_config_loads_into_the_plugin_with_the_owners_key_and_endpoint() {
         // The real tauri.conf.json: a typo in `plugins.updater` would stop
         // the app at startup, which no other test would notice.
         // (generate_context! can't run twice in one crate.)
@@ -675,14 +756,18 @@ mod tests {
             .plugins
             .0
             .insert("updater".into(), config.clone().unwrap());
-        assert!(
-            !pubkey_configured(config.as_ref()),
-            "the key is the owner's to add"
+        assert!(pubkey_configured(config.as_ref()));
+        assert_eq!(
+            config
+                .as_ref()
+                .and_then(|c| c.get("pubkey"))
+                .and_then(Value::as_str),
+            Some(OWNER_PUBKEY),
+            "the updater must trust the owner's key and no other"
         );
         assert!(!insecure_allowed(config.as_ref()));
         let endpoints = endpoints(config.as_ref());
-        assert_eq!(endpoints.len(), 1);
-        assert_eq!(endpoints[0].scheme(), "https");
+        assert_eq!(endpoints, [url(ENDPOINT)]);
         plugins(mock_builder()).build(context).unwrap();
     }
 
@@ -701,18 +786,25 @@ mod tests {
     fn a_package_must_be_https_on_the_endpoints_host_and_releases_path() {
         let endpoints = [url(ENDPOINT)];
         let good = url(
-            "https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/dictation-app.app.tar.gz",
+            "https://github.com/gargankit90/dictation-app-releases/releases/download/v0.2.0/dictation-app.app.tar.gz",
         );
         assert_eq!(package_url_problem(&good, &endpoints, false), None);
+        // The private source repository is not where packages come from.
+        let source_repo = url(
+            "https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/dictation-app.app.tar.gz",
+        );
+        assert!(package_url_problem(&source_repo, &endpoints, false).is_some());
 
-        let http = url("http://github.com/gargankit90/dictation-app/releases/download/v1/a.tar.gz");
+        let http = url(
+            "http://github.com/gargankit90/dictation-app-releases/releases/download/v1/a.tar.gz",
+        );
         assert!(
             package_url_problem(&http, &endpoints, false)
                 .unwrap()
                 .contains("secure connection")
         );
         let elsewhere =
-            url("https://evil.example/gargankit90/dictation-app/releases/download/v1/a");
+            url("https://evil.example/gargankit90/dictation-app-releases/releases/download/v1/a");
         assert!(
             package_url_problem(&elsewhere, &endpoints, false)
                 .unwrap()

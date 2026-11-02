@@ -44,6 +44,12 @@
 //!   the focus from the window the test pastes into. Only the first launch's
 //!   counts.
 //!
+//! - `--debug-update-check` makes a scripted test launch check for updates
+//!   at launch like a person's launch (M5.4). A launch with
+//!   `--debug-audio-file` or the mock engine otherwise skips that check, so
+//!   an update dialog can't take the focus from the window a test pastes
+//!   into. Only the first launch's counts.
+//!
 //! - `--debug-provider-url <url>` sends the real engine's requests (and
 //!   Settings' Test key) to `url` instead of the provider's own endpoint, so
 //!   the signed test build can talk to a local stand-in provider (T4a). Only
@@ -83,6 +89,10 @@ pub const MOCK_TEXT_SEQUENCE_FLAG: &str = "--mock-text-sequence";
 /// `--debug-onboarding`: decide about onboarding at launch like a person's
 /// launch, even in a scripted test launch (debug builds only).
 pub const DEBUG_ONBOARDING_FLAG: &str = "--debug-onboarding";
+
+/// `--debug-update-check`: check for updates at launch like a person's
+/// launch, even in a scripted test launch (debug builds only, M5.4).
+pub const DEBUG_UPDATE_CHECK_FLAG: &str = "--debug-update-check";
 
 /// `--debug-provider-url <url>` (or `=<url>`): where the real engine sends
 /// its requests instead of the provider's endpoint (debug builds only;
@@ -172,6 +182,9 @@ pub struct LaunchFlags {
     /// Decide about onboarding at launch like a person's launch (debug builds
     /// only, `--debug-onboarding`).
     pub show_onboarding: bool,
+    /// Check for updates at launch like a person's launch (debug builds
+    /// only, `--debug-update-check`).
+    pub check_updates: bool,
     /// Engine names `--transcriber` was given that no engine has.
     pub unknown_engines: Vec<String>,
     /// Arguments this build doesn't act on, for a warning.
@@ -232,6 +245,7 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
             RELEASE_FLAG if test_flags => flags.events.push(HotkeyEvent::Released),
             DEBUG_SAVE_AUDIO_FLAG if test_flags => flags.save_audio = true,
             DEBUG_ONBOARDING_FLAG if test_flags => flags.show_onboarding = true,
+            DEBUG_UPDATE_CHECK_FLAG if test_flags => flags.check_updates = true,
             key_flag if test_flags && KeyCommand::from_flag(key_flag).is_some() => {
                 flags.key_commands.extend(KeyCommand::from_flag(key_flag));
             }
@@ -438,6 +452,18 @@ mod tests {
         let flags = parse(&argv(&["--debug-onboarding"]), false);
         assert!(!flags.show_onboarding);
         assert_eq!(flags.ignored, ["--debug-onboarding"]);
+    }
+
+    /// M5.4: only a debug build can be told to check for updates at launch.
+    #[test]
+    fn debug_builds_take_the_update_check_flag() {
+        let flags = parse(&argv(&["--debug-update-check"]), true);
+        assert!(flags.check_updates);
+        assert!(flags.ignored.is_empty());
+        assert!(!flags.configure_pipeline());
+        let flags = parse(&argv(&["--debug-update-check"]), false);
+        assert!(!flags.check_updates);
+        assert_eq!(flags.ignored, ["--debug-update-check"]);
     }
 
     #[test]
