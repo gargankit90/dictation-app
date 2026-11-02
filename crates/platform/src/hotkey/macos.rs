@@ -1,5 +1,12 @@
-//! [`HotkeySource`] on macOS: a listen-only `CGEventTap` through the
+//! [`HotkeySource`] on macOS: a non-blocking `CGEventTap` through the
 //! `handy-keys` crate (MIT), matched by [`HotkeyMatcher`].
+//!
+//! The tap is not `ListenOnly`: `KeyboardListener::new()` creates it with
+//! `CGEventTapOptions::Default` (an active filter) and no blocking hotkeys,
+//! so its callback returns every event unchanged and swallows no key. That
+//! is why it needs full Accessibility (`AXIsProcessTrusted`), not Input
+//! Monitoring alone, and why recovery from `TapDisabledByTimeout` matters
+//! (#49).
 //!
 //! The tap sees every key, so nothing here logs or keeps them: only the
 //! [`HotkeyEvent`]s the matcher produces leave this module.

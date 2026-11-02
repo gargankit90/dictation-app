@@ -18,13 +18,7 @@ impl Audio {
     /// How long the audio lasts. Zero when `sample_rate` is zero.
     #[must_use]
     pub fn duration(&self) -> std::time::Duration {
-        if self.sample_rate == 0 {
-            return std::time::Duration::ZERO;
-        }
-        // usize -> f64 loses precision only past 2^53 samples (years of audio).
-        #[allow(clippy::cast_precision_loss)]
-        let seconds = self.samples.len() as f64 / f64::from(self.sample_rate);
-        std::time::Duration::from_secs_f64(seconds)
+        dictation_core::audio_math::duration(self.samples.len(), self.sample_rate)
     }
 }
 
