@@ -127,39 +127,46 @@ upd_installed_version() {
 UPD_DIALOG_APP=UserNotificationCenter
 
 # upd_dialog <text> <button>: within about 30 s a dialog shows <text>;
-# presses <button> in it. Saves both UI trees if not.
+# presses <button> in that dialog (ax.js alert-press: the window that shows
+# the text, since the alerts have no title). Saves both UI trees if not.
 upd_dialog() {
-  local text=$1 button=$2 i
-  for i in $(seq 1 20); do
-    if ax wait-text "$UPD_DIALOG_APP" "" "$text" 1 >/dev/null 2>&1; then
-      if ax_ok press "$UPD_DIALOG_APP" "" "$button"; then
-        return 0
-      fi
-      # The system's default button: "OK" (some versions say "Ok").
-      if [ "$button" = OK ] && ax_ok press "$UPD_DIALOG_APP" "" Ok; then
-        return 0
-      fi
-      break
-    fi
-    sleep 0.5
-  done
+  local text=$1 button=$2
+  if VM_TERMINAL_TIMEOUT=45 ax_ok alert-press "$UPD_DIALOG_APP" "$text" "$button" 30; then
+    return 0
+  fi
   log "  no dialog with [$text] and a [$button] button"
   {
     echo "--- $UPD_DIALOG_APP"
-    ax windows "$UPD_DIALOG_APP" 2>&1
     ax dump "$UPD_DIALOG_APP" 2>&1
   } >"$OUT_DIR/e2e_update_keeps_permissions-dialog-$(date +%H%M%S).ax.txt" || true
   dump_ui "e2e_update_keeps_permissions-$(date +%H%M%S)"
   return 1
 }
 
-# No update dialog came up within <secs>: no "is available" or "update"
-# text in a UserNotificationCenter window (it may not even be running).
+# How many of UserNotificationCenter's dialogs show <text> (0 when it isn't
+# running).
+upd_dialog_count() {
+  ax alert-count "$UPD_DIALOG_APP" "$1" 2>/dev/null || echo 0
+}
+
+# No update dialog came up within <secs>.
 upd_no_dialog() {
-  local secs=$1
+  local secs=$1 count
   sleep "$secs"
-  ! ax wait-text "$UPD_DIALOG_APP" "" "is available" 1 >/dev/null 2>&1 &&
-    ! ax wait-text "$UPD_DIALOG_APP" "" "dictation-app" 1 >/dev/null 2>&1
+  count=$(upd_dialog_count "dictation-app")
+  log "  dialogs naming dictation-app: $count"
+  [ "$count" = 0 ]
+}
+
+# Dismisses any update dialog left on screen (they outlive the app: they are
+# UserNotificationCenter's). True once none is left.
+upd_dismiss_dialogs() {
+  local said
+  said=$(ax alert-dismiss "$UPD_DIALOG_APP" "dictation-app" Later OK 2>/dev/null) || true
+  [ -z "$said" ] || log "  $UPD_DIALOG_APP: $said"
+  said=$(ax alert-dismiss "$UPD_DIALOG_APP" "update" Later OK 2>/dev/null) || true
+  [ -z "$said" ] || log "  $UPD_DIALOG_APP: $said"
+  [ "$(upd_dialog_count "dictation-app")" = 0 ] && [ "$(upd_dialog_count "update")" = 0 ]
 }
 
 upd_tray_check() {
@@ -171,6 +178,10 @@ upd_tray_check() {
 upd_cleanup() {
   local ok=0
   fresh_app_state || ok=1
+  if ! upd_dismiss_dialogs; then
+    log "  cleanup: an update dialog is still on screen"
+    ok=1
+  fi
   if [ "$UPD_SERVER_STOPPED" = 0 ] && ! upd_server_stop; then
     log "  cleanup: the update server is still running"
     ok=1
@@ -218,6 +229,7 @@ e2e_update_keeps_permissions() {
     vm "tar -C $(q "$VM_UPD_DIR/manifests") -xf -"
 
   fresh_app_state
+  expect "no update dialog is left from before" upd_dismiss_dialogs
   install_app "$UPD_DIR/old/$APP_NAME.app"
   expect "0.1.0 is installed" test "$(upd_installed_version)" = "$UPD_OLD"
 
