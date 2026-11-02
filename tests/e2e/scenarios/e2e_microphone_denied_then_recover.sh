@@ -32,7 +32,7 @@
 
 MIC_BUNDLE_ID=com.dictationapp.desktop
 # DictationError::PermissionMissing(Microphone)'s text (crates/core).
-MIC_ERROR="Microphone permission is missing. Allow it in System Settings, Privacy & Security, Microphone, then reopen the app."
+MIC_ERROR="Microphone permission is missing. Allow it in Privacy & Security, Microphone, then reopen the app."
 MIC_PROMPT_APP=UserNotificationCenter
 MIC_PROMPT_TEXT="would like to access the microphone"
 MIC_SETTINGS_URL='x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'
@@ -198,6 +198,7 @@ e2e_microphone_denied_then_recover() {
   expect "a second press shows the actionable error" \
     wait_for_log_count "shown to the user error=$MIC_ERROR" 2 10
   expect "the overlay renders it" overlay_shows "shown: $MIC_ERROR"
+  screenshot e2e_microphone_denied_then_recover.error
   expect "and the tray's tooltip has it" tray_shows "$TRAY_ERROR_TITLE" "$TRAY_TOOLTIP: $MIC_ERROR"
   expect "macOS doesn't ask again" no_mic_prompt
   launch --release

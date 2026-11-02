@@ -79,7 +79,7 @@ impl fmt::Debug for DictationError {
 fn permission_message(permission: Permission) -> &'static str {
     match permission {
         Permission::Microphone => {
-            "Microphone permission is missing. Allow it in System Settings, Privacy & Security, Microphone, then reopen the app."
+            "Microphone permission is missing. Allow it in Privacy & Security, Microphone, then reopen the app."
         }
         Permission::Accessibility => "Accessibility permission is missing.",
     }
@@ -111,7 +111,7 @@ mod tests {
             ),
             (
                 DictationError::PermissionMissing(Permission::Microphone),
-                "Microphone permission is missing. Allow it in System Settings, Privacy & Security, Microphone, then reopen the app.",
+                "Microphone permission is missing. Allow it in Privacy & Security, Microphone, then reopen the app.",
             ),
             (
                 DictationError::PermissionMissing(Permission::Accessibility),
