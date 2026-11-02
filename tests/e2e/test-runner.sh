@@ -453,19 +453,22 @@ check "TextEdit's text is compared exactly, a trailing newline too" \
 # #164: a run in miniature ends its fixtures however it ends, KEEP=1 or not,
 # and only KEEP=1 keeps its files. It has a longsleep, and a job holding a
 # /bin/sleep (no $tmp in its command line) that answers TERM by starting
-# another longsleep, as a held-key job starts a release.
+# another longsleep, as a held-key job starts a release. That /bin/sleep is
+# told apart from other runs' by its argument, 602.<this runner's pid>: a
+# machine-wide match on "/bin/sleep 602" made two runners fail each other.
+held_sleep="602.$$"
 cleanup_case() { # name, KEEP, how the run ends: pass, fail or term
   local dir="$tmp/cleanup-$1" status=0
   mkdir -p "$dir"
   ln -s /bin/sleep "$dir/longsleep"
-  KEEP=$2 bash -c '
+  KEEP=$2 HELD_SLEEP=$held_sleep bash -c '
     tmp=$1
     . "$2/tests/e2e/fixture_cleanup.sh"
     trap finish_run EXIT
     trap "exit 143" TERM
     # Not on the runner'"'"'s output: a survivor would hold a pipe open.
     "$tmp/longsleep" 600 >/dev/null 2>&1 &
-    bash -c "trap \"\$0 601 &\" TERM; /bin/sleep 602 & wait" "$tmp/longsleep" >/dev/null 2>&1 &
+    bash -c "trap \"\$0 601 &\" TERM; /bin/sleep $HELD_SLEEP & wait" "$tmp/longsleep" >/dev/null 2>&1 &
     sleep 0.5
     case $3 in
       pass) exit 0 ;;
@@ -476,7 +479,7 @@ cleanup_case() { # name, KEEP, how the run ends: pass, fail or term
   echo "$status" >"$dir.status"
 }
 no_fixture_left() { # dir
-  [ -z "$(pgrep -f "$1/" || true)" ] && [ -z "$(pgrep -fx '/bin/sleep 602' || true)" ]
+  [ -z "$(pgrep -f "$1/" || true)" ] && [ -z "$(pgrep -fx "/bin/sleep $held_sleep" || true)" ]
 }
 for how in pass:0 fail:1 term:143; do
   for keep in 1 0; do

@@ -134,7 +134,7 @@ Tauri is a thin layer on top.
   Settings › Privacy & Security › Microphone reaches the app only after it
   is quit and reopened: macOS 15 keeps reporting the refusal to the running
   app (`AVCaptureDevice` authorization status, checked in the VM over 25 s,
-  T4b). So the error says to allow it there and reopen the app. Checked by
+  T4b). So the error says to allow it there and relaunch the app from the menu bar. Checked by
   `e2e_microphone_denied_then_recover` (#126).
 - **Paste target:** the text goes to whatever has keyboard focus when it is
   pasted, not where the dictation started. A user who switches windows (or
