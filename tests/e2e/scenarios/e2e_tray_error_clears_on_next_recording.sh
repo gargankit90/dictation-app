@@ -11,7 +11,7 @@
 # The error of a dictation with no key (DictationError's text around
 # TranscribeError::MissingKey's user message).
 TRAY_NO_KEY_ERROR="Transcription failed: Add your API key in Settings."
-# The tray's title for any error (TRAY_ERROR_TITLE in src-tauri/src/lib.rs).
+# The tray's title for any error (DICTATION_FAILED in crates/app/src/tray.rs).
 TRAY_ERROR_TITLE="⚠ Dictation failed"
 # Its tooltip when there is no error.
 TRAY_TOOLTIP="dictation-app"
