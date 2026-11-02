@@ -71,6 +71,7 @@ export function Onboarding({ onFinished }: Props) {
   const [keyInput, setKeyInput] = useState("");
   const [keySaved, setKeySaved] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [testing, setTesting] = useState(false);
   // The test dictation lands here.
   const [tryText, setTryText] = useState("");
   const tryField = useRef<HTMLTextAreaElement>(null);
@@ -257,6 +258,7 @@ export function Onboarding({ onFinished }: Props) {
       }
     }
     setBusy(true);
+    setTesting(true);
     setNotice(null);
     try {
       const outcome = await testKey(provider, typed);
@@ -291,6 +293,7 @@ export function Onboarding({ onFinished }: Props) {
       return;
     } finally {
       setBusy(false);
+      setTesting(false);
     }
     await goTo("try");
   }
@@ -522,7 +525,7 @@ export function Onboarding({ onFinished }: Props) {
             disabled={busy}
             onClick={() => void testAndContinue()}
           >
-            {busy ? "Testing…" : "Test and continue"}
+            {testing ? "Testing…" : "Test and continue"}
           </button>
         ) : next !== undefined ? (
           <button
