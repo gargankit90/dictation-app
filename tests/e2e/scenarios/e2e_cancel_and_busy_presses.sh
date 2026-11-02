@@ -16,17 +16,19 @@
 # wrong dictation, or a second one, shows in TextEdit's exact text.
 
 # A Terminal job: Right Option down, then (once the app's log shows one more
-# Recording than before, within 10 s) Esc with Right Option held, then
-# Right Option up. Option+Esc is also TextEdit's "complete" shortcut: it
-# opens a word-completion list whose modal loop holds up TextEdit's Apple
-# Events (and so every read of its text) until it closes, so a plain Esc
-# closes it, as a user would; the app, back in Idle, ignores that one.
-# Prints "posted down", "pressed 1", "posted up", "pressed 1". Releases
-# the key itself however it ends, like key_hold_job.
+# Recording than before, within 10 s) Esc with Right Option held, as the
+# keyboard sends it, then Right Option up. Prints "posted down", "pressed 1",
+# "posted up". Releases the key itself however it ends, like key_hold_job.
+#
+# The job's own Terminal window stays in front: Option+Esc is also
+# TextEdit's "complete" shortcut, whose word list holds up TextEdit (its
+# Apple Events, so every read of its text) until it is dismissed, and can
+# leave a word behind. Whether anything was pasted is shown by the phases,
+# the provider's requests, the clipboard and TextEdit's text.
 hold_escape_release() {
   local key
   key="osascript -l JavaScript $(q "$VM_RIGHT_OPTION")"
-  vm_terminal "open -a TextEdit; sleep 1; down=0
+  vm_terminal "down=0
     release() { if [ \$down = 1 ]; then $key up; fi; }
     trap release EXIT; trap 'exit 1' INT TERM HUP
     recordings() {
@@ -41,8 +43,7 @@ hold_escape_release() {
       sleep 0.1
     done
     osascript -l JavaScript $(q "$VM_KEYS") right-option+escape || exit
-    sleep 0.3; $key up || exit; down=0
-    sleep 0.3; osascript -l JavaScript $(q "$VM_KEYS") escape"
+    sleep 0.3; $key up || exit; down=0"
 }
 
 # hold_pastes <word> <want>: a 1.5 s Right Option hold, the provider answering
@@ -77,14 +78,13 @@ e2e_cancel_and_busy_presses() {
   expect "Right Option down, Esc while recording, Right Option up" \
     job_says "posted down
 pressed 1
-posted up
-pressed 1" hold_escape_release
+posted up" hold_escape_release
   expect "the app is back in Idle" wait_for_idle_count 1 10
   sleep 2
   expect "the recording was dropped: Recording then Idle, nothing else" \
     test "$(phases_since 0)" = "Recording Idle"
   expect "no request reached the provider" provider_requests_are 0
-  expect "TextEdit got nothing (read back exactly)" textedit_is ""
+  expect "TextEdit is untouched (read back exactly)" textedit_is ""
   expect "the clipboard is untouched" test "$(clipboard)" = "$PROVIDER_SENTINEL"
   expect "a fresh hold then dictates" hold_pastes first first
   expect "with one request" provider_requests_are 1
@@ -103,7 +103,9 @@ posted up" real_key_hold 1.5
   provider_reply "$(esc_b64 queued)"
   expect "another hold while transcribing" job_says "posted down
 posted up" real_key_hold 0.8
-  expect "and Esc" job_says "pressed 1" keys escape
+  # From Terminal, in front, for the reason in hold_escape_release.
+  expect "and Esc" job_says "pressed 1" vm_terminal "osascript -l JavaScript $(q "$VM_KEYS") escape"
+  expect "TextEdit is in front again, for the paste" textedit_front
   sleep 2
   expect "neither started anything" test "$(phases_since "$mark")" = "Recording Transcribing"
   expect "nor sent a request" provider_requests_are 2

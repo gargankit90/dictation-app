@@ -235,6 +235,23 @@ keys() {
   vm_terminal "open -a TextEdit; sleep 1; osascript -l JavaScript $(q "$VM_KEYS") ${args[*]}"
 }
 
+# Puts TextEdit (its front document) back in front, activated twice as in
+# textedit_fresh so its window is key; checks it (up to 10 s).
+textedit_front() {
+  local i
+  for i in $(seq 1 10); do
+    vm_osascript 'tell application "TextEdit" to activate' >/dev/null || true
+    sleep 0.5
+    if [ "$(frontmost_app)" = TextEdit ]; then
+      vm_osascript 'tell application "TextEdit" to activate' >/dev/null
+      sleep 1
+      return 0
+    fi
+  done
+  log "  TextEdit didn't come to the front: [$(frontmost_app)] is"
+  return 1
+}
+
 # The frontmost app's name.
 frontmost_app() {
   vm_osascript 'tell application "System Events" to get name of first process whose frontmost is true'
