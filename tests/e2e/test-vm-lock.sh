@@ -7,13 +7,17 @@
 #   the golden image and its backup included, is refused before lume runs.
 # - A reset clones the golden image, then sets memory and CPUs on the clone
 #   (never on the golden image), then starts it.
-# - A VM's lock is taken, released however the run ends, refused with a
-#   "VM busy" error while a live run holds it, and taken over when stale. Two
-#   runs never both get one lock (also while one is slow, or both take over
-#   a stale one), a signal at any point of taking it releases it, and a
-#   scenario's own traps don't leave it behind.
+# - A VM's lock is taken with one atomic create, released however the run
+#   ends, and refused with a "VM busy" error while a live run holds it. A
+#   lock whose run is gone is never taken over: the run fails naming
+#   `run.sh --clear-stale-lock <vm>`, which removes it only if its pid is not
+#   running and only for the VMs' and the host-wide locks. Two runs never both
+#   get one lock (also while one is slow), a signal at any point of taking it
+#   releases it, and a scenario's own traps don't leave it behind.
 # - Clones of the golden image are serialised; a third running macOS VM is
-#   refused, also when two runs reset their VMs at the same time.
+#   refused, also when two runs reset their VMs at the same time and while
+#   a start is not yet visible in `lume ls` (the start lock is held until it
+#   is; at the deadline the VM is stopped and the run fails).
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd -P)
@@ -54,26 +58,30 @@ cat >"$tmp/harness.sh" <<'HARNESS'
 set -euo pipefail
 cd "$ROOT"
 export E2E_LOCK_DIR="$STUB/locks"
-export E2E_START_VISIBLE_WAIT=${E2E_START_VISIBLE_WAIT:-0}
 . tests/e2e/lib.sh
 
 # `lume ls` lists $STUB/ls.json plus every VM `lume run` has started (their
-# names, one per line, in $STUB/started).
+# names, one per line, in $STUB/started). With STUB_HIDE_STARTED=1 it leaves
+# them out until the file $STUB/visible exists (a start that takes a while to
+# show). STUB_RUN_FAIL_LS=1: `lume ls` fails once a VM has been started.
+# STUB_STOP_FAIL=1: `lume stop` fails.
 lume() {
   echo "$*" >>"$STUB/lume.log"
   case $1 in
     ls)
       if [ -e "$STUB/ls.fail" ]; then return 1; fi
-      if [ -s "$STUB/started" ]; then
+      if [ -s "$STUB/started" ] && { [ "${STUB_HIDE_STARTED:-}" != 1 ] || [ -e "$STUB/visible" ]; }; then
         jq -c --rawfile s "$STUB/started" '. + ([$s | split("\n")[] | select(length > 0)] | map({name: ., os: "macOS", status: "running"}))' "$STUB/ls.json"
       else
         cat "$STUB/ls.json"
       fi
       ;;
     clone) [ -z "${STUB_CLONE_SLEEP:-}" ] || sleep "$STUB_CLONE_SLEEP" ;;
+    stop) [ -z "${STUB_STOP_FAIL:-}" ] || return 1 ;;
     run)
       [ -z "${STUB_RUN_SLEEP:-}" ] || sleep "$STUB_RUN_SLEEP"
       echo "$2" >>"$STUB/started"
+      [ -z "${STUB_RUN_FAIL_LS:-}" ] || : >"$STUB/ls.fail"
       ;;
   esac
 }
@@ -91,6 +99,18 @@ run_case() {
   set +e
   env ROOT="$root" STUB="$dir" "$@" \
     bash -c '. "$STUB/../harness.sh"; '"$script" >"$dir/out" 2>"$dir/err" </dev/null
+  echo $? >"$dir/status"
+  set -e
+}
+# run_sh <case> <args...>: tests/e2e/run.sh itself, with the case's lock
+# directory (for --clear-stale-lock, which needs no VM).
+run_sh() {
+  local name=$1
+  shift
+  local dir=$tmp/$name
+  mkdir -p "$dir"
+  set +e
+  (cd "$root" && E2E_LOCK_DIR="$dir/locks" bash tests/e2e/run.sh "$@") >"$dir/out" 2>"$dir/err" </dev/null
   echo $? >"$dir/status"
   set -e
 }
@@ -203,9 +223,9 @@ check "an empty E2E_VM means the default" test "$(cat "$tmp/empty_vm/out")" = di
 # --- Reset: clone, then set memory and CPUs on the clone, then run ------------
 run_case reset1 'reset_vm'
 check "a reset works" test "$(status_of reset1)" = 0
-check "the reset checks the limit, stops, deletes, clones, sets, checks again, then runs (in that order)" \
+check "the reset checks the limit, stops, deletes, clones, sets, checks again, runs, then confirms in lume ls (in that order)" \
   test "$(calls reset1 | cut -d' ' -f1-2 | tr '\n' '|')" = \
-  "ls -f|stop dictation-vm|delete dictation-vm|clone $GOLDEN|set dictation-vm|ls -f|run dictation-vm|"
+  "ls -f|stop dictation-vm|delete dictation-vm|clone $GOLDEN|set dictation-vm|ls -f|run dictation-vm|ls -f|"
 check "the clone is made from the golden image" has "clone $GOLDEN dictation-vm" "$tmp/reset1/lume.log"
 check "default memory is 6GB and 4 CPUs" has "set dictation-vm --memory 6GB --cpu 4" "$tmp/reset1/lume.log"
 check "lume set is called once, on the clone only" test "$(calls reset1 | grep -c '^set ')" = 1
@@ -277,31 +297,41 @@ run_case other_vm 'arm_run_traps; vm_lock_take' E2E_VM=dictation-vm-2
 check "dictation-vm busy, dictation-vm-2 free: it runs" test "$(status_of other_vm)" = 0
 check "dictation-vm's lock is untouched" test "$(lock_pid other_vm dictation-vm)" = "$pid"
 
-# stale
+# stale: never taken over; the run fails and says how to clear it
 start_dead_pid
 dead=$DEAD_PID
 fake_lock stale dictation-vm "$dead"
-run_case stale 'vm_lock_take; lock_read dictation-vm | cut -d" " -f1'
-check "a lock whose run is gone is taken over" test "$(status_of stale)" = 0
-check "and says so" has "took over the stale 'dictation-vm' lock (pid $dead is gone)" "$tmp/stale/err"
-check "the new lock holds the new run's pid" test "$(cat "$tmp/stale/out")" != "$dead"
-run_case stale_release 'arm_run_traps; vm_lock_take'
-fake_lock stale_release dictation-vm "$dead"
-run_case stale_release 'arm_run_traps; vm_lock_take'
-check "a taken-over lock is released at the end" not_locked stale_release dictation-vm
+run_case stale 'arm_run_traps; vm_lock_take; echo reached'
+check "a lock whose run is gone: the run fails" test "$(status_of stale)" != 0
+check "it says the lock is stale, whose pid, and how to clear it" \
+  has "stale lock for dictation-vm from pid $dead (no longer running); remove it with: tests/e2e/run.sh --clear-stale-lock dictation-vm" "$tmp/stale/err"
+check "it does not carry on" lacks reached "$tmp/stale/out"
+check "it does not take the lock over" test "$(lock_pid stale dictation-vm)" = "$dead"
+check "its own exit leaves the stale lock as it was" is_locked stale dictation-vm
+check "no 'took over' message" lacks "took over" "$tmp/stale/err"
+fake_lock stale_reset dictation-vm "$dead"
+run_case stale_reset 'arm_run_traps; vm_lock_take; reset_vm'
+check "a stale VM lock: a run never gets as far as lume" no_lume_call stale_reset
+fake_lock stale_vm2 dictation-vm-2 "$dead"
+run_case stale_vm2 'arm_run_traps; vm_lock_take' E2E_VM=dictation-vm-2
+check "dictation-vm-2's stale lock names dictation-vm-2" \
+  has "stale lock for dictation-vm-2 from pid $dead (no longer running); remove it with: tests/e2e/run.sh --clear-stale-lock dictation-vm-2" "$tmp/stale_vm2/err"
 
-# a directory lock from an older version of lib_vm.sh
+# a directory lock from an older version of lib_vm.sh counts as a lock too
 mkdir -p "$tmp/empty_lock/locks/dictation-vm.lock"
 run_case empty_lock 'vm_lock_take'
-check "an old-style lock directory with no pid is taken over" test "$(status_of empty_lock)" = 0
+check "an old-style lock directory with no pid is stale, not taken over" test "$(status_of empty_lock)" != 0
+check "and says so" has "stale lock for dictation-vm from pid unknown" "$tmp/empty_lock/err"
 mkdir -p "$tmp/old_dead/locks/dictation-vm.lock"
 echo "$dead" >"$tmp/old_dead/locks/dictation-vm.lock/pid"
 run_case old_dead 'vm_lock_take'
-check "an old-style lock directory of a dead run is taken over" test "$(status_of old_dead)" = 0
+check "an old-style lock directory of a dead run is stale" test "$(status_of old_dead)" != 0
+check "and is still there" test -d "$tmp/old_dead/locks/dictation-vm.lock"
 mkdir -p "$tmp/old_live/locks/dictation-vm.lock"
 echo "$pid" >"$tmp/old_live/locks/dictation-vm.lock/pid"
 run_case old_live 'vm_lock_take'
 check "an old-style lock directory of a live run is respected" test "$(status_of old_live)" != 0
+check "as busy, not stale" has "VM busy: dictation-vm is in use by a run (pid $pid since" "$tmp/old_live/err"
 
 # a run doesn't release a lock it doesn't hold
 fake_lock not_mine dictation-vm "$pid"
@@ -325,37 +355,92 @@ check "the one that lost was told the VM is busy" \
   test "$(cat "$tmp/slow_owner/a.status")$(cat "$tmp/slow_owner/b.status")" = 10 -o "$(cat "$tmp/slow_owner/a.status")$(cat "$tmp/slow_owner/b.status")" = 01
 check "and the winner's lock is gone only once the winner is" not_locked slow_owner dictation-vm
 
-# Four runs find the same stale lock at once: one takes it over.
+# Four runs find the same stale lock at once: none takes it, all say so, and
+# the lock stays for --clear-stale-lock.
 start_dead_pid
 fake_lock stale_race dictation-vm "$DEAD_PID"
 for label in a b c d; do
   run_bg stale_race $label 'arm_run_traps; vm_lock_take; echo acquired; sleep 2'
 done
 wait_bg
-check "four runs, one stale lock: exactly one takes it over" \
-  test "$(acquired_count stale_race a b c d)" = 1
-check "the others are told it is busy" test "$(grep -l 'VM busy' "$tmp"/stale_race/?.err | wc -l | tr -d ' ')" = 3
+check "four runs, one stale lock: none takes it" test "$(acquired_count stale_race a b c d)" = 0
+check "all four say it is stale" test "$(grep -l 'stale lock for dictation-vm from pid' "$tmp"/stale_race/?.err | wc -l | tr -d ' ')" = 4
+check "the stale lock is untouched" test "$(lock_pid stale_race dictation-vm)" = "$DEAD_PID"
 
-# A takeover that was interrupted (its reclaim lock has a dead owner): the next
-# run clears that and takes over.
+# What used to be the takeover race (an abandoned reclaim lock beside a stale
+# lock, two contenders): nothing is taken over, so there is nothing to race
+# for. Both fail, both locks stay as they were (the reclaim file is just
+# ignored).
 start_dead_pid
-fake_lock reclaim_dead dictation-vm "$DEAD_PID"
-fake_lock reclaim_dead dictation-vm.reclaim "$DEAD_PID"
-run_case reclaim_dead 'arm_run_traps; vm_lock_take'
-check "an abandoned reclaim lock doesn't block a takeover" test "$(status_of reclaim_dead)" = 0
-check "and nothing is left behind" not_locked reclaim_dead dictation-vm
-check "not even the reclaim lock" not_locked reclaim_dead dictation-vm.reclaim
+fake_lock reclaim_race dictation-vm "$DEAD_PID"
+fake_lock reclaim_race dictation-vm.reclaim "$DEAD_PID"
+for label in a b; do
+  run_bg reclaim_race $label 'arm_run_traps; vm_lock_take; echo acquired; sleep 2'
+done
+wait_bg
+check "a stale lock and a stale reclaim lock, two runs: neither gets the VM" test "$(acquired_count reclaim_race a b)" = 0
+check "both fail" test "$(cat "$tmp/reclaim_race/a.status")$(cat "$tmp/reclaim_race/b.status")" = 11
+check "the stale lock is untouched" test "$(lock_pid reclaim_race dictation-vm)" = "$DEAD_PID"
+check "and so is the reclaim lock" test "$(lock_pid reclaim_race dictation-vm.reclaim)" = "$DEAD_PID"
 
-# A takeover under way (live reclaimer): this run keeps off.
-fake_lock reclaim_live dictation-vm "$DEAD_PID"
-fake_lock reclaim_live dictation-vm.reclaim "$pid"
-run_case reclaim_live 'arm_run_traps; vm_lock_take; echo reached'
-check "someone else is taking over the stale lock: this run does not" test "$(status_of reclaim_live)" != 0
-check "it leaves the stale lock and the other's reclaim lock alone" \
-  test "$(lock_pid reclaim_live dictation-vm)" = "$DEAD_PID" -a "$(lock_pid reclaim_live dictation-vm.reclaim)" = "$pid"
+# A stale lock does not make a live contender race anyone: while a run holds
+# the lock for real, others get "busy", never "stale".
 fake_lock reclaim_live_pid dictation-vm "$pid"
 run_case reclaim_live_pid 'arm_run_traps; vm_lock_take'
 check "a young lock whose run is alive is never taken over" test "$(status_of reclaim_live_pid)" != 0
+check "and is reported busy, not stale" lacks "stale lock" "$tmp/reclaim_live_pid/err"
+
+# --- run.sh --clear-stale-lock <vm> ----------------------------------------------
+start_dead_pid
+dead=$DEAD_PID
+for name in dictation-vm dictation-vm-2 vm-start golden-clone; do
+  fake_lock "clear_$name" "$name" "$dead"
+  run_sh "clear_$name" --clear-stale-lock "$name"
+  check "--clear-stale-lock $name: removes a lock whose run is gone" test "$(status_of "clear_$name")" = 0
+  check "$name: the lock is gone" not_locked "clear_$name" "$name"
+  check "$name: it says what it removed" has "removed the stale '$name' lock (pid $dead is not running)" "$tmp/clear_$name/err"
+done
+run_case clear_then_take 'arm_run_traps; vm_lock_take'
+check "after clearing, the next run takes the VM" test "$(status_of clear_then_take)" = 0
+
+fake_lock clear_live dictation-vm "$pid"
+run_sh clear_live --clear-stale-lock dictation-vm
+check "--clear-stale-lock refuses a lock whose run is alive" test "$(status_of clear_live)" != 0
+check "and says why" has "not removing the 'dictation-vm' lock: pid $pid is still running" "$tmp/clear_live/err"
+check "the live run's lock is untouched" test "$(lock_pid clear_live dictation-vm)" = "$pid"
+for name in vm-start golden-clone dictation-vm-2; do
+  fake_lock "clear_live_$name" "$name" "$pid"
+  run_sh "clear_live_$name" --clear-stale-lock "$name"
+  check "$name: a live holder is refused too" test "$(status_of "clear_live_$name")" != 0
+  check "$name: and its lock stays" is_locked "clear_live_$name" "$name"
+done
+
+n=0
+for bad in "$GOLDEN" "$BACKUP" dictation-vm-3 dictation-vm.reclaim dictation-vm-golden.lock ../dictation-vm Dictation-VM ""; do
+  n=$((n + 1))
+  # A (dead) lock under that name exists, as bait.
+  mkdir -p "$tmp/clear_bad$n/locks"
+  [ -z "$bad" ] || [ "${bad#*/}" != "$bad" ] || fake_lock "clear_bad$n" "$bad" "$dead"
+  run_sh "clear_bad$n" --clear-stale-lock "$bad"
+  check "--clear-stale-lock '$bad' is refused" test "$(status_of "clear_bad$n")" != 0
+  check "'$bad': the error lists the locks it may clear" has "the locks are: dictation-vm dictation-vm-2 golden-clone vm-start" "$tmp/clear_bad$n/err"
+  check "'$bad': nothing was removed" test "$(ls "$tmp/clear_bad$n/locks" | wc -l | tr -d ' ')" = "$([ -z "$bad" ] || [ "${bad#*/}" != "$bad" ] && echo 0 || echo 1)"
+done
+run_sh clear_noarg --clear-stale-lock
+check "--clear-stale-lock with no name is an error" test "$(status_of clear_noarg)" != 0
+run_sh clear_none --clear-stale-lock dictation-vm
+check "no lock at all: nothing to do, no error" test "$(status_of clear_none)" = 0
+check "and it says so" has "there is no 'dictation-vm' lock" "$tmp/clear_none/err"
+mkdir -p "$tmp/clear_olddir/locks/dictation-vm.lock"
+echo "$dead" >"$tmp/clear_olddir/locks/dictation-vm.lock/pid"
+run_sh clear_olddir --clear-stale-lock dictation-vm
+check "an old-style lock directory of a dead run is cleared too" not_locked clear_olddir dictation-vm
+mkdir -p "$tmp/clear_olddir_live/locks/dictation-vm.lock"
+echo "$pid" >"$tmp/clear_olddir_live/locks/dictation-vm.lock/pid"
+run_sh clear_olddir_live --clear-stale-lock dictation-vm
+check "and a live one's is refused" is_locked clear_olddir_live dictation-vm
+run_sh clear_help --help
+check "--help lists --clear-stale-lock" has "--clear-stale-lock" "$tmp/clear_help/out"
 
 # --- A signal while taking a lock releases it ---------------------------------
 # (R3) TERM right after the lock is created, before the run has done anything
@@ -373,21 +458,19 @@ for signal in INT HUP; do
   run_case "sig_$signal" 'ln() { command ln "$@"; kill -'"$signal"' $$; }; mv() { command mv "$@"; kill -'"$signal"' $$; }; arm_run_traps; vm_lock_take'
   check "$signal while taking the lock: it is released" not_locked "sig_$signal" dictation-vm
 done
-fake_lock sig_reclaim dictation-vm "$DEAD_PID"
-run_case sig_reclaim 'ln() { local rc=0; command ln "$@" || rc=$?; case "$*" in *.reclaim.lock*) kill -TERM $$ ;; esac; return $rc; }; arm_run_traps; vm_lock_take'
-check "TERM inside a takeover: the run ends" test "$(status_of sig_reclaim)" = 143
-check "its reclaim lock is released" not_locked sig_reclaim dictation-vm.reclaim
-run_case sig_reclaim2 'arm_run_traps; vm_lock_take'
-check "and the next run takes the stale lock over" test "$(status_of sig_reclaim2)" = 0
-
 # lock_release twice, and for a lock this run never took
 run_case release_twice 'vm_lock_take; lock_release dictation-vm; lock_release dictation-vm; lock_release golden-clone; release_run_locks; release_run_locks'
 check "releasing twice, or what was never held, is harmless" test "$(status_of release_twice)" = 0
 
 # --- A scenario's own traps don't leave the lock behind -----------------------
 # (R2) Scenarios arm their own EXIT trap (arm_key_cleanup, groq_guard_start...),
-# which replaces the runner's. The runner runs them through run_scenario.
+# which would replace the runner's. run_scenario (lib.sh) runs each in a
+# subshell, so the runner's traps stay armed: the lock is held while the run
+# goes on and released when it ends.
 SCEN='
+OUT_DIR=$STUB/scen-out; mkdir -p "$OUT_DIR"
+collect_log() { :; }
+held() { [ -L "$E2E_LOCK_DIR/dictation-vm.lock" ] && echo held || echo not-held; }
 scen_ok() { true; }
 scen_die() { trap '"'"'echo scenario-cleanup >&2; exit 1'"'"' EXIT; die "simulated failure"; }
 scen_term_self() { trap '"'"'echo scenario-cleanup >&2; exit 143'"'"' EXIT; trap "exit 143" TERM; kill -TERM $BASHPID; sleep 5; echo survived; }
@@ -395,41 +478,40 @@ scen_term_runner() { trap '"'"'echo scenario-cleanup >&2; exit 1'"'"' EXIT; kill
 scen_exit7() { exit 7; }
 scen_failed() { SCENARIO_FAILED=1; }
 scen_skipped() { SCENARIO_SKIPPED=1; }
-scen_both() { SCENARIO_FAILED=1; SCENARIO_SKIPPED=1; }
 '
-run_case scen_die "$SCEN"'arm_run_traps; vm_lock_take; run_scenario scen_die; echo survived'
-check "a scenario that dies while its own EXIT trap is armed: the run ends" test "$(status_of scen_die)" = 1
-check "the VM lock is released" not_locked scen_die dictation-vm
+run_case scen_die "$SCEN"'arm_run_traps; vm_lock_take; run_scenario scen_die; echo "$SCENARIO_RESULT $(held)"; trap -p EXIT'
+check "a scenario that dies with its own EXIT trap armed fails, and the run goes on" \
+  test "$(head -1 "$tmp/scen_die/out")" = "FAIL held"
+check "the runner's EXIT trap is still armed" has release_run_locks "$tmp/scen_die/out"
+check "the VM lock is released when the run ends" not_locked scen_die dictation-vm
 check "the scenario's own cleanup ran, once" test "$(grep -c scenario-cleanup "$tmp/scen_die/err")" = 1
-check "the run did not carry on" lacks survived "$tmp/scen_die/out"
 run_case scen_key "$SCEN"'
   . tests/e2e/lib_full.sh
   key_cleanup_steps() { echo steps >&2; }
-  collect_log() { :; }
   scen_key() { arm_key_cleanup scen_key; die "simulated failure"; }
-  arm_run_traps; vm_lock_take; run_scenario scen_key'
-check "the real arm_key_cleanup: a failure ends the run" test "$(status_of scen_key)" = 1
-check "the VM lock is released" not_locked scen_key dictation-vm
-check "and its cleanup steps ran" has steps "$tmp/scen_key/err"
-run_case scen_term_self "$SCEN"'arm_run_traps; vm_lock_take; run_scenario scen_term_self; echo survived'
-check "a scenario that gets TERM: its cleanup runs, the run ends" test "$(status_of scen_term_self)" != 0
-check "the VM lock is released" not_locked scen_term_self dictation-vm
+  arm_run_traps; vm_lock_take; run_scenario scen_key; echo "$SCENARIO_RESULT $(held)"'
+check "the real arm_key_cleanup: the scenario fails, the run goes on holding the lock" \
+  test "$(head -1 "$tmp/scen_key/out")" = "FAIL held"
+check "its cleanup steps ran" has steps "$tmp/scen_key/err"
+check "the VM lock is released when the run ends" not_locked scen_key dictation-vm
+run_case scen_term_self "$SCEN"'arm_run_traps; vm_lock_take; run_scenario scen_term_self; echo "$SCENARIO_RESULT $(held)"'
+check "a scenario that gets TERM: it fails, the run goes on" test "$(head -1 "$tmp/scen_term_self/out")" = "FAIL held"
 check "its cleanup ran" has scenario-cleanup "$tmp/scen_term_self/err"
+check "the VM lock is released when the run ends" not_locked scen_term_self dictation-vm
 run_case scen_term_runner "$SCEN"'arm_run_traps; vm_lock_take; run_scenario scen_term_runner; echo survived'
 check "TERM to the run while a scenario's trap is armed: the run ends with 143" test "$(status_of scen_term_runner)" = 143
 check "the VM lock is released" not_locked scen_term_runner dictation-vm
 check "the scenario's cleanup ran" has scenario-cleanup "$tmp/scen_term_runner/err"
-run_case scen_exit7 "$SCEN"'arm_run_traps; vm_lock_take; run_scenario scen_exit7; echo survived'
-check "a scenario that exits non-zero ends the run" test "$(status_of scen_exit7)" = 1
-check "the VM lock is released" not_locked scen_exit7 dictation-vm
-check "and the error names the scenario" has "scenario scen_exit7 ended the run (status 7)" "$tmp/scen_exit7/err"
+run_case scen_exit7 "$SCEN"'arm_run_traps; vm_lock_take; run_scenario scen_exit7; echo "$SCENARIO_RESULT $(held)"'
+check "a scenario that exits non-zero fails, the run goes on" test "$(head -1 "$tmp/scen_exit7/out")" = "FAIL held"
+check "the VM lock is released when the run ends" not_locked scen_exit7 dictation-vm
 run_case scen_flags "$SCEN"'
   arm_run_traps; vm_lock_take
-  for s in scen_ok scen_failed scen_skipped scen_both; do
-    run_scenario $s; echo "$s $SCENARIO_FAILED $SCENARIO_SKIPPED"
+  for s in scen_ok scen_failed scen_skipped; do
+    run_scenario $s; echo "$s $SCENARIO_RESULT"
   done'
-check "run_scenario reports ok, failed, skipped and both, and the run goes on" \
-  test "$(tr '\n' '|' <"$tmp/scen_flags/out")" = "scen_ok 0 0|scen_failed 1 0|scen_skipped 0 1|scen_both 1 1|"
+check "run_scenario reports ok, failed and skipped, and the run goes on" \
+  test "$(tr '\n' '|' <"$tmp/scen_flags/out")" = "scen_ok PASS|scen_failed FAIL|scen_skipped SKIP|"
 check "and the lock is released at the end" not_locked scen_flags dictation-vm
 
 # --- The clone lock -----------------------------------------------------------
@@ -442,8 +524,11 @@ check "lume set was not called" lacks "set " "$tmp/clone_busy/lume.log"
 
 fake_lock clone_stale golden-clone "$dead"
 run_case clone_stale 'reset_vm'
-check "a stale clone lock is taken over and the reset goes on" test "$(status_of clone_stale)" = 0
-check "the clone happened" has "clone $GOLDEN dictation-vm" "$tmp/clone_stale/lume.log"
+check "a stale clone lock: the reset fails" test "$(status_of clone_stale)" != 0
+check "and says how to clear it" \
+  has "stale lock for golden-clone from pid $dead (no longer running); remove it with: tests/e2e/run.sh --clear-stale-lock golden-clone" "$tmp/clone_stale/err"
+check "nothing was cloned" lacks "clone " "$tmp/clone_stale/lume.log"
+check "and the stale lock is left alone" test "$(lock_pid clone_stale golden-clone)" = "$dead"
 
 # --- At most two running macOS VMs ---------------------------------------------
 ls_json three_vms "$GOLDEN:running" dictation-vm-2:running dictation-vm:stopped
@@ -500,11 +585,71 @@ check "a start in progress elsewhere: this one gives up after the wait" test "$(
 check "the error names the lock" has "'vm-start' is busy" "$tmp/start_busy/err"
 check "lume run was not called" lacks "run " "$tmp/start_busy/lume.log"
 
-# The start lock is held until lume ls lists the new VM as running.
-ls_json visible unrelated:stopped
-run_case visible 'reset_vm' E2E_START_VISIBLE_WAIT=3
-check "after lume run, the reset waits for lume ls to list the VM" test "$(status_of visible)" = 0
+# The start lock is held until lume ls lists the new VM as running (R4). Here
+# the start takes a while to show: until then the lock stays held, a third
+# start is refused, and the VM only counts once it is listed.
+ls_json visible unrelated:running
+run_bg visible a 'arm_run_traps; vm_lock_take; reset_vm; echo done' E2E_VM=dictation-vm STUB_HIDE_STARTED=1 E2E_START_VISIBLE_WAIT=30
+wait_for_file "$tmp/visible/started" || true
+sleep 1
+check "while the new VM is not listed: the start lock is held" is_locked visible vm-start
+check "by the run that started it" test "$(lock_pid visible vm-start)" = "$(lock_pid visible dictation-vm)"
+run_bg visible b 'arm_run_traps; vm_lock_take; reset_vm; echo done' E2E_VM=dictation-vm-2 STUB_HIDE_STARTED=1 E2E_START_LOCK_WAIT=0
+sleep 2
+check "a third start while it is unconfirmed is refused" test "$(cat "$tmp/visible/b.status" 2>/dev/null)" = 1
+check "with the start lock's busy error" has "'vm-start' is busy" "$tmp/visible/b.err"
+check "it never ran lume run" test "$(calls visible | grep -c '^run dictation-vm-2')" = 0
+check "and the first run is still waiting, holding the lock" is_locked visible vm-start
+: >"$tmp/visible/visible"
+wait_bg
+check "once the VM is listed, the first run goes on" test "$(cat "$tmp/visible/a.status")" = 0
+check "only one VM was started" test "$(wc -l <"$tmp/visible/started" | tr -d ' ')" = 1
+check "the start lock is released after that" not_locked visible vm-start
 check "lume ls was asked again after the run" test "$(calls visible | grep -c '^ls ')" -ge 3
+
+# The deadline passes with the VM still not listed: it is stopped, the lock is
+# released and the run fails (R4). A second reset waiting for the lock goes
+# only after that: starts never overlap.
+ls_json deadline unrelated:running
+run_bg deadline a 'arm_run_traps; vm_lock_take; reset_vm; echo done' E2E_VM=dictation-vm STUB_HIDE_STARTED=1 E2E_START_VISIBLE_WAIT=2
+wait_for_file "$tmp/deadline/started" || true
+run_bg deadline b 'arm_run_traps; vm_lock_take; reset_vm; echo done' E2E_VM=dictation-vm-2 STUB_HIDE_STARTED=1 E2E_START_VISIBLE_WAIT=2 E2E_START_LOCK_WAIT=30
+wait_bg
+check "a VM never listed as running: the reset fails" test "$(cat "$tmp/deadline/a.status")" != 0
+check "and says why" has "lume ls didn't list dictation-vm as running within 2 s; stopped dictation-vm" "$tmp/deadline/a.err"
+check "it did not report success" lacks done "$tmp/deadline/a.out"
+check "its VM lock and the start lock are released" not_locked deadline dictation-vm
+# (Each reset also stops its VM first, before any start lock: only the stop
+# after the run counts.)
+line_of() { calls "$1" | grep -n "$2" | "${3:-head}" -1 | cut -d: -f1; }
+check "the second reset waited for the first to finish: run A, stop A, only then run B" \
+  test "$(line_of deadline '^run dictation-vm ')" -lt "$(line_of deadline '^stop dictation-vm$' tail)" \
+  -a "$(line_of deadline '^stop dictation-vm$' tail)" -lt "$(line_of deadline '^run dictation-vm-2 ')"
+check "the second one also fails at its own deadline" test "$(cat "$tmp/deadline/b.status")" != 0
+check "no lock is left" test "$(ls "$tmp/deadline/locks" | wc -l | tr -d ' ')" = 0
+
+# `lume ls` failing after the start is the same: unconfirmed, stopped, released.
+ls_json ls_after_run unrelated:running
+run_case ls_after_run 'arm_run_traps; vm_lock_take; reset_vm; echo done' STUB_RUN_FAIL_LS=1 E2E_START_VISIBLE_WAIT=2
+check "lume ls failing after the start: the reset fails at the deadline" test "$(status_of ls_after_run)" != 0
+check "the VM is stopped" test "$(calls ls_after_run | grep -c '^stop dictation-vm')" = 2
+check "the last call is the stop" test "$(calls ls_after_run | tail -1)" = "stop dictation-vm"
+check "the start lock is released" not_locked ls_after_run vm-start
+
+# If lume stop fails too, the run says the VM may still be starting.
+ls_json stop_fails unrelated:running
+run_case stop_fails 'arm_run_traps; vm_lock_take; reset_vm' STUB_HIDE_STARTED=1 STUB_STOP_FAIL=1 E2E_START_VISIBLE_WAIT=1
+check "unconfirmed start and a failing lume stop: the reset fails" test "$(status_of stop_fails)" != 0
+check "and says the VM may still be starting" has "lume stop dictation-vm failed; it may still be starting" "$tmp/stop_fails/err"
+check "the start lock is released" not_locked stop_fails vm-start
+
+# The start lock left by a run that died: the next reset says so and starts nothing.
+fake_lock start_stale vm-start "$dead"
+run_case start_stale 'reset_vm'
+check "a stale start lock: the reset fails" test "$(status_of start_stale)" != 0
+check "and says how to clear it" \
+  has "stale lock for vm-start from pid $dead (no longer running); remove it with: tests/e2e/run.sh --clear-stale-lock vm-start" "$tmp/start_stale/err"
+check "lume run was not called" lacks "run " "$tmp/start_stale/lume.log"
 
 mkdir -p "$tmp/ls_fails"
 : >"$tmp/ls_fails/ls.fail"
