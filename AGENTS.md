@@ -169,7 +169,7 @@ on a private repo:
 
 ## Reference repos
 
-Next to this repo in `~/Documents/Dictation App/`: Handy, FluidVoice,
+Cloned next to this repo, in the same parent folder: Handy, FluidVoice,
 openwhispr, FluidAudio, transcribe.cpp, freeflow, muesli, VoiceInk. Commits
 and what each is good for: the plan's "Reference repos" section and
 `docs/ENGINEERING.md`.

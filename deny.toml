@@ -53,7 +53,8 @@ exceptions = [
 ]
 
 [licenses.private]
-# Our own crates are `publish = false` with no `license` field (not open source).
+# Our own crates are MIT (`license.workspace = true`) but `publish = false`;
+# ignoring unpublished crates keeps them out of the third-party licence check.
 ignore = true
 
 [bans]

@@ -3,6 +3,8 @@
 Hold a hotkey, speak, release, and the text is pasted into the app that has
 focus. Mac first, then Windows. Built with Tauri 2, Rust and React.
 
+This is a learning project, built with AI agents (see [AGENTS.md](AGENTS.md)).
+
 ## Requirements
 
 - Rust: installed by `rustup` from `rust-toolchain.toml`
@@ -33,9 +35,10 @@ is there. CI builds one as an ad-hoc-signed artifact (`.github/workflows/dmg.yml
 ## Quality gate
 
 Every push and every PR runs the same gate (`scripts/gate.sh`): git's
-pre-push hook runs it through `lefthook run pre-push-gate`, and GitHub Actions
-runs it on Linux (Ubuntu 24.04; a macOS job is added once the gate has
-Mac-specific code). Run it yourself with:
+pre-push hook runs it through `lefthook run pre-push-gate`, and CI
+runs it on GitHub-hosted runners for every PR and push. The VM end-to-end
+tests (`tests/e2e/`) are run by the maintainer on a local Mac. Run it yourself
+with:
 
 ```sh
 scripts/gate.sh
@@ -69,3 +72,13 @@ on staged files: `cargo fmt --check`, `prettier --check`, `eslint`, `typos`.
 | `src-tauri` | Thin Tauri shell: commands, events, tray, windows. |
 | `src` | React UI. |
 | `docs/milestones` | One spec per milestone. |
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately, as
+described in [SECURITY.md](SECURITY.md).
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). Third-party code and its licences are listed in
+[NOTICE](NOTICE) and `THIRD-PARTY-LICENSES.txt`.
