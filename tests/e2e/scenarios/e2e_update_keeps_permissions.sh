@@ -143,10 +143,19 @@ upd_dialog() {
   return 1
 }
 
-# How many of UserNotificationCenter's dialogs show <text> (0 when it isn't
-# running).
+# How many of UserNotificationCenter's dialogs show <text>: 0 when it isn't
+# running (no dialog has been shown since the VM started). Any other failure
+# prints what ax said, which is not a number, so a check on it fails.
 upd_dialog_count() {
-  ax alert-count "$UPD_DIALOG_APP" "$1" 2>/dev/null || echo 0
+  local said status=0
+  said=$(ax alert-count "$UPD_DIALOG_APP" "$1" 2>&1) || status=$?
+  if [ "$status" = 0 ]; then
+    printf '%s' "$said"
+  elif grep -q "no running app named $UPD_DIALOG_APP" <<<"$said"; then
+    printf 0
+  else
+    printf 'ax failed: %s' "$said"
+  fi
 }
 
 # No update dialog came up within <secs>.
@@ -161,11 +170,12 @@ upd_no_dialog() {
 # Dismisses any update dialog left on screen (they outlive the app: they are
 # UserNotificationCenter's). True once none is left.
 upd_dismiss_dialogs() {
-  local said
-  said=$(ax alert-dismiss "$UPD_DIALOG_APP" "dictation-app" Later OK 2>/dev/null) || true
-  [ -z "$said" ] || log "  $UPD_DIALOG_APP: $said"
-  said=$(ax alert-dismiss "$UPD_DIALOG_APP" "update" Later OK 2>/dev/null) || true
-  [ -z "$said" ] || log "  $UPD_DIALOG_APP: $said"
+  local text said
+  for text in "dictation-app" "update"; do
+    [ "$(upd_dialog_count "$text")" != 0 ] || continue
+    said=$(ax alert-dismiss "$UPD_DIALOG_APP" "$text" Later OK 2>&1) || true
+    log "  $UPD_DIALOG_APP: $said"
+  done
   [ "$(upd_dialog_count "dictation-app")" = 0 ] && [ "$(upd_dialog_count "update")" = 0 ]
 }
 
