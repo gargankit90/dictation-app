@@ -10,7 +10,12 @@
 //!    A user who really says "thank you" has a low probability and keeps
 //!    their text; an engine that reports no probability never triggers the
 //!    filter, since without it silence can't be told from a short reply.
-//! 4. **Smart leading space.** [`clean`] takes the character before the
+//! 4. **Drop results with no words**: nothing but punctuation and
+//!    whitespace, no letter or digit in any script (`.`, `...`, `?!`). A
+//!    short, near-silent recording can come back as `.` whatever the engine
+//!    says about speech (#172); pasted, it would replace the user's
+//!    selection with a dot. Nobody dictates a lone punctuation mark.
+//! 5. **Smart leading space.** [`clean`] takes the character before the
 //!    cursor, if the caller knows it, and starts the text with one space
 //!    when it would otherwise be glued to the word before it.
 //!
@@ -112,6 +117,8 @@ pub enum Dropped {
     Empty,
     /// A [`SILENCE_PHRASES`] match with a high `no_speech_prob`.
     Silence,
+    /// No letter or digit: only punctuation, symbols and whitespace.
+    NoWords,
 }
 
 /// The result of [`clean`].
@@ -153,6 +160,9 @@ pub fn clean(transcript: &Transcript, preceding: Option<char>) -> Cleaned {
     }
     if is_silence_hallucination(text, transcript.no_speech_prob) {
         return Cleaned::Dropped(Dropped::Silence);
+    }
+    if !text.chars().any(char::is_alphanumeric) {
+        return Cleaned::Dropped(Dropped::NoWords);
     }
     if needs_leading_space(text, preceding) {
         Cleaned::Text(format!(" {text}"))
@@ -264,7 +274,8 @@ mod tests {
 
     #[test]
     fn a_silence_phrase_with_low_no_speech_prob_is_kept() {
-        for phrase in SILENCE_PHRASES {
+        // "." has no words, so it never is (see the no-words tests).
+        for phrase in SILENCE_PHRASES.iter().filter(|p| **p != ".") {
             for prob in [0.0, 0.1, 0.59] {
                 assert_eq!(
                     clean(&said(phrase, prob), None),
@@ -272,6 +283,54 @@ mod tests {
                     "{phrase:?} at {prob}"
                 );
             }
+        }
+    }
+
+    // No words (#172).
+
+    /// M5.9 criterion 5: a transcript with no letter or digit is dropped,
+    /// whatever the engine says about speech and wherever the cursor is.
+    #[test]
+    fn criterion_5_punctuation_and_symbols_alone_are_dropped() {
+        for raw in [
+            ".",
+            " . ",
+            "...",
+            "?!",
+            "\u{2026}",
+            "-",
+            "\u{3002}",
+            "( )",
+            ". ,\n;",
+            "\u{1f600}",
+        ] {
+            for transcript in [Transcript::from_text(raw), said(raw, 0.0), said(raw, 1.0)] {
+                for preceding in [None, Some('a')] {
+                    let got = clean(&transcript, preceding);
+                    assert!(
+                        matches!(got, Cleaned::Dropped(Dropped::NoWords | Dropped::Silence)),
+                        "{raw:?} {transcript:?} {preceding:?}: {got:?}"
+                    );
+                }
+            }
+            assert_eq!(
+                clean(&Transcript::from_text(raw), None),
+                Cleaned::Dropped(Dropped::NoWords),
+                "{raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn one_letter_or_digit_in_any_script_is_enough_to_keep_it() {
+        for raw in [
+            "a", "7", "I.", "?a", "\u{5b57}", "\u{e9}!", "\u{661}", "...ok",
+        ] {
+            assert_eq!(
+                clean(&Transcript::from_text(raw), None),
+                Cleaned::Text(raw.to_owned()),
+                "{raw:?}"
+            );
         }
     }
 
@@ -367,7 +426,7 @@ mod tests {
 
     #[test]
     fn no_space_is_added_before_punctuation_that_attaches_to_the_word() {
-        for raw in [", and then", ". Next", "?", ")"] {
+        for raw in [", and then", ". Next", "? Yes", ") then"] {
             let cleaned = clean(&Transcript::from_text(raw), Some('d'));
             assert_eq!(text(&cleaned), raw, "{raw:?}");
         }
