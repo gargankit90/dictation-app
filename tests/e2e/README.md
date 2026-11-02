@@ -1,8 +1,9 @@
 # End-to-end tests
 
 The built app, run inside a Lume VM and driven from the host over ssh. PRs
-don't run them (the Tester does); the **E2E** workflow runs them on every push
-to `main` (see "In CI" below). Run them locally:
+don't run them (the Tester does), and no GitHub workflow does: the Lead runs
+them on the owner's Mac after each merge with `scripts/e2e-main.sh` (see "After
+each merge" below). Run them locally:
 
 ```sh
 tests/e2e/run.sh                                   # build, reset the VM, run all scenarios
@@ -116,35 +117,45 @@ points at `dictation-vm`) don't reset each other's VM.
 - `tests/e2e/test-vm-lock.sh` (part of the gate, no VM needed) checks all of
   this with a stubbed `lume`.
 
-## In CI
+## After each merge
 
-`.github/workflows/e2e.yml` runs `tests/e2e/ci-run.sh` on the owner's Mac on
-every push to `main` (and by hand, `workflow_dispatch`); never on a PR.
+`scripts/e2e-main.sh [<sha>]` runs the suite on a commit of `origin/main`; the
+Lead runs it on the owner's Mac after each merge. It replaces the old E2E
+workflow: the repository is public, hosted CI is open to pull requests from
+forks, and the VMs and the signing certificate live on the owner's Mac, so no
+workflow may reach it.
 
+- **Which commit:** the `origin/main` tip, or the SHA you pass. A SHA that is
+  not reachable from `origin/main` (a branch, a PR head, a made-up object) is
+  refused with exit 2, before anything is built.
+- **How:** it checks the commit out into a fresh temporary worktree (never
+  your working tree), runs `npm ci` and then `tests/e2e/ci-run.sh` there, and
+  removes the worktree at the end, also after a failure or Ctrl-C.
 - **What runs:** every scenario except `e2e_real_groq` and `e2e_real_mic`
-  (CI has no API key and no real microphone); the rest use the local provider.
-- **The pool:** the wrapper builds once, then starts `run.sh --no-build` on
+  (no API key and no real microphone); the rest use the local provider.
+- **The pool:** `ci-run.sh` builds once, then starts `run.sh --no-build` on
   `dictation-vm-2` and, if its lock is taken (or stale), on `dictation-vm`.
-  The lock is `run.sh`'s own, so a Developer's or Tester's run just makes CI
-  wait or take the other VM, and CI makes them wait the same way. If both
-  stay taken it polls every 30 s (`CI_VM_POLL`) for 45 minutes
-  (`CI_VM_WAIT`, seconds) and ends as `skipped: no VM free` with exit 0: a
-  busy VM is not a broken `main`. `CI_VM_POOL="dictation-vm"` narrows the
-  pool (a Developer's local try-out); it can never name anything else, so
-  never the golden image, and `run.sh` still refuses a third running VM.
-- **Result:** a failed build or scenario fails the job (exit 1); the E2E
-  workflow is separate from CI, so it never turns the gate red.
-- **Evidence:** the artifact `e2e-evidence-<sha>` (14 days) holds `about.txt`
-  (SHA, VM, status), `results.txt` (PASS/FAIL/SKIP per scenario), the run's
-  output, the app logs, `.ax.txt` files and screenshots, with key-shaped
-  strings hidden; it is uploaded also when the suite failed or was skipped.
-- **A stale lock** (a killed run) makes CI skip that VM, and the job ends as
+  The lock is `run.sh`'s own, so a Developer's or Tester's run just makes it
+  wait or take the other VM, and it makes them wait the same way. If both stay
+  taken it polls every 30 s (`CI_VM_POLL`) for 45 minutes (`CI_VM_WAIT`,
+  seconds) and ends as `skipped: no VM free` with exit 0: a busy VM is not a
+  broken `main`. `CI_VM_POOL="dictation-vm"` narrows the pool; it can never
+  name anything else, so never the golden image, and `run.sh` still refuses a
+  third running VM.
+- **Result:** exit 0 for passed or skipped, 1 for a failed build or scenario.
+- **Evidence:** `target/e2e-main-evidence/<sha12>-<time>/` in your checkout
+  (untracked; `E2E_MAIN_EVIDENCE_ROOT` moves it). A passing run keeps only
+  `about.txt` (SHA, VM, status) and `results.txt` (PASS/FAIL/SKIP per
+  scenario): a few KB (#174). A failed or skipped run keeps everything:
+  the run's output, the app logs, `.ax.txt` files and screenshots, with
+  key-shaped strings hidden. Delete old directories by hand when you like.
+- **A stale lock** (a killed run) makes it skip that VM, and the run ends as
   skipped if both are stale: clear it with `tests/e2e/run.sh
   --clear-stale-lock dictation-vm-2` (or `dictation-vm`), as above.
-- **Queue:** the runner takes one job at a time, so while this job runs (up to
-  about two hours) the other CI jobs wait behind it.
-- `tests/e2e/test-ci-run.sh` (part of the gate, through `test-runner.sh`)
-  checks the pool with a fake `run.sh` and real lock files.
+- `scripts/test-e2e-main.sh` (part of the gate, no VM) checks the refusal, the
+  worktree and the evidence size with a stub `ci-run.sh`;
+  `tests/e2e/test-ci-run.sh` (through `test-runner.sh`) checks the pool with a
+  fake `run.sh` and real lock files.
 
 ## What a run does
 
