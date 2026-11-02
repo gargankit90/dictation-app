@@ -532,8 +532,9 @@ key_scenario_end() {
 
 # For testing the cleanup: E2E_INJECT_FAILURE=<point> makes a scenario fail
 # at that point, as a crash would. Points: after_key_down (right after a
-# key-down is posted) and mid_hold (inside real_key_hold's job, between its
-# down and up).
+# key-down is posted), mid_hold (inside real_key_hold's job, between its
+# down and up) and after_mic_denied (e2e_microphone_denied_then_recover,
+# right after the microphone was refused).
 inject_failure() {
   if [ "${E2E_INJECT_FAILURE:-}" = "$1" ]; then
     die "injected failure at $1"
