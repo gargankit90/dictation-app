@@ -35,7 +35,7 @@ is there. CI builds one as an ad-hoc-signed artifact (`.github/workflows/dmg.yml
 ## Quality gate
 
 Every push and every PR runs the same gate (`scripts/gate.sh`): git's
-pre-push hook runs it through `lefthook run pre-push-gate`, and GitHub Actions
+pre-push hook runs it through `lefthook run pre-push-gate`, and CI
 runs it on GitHub-hosted runners for every PR and push. The VM end-to-end
 tests (`tests/e2e/`) are run by the maintainer on a local Mac. Run it yourself
 with:
