@@ -27,3 +27,4 @@ pub mod reveal;
 pub mod secrets;
 pub mod secure_input;
 pub mod single_instance;
+pub mod system_settings;
