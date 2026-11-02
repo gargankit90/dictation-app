@@ -3,8 +3,9 @@
 //! M1.5: a menu-bar app with a tray menu (Settings and Quit) that runs the
 //! pipeline with the real hotkey and the stand-ins for transcription and
 //! paste. M2.2: it records from the real microphone, and
-//! a dictation error (such as a missing microphone permission) shows as the
-//! tray's title and tooltip until the next recording. A second launch
+//! a dictation error (such as a missing microphone permission) shows in the
+//! tray until the next recording: a short title next to the icon (#151) and
+//! the message in the tooltip. A second launch
 //! forwards its flags to the running app and exits (M1.7:
 //! `dictation_platform::single_instance`, which replaced the
 //! single-instance plugin). Debug builds act on the test flags (`--press`,
@@ -82,6 +83,11 @@ const REVEAL_LOG_ID: &str = "reveal-log";
 const SETTINGS_WINDOW: &str = "main";
 const TRAY_ID: &str = "main";
 const TOOLTIP: &str = "dictation-app";
+/// The tray's title while an error is shown: short and the same for every
+/// error, so the status item always fits in the menu bar (#151). A long
+/// title made macOS hide the item, and with it the way to Settings. The
+/// whole message is in the tooltip (and the overlay).
+const TRAY_ERROR_TITLE: &str = "\u{26a0} Dictation failed";
 /// Where a launch's flags came from, for the log.
 const THIS_LAUNCH: &str = "this launch";
 const SECOND_LAUNCH: &str = "a second launch";
@@ -574,8 +580,8 @@ fn show_settings(app: &AppHandle) {
 }
 
 /// Logs each state change (never the transcript), passes each event to the
-/// overlay, and shows a dictation error as the tray's title and tooltip
-/// until the next recording starts.
+/// overlay, and shows a dictation error in the tray (a short title, the
+/// message in the tooltip) until the next recording starts.
 async fn show_ui_events(app: AppHandle, mut events: UiReceiver, overlay: Option<UiSender>) {
     while let Some(event) = events.recv().await {
         if let Some(overlay) = &overlay {
@@ -598,15 +604,23 @@ async fn show_ui_events(app: AppHandle, mut events: UiReceiver, overlay: Option<
     }
 }
 
-/// Puts `error` in the tray's title (next to the icon) and tooltip, or
-/// clears it.
+/// The tray's title and tooltip for `error`, or for none.
+fn tray_texts(error: Option<&str>) -> (Option<&'static str>, String) {
+    match error {
+        Some(error) => (Some(TRAY_ERROR_TITLE), format!("{TOOLTIP}: {error}")),
+        None => (None, TOOLTIP.to_owned()),
+    }
+}
+
+/// Shows that `error` happened in the tray: a short title next to the icon,
+/// the message in the tooltip; or clears both.
 fn show_in_tray(app: &AppHandle, error: Option<&str>) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
-    let tooltip = error.map_or_else(|| TOOLTIP.to_owned(), |error| format!("{TOOLTIP}: {error}"));
+    let (title, tooltip) = tray_texts(error);
     if let Err(error) = tray
-        .set_title(error)
+        .set_title(title)
         .and_then(|()| tray.set_tooltip(Some(tooltip)))
     {
         tracing::warn!(%error, "could not update the tray");
@@ -636,6 +650,59 @@ fn shut_down(app: &AppHandle) {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .take(),
         );
+    }
+}
+
+#[cfg(test)]
+mod tray_tests {
+    use dictation_core::error::{DictationError, Permission};
+
+    use super::*;
+
+    /// One of each error, with reasons as long as the summary lets through.
+    fn every_error() -> Vec<DictationError> {
+        let long = "The provider rejected your API key. Check it in Settings. ".repeat(4);
+        let all = vec![
+            DictationError::TranscriptionFailed {
+                reason: long.clone(),
+            },
+            DictationError::EmptyTranscript,
+            DictationError::InsertFailed { reason: long },
+            DictationError::SecureInput,
+            DictationError::PermissionMissing(Permission::Microphone),
+            DictationError::PermissionMissing(Permission::Accessibility),
+            DictationError::HotkeyFailed,
+        ];
+        // A new kind of error fails to compile here until it is listed above.
+        for error in &all {
+            match error {
+                DictationError::TranscriptionFailed { .. }
+                | DictationError::EmptyTranscript
+                | DictationError::InsertFailed { .. }
+                | DictationError::SecureInput
+                | DictationError::PermissionMissing(_)
+                | DictationError::HotkeyFailed => {}
+            }
+        }
+        all
+    }
+
+    /// #151: whatever the error, the title is the same short text, so the
+    /// status item fits in the menu bar; the whole message is the tooltip.
+    #[test]
+    fn the_tray_title_stays_short_for_every_error() {
+        for error in every_error() {
+            let message = error.to_string();
+            let (title, tooltip) = tray_texts(Some(&message));
+            assert_eq!(title, Some(TRAY_ERROR_TITLE), "{message}");
+            assert!(TRAY_ERROR_TITLE.chars().count() <= 20);
+            assert_eq!(tooltip, format!("dictation-app: {message}"));
+        }
+    }
+
+    #[test]
+    fn no_error_clears_the_title() {
+        assert_eq!(tray_texts(None), (None, "dictation-app".to_owned()));
     }
 }
 
