@@ -84,8 +84,11 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<MacOSLi
     let thread_state = Arc::clone(&state);
     let thread_running = Arc::clone(&running);
 
+    // Patched (dictation-app, #173): only a tap that may block needs to be
+    // an active filter.
+    let listen_only = blocking_hotkeys.is_none();
     let handle = thread::spawn(move || {
-        run_event_tap(thread_state, thread_running, init_tx);
+        run_event_tap(thread_state, thread_running, init_tx, listen_only);
     });
 
     // Wait for the event tap to be created
@@ -218,6 +221,13 @@ struct CallbackCtx {
     /// flags disagree with the tracked state. [`session_flags`] in the
     /// tap; a fixed answer in tests.
     session_flags: fn() -> CGEventFlags,
+    /// Patched (dictation-app, #173): whether the process may still tap
+    /// events ([`check_accessibility`] in the tap; a fixed answer in tests).
+    trusted: fn() -> bool,
+    /// Patched (dictation-app, #173): set by the callback when the system
+    /// disabled the tap and the process is no longer trusted. The tap
+    /// thread then tears the tap down instead of running on.
+    lost_trust: Cell<bool>,
 }
 
 /// The modifier flags of the combined session, hardware and posted events
@@ -249,6 +259,19 @@ unsafe extern "C-unwind" fn event_tap_callback(
         event_type,
         CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput
     ) {
+        // Patched (dictation-app, #173): never re-enable a tap the system
+        // disabled once the process has lost Accessibility. Turning the
+        // permission off while an active tap was installed froze the whole
+        // Mac's input; re-enabling it there only fights the system. Stop
+        // the tap thread instead: the tap is removed, the event channel
+        // closes, and the consumer sees the listener die.
+        if !(ctx.trusted)() {
+            ctx.lost_trust.set(true);
+            if let Some(run_loop) = CFRunLoop::current() {
+                run_loop.stop();
+            }
+            return event.as_ptr();
+        }
         if let Some(tap) = ctx.tap.get() {
             CGEvent::tap_enable(tap.as_ref(), true);
         }
@@ -562,6 +585,7 @@ fn run_event_tap(
     state: Arc<Mutex<ListenerState>>,
     running: Arc<AtomicBool>,
     init_tx: Sender<std::result::Result<TapRunLoop, String>>,
+    listen_only: bool,
 ) {
     // Event types we want to monitor
     let event_mask: CGEventMask = (1 << CGEventType::KeyDown.0)
@@ -580,16 +604,28 @@ fn run_event_tap(
         state: Arc::clone(&state),
         tap: Cell::new(None),
         session_flags,
+        trusted: check_accessibility,
+        lost_trust: Cell::new(false),
     }));
 
     let callback: CGEventTapCallBack = Some(event_tap_callback);
 
-    // Use Default mode (not ListenOnly) to enable optional event blocking
+    // Default mode (an active filter) only to block events. Patched
+    // (dictation-app, #173): with nothing to block, a listen-only tap. The
+    // window server waits for an active tap's answer to every event, so a
+    // filter tap that stops answering (its process lost Accessibility while
+    // it ran) held up the whole Mac's keyboard and mouse; it never waits for
+    // a listen-only tap.
+    let options = if listen_only {
+        CGEventTapOptions::ListenOnly
+    } else {
+        CGEventTapOptions::Default
+    };
     let tap: Option<CFRetained<CFMachPort>> = unsafe {
         CGEvent::tap_create(
             CGEventTapLocation::SessionEventTap,
             CGEventTapPlacement::HeadInsertEventTap,
-            CGEventTapOptions::Default,
+            options,
             event_mask,
             callback,
             ctx_ptr as *mut c_void,
@@ -678,6 +714,13 @@ fn run_event_tap(
         CFRunLoop::run();
 
         if !CFMachPort::is_valid(&tap) {
+            break;
+        }
+        // Patched (dictation-app, #173): the callback found Accessibility
+        // gone; tear the tap down rather than run on.
+        // Safety: ctx_ptr stays valid until the cleanup below, and the
+        // callback only runs on this thread.
+        if unsafe { (*ctx_ptr).lost_trust.get() } {
             break;
         }
     }
@@ -793,6 +836,8 @@ mod tests {
             state: Arc::new(Mutex::new(ListenerState::new(tx, None))),
             tap: Cell::new(Some(NonNull::from(&**tap))),
             session_flags,
+            trusted: trusted_yes,
+            lost_trust: Cell::new(false),
         }
     }
 
@@ -806,7 +851,17 @@ mod tests {
             state: Arc::new(Mutex::new(ListenerState::new(tx, None))),
             tap: Cell::new(None),
             session_flags,
+            trusted: trusted_yes,
+            lost_trust: Cell::new(false),
         }
+    }
+
+    fn trusted_yes() -> bool {
+        true
+    }
+
+    fn trusted_no() -> bool {
+        false
     }
 
     fn deliver_tap_disabled(ctx: &CallbackCtx, event_type: CGEventType) {
@@ -847,6 +902,57 @@ mod tests {
                 "callback must re-enable the tap after {event_type:?}"
             );
         }
+    }
+
+    /// Patched (dictation-app, #173): once the process has lost
+    /// Accessibility, a tap the system disabled stays disabled, and the
+    /// callback asks the tap thread to tear it down.
+    #[test]
+    fn tap_disabled_without_trust_is_not_reenabled() {
+        let Some(tap) = create_test_tap() else { return };
+
+        for event_type in [
+            CGEventType::TapDisabledByTimeout,
+            CGEventType::TapDisabledByUserInput,
+        ] {
+            let mut ctx = make_ctx(&tap);
+            ctx.trusted = trusted_no;
+            CGEvent::tap_enable(&tap, false);
+
+            deliver_tap_disabled(&ctx, event_type);
+
+            assert!(
+                !CGEvent::tap_is_enabled(&tap),
+                "an untrusted callback must not re-enable the tap after {event_type:?}"
+            );
+            assert!(ctx.lost_trust.get(), "{event_type:?}");
+        }
+    }
+
+    /// Patched (dictation-app, #173): the same without a tap (no permission
+    /// needed): trust lost is recorded and nothing is sent, and a trusted
+    /// process keeps its tap running.
+    #[test]
+    fn tap_disabled_records_lost_trust_only_when_untrusted() {
+        let (tx, rx) = mpsc::channel();
+        let ctx = CallbackCtx {
+            state: Arc::new(Mutex::new(ListenerState::new(tx, None))),
+            tap: Cell::new(None),
+            session_flags: session_flags_none,
+            trusted: trusted_no,
+            lost_trust: Cell::new(false),
+        };
+        deliver_tap_disabled(&ctx, CGEventType::TapDisabledByTimeout);
+        assert!(ctx.lost_trust.get());
+        assert!(rx.try_recv().is_err(), "nothing is sent once trust is gone");
+
+        let ctx = make_ctx_without_tap(session_flags_none);
+        deliver_tap_disabled(&ctx, CGEventType::TapDisabledByTimeout);
+        assert!(!ctx.lost_trust.get());
+    }
+
+    fn session_flags_none() -> CGEventFlags {
+        CGEventFlags::empty()
     }
 
     /// Re-enabling must not depend on the state mutex being healthy: a
@@ -970,6 +1076,8 @@ mod dictation_patch_tests {
                 state: Arc::new(Mutex::new(state)),
                 tap: Cell::new(None),
                 session_flags,
+                trusted: || true,
+                lost_trust: Cell::new(false),
             };
             Self { ctx, rx }
         }
