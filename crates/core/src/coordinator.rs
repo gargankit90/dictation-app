@@ -529,7 +529,39 @@ mod proptests {
     /// An event with the time gap since the previous one, so times only go
     /// forward (presses, releases and Ticks share one clock).
     fn event_strategy() -> impl Strategy<Value = (u64, EventKind)> {
-        (0u64..400_000, any::<EventKind>())
+        (gap_ms(), any::<EventKind>())
+    }
+
+    /// A gap in milliseconds, mixed (#31): human-scale gaps, so a release
+    /// under [`MIN_HOLD`] after a press (an accidental tap) is common;
+    /// seconds; and gaps past [`MAX_RECORDING`]. A uniform 0..400 000 ms
+    /// almost never made a tap.
+    fn gap_ms() -> impl Strategy<Value = u64> {
+        prop_oneof![
+            3 => 0u64..400,
+            2 => 0u64..10_000,
+            1 => 0u64..400_000,
+        ]
+    }
+
+    #[test]
+    fn the_gaps_make_taps_and_long_holds() {
+        use proptest::strategy::ValueTree;
+        use proptest::test_runner::TestRunner;
+
+        let mut runner = TestRunner::deterministic();
+        let gaps: Vec<u64> = (0..1_000)
+            .map(|_| gap_ms().new_tree(&mut runner).unwrap().current())
+            .collect();
+        let min_hold = u64::try_from(MIN_HOLD.as_millis()).unwrap();
+        let max_recording = u64::try_from(MAX_RECORDING.as_millis()).unwrap();
+        let taps = gaps.iter().filter(|&&gap| gap < min_hold).count();
+        let past_max = gaps.iter().filter(|&&gap| gap > max_recording).count();
+        assert!(taps > 150, "only {taps} of 1000 gaps are taps");
+        assert!(
+            past_max > 20,
+            "only {past_max} of 1000 gaps pass MAX_RECORDING"
+        );
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -627,6 +659,8 @@ mod proptests {
     }
 
     proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1_024))]
+
         #[test]
         fn criterion_8_random_sequences_settle_in_idle_with_no_recording_left(
             events in prop::collection::vec(event_strategy(), 0..64)
