@@ -1,6 +1,0 @@
-2026-10-31T05:22:44.400212Z  INFO dictation_app_lib: starting version="0.1.0" log_dir=/Users/lume/Library/Logs/com.dictationapp.desktop
-2026-10-31T05:22:44.421067Z  WARN dictation_pipeline::hotkey: PermissionMissing: the hotkey is off until Accessibility is granted and the app restarts error=Accessibility permission is missing.
-2026-10-31T05:22:44.421142Z  INFO dictation_app_lib: ready hotkey=RightAlt
-2026-10-31T05:22:44.421152Z  WARN dictation_app_lib: ignoring an unknown flag flag=--press from="this launch"
-2026-10-31T05:22:47.716730Z  WARN dictation_app_lib: ignoring an unknown flag flag=--press from="a second launch"
-2026-10-31T05:22:50.883427Z  WARN dictation_app_lib: ignoring an unknown flag flag=--release from="a second launch"

@@ -1,55 +1,11 @@
 {
-  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "dictation-app",
-  "version": "0.1.0",
-  "identifier": "com.dictationapp.desktop",
-  "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
-    "frontendDist": "../dist"
-  },
-  "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "dictation-app Settings",
-        "width": 480,
-        "height": 640,
-        "center": true,
-        "visible": false
-      }
-    ],
-    "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self'"
-    }
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
-    "macOS": {
-      "minimumSystemVersion": "13.0",
-      "signingIdentity": "dictation-app Dev",
-      "entitlements": "./Entitlements.plist"
-    },
-    "resources": {
-      "../THIRD-PARTY-LICENSES.txt": "THIRD-PARTY-LICENSES.txt"
-    }
-  },
+  "version": "0.3.0",
   "plugins": {
     "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNBMjEwMjVFMDM4RTQxRTIKUldUaVFZNERYZ0loT2pTUU9sM2EvQSsyTHUrOEtTSEJCSHJhc1RDTXU1MjZqZ1EzQ2o2UXQ2c0kK",
       "endpoints": [
         "https://github.com/gargankit90/dictation-app-releases/releases/latest/download/latest.json"
-      ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2QzgwRjE3M0E5NkQ3OEYKUldTUDE1WTZGdy9JOWpxTlNIUjA4ampTb2pSdkFHdENZVjA4TEtBSkkwVW5zNHFTZkNmSURRWHAK",
-      "requireSignedVersion": true
+      ]
     }
   }
 }
