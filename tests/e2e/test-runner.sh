@@ -93,6 +93,9 @@ cat >"$tmp/bin/ssh" <<'FAKE'
 for last; do :; done
 exec bash -c "$last"
 FAKE
+# A job that outlives every wait the cases make (10 minutes): only a TERM ends
+# it. Its path holds $tmp, so the exit trap's pkill -f "$tmp/" reaps it too.
+ln -s /bin/sleep "$tmp/longsleep"
 chmod +x "$tmp/bin/"* "$tmp/jobbin/"*
 
 # --- The harness each case runs in a bash of its own ----------------------------
@@ -275,8 +278,10 @@ check "a Terminal job that ends a while after it started is waited for" test "$(
 check "and its output comes back" test "$(out_of term_late)" = late
 
 # The job outlasts the deadline (2 s) by far, so only the deadline can end the
-# wait, and a loaded machine cannot make the job finish first (#149).
-run_case term_deadline 'start=$SECONDS; s=0; VM_TERMINAL_TIMEOUT=2 vm_terminal "/bin/sleep 30" || s=$?; echo "$s $((SECONDS - start))"' \
+# wait, and a loaded machine cannot make the job finish first (#149). It also
+# outlasts job_gone's 30 s wait below, so it is gone only if the deadline
+# really cancelled it (T5 R1).
+run_case term_deadline "start=\$SECONDS; s=0; VM_TERMINAL_TIMEOUT=2 vm_terminal '$tmp/longsleep 600' || s=\$?; echo \"\$s \$((SECONDS - start))\"" \
   STUB_TERMINAL=async
 read -r term_status term_took <"$(stdout term_deadline)"
 check "a Terminal job past its deadline fails (124)" test "$term_status" = 124
