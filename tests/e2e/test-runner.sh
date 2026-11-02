@@ -497,5 +497,7 @@ for how in pass:0 fail:1 term:143; do
   done
 done
 
+"$root/tests/e2e/test-ci-run.sh" || failed=$((failed + 1))
+
 echo "runner tests: $passed passed, $failed failed"
 [ "$failed" = 0 ]

@@ -215,8 +215,20 @@ account billing.
   older DMG from the kept `target/`.
 - **Safety:** pull requests run only from branches in this repository, never
   forks; `pull_request_target` is not used; the token is `contents: read`;
-  CI never touches the Lume VMs, and runs no e2e tests. The DMG job signs ad
+  ci.yml and dmg.yml never touch the Lume VMs. The DMG job signs ad
   hoc (`DMG_ADHOC=1`), so it never uses the owner's dev certificate.
+- **VM e2e on every merge (T6, #104):** `.github/workflows/e2e.yml` runs
+  `tests/e2e/ci-run.sh` on every push to `main` (never on a PR). It borrows
+  `dictation-vm-2`, else `dictation-vm`, through `run.sh`'s lock, so the
+  agents' runs and CI wait on each other and never share a VM; if both stay
+  taken for 45 minutes it ends as `skipped: no VM free` (success). It skips
+  `e2e_real_groq` and `e2e_real_mic` (no API key in CI), fails only on a
+  failed build or scenario, and uploads `e2e-evidence-<sha>` (summary, SHA,
+  VM, logs; 14 days). The runner takes one job at a time, so the other CI
+  jobs queue behind it while it runs (up to about two hours). It signs with
+  the owner's `dictation-app Dev` certificate in the runner user's keychain.
+  Stale lock: `tests/e2e/run.sh --clear-stale-lock <vm>`. Details:
+  `tests/e2e/README.md`.
 - **One run per PR:** a new push cancels the superseded run. The concurrency
   group is the PR number for pull requests and the run id for everything
   else, so pushes to `main` and manual runs each get their own group: none is
