@@ -26,7 +26,9 @@ dictation-app is not yet signed with an Apple Developer ID, so macOS blocks
 the first launch of anything downloaded from a browser, chat or email with
 _"dictation-app can't be opened because Apple cannot check it for malicious
 software"_. You tell macOS you trust it once. Open **Terminal** (Spotlight:
-`Terminal`) and paste:
+`Terminal`) and paste this. It assumes you already dragged the app into
+**Applications** (section 1); if you opened it from the DMG window instead,
+do that first, or the command says "No such file":
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/dictation-app.app
@@ -81,7 +83,8 @@ The key is the only secret. It stays on your Mac and is sent only to Groq.
 1. Click into any text field (Notes, Slack, a browser, a document).
 2. **Hold the right Option key** (the Option key right of the space bar),
    speak, and let go. A small overlay shows that it is recording and then that
-   it is working.
+   it is working. The first time, macOS asks to use the microphone: click
+   **Allow**, then dictate again.
 3. The text appears where your cursor was, a moment later.
 
 You can change the key in Settings (the **Hotkey** box). Password fields are

@@ -235,6 +235,13 @@ grep -q "needs tag v$VERSION on HEAD" "$work/out.txt" || fail "no tag message"
 [ ! -e "$calls/npm" ] && [ ! -e "$calls/gh" ] || fail "a refused publish built or called gh"
 git -C "$repo" tag "v0.2.9"
 run_release "$VERSION" --publish && fail "--publish passed with another version's tag"
+# A tag that only matches v$VERSION as a regex (the dots) is not the tag.
+lookalike="v${VERSION//./x}"
+git -C "$repo" tag "$lookalike"
+run_release "$VERSION" --publish && fail "--publish passed with the lookalike tag $lookalike"
+grep -q "needs tag v$VERSION on HEAD" "$work/out.txt" || fail "no tag message for the lookalike tag"
+[ ! -e "$calls/npm" ] && [ ! -e "$calls/gh" ] || fail "a refused publish built or called gh"
+git -C "$repo" tag -d "$lookalike" >/dev/null
 pass "--publish is refused without a clean tree or tag v$VERSION"
 
 git -C "$repo" tag "v$VERSION"

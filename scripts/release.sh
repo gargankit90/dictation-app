@@ -101,7 +101,7 @@ pubkey=$(jq -r '.plugins.updater.pubkey // ""' "$conf")
 
 if [ "$publish" = 1 ]; then
   [ -z "$(git status --porcelain)" ] || die "--publish needs a clean tree (commit or remove the changes)"
-  grep -qx "v$version" <<<"$(git tag --points-at HEAD)" ||
+  grep -qxF "v$version" <<<"$(git tag --points-at HEAD)" ||
     die "--publish needs tag v$version on HEAD (git tag v$version, after the version PR is merged)"
   command -v gh >/dev/null || die "gh is not installed"
   gh auth status >/dev/null 2>&1 || die "gh is not logged in (gh auth login)"
