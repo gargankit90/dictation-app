@@ -49,18 +49,28 @@ points at `dictation-vm`) don't reset each other's VM.
   `6GB`) and `E2E_VM_CPU` (default `4`). `lume set` runs only on the fresh
   clone, never on the golden image. 6 GB each leaves the Mac room for two VMs
   and a build.
-- **A lock per VM:** a run takes `~/.cache/dictation-e2e/<vm>.lock` (a
-  directory holding the run's `pid` and `since`) after the build and holds it
-  until the run ends, however it ends (normal end, `die`, Ctrl-C, kill, closed
-  terminal). A second run on the same VM stops at once with `VM busy: <vm> is
-  in use by a run (pid N since T)`; start it on the other VM or wait. A lock
-  whose pid is gone (the run was killed with `kill -9`) is stale and the next
-  run takes it over. A short `golden-clone.lock` makes two runs clone the
-  golden image one after the other (the second waits, up to 10 minutes, or
-  `E2E_CLONE_LOCK_WAIT` seconds).
+- **A lock per VM:** a run takes `~/.cache/dictation-e2e/<vm>.lock` after the
+  build and holds it until the run ends, however it ends (normal end, `die`,
+  Ctrl-C, kill, closed terminal, a scenario's own cleanup trap). The lock is a
+  symlink whose target is the run's `<pid> <time>`: `ln -s` creates it with its
+  owner in one atomic step, so a lock is never held by "nobody yet", and a lock
+  whose pid is alive is never taken over, however young. A second run on the
+  same VM stops at once with `VM busy: <vm> is in use by a run (pid N since
+  T)`; start it on the other VM or wait. A lock whose pid is gone (the run was
+  killed with `kill -9`) is stale and the next run takes it over, one run at a
+  time (`<vm>.reclaim.lock`, itself cleared if its owner died). The traps are
+  armed before any lock is taken, and a release removes only a lock whose pid
+  is the run's own. A short `golden-clone.lock` makes two runs clone the golden
+  image one after the other (the second waits, up to 10 minutes, or
+  `E2E_CLONE_LOCK_WAIT` seconds). Each scenario runs in a subshell
+  (`run_scenario`), so the cleanup traps it arms don't replace the run's.
 - **At most two running VMs:** a reset refuses to start when two other macOS
   VMs are running already (`lume ls`; the golden image counts if it is
-  running).
+  running). The count and `lume run` are one step under `vm-start.lock`, held
+  until `lume ls` lists the new VM as running (`E2E_START_VISIBLE_WAIT`, 30
+  seconds; `E2E_START_LOCK_WAIT`, 300), so two resets together can't both
+  start. Lock order: VM lock, then the clone lock or the start lock (never
+  both).
 - The lock is per VM, not per checkout: two worktrees pointing at the same VM
   also exclude each other. Two parallel runs from one checkout share the
   `target/` build, so give the second `--no-build`.

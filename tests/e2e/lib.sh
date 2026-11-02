@@ -56,7 +56,7 @@ reset_vm() {
   lume delete "$VM" --force >/dev/null 2>&1 || true
   clone_golden
   set_vm_resources
-  lume run "$VM" --no-display --detach >/dev/null || die "lume run failed"
+  start_vm
   wait_for_vm
 }
 

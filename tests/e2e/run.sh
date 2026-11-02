@@ -73,7 +73,8 @@ fi
 [ -d "$APP_PATH" ] || die "no app at $APP_PATH; run without --no-build"
 
 # One run per VM at a time, held until the run ends (after the build, which
-# doesn't need the VM).
+# doesn't need the VM). The traps come first, so no lock is ever held without
+# them.
 arm_run_traps
 vm_lock_take
 
@@ -100,10 +101,7 @@ bad_skips=()
 results=()
 for scenario in "${scenarios[@]}"; do
   log "scenario $scenario"
-  SCENARIO_FAILED=0
-  SCENARIO_SKIPPED=0
-  "$scenario"
-  arm_run_traps # a scenario's own cleanup trap replaced ours
+  run_scenario "$scenario" # sets SCENARIO_FAILED and SCENARIO_SKIPPED
   if [ "$SCENARIO_SKIPPED" = 1 ]; then
     skipped+=("$scenario")
     if is_optional "$scenario"; then
