@@ -9,12 +9,15 @@ You need a Mac with **macOS 13 (Ventura) or newer**, an internet connection
 
 ## 1. Install
 
-1. Open the DMG you were sent (`dictation-app_<version>_<chip>.dmg`).
+1. Download the DMG (`dictation-app_<version>_aarch64.dmg`) from the newest
+   release at
+   <https://github.com/gargankit90/dictation-app-releases/releases/latest>,
+   or use the one you were sent, and open it.
 2. Drag **dictation-app** onto the **Applications** shortcut in the window.
 3. Eject the DMG (Finder sidebar, or drag it to the Trash).
 
-The licences of the open-source software inside the app are in the DMG's
-download folder as `THIRD-PARTY-LICENSES.txt`, and inside the app at
+The licences of the open-source software inside the app are on the release
+page as `THIRD-PARTY-LICENSES.txt`, and inside the app at
 `dictation-app.app/Contents/Resources/`.
 
 ## 2. Open it for the first time (clear the quarantine flag)
@@ -86,16 +89,28 @@ skipped on purpose: nothing is pasted there.
 
 If nothing happens, see "Something went wrong" below.
 
-## Updating
+## How updates arrive
 
-Click the menu-bar icon > **Check for updates…**. If there is a newer build it
-tells you what is new and offers **Install and restart**. If there isn't, it
-says _"You're up to date"_. If the update server can't be reached, it says so.
+You install from the DMG once. After that, dictation-app updates itself:
 
-While the project's code is in a private GitHub repository, GitHub refuses
-the update check from outside (it answers "not found" to anyone who isn't
-signed in), so **Check for updates…** will say it couldn't reach the update
-server. Until that changes, install each new build from the DMG you are sent.
+- **When it starts**, it quietly asks the release page whether there is a
+  newer build. If there is, it shows **Update available** with what is new;
+  if not, or if you are offline, it shows nothing.
+- **Any time**, click the menu-bar icon > **Check for updates…**. It says
+  _"You're up to date"_, offers the update, or says plainly that it couldn't
+  check (_"Couldn't check for updates"_, for example when you are offline).
+- Nothing is downloaded or installed until you click **Install and
+  restart**. **Later** keeps the build you have; you are asked again next
+  time.
+- The app restarts as the new version by itself. **Microphone and
+  Accessibility stay granted**: every build is signed the same way, so macOS
+  knows it is the same app. You don't clear the quarantine flag again.
+- Every update is signed with our update key, and the app refuses one whose
+  signature doesn't match (_"The update's signature didn't match this app's
+  update key, so it was not installed."_). If you see that, tell us.
+
+If an update ever goes wrong, download the newest DMG from the release page
+and install it over the old app, as in section 1.
 
 ## Something went wrong: the log
 
@@ -114,7 +129,8 @@ are not written at all.
   still not its text.
 
 Please also tell us what you did, what you expected, what happened, your
-macOS version and the dictation-app version (the DMG's name).
+macOS version and the dictation-app version (the DMG's name, or the
+**Update available** dialog's "you have …").
 
 ## Quit and uninstall
 

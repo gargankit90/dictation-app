@@ -25,7 +25,7 @@ in the keychain".
 
 ## For testers
 
-`docs/testing/TESTER-README.md` takes a tester from the DMG to a first
+`docs/TESTERS.md` takes a tester from the DMG to a first
 dictation (quarantine, permissions, a Groq key, logs). Build the DMG with
 `scripts/build-dmg.sh`; it signs with `dictation-app Dev` when the certificate
 is there. CI builds one as an ad-hoc-signed artifact (`.github/workflows/dmg.yml`).

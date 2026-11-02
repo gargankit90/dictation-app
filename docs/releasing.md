@@ -12,15 +12,19 @@ unless the owner decides so.
 | DMG build, checks, checksums                           | `scripts/build-dmg.sh`, `scripts/check-dmg.sh`                               |
 | DMG on every packaging PR and on `main` (ad-hoc signed) | `.github/workflows/dmg.yml`, artifact `dictation-app-dmg`                   |
 | Third-party licence notice, bundled and checked        | `THIRD-PARTY-LICENSES.txt`, `scripts/gen-licences.sh`, `scripts/check-licences.sh` |
-| Tester guide                                           | `docs/testing/TESTER-README.md`                                              |
+| Tester guide (the releases repo's README)              | `docs/TESTERS.md`                                                            |
+| Release build, signature check, upload                 | `scripts/release.sh` (tests: `scripts/test-release.sh`, in the gate)         |
 | Updater (tray "Check for updates…")                    | `src-tauri/src/updater.rs`, `plugins.updater` in `src-tauri/tauri.conf.json` |
 | Manifest maker, throwaway-key updater test             | `scripts/make-latest-json.sh`, `scripts/updater-test.sh`                     |
 
 The updater trusts one **minisign public key** from `tauri.conf.json`
-(`plugins.updater.pubkey`) and refuses any download whose signature doesn't
-verify against it, or whose signed version differs from the announced one
-(`requireSignedVersion`). It is **empty** until the owner approves a real key;
-the tray item then says _"Updates aren't set up"_.
+(`plugins.updater.pubkey`, the owner's, key id `F6C80F173A96D78F`) and refuses
+any download whose signature doesn't verify against it, or whose signed
+version differs from the announced one (`requireSignedVersion`). It fetches
+`https://github.com/gargankit90/dictation-app-releases/releases/latest/download/latest.json`
+(a public repository holding only release assets, no source), once at launch
+(quietly: a dialog only when there is an update) and from the tray's
+**Check for updates…**.
 
 ## Signing, in one place
 
@@ -35,62 +39,50 @@ the tray item then says _"Updates aren't set up"_.
 - No notarisation: there is no Apple Developer account. Testers clear the
   quarantine flag (see the tester guide).
 
-## One-time, owner only
+## The update key (done by the owner, 2026-11-02)
 
-These need the owner; nothing below has been done.
-
-1. **Make the real update key**, off the repo, with a password:
-
-   ```sh
-   npx tauri signer generate -w ~/.tauri/dictation-app.key
-   ```
-
-   Keep `~/.tauri/dictation-app.key` and its password in the owner's password
-   manager. Losing it means no tester can update again (they would have to
-   install a new build by hand); leaking it lets someone push code to every
-   tester.
-
-2. **Commit only the public key**: paste the contents of
-   `~/.tauri/dictation-app.key.pub` into `plugins.updater.pubkey` in
-   `src-tauri/tauri.conf.json`, in a PR.
-3. **Decide where releases live.** The endpoint in `tauri.conf.json` is
-   `https://github.com/gargankit90/dictation-app/releases/latest/download/latest.json`.
-   While the repository is **private**, GitHub answers 404 to anyone not
-   signed in, and the updater sends no credentials, so no tester can fetch it.
-   Either make the repository public, or publish releases from a small
-   public repository (then change `endpoints`), or host `latest.json` and the
-   archive somewhere public.
-4. (Only if CI should ever build releases) add the key as the GitHub secrets
-   `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Not
-   needed for the manual flow below.
+The private key and its password are generic passwords in the owner's login
+Keychain, services `dictation-app-updater-key` and
+`dictation-app-updater-password`, with a backup kept by the owner. Only the
+public half is in the repo. Losing the key means no tester can update again
+(each would install a new DMG by hand); leaking it lets someone push code to
+every tester. It is never a CI secret: releases are built on the owner's Mac.
 
 ## Making a release
 
-On the owner's Mac, from a clean checkout of `main` at the version to ship
-(bump `version` in `src-tauri/tauri.conf.json`, `Cargo.toml` and
-`package.json` first, in a PR):
+1. In a PR, bump `version` in `src-tauri/tauri.conf.json`, `package.json` and
+   `Cargo.toml` (the script refuses a version they don't all have). Merge it.
+2. On the owner's Mac, on that `main` commit, with a clean tree:
 
-```sh
-export TAURI_SIGNING_PRIVATE_KEY=~/.tauri/dictation-app.key
-export TAURI_SIGNING_PRIVATE_KEY_PASSWORD='…'
-npm run tauri build -- --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}'
-scripts/check-dmg.sh target/release/bundle/dmg/dictation-app_<version>_aarch64.dmg
-scripts/make-latest-json.sh <version> "<what's new>" \
-  target/release/bundle/macos/dictation-app.app.tar.gz \
-  target/release/bundle/macos/dictation-app.app.tar.gz.sig \
-  https://github.com/gargankit90/dictation-app/releases/download/v<version>/dictation-app.app.tar.gz \
-  > target/release/latest.json
-gh release create v<version> --title "dictation-app <version>" --notes "<what's new>" \
-  target/release/bundle/dmg/dictation-app_<version>_aarch64.dmg \
-  target/release/bundle/macos/dictation-app.app.tar.gz \
-  target/release/latest.json \
-  THIRD-PARTY-LICENSES.txt docs/testing/TESTER-README.md
-```
+   ```sh
+   scripts/release.sh 0.2.0 --notes "What's new, in a line or two."   # dry run
+   ```
 
-(`scripts/build-dmg.sh` does the DMG part and the checks; use it for the DMG
-and the command above for the updater archive, or both flags in one build.)
-Testers get the DMG and the README; installed apps find `latest.json` and
-offer the update.
+   It builds the release signed `dictation-app Dev`, reads the two Keychain
+   items into the build's environment only (filtered from its output, never
+   written anywhere), checks the DMG (`scripts/check-dmg.sh`), verifies the
+   updater bundle's `.sig` against the public key in `tauri.conf.json` and
+   that it is bound to the version, and writes everything into
+   `target/release-out/v0.2.0/`: the DMG, `…app.tar.gz` and its `.sig`,
+   `latest.json`, `README.md` (this repo's `docs/TESTERS.md`),
+   `THIRD-PARTY-LICENSES.txt` and `SHA256SUMS`. Nothing is uploaded. macOS may
+   ask once to let `security` read the two Keychain items.
+
+3. To publish, tag that commit and run it again with `--publish`:
+
+   ```sh
+   git tag v0.2.0
+   scripts/release.sh 0.2.0 --notes "…" --publish
+   ```
+
+   It refuses without a clean tree and tag `v0.2.0` on `HEAD`, then runs
+   `gh release create v0.2.0 --repo gargankit90/dictation-app-releases` with
+   those files (the owner's own `gh` login; no new token). Installed apps find
+   the new `latest.json` at their next launch or **Check for updates…**.
+   Push the tag to this repository too (`git push origin v0.2.0`).
+
+The releases repository's README is `docs/TESTERS.md`; update it there when
+the guide changes. Publishing the first real release is the owner's call.
 
 ## Try the updater with a throwaway key (no owner secrets)
 
@@ -106,10 +98,12 @@ scripts/updater-test.sh serve     # leave running
 In the Lume VM (reachable from the VM at `192.168.64.1`, the default `HOST`):
 copy `target/updater-test/old/dictation-app.app` to `~/Applications`, open it,
 menu-bar icon > **Check for updates…** > **Install and restart**. The app
-restarts as 0.1.1 (the log says `starting version=0.1.1`). On your own Mac use
+restarts as 0.1.1 (the log says `starting version=0.1.1`).
+`tests/e2e/scenarios/e2e_update_keeps_permissions.sh` does all of this in the
+VM, on its own throwaway key and a fixture server inside the VM. On your own Mac use
 `HOST=127.0.0.1 scripts/updater-test.sh build`.
 
-**Permissions kept (M5.4 #3):** grant Microphone and Accessibility to the 0.1.0
+**Permissions kept (M5.4 #4):** grant Microphone and Accessibility to the 0.1.0
 build first (use `scripts/build-dmg.sh` signing, i.e. the `dictation-app Dev`
 certificate, so both builds share a signature), dictate once, update, and
 dictate again with no new prompt and no entry missing from System Settings >

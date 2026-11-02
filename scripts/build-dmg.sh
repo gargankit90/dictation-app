@@ -11,7 +11,7 @@
 # it (CI, a fresh Mac) the app is signed ad hoc: it runs, but macOS asks for
 # the permissions again after every update. Either way it is not notarised.
 # There is no Apple Developer account, so testers clear the quarantine flag
-# (docs/testing/TESTER-README.md).
+# (docs/TESTERS.md).
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -63,7 +63,7 @@ rm -rf "$out"
 mkdir -p "$out"
 cp "$dmg" "$out/"
 cp THIRD-PARTY-LICENSES.txt "$out/"
-cp docs/testing/TESTER-README.md "$out/README.md" 2>/dev/null || true
+cp docs/TESTERS.md "$out/README.md" 2>/dev/null || true
 (cd "$out" && shasum -a 256 -- *.dmg THIRD-PARTY-LICENSES.txt >SHA256SUMS)
 echo "build-dmg: done:"
 ls -l "$out"
