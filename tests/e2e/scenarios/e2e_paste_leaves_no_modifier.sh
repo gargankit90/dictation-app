@@ -13,6 +13,13 @@
 # Option hold. Each paste must land, and none of the three may carry the
 # Command mask (0x100000) or a Command key's device bit (0x8 left, 0x10
 # right) afterwards.
+#
+# Then (review M5.6 round 1, R1) a Command the user holds must stay held
+# through a paste: with left, then right Command held down (a flagsChanged
+# event from Terminal with the mask and the key's device bit, as the
+# keyboard sends; nothing lets it up during the paste), a synthetic
+# dictation must paste and leave that key held in the HID state. Only after
+# the fixture lets it up must Command be clear.
 
 # The JXA that prints "combined=<n> hid=<n> sourceless=<n>" (decimal flags).
 # Reading the state needs no Accessibility; creating an event without
@@ -54,8 +61,24 @@ no_command() {
   [ "$bad" = 0 ]
 }
 
+# held_command_paste <left-command|right-command>: the R1 phase for one key.
+held_command_paste() {
+  local key=$1 flags status
+  expect "$key goes down" job_says "posted down" post_key "$key" down
+  textedit_fresh
+  expect "a synthetic dictation with $key held gets back to Idle" dictate_once 1
+  expect "its paste landed in TextEdit" test "$(textedit_trimmed)" = "$MOCK_TEXT"
+  flags=$(modifier_flags) || status=$?
+  log "  modifier flags with $key held, after the paste: [$flags]"
+  expect "after the paste, $key is still held" job_says "$key held" post_key "$key" state
+  expect "$key goes up" job_says "posted up" post_key "$key" up
+  flags=$(modifier_flags) || status=$?
+  expect "after $key goes up, Command is not set" no_command "after $key up" "$flags"
+  [ -z "${status:-}" ] || log "  a flags job exited with status $status"
+}
+
 e2e_paste_leaves_no_modifier() {
-  arm_key_cleanup e2e_paste_leaves_no_modifier
+  arm_key_cleanup e2e_paste_leaves_no_modifier left-command right-command
   fresh_app_state
   printf '%s\n' "$PASTE_FLAGS_JXA" |
     vm "mkdir -p $(q "$VM_RUN_DIR") && cat >$(q "$VM_RUN_DIR/modifier-flags.js")"
@@ -85,6 +108,9 @@ posted up" real_key_hold 1.5
   expect "after the hotkey dictation's paste, Command is not set" \
     no_command "after the hotkey paste" "$flags"
   [ -z "${status:-}" ] || log "  a flags job exited with status $status"
+
+  held_command_paste left-command
+  held_command_paste right-command
 
   collect_log e2e_paste_leaves_no_modifier
   key_scenario_end
