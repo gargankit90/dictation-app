@@ -1,12 +1,30 @@
 //! [`HotkeySource`] on macOS: a non-blocking `CGEventTap` through the
 //! `handy-keys` crate (MIT), matched by [`HotkeyMatcher`].
 //!
-//! The tap is not `ListenOnly`: `KeyboardListener::new()` creates it with
-//! `CGEventTapOptions::Default` (an active filter) and no blocking hotkeys,
-//! so its callback returns every event unchanged and swallows no key. That
-//! is why it needs full Accessibility (`AXIsProcessTrusted`), not Input
-//! Monitoring alone, and why recovery from `TapDisabledByTimeout` matters
-//! (#49).
+//! The tap is `ListenOnly` (#173): `KeyboardListener::new()` blocks no
+//! hotkeys, and the patched handy-keys then creates a listen-only tap, which
+//! sees every key and can swallow none. Before, it was an active filter
+//! (`CGEventTapOptions::Default`) that returned every event unchanged, and
+//! turning Accessibility off in System Settings while the app ran stopped
+//! all keyboard input to every app until the app quit (the owner's Mac had
+//! to be forced off; reproduced in the VM, `e2e_accessibility_revoked`). The
+//! window server enforces the revocation on the tap at once, and an active
+//! filter holds up every key event behind it; a listen-only tap holds up
+//! nothing. The app starts the tap only while `AXIsProcessTrusted` says yes
+//! (the paste needs Accessibility anyway).
+//!
+//! The tap also goes as soon as the app can tell Accessibility is gone: the
+//! listener thread asks every [`TRUST_POLL`] and, once it's gone, removes
+//! the tap and reports [`HotkeyEvent::Failed`]; the supervisor in the app
+//! shows the guidance and starts a new tap once it is granted again (a grant
+//! does reach the running app). The patched handy-keys never re-enables a
+//! tap the system disabled (`TapDisabledByTimeout`, #49) while the
+//! permission is missing. On macOS 15.6 a revocation doesn't reach the
+//! running process: `AXIsProcessTrusted`, `CGPreflight*EventAccess` and AX
+//! calls all keep answering yes until it quits (only a new process, even a
+//! child, sees it), and the listen-only tap keeps working. So the app keeps
+//! dictating until it is relaunched, and then shows the guidance; the check
+//! is for systems that do tell the process.
 //!
 //! The tap sees every key, so nothing here logs or keeps them: only the
 //! [`HotkeyEvent`]s the matcher produces leave this module.
@@ -14,7 +32,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dictation_core::hotkey_spec::{HotkeySpec, Key, Modifier};
 use dictation_ports::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};
@@ -26,6 +44,14 @@ use crate::permissions::macos::is_accessibility_trusted;
 /// How often the listener thread checks for [`stop`](HotkeySource::stop)
 /// while no keys arrive.
 const STOP_POLL: Duration = Duration::from_millis(50);
+
+/// How often the listener thread checks that Accessibility is still
+/// granted (#173). Each check is one cheap TCC query.
+const TRUST_POLL: Duration = Duration::from_millis(500);
+
+/// Whether the process may still tap events: [`is_accessibility_trusted`],
+/// or a fake in tests.
+type Trusted = Arc<dyn Fn() -> bool + Send + Sync>;
 
 /// Raw key events for the listener thread: a `handy-keys`
 /// [`KeyboardListener`], or a fake in tests.
@@ -56,6 +82,7 @@ type Open = Box<dyn FnMut() -> Result<Box<dyn RawKeys>, HotkeyError> + Send>;
 pub struct MacHotkey {
     spec: HotkeySpec,
     open: Open,
+    trusted: Trusted,
     running: Option<Running>,
 }
 
@@ -69,13 +96,18 @@ impl MacHotkey {
     /// A source for `spec`; it listens only once started.
     #[must_use]
     pub fn new(spec: HotkeySpec) -> Self {
-        Self::with_open(spec, Box::new(open_listener))
+        Self::with_open(
+            spec,
+            Box::new(open_listener),
+            Arc::new(is_accessibility_trusted),
+        )
     }
 
-    fn with_open(spec: HotkeySpec, open: Open) -> Self {
+    fn with_open(spec: HotkeySpec, open: Open, trusted: Trusted) -> Self {
         Self {
             spec,
             open,
+            trusted,
             running: None,
         }
     }
@@ -109,10 +141,11 @@ impl HotkeySource for MacHotkey {
         let done = Arc::new(AtomicBool::new(false));
         let thread_done = Arc::clone(&done);
         let matcher = HotkeyMatcher::new(self.spec);
+        let trusted = Arc::clone(&self.trusted);
         let thread = thread::Builder::new()
             .name("hotkey".into())
             // Dropping `keys` at the end stops and joins the tap thread.
-            .spawn(move || listen(&*keys, matcher, &thread_done, &mut sink))
+            .spawn(move || listen(&*keys, matcher, &*trusted, &thread_done, &mut sink))
             .map_err(|e| HotkeyError::Unavailable(e.to_string()))?;
         self.running = Some(Running { done, thread });
         Ok(())
@@ -134,15 +167,30 @@ impl Drop for MacHotkey {
 }
 
 /// The listener thread: matches `keys` until `done` is set, or until the
-/// listener dies, which it reports with [`HotkeyEvent::Failed`] after
-/// setting `done` itself.
+/// listener dies or Accessibility is gone (`trusted` says no, asked every
+/// [`TRUST_POLL`]), which it reports with [`HotkeyEvent::Failed`] after
+/// setting `done` itself. Returning drops the listener, which removes the
+/// tap.
 fn listen(
     keys: &dyn RawKeys,
     mut matcher: HotkeyMatcher,
+    trusted: &dyn Fn() -> bool,
     done: &AtomicBool,
     sink: &mut HotkeySink,
 ) {
+    let mut checked = Instant::now();
     while !done.load(Ordering::SeqCst) {
+        if checked.elapsed() >= TRUST_POLL {
+            checked = Instant::now();
+            if !trusted() {
+                tracing::warn!(
+                    "Accessibility was turned off; the hotkey's event tap is removed until it is allowed again"
+                );
+                done.store(true, Ordering::SeqCst);
+                sink(HotkeyEvent::Failed);
+                return;
+            }
+        }
         match keys.recv_timeout(STOP_POLL) {
             Ok(event) if event.is_resync() => {
                 // Presses or releases may be lost: whatever was held is over.
@@ -173,15 +221,17 @@ enum Raw {
     Input(KeyInput),
     /// A key no spec can name (Caps Lock, Page Up, a mouse button), with the
     /// modifiers it reports: it can't press the hotkey, but it can end a
-    /// hold whose release was missed (#47).
-    Unmapped(Held),
+    /// hold whose release was missed (#47). `key_down` if it is a keyboard
+    /// key going down, which during a hold of a modifier-only hotkey is a
+    /// shortcut (#172); a mouse button never is.
+    Unmapped { held: Held, key_down: bool },
 }
 
 /// What `event` makes the matcher report, if anything.
 fn matched(matcher: &mut HotkeyMatcher, event: &KeyEvent) -> Option<HotkeyEvent> {
     match to_input(event)? {
-        Raw::Input(input) => matcher.on_input(input),
-        Raw::Unmapped(held) => matcher.on_unmapped(held),
+        Raw::Input(input) => matcher.on_key(input),
+        Raw::Unmapped { held, key_down } => matcher.on_unmapped_key(held, key_down),
     }
 }
 
@@ -194,7 +244,10 @@ fn to_input(event: &KeyEvent) -> Option<Raw> {
         None => None,
         Some(key) => match to_key(key) {
             Some(key) => Some(key),
-            None => return Some(Raw::Unmapped(held)),
+            None => {
+                let key_down = event.is_key_down && is_typed(key);
+                return Some(Raw::Unmapped { held, key_down });
+            }
         },
     };
     Some(Raw::Input(KeyInput {
@@ -202,6 +255,17 @@ fn to_input(event: &KeyEvent) -> Option<Raw> {
         key,
         down: event.is_key_down,
     }))
+}
+
+/// Whether an unmapped key is one a person types (Page Up, Delete, a
+/// keypad key), so pressing it with the hotkey's modifier is a shortcut. A
+/// mouse button isn't, nor is Caps Lock, a lock rather than a key.
+fn is_typed(key: handy_keys::Key) -> bool {
+    use handy_keys::Key as K;
+    !matches!(
+        key,
+        K::MouseLeft | K::MouseRight | K::MouseMiddle | K::MouseX1 | K::MouseX2 | K::CapsLock
+    )
 }
 
 fn to_held(modifiers: Modifiers) -> Held {
@@ -300,7 +364,9 @@ mod tests {
 
     use dictation_core::coordinator::{self, MAX_RECORDING, State};
     use dictation_core::events::{Command, Event};
-    use dictation_ports::HotkeyEvent::{CancelPressed, Failed, Interrupted, Pressed, Released};
+    use dictation_ports::HotkeyEvent::{
+        CancelPressed, Failed, Interrupted, Pressed, Released, ShortcutPressed,
+    };
 
     use super::*;
 
@@ -361,7 +427,10 @@ mod tests {
                 handy_keys::Key::CapsLock,
                 true
             )),
-            Some(Raw::Unmapped(Held::NONE))
+            Some(Raw::Unmapped {
+                held: Held::NONE,
+                key_down: false
+            })
         );
         assert_eq!(
             to_input(&key_event(
@@ -369,7 +438,10 @@ mod tests {
                 handy_keys::Key::MouseLeft,
                 true
             )),
-            Some(Raw::Unmapped(Held::NONE.with(Modifier::Alt, Hand::Right)))
+            Some(Raw::Unmapped {
+                held: Held::NONE.with(Modifier::Alt, Hand::Right),
+                key_down: false
+            })
         );
     }
 
@@ -397,6 +469,11 @@ mod tests {
         assert_eq!(events, [Pressed, Released, Pressed, Released]);
     }
 
+    /// A click, Caps Lock or an unmapped key's release while the hotkey is
+    /// really held keeps the hold; an unmapped key going down (right
+    /// Option+Page Up) is a
+    /// shortcut (#172), sent once, and the hold still ends only at the
+    /// release.
     #[test]
     fn an_unmapped_key_while_really_held_keeps_the_hold() {
         let r = Modifiers::OPT_RIGHT;
@@ -404,12 +481,53 @@ mod tests {
             HotkeySpec::default(),
             &[
                 modifier_event(r, r, true),
-                key_event(r, handy_keys::Key::PageUp, true),
+                key_event(r, handy_keys::Key::MouseLeft, true),
+                key_event(r, handy_keys::Key::MouseLeft, false),
                 key_event(r, handy_keys::Key::CapsLock, true),
+                key_event(r, handy_keys::Key::PageUp, false),
+                key_event(r, handy_keys::Key::PageUp, true),
+                key_event(r, handy_keys::Key::PageUp, true),
                 modifier_event(Modifiers::empty(), r, false),
             ],
         );
-        assert_eq!(events, [Pressed, Released]);
+        assert_eq!(events, [Pressed, ShortcutPressed, Released]);
+    }
+
+    /// #172 from the OS's events: right Command+C and +V with the hotkey on
+    /// Right Command are shortcuts, not dictations; right Command alone
+    /// still presses and releases.
+    #[test]
+    fn right_command_shortcuts_from_handy_keys_events() {
+        let r = Modifiers::CMD_RIGHT;
+        let events = run(
+            "RightCmd".parse().unwrap(),
+            &[
+                modifier_event(r, r, true),
+                key_event(r, handy_keys::Key::C, true),
+                key_event(r, handy_keys::Key::C, false),
+                modifier_event(Modifiers::empty(), r, false),
+                modifier_event(r, r, true),
+                key_event(r, handy_keys::Key::V, true),
+                key_event(r, handy_keys::Key::V, true),
+                key_event(r, handy_keys::Key::V, false),
+                modifier_event(Modifiers::empty(), r, false),
+                modifier_event(r, r, true),
+                modifier_event(Modifiers::empty(), r, false),
+            ],
+        );
+        assert_eq!(
+            events,
+            [
+                Pressed,
+                ShortcutPressed,
+                Released,
+                Pressed,
+                ShortcutPressed,
+                Released,
+                Pressed,
+                Released
+            ]
+        );
     }
 
     #[test]
@@ -467,6 +585,8 @@ mod tests {
         listeners: mpsc::Receiver<mpsc::Sender<KeyEvent>>,
         keys: mpsc::Sender<KeyEvent>,
         events: mpsc::Receiver<dictation_ports::HotkeyEvent>,
+        /// What the fake permission check answers; true at the start.
+        trusted: Arc<AtomicBool>,
     }
 
     const WAIT: Duration = Duration::from_secs(5);
@@ -474,6 +594,8 @@ mod tests {
     impl Harness {
         fn start() -> Self {
             let (opened, listeners) = mpsc::channel();
+            let trusted_flag = Arc::new(AtomicBool::new(true));
+            let trusted = Arc::clone(&trusted_flag);
             let mut hotkey = MacHotkey::with_open(
                 HotkeySpec::default(),
                 Box::new(move || {
@@ -481,6 +603,7 @@ mod tests {
                     let _ = opened.send(keys);
                     Ok(Box::new(FakeKeys(rx)) as Box<dyn RawKeys>)
                 }),
+                Arc::new(move || trusted.load(Ordering::SeqCst)),
             );
             let (sink, events) = mpsc::channel();
             hotkey
@@ -494,6 +617,7 @@ mod tests {
                 listeners,
                 keys,
                 events,
+                trusted: trusted_flag,
             }
         }
 
@@ -640,7 +764,7 @@ mod tests {
             let event = match event {
                 Pressed => Event::HotkeyPressed(now),
                 Released => Event::HotkeyReleased(now),
-                CancelPressed => Event::CancelPressed,
+                CancelPressed | ShortcutPressed => Event::CancelPressed,
                 Interrupted => Event::HotkeyInterrupted,
                 Failed => Event::HotkeyFailed,
                 // Only a supervisor sends it, never the adapter.
@@ -698,16 +822,17 @@ mod tests {
         }
     }
 
+    /// Other modifiers, Caps Lock and Fn while the hotkey is held don't end
+    /// the dictation; a key does (#172:
+    /// `right_command_shortcuts_from_handy_keys_events`).
     #[test]
-    fn other_modifiers_and_keys_while_held_do_not_cancel() {
+    fn other_modifiers_while_held_do_not_cancel() {
         let (sl, sr) = (Modifiers::SHIFT_LEFT, Modifiers::SHIFT_RIGHT);
         let (cl, cr) = (Modifiers::CMD_LEFT, Modifiers::CMD_RIGHT);
         let fun = Modifiers::FN;
         let out = outputs(&[
             modifier_event(RIGHT, RIGHT, true),
             modifier_event(RIGHT | sl, sl, true),
-            key_event(RIGHT | sl, handy_keys::Key::A, true),
-            key_event(RIGHT | sl, handy_keys::Key::A, false),
             modifier_event(RIGHT, sl, false),
             modifier_event(RIGHT | sr, sr, true),
             modifier_event(RIGHT, sr, false),
@@ -780,11 +905,50 @@ mod tests {
         assert!(harness.listeners.recv_timeout(WAIT).is_ok());
     }
 
+    /// #173: the moment Accessibility is gone the listener is dropped (its
+    /// tap removed) and Failed sent, without waiting for a key; a hold in
+    /// progress gets no release from the dead listener. Once allowed
+    /// again, a new start listens.
+    #[test]
+    fn losing_accessibility_drops_the_listener_and_fails() {
+        let mut harness = Harness::start();
+        harness.send(&[modifier_event(RIGHT, RIGHT, true)]);
+        assert_eq!(harness.next(), Pressed);
+        harness.trusted.store(false, Ordering::SeqCst);
+        let started = Instant::now();
+        assert_eq!(harness.next(), Failed);
+        assert!(
+            started.elapsed() < TRUST_POLL * 4,
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            harness.events.recv_timeout(WAIT),
+            Err(mpsc::RecvTimeoutError::Disconnected),
+            "the thread ended and dropped the sink"
+        );
+        // The listener was dropped too: its key channel closes as the
+        // thread ends, which may trail Failed by a moment.
+        let deadline = Instant::now() + WAIT;
+        while harness
+            .keys
+            .send(modifier_event(none(), RIGHT, false))
+            .is_ok()
+        {
+            assert!(Instant::now() < deadline, "the listener was never dropped");
+            thread::sleep(STOP_POLL);
+        }
+        harness.trusted.store(true, Ordering::SeqCst);
+        harness.hotkey.start(Box::new(|_| {})).unwrap();
+        assert!(harness.listeners.recv_timeout(WAIT).is_ok());
+    }
+
     #[test]
     fn a_failed_open_leaves_it_stopped() {
         let mut hotkey = MacHotkey::with_open(
             HotkeySpec::default(),
             Box::new(|| Err(HotkeyError::PermissionDenied)),
+            Arc::new(|| true),
         );
         assert_eq!(
             hotkey.start(Box::new(|_| {})),

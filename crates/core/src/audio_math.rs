@@ -34,6 +34,18 @@ pub const MIN_ACTIVE_FRAMES: usize = 2;
 /// long recording is less than 5% of it).
 pub const MAX_ACTIVE_FRAMES: usize = 5;
 
+/// A clip shorter than this must hold sustained sound to be transcribed
+/// (#172): see [`MIN_SOUND_RUN`].
+pub const SHORT_CLIP: Duration = Duration::from_secs(2);
+
+/// How many 20 ms frames in a row a [`SHORT_CLIP`] needs louder than the
+/// threshold (100 ms). A spoken word is sustained sound; the clicks of
+/// pressing and letting go of keys are a few loud frames apart. A short
+/// press with no speech in it is where the transcriber makes up words: the
+/// owner's half-second presses, with only key clicks and room noise, came
+/// back as `.` and ` Thank you.` and were pasted (#172).
+pub const MIN_SOUND_RUN: usize = 5;
+
 /// Clips shorter than this are not transcribed.
 ///
 /// The same 200 ms as [`MIN_HOLD`], the coordinator's shortest hotkey hold:
@@ -96,13 +108,7 @@ pub fn is_silent_by_frame(samples: &[f32], sample_rate: u32, threshold: f32) -> 
     if threshold.is_nan() {
         return false;
     }
-    // 20 ms of samples; at least one, so a tiny sample rate can't make
-    // `chunks` panic.
-    let frame_len = usize::try_from(
-        u64::from(sample_rate) * u64::try_from(FRAME_DURATION.as_millis()).unwrap_or(20) / 1_000,
-    )
-    .unwrap_or(usize::MAX)
-    .max(1);
+    let frame_len = frame_len(sample_rate);
     let frames = samples.len().div_ceil(frame_len);
     #[allow(
         clippy::cast_precision_loss,
@@ -119,6 +125,38 @@ pub fn is_silent_by_frame(samples: &[f32], sample_rate: u32, threshold: f32) -> 
         .take(needed)
         .count();
     active < needed
+}
+
+/// Samples in a [`FRAME_DURATION`] frame at `sample_rate` Hz; at least one,
+/// so a tiny sample rate can't make `chunks` panic.
+fn frame_len(sample_rate: u32) -> usize {
+    usize::try_from(
+        u64::from(sample_rate) * u64::try_from(FRAME_DURATION.as_millis()).unwrap_or(20) / 1_000,
+    )
+    .unwrap_or(usize::MAX)
+    .max(1)
+}
+
+/// Whether the clip has at least `run` frames in a row whose RMS is at least
+/// `threshold`: sustained sound, as speech is, not clicks (#172). A `NaN`
+/// threshold never throws audio away (true), as with [`is_silent`]; empty
+/// input has none (false).
+#[must_use]
+pub fn has_sustained_sound(samples: &[f32], sample_rate: u32, threshold: f32, run: usize) -> bool {
+    if threshold.is_nan() {
+        return true;
+    }
+    let mut longest = 0;
+    let mut current = 0;
+    for frame in samples.chunks(frame_len(sample_rate)) {
+        if rms(frame) >= threshold {
+            current += 1;
+            longest = longest.max(current);
+        } else {
+            current = 0;
+        }
+    }
+    longest >= run.max(1)
 }
 
 /// How long `sample_count` samples last at `sample_rate` Hz, to the
@@ -157,11 +195,16 @@ pub enum Verdict {
     TooShort,
     /// Long enough, but (almost) every frame is quieter than the threshold.
     Silent,
+    /// Shorter than [`SHORT_CLIP`], with loud frames but never
+    /// [`MIN_SOUND_RUN`] in a row: key clicks or a bump, not a word (#172).
+    NoSustainedSound,
 }
 
 /// Decides whether a recording goes to the transcriber, checking emptiness,
 /// then length, then loudness frame by frame ([`is_silent_by_frame`]) against
-/// `silence_threshold` (normally [`DEFAULT_SILENCE_THRESHOLD`]).
+/// `silence_threshold` (normally [`DEFAULT_SILENCE_THRESHOLD`]), then, for a
+/// clip shorter than [`SHORT_CLIP`], sustained sound
+/// ([`has_sustained_sound`], [`MIN_SOUND_RUN`] frames).
 #[must_use]
 pub fn assess(samples: &[f32], sample_rate: u32, silence_threshold: f32) -> Verdict {
     if samples.is_empty() || sample_rate == 0 {
@@ -170,6 +213,10 @@ pub fn assess(samples: &[f32], sample_rate: u32, silence_threshold: f32) -> Verd
         Verdict::TooShort
     } else if is_silent_by_frame(samples, sample_rate, silence_threshold) {
         Verdict::Silent
+    } else if duration(samples.len(), sample_rate) < SHORT_CLIP
+        && !has_sustained_sound(samples, sample_rate, silence_threshold, MIN_SOUND_RUN)
+    {
+        Verdict::NoSustainedSound
     } else {
         Verdict::Transcribe
     }
@@ -390,6 +437,79 @@ mod tests {
         assert!(is_silent_by_frame(&[0.5; 10], 0, 1.5));
         // A clip shorter than the minimum active count counts what it has.
         assert!(!is_silent_by_frame(&[0.5; 100], RATE, t));
+    }
+
+    /// Room noise at −62 dBFS with a key click (5 ms at 0.9) at each of
+    /// `clicks_at` (ms).
+    fn noise_with_clicks(millis: u32, clicks_at: &[u32]) -> Vec<f32> {
+        let mut clip = tone_at(-62.0, millis);
+        for &at in clicks_at {
+            let start = (at * RATE / 1_000) as usize;
+            clip[start..start + 80].fill(0.9);
+        }
+        clip
+    }
+
+    /// #172, the owner's presses: half a second or so with the clicks of a
+    /// shortcut's keys going down and up and no speech is not sent; the
+    /// same press with a short word in it is.
+    #[test]
+    fn issue_172_a_short_press_with_only_key_clicks_is_not_sent() {
+        let t = DEFAULT_SILENCE_THRESHOLD;
+        for (millis, clicks) in [
+            (500, &[30, 200, 260, 470][..]),
+            (700, &[20, 21, 300, 340, 650, 690][..]),
+            (1_900, &[100, 140, 180, 220, 900, 1_800][..]),
+        ] {
+            let clip = noise_with_clicks(millis, clicks);
+            assert!(
+                !is_silent_by_frame(&clip, RATE, t),
+                "{millis} ms: loud enough"
+            );
+            assert_eq!(
+                assess(&clip, RATE, t),
+                Verdict::NoSustainedSound,
+                "{millis} ms"
+            );
+        }
+        // A word ("yes", 150 ms at −40 dBFS) among the same clicks is sent.
+        let mut clip = noise_with_clicks(300, &[30]);
+        clip.extend(tone_at(-40.0, 150));
+        clip.extend(noise_with_clicks(300, &[250]));
+        assert_eq!(assess(&clip, RATE, t), Verdict::Transcribe);
+        // From two seconds on the old rule alone decides, as before: six
+        // loud frames (5% of 100 is 5) are enough there, in a row or not.
+        let clip = noise_with_clicks(2_000, &[100, 300, 500, 700, 900, 1_100]);
+        assert_eq!(assess(&clip, RATE, t), Verdict::Transcribe);
+    }
+
+    #[test]
+    fn sustained_sound_needs_a_run_of_loud_frames() {
+        let t = DEFAULT_SILENCE_THRESHOLD;
+        let loud = tone(0.5, 20);
+        let quiet = vec![0.0; 320];
+        let clip = |pattern: &str| -> Vec<f32> {
+            pattern
+                .chars()
+                .flat_map(|c| {
+                    if c == 'x' {
+                        loud.clone()
+                    } else {
+                        quiet.clone()
+                    }
+                })
+                .collect()
+        };
+        assert!(has_sustained_sound(&clip("..xxxxx.."), RATE, t, 5));
+        assert!(!has_sustained_sound(&clip("..xxxx.xxxx.."), RATE, t, 5));
+        assert!(has_sustained_sound(&clip("x.x.xxxxxx"), RATE, t, 5));
+        assert!(!has_sustained_sound(&[], RATE, t, 5));
+        // A NaN threshold never throws audio away; a run of 0 is 1.
+        assert!(has_sustained_sound(&[0.0; 10], RATE, f32::NAN, 5));
+        assert!(has_sustained_sound(&clip("x"), RATE, t, 0));
+        assert!(!has_sustained_sound(&clip("."), RATE, t, 0));
+        assert_eq!(SHORT_CLIP, Duration::from_secs(2));
+        assert_eq!(MIN_SOUND_RUN, 5);
     }
 
     #[test]

@@ -64,15 +64,29 @@ All in `src/platform/macos/listener.rs` unless noted.
    which no other macOS event has. `HotkeyManager` needs no change: it
    treats a resync as a modifier release, so a modifier-only hotkey whose
    keys are no longer held is released.
-6. Tests: `dictation_patch_tests` at the end of `listener.rs` drive the real
+6. **Listen-only tap, and no re-enable without Accessibility** (#173).
+   `run_event_tap` creates a `ListenOnly` tap when no blocking hotkeys
+   were given (`KeyboardListener::new()`), and the active `Default` filter
+   only for `new_with_blocking`. Turning Accessibility off while an active
+   filter tap ran froze the whole Mac's keyboard (the window server waits
+   for an active tap's answer to each event; it never waits for a
+   listen-only one). And the `TapDisabledBy*` handler no longer re-enables
+   the tap once `AXIsProcessTrusted` is false: it marks the context
+   (`CallbackCtx::lost_trust`) and stops the run loop, so the tap thread
+   removes the tap and ends, the event channel closes, and the consumer
+   sees `EventLoopNotRunning`. The check goes through
+   `CallbackCtx::trusted`, so tests give it a fixed answer.
+   Tests: `tap_disabled_without_trust_is_not_reenabled`,
+   `tap_disabled_records_lost_trust_only_when_untrusted`.
+7. Tests: `dictation_patch_tests` at the end of `listener.rs` drive the real
    callback with local `CGEvent`s (no tap, nothing posted, no permission
    needed). Run them with
    `CARGO_TARGET_DIR=target/handy-keys cargo test --manifest-path third_party/handy-keys/Cargo.toml --lib dictation_patch`.
-7. `rustfmt.toml` (new): keeps the repository's pre-commit
+8. `rustfmt.toml` (new): keeps the repository's pre-commit
    `rustfmt --edition 2024` from restyling the 2021-edition upstream code.
 
 Not changed: Windows and Linux backends, blocking hotkeys, the tap thread's
-run loop and teardown, the unreachable `keycode == 0x3F` branch.
+teardown (apart from 6), the unreachable `keycode == 0x3F` branch.
 
 ## Upstream report (draft)
 
