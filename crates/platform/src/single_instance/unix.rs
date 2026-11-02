@@ -26,6 +26,10 @@ pub struct Server {
     /// Taken by [`Server::listen`].
     listener: Option<UnixListener>,
     shutdown: Arc<Shutdown>,
+    /// Tests only (#142): moved into the accept thread by [`Server::listen`],
+    /// so the thread's end shows as the channel closing.
+    #[cfg(test)]
+    accept_exit_fence: Option<std::sync::mpsc::Sender<()>>,
 }
 
 impl Server {
@@ -45,6 +49,8 @@ impl Server {
             io_timeout: config.io_timeout,
             listener: Some(listener),
             shutdown: Arc::default(),
+            #[cfg(test)]
+            accept_exit_fence: None,
         })
     }
 
@@ -61,6 +67,8 @@ impl Server {
             readers: Arc::new(AtomicUsize::new(0)),
             io_timeout: self.io_timeout,
             shutdown: Arc::clone(&self.shutdown),
+            #[cfg(test)]
+            _exit_fence: self.accept_exit_fence.take(),
         };
         std::thread::Builder::new()
             .name("single-instance".into())
@@ -106,6 +114,9 @@ struct Accepting {
     readers: Arc<AtomicUsize>,
     io_timeout: Duration,
     shutdown: Arc<Shutdown>,
+    /// Tests only (#142): dropped when the accept thread ends.
+    #[cfg(test)]
+    _exit_fence: Option<std::sync::mpsc::Sender<()>>,
 }
 
 impl Accepting {
@@ -178,6 +189,10 @@ struct Shutdown {
     /// instead of guessing with a sleep.
     #[cfg(test)]
     wait_started: Mutex<Option<std::sync::mpsc::Sender<StopEvent>>>,
+    /// Tests only (#142): the limit [`Shutdown::wait_for_deliveries`] was
+    /// last given, to check the stop budget without timing anything.
+    #[cfg(test)]
+    last_limit: Mutex<Option<Duration>>,
 }
 
 /// What a test learns about [`Server::stop`], in order.
@@ -226,6 +241,13 @@ impl Shutdown {
     /// Waits until no message is being handed over, or `limit` passes;
     /// `true` if none is.
     fn wait_for_deliveries(&self, limit: Duration) -> bool {
+        #[cfg(test)]
+        {
+            *self
+                .last_limit
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(limit);
+        }
         let (state, _) = self
             .idle
             .wait_timeout_while(self.state(), limit, |state| {
@@ -992,6 +1014,80 @@ mod tests {
         // Once shutdown has finished, the next launch runs.
         let next = acquire(&config, &message("c"));
         assert!(matches!(next, Ok(Launch::Primary(_))), "{next:?}");
+    }
+
+    /// #142: `stop` waits for a delivery in flight up to twice the I/O
+    /// timeout (a delivery is read within one timeout and answered within
+    /// another). The limit it gives the wait is read back from the wait, so
+    /// nothing here is timed.
+    #[test]
+    fn stop_waits_for_a_delivery_for_twice_the_io_timeout() {
+        // Failure bound only; nothing here passes or fails by elapsed time.
+        const BOUND: Duration = Duration::from_secs(30);
+        let mut config = temp_config();
+        config.io_timeout = Duration::from_secs(5);
+        let Launch::Primary(mut instance) = acquire(&config, &message("a")).unwrap() else {
+            panic!("not the primary");
+        };
+        let (entered_tx, entered) = mpsc::channel();
+        let (release_tx, release) = mpsc::channel::<()>();
+        instance
+            .listen(move |_| {
+                let _ = entered_tx.send(());
+                let _ = release.recv();
+            })
+            .unwrap();
+        let (events_tx, events) = mpsc::channel();
+        *instance.server.shutdown.wait_started.lock().unwrap() = Some(events_tx);
+        let shutdown = Arc::clone(&instance.server.shutdown);
+        let second = {
+            let config = config.clone();
+            std::thread::spawn(move || acquire(&config, &message("b")))
+        };
+        let entered = entered.recv_timeout(BOUND);
+        let stopper = std::thread::spawn(move || drop(instance));
+        let waiting = events.recv_timeout(BOUND);
+        let limit = *shutdown.last_limit.lock().unwrap();
+        // Clean up before asserting: release the callback, let both finish.
+        let _ = release_tx.send(());
+        stopper.join().unwrap();
+        let _ = second.join().unwrap();
+        assert_eq!(entered, Ok(()));
+        assert_eq!(waiting, Ok(StopEvent::Waiting), "stop didn't wait");
+        assert_eq!(
+            limit,
+            Some(config.io_timeout * 2),
+            "stop's budget for a delivery in flight is twice the I/O timeout"
+        );
+    }
+
+    /// #142: after `stop`, the accept thread ends (so its listener is closed
+    /// and nothing can connect any more), not just stops handing out
+    /// messages. The thread's end is read from a channel its closure owns the
+    /// sender of.
+    #[test]
+    fn the_accept_thread_ends_when_the_server_stops() {
+        // Failure bound only; the thread ends at once when it works.
+        const BOUND: Duration = Duration::from_secs(10);
+        let config = temp_config();
+        let Launch::Primary(mut instance) = acquire(&config, &message("a")).unwrap() else {
+            panic!("not the primary");
+        };
+        let (fence, ended) = mpsc::channel::<()>();
+        instance.server.accept_exit_fence = Some(fence);
+        instance.listen(|_| {}).unwrap();
+        // A launch gets through while it runs.
+        assert!(matches!(
+            acquire(&config, &message("b")).unwrap(),
+            Launch::Forwarded
+        ));
+        drop(instance);
+        // The sender is dropped when the accept thread's closure ends.
+        assert_eq!(
+            ended.recv_timeout(BOUND),
+            Err(mpsc::RecvTimeoutError::Disconnected),
+            "the accept thread was still running after stop"
+        );
     }
 
     /// #127: the scratch owner removes whatever a test leaves at or next to
