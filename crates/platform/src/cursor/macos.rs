@@ -5,7 +5,11 @@
 //! 1. Secure Input on, or no Accessibility grant: nothing is read.
 //! 2. The system-wide element's `AXFocusedUIElement`.
 //! 3. That element's `AXSubrole`: an `AXSecureTextField` (a password field)
-//!    is never read.
+//!    is never read. Neither is a field whose subrole can't be read (the app
+//!    timed out, failed, or answered with something that isn't a string):
+//!    it fails closed (#135). Only an element that has no subrole at all
+//!    (`kAXErrorAttributeUnsupported` or `kAXErrorNoValue`, as TextEdit's
+//!    text view answers) is read on: a password field always has one.
 //! 4. Its `AXSelectedTextRange` (UTF-16 offsets): at offset 0 the cursor is
 //!    at the start of the field.
 //! 5. The two UTF-16 units before the cursor (two, so a character outside
@@ -38,6 +42,9 @@ const UNITS_BEFORE: isize = 2;
 /// the field's text: that is read only through the bounded
 /// `AXStringForRange`.
 const READABLE_ATTRIBUTES: [&str; 3] = ["AXFocusedUIElement", "AXSubrole", "AXSelectedTextRange"];
+
+/// `NSAccessibilitySecureTextFieldSubrole`: a password field.
+const SECURE_SUBROLE: &str = "AXSecureTextField";
 
 type CfTypeRef = *const c_void;
 type AxError = i32;
@@ -186,6 +193,17 @@ fn ax_error(code: AxError) -> CursorReadError {
 /// The element's `attribute`, one of [`READABLE_ATTRIBUTES`]; any other
 /// is refused before the app is asked.
 fn copy_attribute(element: &Cf, attribute: &str) -> Result<Cf, CursorReadError> {
+    copy_attribute_or_code(element, attribute)?.map_err(ax_error)
+}
+
+/// [`copy_attribute`], with the app's `AXError` kept as it is (inner `Err`),
+/// for a caller that tells the codes apart. The outer `Err` is a refusal
+/// before the app is asked. A success with no object reads as
+/// `kAXErrorNoValue`.
+fn copy_attribute_or_code(
+    element: &Cf,
+    attribute: &str,
+) -> Result<Result<Cf, AxError>, CursorReadError> {
     if !READABLE_ATTRIBUTES.contains(&attribute) {
         return Err(CursorReadError::Failed(format!("{attribute} is not read")));
     }
@@ -196,9 +214,19 @@ fn copy_attribute(element: &Cf, attribute: &str) -> Result<Cf, CursorReadError> 
     // rule) that Cf takes over.
     let code = unsafe { AXUIElementCopyAttributeValue(element.0, name.0, &raw mut value) };
     if code != AX_SUCCESS {
-        return Err(ax_error(code));
+        return Ok(Err(code));
     }
-    Cf::owned(value).ok_or(CursorReadError::Unavailable)
+    Ok(Cf::owned(value).ok_or(AX_ERROR_NO_VALUE))
+}
+
+/// What an `AXSubrole` read that failed with `code` means: the element has
+/// no subrole (`Ok(None)`, so it isn't a password field: those always have
+/// one), or the subrole is unknown and the field must not be read (#135).
+fn subrole_error(code: AxError) -> Result<Option<Vec<u16>>, CursorReadError> {
+    match code {
+        AX_ERROR_ATTRIBUTE_UNSUPPORTED | AX_ERROR_NO_VALUE => Ok(None),
+        other => Err(ax_error(other)),
+    }
 }
 
 /// The element's `AXStringForRange` for `range`.
@@ -267,8 +295,9 @@ fn last_char(units: &[u16]) -> Option<char> {
 /// text is [`string_for_range`](Self::string_for_range), bounded at the
 /// source, so nothing here can request the whole field.
 trait FocusedField {
-    /// Whether it is a password field.
-    fn is_secure(&self) -> bool;
+    /// Its `AXSubrole` (UTF-16), `None` if it has none, or why it couldn't
+    /// be read.
+    fn subrole(&self) -> Result<Option<Vec<u16>>, CursorReadError>;
     /// The cursor's offset: the start of `AXSelectedTextRange`.
     fn cursor(&self) -> Result<isize, CursorReadError>;
     /// At most `range.length` UTF-16 units of `AXStringForRange` for
@@ -280,22 +309,25 @@ trait FocusedField {
 struct AxField(Cf);
 
 impl FocusedField for AxField {
-    fn is_secure(&self) -> bool {
-        copy_attribute(&self.0, "AXSubrole")
-            .ok()
-            .filter(Cf::is_string)
-            .and_then(|subrole| {
-                // SAFETY: a valid CFString.
-                let length = unsafe { CFStringGetLength(subrole.0) };
-                units(
-                    &subrole,
-                    CfRange {
-                        location: 0,
-                        length,
-                    },
-                )
-            })
-            .is_some_and(|subrole| String::from_utf16_lossy(&subrole) == "AXSecureTextField")
+    fn subrole(&self) -> Result<Option<Vec<u16>>, CursorReadError> {
+        let subrole = match copy_attribute_or_code(&self.0, "AXSubrole")? {
+            Ok(subrole) => subrole,
+            Err(code) => return subrole_error(code),
+        };
+        if !subrole.is_string() {
+            return Err(CursorReadError::Unavailable);
+        }
+        // SAFETY: a valid CFString (checked above).
+        let length = unsafe { CFStringGetLength(subrole.0) };
+        units(
+            &subrole,
+            CfRange {
+                location: 0,
+                length,
+            },
+        )
+        .map(Some)
+        .ok_or(CursorReadError::Unavailable)
     }
 
     fn cursor(&self) -> Result<isize, CursorReadError> {
@@ -336,10 +368,14 @@ impl FocusedField for AxField {
 }
 
 /// The character before the cursor in `field`: nothing is read from a
-/// password field, and if the bounded range read fails the answer is
-/// unknown (the caller adds no space); there is no other way to the text.
+/// password field, nor from a field whose subrole can't be read (fail
+/// closed, #135), and if the bounded range read fails the answer is unknown
+/// (the caller adds no space); there is no other way to the text.
 fn read_field(field: &impl FocusedField) -> Result<BeforeCursor, CursorReadError> {
-    if field.is_secure() {
+    if field
+        .subrole()?
+        .is_some_and(|subrole| subrole.iter().copied().eq(SECURE_SUBROLE.encode_utf16()))
+    {
         return Err(CursorReadError::SecureField);
     }
     let cursor = field.cursor()?;
@@ -385,7 +421,8 @@ mod tests {
     struct RecordingField {
         text: Vec<u16>,
         cursor: Result<isize, CursorReadError>,
-        secure: bool,
+        /// What `AXSubrole` answers; a plain text area has none.
+        subrole: Result<Option<&'static str>, CursorReadError>,
         range_read: Option<CursorReadError>,
         /// Extra units an app returns around the asked-for range.
         overshoot: bool,
@@ -397,7 +434,7 @@ mod tests {
             Self {
                 text: text.encode_utf16().collect(),
                 cursor: Ok(cursor),
-                secure: false,
+                subrole: Ok(None),
                 range_read: None,
                 overshoot: false,
                 requests: RefCell::new(Vec::new()),
@@ -410,9 +447,11 @@ mod tests {
     }
 
     impl FocusedField for RecordingField {
-        fn is_secure(&self) -> bool {
+        fn subrole(&self) -> Result<Option<Vec<u16>>, CursorReadError> {
             self.requests.borrow_mut().push("AXSubrole".into());
-            self.secure
+            self.subrole
+                .clone()
+                .map(|subrole| subrole.map(|s| s.encode_utf16().collect()))
         }
 
         fn cursor(&self) -> Result<isize, CursorReadError> {
@@ -494,9 +533,67 @@ mod tests {
     #[test]
     fn a_password_field_is_never_read() {
         let mut field = RecordingField::new("secret", 6);
-        field.secure = true;
+        field.subrole = Ok(Some("AXSecureTextField"));
         assert_eq!(read_field(&field), Err(CursorReadError::SecureField));
         assert_eq!(field.requests(), ["AXSubrole"]);
+    }
+
+    /// #135: a subrole that can't be read fails closed: nothing more is
+    /// asked of the field (no cursor, no text), so no space is added.
+    #[test]
+    fn a_field_whose_subrole_cant_be_read_is_never_read() {
+        for error in [
+            CursorReadError::TimedOut,
+            CursorReadError::Unavailable,
+            CursorReadError::PermissionDenied,
+            CursorReadError::Failed("AXError -25200".into()),
+        ] {
+            let mut field = RecordingField::new("secret", 6);
+            field.subrole = Err(error.clone());
+            assert_eq!(read_field(&field), Err(error));
+            assert_eq!(field.requests(), ["AXSubrole"]);
+        }
+    }
+
+    #[test]
+    fn a_field_with_another_subrole_or_none_is_read() {
+        for subrole in [None, Some("AXSearchField"), Some("AXSecureTextFieldX")] {
+            let mut field = RecordingField::new("hello", 5);
+            field.subrole = Ok(subrole);
+            assert_eq!(
+                read_field(&field),
+                Ok(BeforeCursor::Char('o')),
+                "{subrole:?}"
+            );
+        }
+    }
+
+    /// #135: only "the element has no subrole" reads on; every other
+    /// AXError on `AXSubrole` (a timeout, a dead or invalid element, an
+    /// unknown failure) means the subrole is unknown.
+    #[test]
+    fn only_a_missing_subrole_counts_as_not_a_password_field() {
+        assert_eq!(subrole_error(AX_ERROR_ATTRIBUTE_UNSUPPORTED), Ok(None));
+        assert_eq!(subrole_error(AX_ERROR_NO_VALUE), Ok(None));
+        assert_eq!(
+            subrole_error(AX_ERROR_CANNOT_COMPLETE),
+            Err(CursorReadError::TimedOut)
+        );
+        for code in [
+            AX_ERROR_INVALID_UI_ELEMENT,
+            AX_ERROR_NOT_IMPLEMENTED,
+            AX_ERROR_PARAMETERIZED_ATTRIBUTE_UNSUPPORTED,
+        ] {
+            assert_eq!(subrole_error(code), Err(CursorReadError::Unavailable));
+        }
+        assert_eq!(
+            subrole_error(AX_ERROR_API_DISABLED),
+            Err(CursorReadError::PermissionDenied)
+        );
+        assert_eq!(
+            subrole_error(-25200),
+            Err(CursorReadError::Failed("AXError -25200".into()))
+        );
     }
 
     #[test]
