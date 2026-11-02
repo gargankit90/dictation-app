@@ -240,6 +240,7 @@ pub struct SyntheticHotkey<H> {
 #[derive(Clone)]
 pub struct Injector {
     sink: SharedSink,
+    outage: Option<HotkeyOutage>,
 }
 
 impl<H: HotkeySource> SyntheticHotkey<H> {
@@ -248,6 +249,7 @@ impl<H: HotkeySource> SyntheticHotkey<H> {
         let sink = SharedSink::default();
         let injector = Injector {
             sink: Arc::clone(&sink),
+            outage: None,
         };
         (
             Self {
@@ -308,6 +310,25 @@ impl<H: HotkeySource> HotkeySource for SyntheticHotkey<H> {
 }
 
 impl Injector {
+    /// This injector, also able to start and end `outage`.
+    #[must_use]
+    pub fn with_outage(mut self, outage: HotkeyOutage) -> Self {
+        self.outage = Some(outage);
+        self
+    }
+
+    /// Starts or ends the hotkey outage. Returns whether this injector has
+    /// one ([`with_outage`](Self::with_outage)).
+    pub fn outage(&self, command: OutageCommand) -> bool {
+        match &self.outage {
+            Some(outage) => {
+                outage.run(command);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Sends `event` to the pipeline. Returns whether it was listening; an
     /// event while stopped is lost, like a real key press.
     pub fn inject(&self, event: HotkeyEvent) -> bool {
@@ -318,6 +339,227 @@ impl Injector {
             }
             None => false,
         }
+    }
+}
+
+/// `--debug-hotkey-outage`: the real hotkey dies, as when Accessibility is
+/// turned off, and can't start again until `--debug-hotkey-recover` (debug
+/// builds; for the e2e scenario `e2e_hotkey_listener_recovers`, #88).
+pub const DEBUG_HOTKEY_OUTAGE_FLAG: &str = "--debug-hotkey-outage";
+/// `--debug-hotkey-recover`: the real hotkey may start again; the app's
+/// supervisor brings it back by itself.
+pub const DEBUG_HOTKEY_RECOVER_FLAG: &str = "--debug-hotkey-recover";
+
+/// What an outage hook asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutageCommand {
+    /// [`DEBUG_HOTKEY_OUTAGE_FLAG`].
+    Begin,
+    /// [`DEBUG_HOTKEY_RECOVER_FLAG`].
+    End,
+}
+
+impl OutageCommand {
+    /// The outage hook `flag` is, if it is one.
+    #[must_use]
+    pub fn from_flag(flag: &str) -> Option<Self> {
+        match flag {
+            DEBUG_HOTKEY_OUTAGE_FLAG => Some(Self::Begin),
+            DEBUG_HOTKEY_RECOVER_FLAG => Some(Self::End),
+            _ => None,
+        }
+    }
+}
+
+/// Makes real hotkey sources fail on demand, the way revoking Accessibility
+/// does, without touching the OS (a VM can't re-grant it without a person
+/// typing a password). Wrap each source the hotkey factory builds with
+/// [`wrap`](Self::wrap); [`begin`](Self::begin) then ends every wrapped
+/// source that listens with [`HotkeyEvent::Failed`] and makes every start
+/// fail with [`HotkeyError::PermissionDenied`] until [`end`](Self::end).
+/// Cheap to clone; every clone is the same outage.
+#[derive(Clone, Default)]
+pub struct HotkeyOutage {
+    shared: Arc<Mutex<Outage>>,
+}
+
+#[derive(Default)]
+struct Outage {
+    on: bool,
+    /// The sinks of the wrapped sources started so far; those still alive
+    /// listen.
+    sinks: Vec<std::sync::Weak<Mutex<Option<HotkeySink>>>>,
+}
+
+impl HotkeyOutage {
+    fn lock(&self) -> MutexGuard<'_, Outage> {
+        self.shared.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// `inner`, failing while this outage lasts.
+    pub fn wrap<H: HotkeySource>(&self, inner: H) -> Breakable<H> {
+        Breakable {
+            inner,
+            outage: self.clone(),
+            sink: SharedSink::default(),
+        }
+    }
+
+    /// Starts the outage: every wrapped source that listens is cut off from
+    /// its sink, which gets [`HotkeyEvent::Failed`] (its real listener keeps
+    /// running, unheard, until it is stopped), and new ones can't start.
+    /// Returns how many were listening.
+    pub fn begin(&self) -> usize {
+        let live: Vec<_> = {
+            let mut outage = self.lock();
+            outage.on = true;
+            std::mem::take(&mut outage.sinks)
+                .iter()
+                .filter_map(std::sync::Weak::upgrade)
+                .collect()
+        };
+        let mut failed = 0;
+        for slot in live {
+            // Taken out, then called and dropped without the lock.
+            let sink = lock(&slot).take();
+            if let Some(mut sink) = sink {
+                sink(HotkeyEvent::Failed);
+                failed += 1;
+            }
+        }
+        tracing::info!(failed, "test hook: hotkey outage begins");
+        failed
+    }
+
+    /// Ends the outage: wrapped sources start again.
+    pub fn end(&self) {
+        self.lock().on = false;
+        tracing::info!("test hook: hotkey outage ends");
+    }
+
+    /// Does `command`.
+    pub fn run(&self, command: OutageCommand) {
+        match command {
+            OutageCommand::Begin => {
+                self.begin();
+            }
+            OutageCommand::End => self.end(),
+        }
+    }
+}
+
+/// A [`HotkeySource`] that a [`HotkeyOutage`] can break.
+pub struct Breakable<H> {
+    inner: H,
+    outage: HotkeyOutage,
+    sink: SharedSink,
+}
+
+impl<H: HotkeySource> HotkeySource for Breakable<H> {
+    fn start(&mut self, sink: HotkeySink) -> Result<(), HotkeyError> {
+        {
+            let mut outage = self.outage.lock();
+            if outage.on {
+                return Err(HotkeyError::PermissionDenied);
+            }
+            *lock(&self.sink) = Some(sink);
+            outage.sinks.retain(|sink| sink.strong_count() > 0);
+            outage.sinks.push(Arc::downgrade(&self.sink));
+        }
+        let forward = Arc::clone(&self.sink);
+        let started = self.inner.start(Box::new(move |event| {
+            if let Some(sink) = lock(&forward).as_mut() {
+                sink(event);
+            }
+        }));
+        if started.is_err() {
+            *lock(&self.sink) = None;
+        }
+        started
+    }
+
+    fn stop(&mut self) {
+        // The real source first, without the lock: its stop may wait for a
+        // sink call that needs it.
+        self.inner.stop();
+        let sink = lock(&self.sink).take();
+        drop(sink);
+    }
+}
+
+#[cfg(test)]
+mod outage_tests {
+    use std::sync::mpsc;
+
+    use HotkeyEvent::{Failed, Pressed};
+    use dictation_platform::fakes::FakeHotkey;
+
+    use super::*;
+
+    fn channel_sink() -> (HotkeySink, mpsc::Receiver<HotkeyEvent>) {
+        let (tx, rx) = mpsc::channel();
+        (
+            Box::new(move |event| {
+                let _ = tx.send(event);
+            }),
+            rx,
+        )
+    }
+
+    #[test]
+    fn the_flags_name_the_commands() {
+        assert_eq!(
+            OutageCommand::from_flag(DEBUG_HOTKEY_OUTAGE_FLAG),
+            Some(OutageCommand::Begin)
+        );
+        assert_eq!(
+            OutageCommand::from_flag(DEBUG_HOTKEY_RECOVER_FLAG),
+            Some(OutageCommand::End)
+        );
+        assert_eq!(OutageCommand::from_flag("--press"), None);
+    }
+
+    #[test]
+    fn an_outage_kills_the_listening_source_and_refuses_new_ones() {
+        let outage = HotkeyOutage::default();
+        let real = FakeHotkey::new();
+        let mut source = outage.wrap(real.clone());
+        let (sink, events) = channel_sink();
+        source.start(sink).unwrap();
+        assert!(real.emit(Pressed));
+
+        outage.run(OutageCommand::Begin);
+        // The real source still runs but is no longer heard.
+        assert!(real.emit(Pressed));
+        assert_eq!(events.try_iter().collect::<Vec<_>>(), [Pressed, Failed]);
+        assert_eq!(outage.begin(), 0, "nothing listens any more");
+
+        let mut next = outage.wrap(FakeHotkey::new());
+        let (sink, _) = channel_sink();
+        assert_eq!(next.start(sink), Err(HotkeyError::PermissionDenied));
+        source.stop();
+        assert!(!real.is_listening());
+
+        outage.run(OutageCommand::End);
+        let again = FakeHotkey::new();
+        let mut next = outage.wrap(again.clone());
+        let (sink, events) = channel_sink();
+        next.start(sink).unwrap();
+        assert!(again.emit(Pressed));
+        assert_eq!(events.try_recv(), Ok(Pressed));
+        next.stop();
+    }
+
+    #[test]
+    fn a_source_that_cannot_start_is_not_broken_later() {
+        let outage = HotkeyOutage::default();
+        let real = FakeHotkey::new();
+        real.fail_next_start(HotkeyError::Unavailable("busy".into()));
+        let mut source = outage.wrap(real);
+        let (sink, events) = channel_sink();
+        assert!(source.start(sink).is_err());
+        assert_eq!(outage.begin(), 0);
+        assert!(events.try_recv().is_err());
     }
 }
 

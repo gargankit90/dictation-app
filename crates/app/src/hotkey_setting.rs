@@ -16,30 +16,62 @@
 //! being stopped and joined arrives) or both do (an old event that was
 //! already on its way is dropped, not delivered after the handoff).
 //!
+//! The hotkey comes back by itself (#88). When the current source dies (a
+//! [`HotkeyEvent::Failed`]: Accessibility was turned off, the event tap was
+//! removed) or can't start at all, a supervisor thread builds and starts a
+//! new one for the current spec, waiting longer after each failure
+//! ([`RESTART_POLICY`]), until one listens; then it sends
+//! [`HotkeyEvent::Restored`]. It sleeps on a condition variable in between,
+//! so it costs nothing while the hotkey works or while it waits, and it ends
+//! with [`stop`](HotkeySource::stop) (Quit). There is one supervisor per
+//! start, and it replaces the dead source, so there is never a second
+//! listener. A [`HotkeyControl::switch`] while the hotkey is down records
+//! the new spec, which is the one that comes back.
+//!
 //! [`startup_spec`] picks the spec to start with from the saved settings, and
 //! [`apply`] is what saving Settings does with the hotkey field: switch to
 //! it, or keep the old hotkey in both the listener and the settings to be
 //! saved, so the file, the form and the keyboard always agree.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
+use dictation_core::error::DictationError;
 use dictation_core::hotkey_spec::HotkeySpec;
+use dictation_core::retry::RetryPolicy;
 use dictation_core::settings::Settings;
-use dictation_ports::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};
+use dictation_ports::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource, Permission};
 
 use crate::config::ConfigError;
 
 /// Builds the real source for a spec; it listens only once started.
 pub type HotkeyFactory<H> = Box<dyn Fn(HotkeySpec) -> H + Send + Sync>;
 
+/// How the supervisor waits between tries to bring a dead hotkey back: half
+/// a second, then twice as long each time, at most 2 s, and it never gives
+/// up. A grant of Accessibility is picked up within about 2 s; a few tries a
+/// second at most, each a cheap permission check, don't load the CPU.
+pub const RESTART_POLICY: RetryPolicy = RetryPolicy {
+    max_attempts: u32::MAX,
+    base_delay: Duration::from_millis(500),
+    multiplier: 2,
+    max_delay: Duration::from_secs(2),
+    jitter: 0.0,
+};
+
 /// The pipeline's hotkey: a source for the current spec, replaceable through
 /// its [`HotkeyControl`] while the pipeline runs.
 ///
 /// A [`HotkeyEvent::Failed`] from the current source is passed on as usual;
-/// the pipeline's sink is kept, so a later successful
-/// [`switch`](HotkeyControl::switch) listens again.
+/// the pipeline's sink is kept, and the supervisor (see the module docs)
+/// restarts the hotkey and sends [`HotkeyEvent::Restored`]. If the first
+/// source can't start, [`start`](HotkeySource::start) still succeeds: it
+/// sends [`HotkeyEvent::Failed`] and the supervisor keeps trying.
 pub struct ConfigurableHotkey<H> {
     shared: Arc<Shared<H>>,
+    /// The supervisor thread while started.
+    supervisor: Option<JoinHandle<()>>,
 }
 
 /// Changes the hotkey of a running [`ConfigurableHotkey`]. Cheap to clone;
@@ -56,18 +88,22 @@ pub enum Switched {
     Now,
     /// It was already the hotkey; nothing was re-registered.
     Unchanged,
-    /// Nothing is listening (the pipeline hasn't started, or the hotkey
-    /// couldn't start, for the reason given). The spec is kept: it is the one
-    /// used the next time the hotkey starts.
+    /// Nothing is listening (the pipeline hasn't started, or the hotkey is
+    /// down and couldn't start, for the reason given). The spec is kept: it
+    /// is the one used the next time the hotkey starts, or comes back.
     NotListening(Option<HotkeyError>),
 }
 
 struct Shared<H> {
     factory: HotkeyFactory<H>,
+    /// How long the supervisor waits between tries.
+    restart: RetryPolicy,
     state: Mutex<State<H>>,
     /// Where every source's events go. Never held while a source starts or
     /// stops, so a source's `stop` can wait for its own event in flight.
     delivery: Arc<Mutex<Delivery>>,
+    /// Wakes the supervisor (with `delivery`): the hotkey died, or stopped.
+    wake: Arc<Condvar>,
 }
 
 /// Which source's events reach the pipeline. Each event is checked and
@@ -91,6 +127,11 @@ struct Delivery {
     pending_held: bool,
     /// Whether the pending source has failed since it started.
     pending_failed: bool,
+    /// The hotkey is down: the current source failed, or none could start.
+    /// The supervisor brings it back.
+    dead: bool,
+    /// The hotkey was stopped; the supervisor ends.
+    closed: bool,
 }
 
 impl Delivery {
@@ -100,16 +141,22 @@ impl Delivery {
         }
     }
 
-    /// An event from the source of `generation`.
-    fn deliver(&mut self, generation: u64, event: HotkeyEvent) {
+    /// An event from the source of `generation`. Returns whether it made
+    /// the hotkey [`dead`](Self::dead), so the supervisor must be woken.
+    fn deliver(&mut self, generation: u64, event: HotkeyEvent) -> bool {
+        let mut died = false;
         if generation == self.active {
             match event {
                 HotkeyEvent::Pressed => self.held = true,
-                HotkeyEvent::Released | HotkeyEvent::Interrupted | HotkeyEvent::Failed => {
+                HotkeyEvent::Released | HotkeyEvent::Interrupted => self.held = false,
+                HotkeyEvent::Failed => {
                     self.held = false;
+                    died = !self.dead;
+                    self.dead = true;
                 }
-                // Esc says nothing about the hotkey.
-                HotkeyEvent::CancelPressed => {}
+                // Esc says nothing about the hotkey, and a source doesn't
+                // restore itself.
+                HotkeyEvent::CancelPressed | HotkeyEvent::Restored => {}
             }
             self.send(event);
         } else if generation == self.pending {
@@ -121,9 +168,10 @@ impl Delivery {
                     self.pending_failed = true;
                 }
                 // Esc before the switch is the old hotkey's business.
-                HotkeyEvent::CancelPressed => {}
+                HotkeyEvent::CancelPressed | HotkeyEvent::Restored => {}
             }
         }
+        died
     }
 
     /// A switch is starting the source of `generation`.
@@ -140,9 +188,13 @@ impl Delivery {
 
     /// Makes the pending source the current one: from here on only its
     /// events reach the sink. A hold of the old key ends (its release would
-    /// be dropped); a hold of the new key that began while it was pending
+    /// be dropped); if the hotkey was down, [`HotkeyEvent::Restored`] says
+    /// it is back; a hold of the new key that began while it was pending
     /// starts, so its release isn't the first the pipeline hears of it.
-    fn hand_over(&mut self) {
+    ///
+    /// Returns whether the new source has already failed, which leaves the
+    /// hotkey dead (and the supervisor must be woken).
+    fn hand_over(&mut self) -> bool {
         self.active = self.pending;
         let pressed = self.pending_held;
         let failed = self.pending_failed;
@@ -151,11 +203,18 @@ impl Delivery {
             self.send(HotkeyEvent::Interrupted);
         }
         if failed {
+            self.dead = true;
             self.send(HotkeyEvent::Failed);
-        } else if pressed {
+            return true;
+        }
+        if std::mem::take(&mut self.dead) {
+            self.send(HotkeyEvent::Restored);
+        }
+        if pressed {
             self.held = true;
             self.send(HotkeyEvent::Pressed);
         }
+        false
     }
 }
 
@@ -182,13 +241,27 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl<H: HotkeySource + 'static> ConfigurableHotkey<H> {
     /// A hotkey for `spec`, built with `factory`; returns it and its
-    /// control. Nothing listens until the pipeline starts it.
+    /// control. Nothing listens until the pipeline starts it. A dead hotkey
+    /// is restarted under [`RESTART_POLICY`].
     pub fn new(
         spec: HotkeySpec,
         factory: impl Fn(HotkeySpec) -> H + Send + Sync + 'static,
     ) -> (Self, HotkeyControl) {
+        Self::with_restart_policy(spec, factory, RESTART_POLICY)
+    }
+
+    /// Like [`new`](Self::new), restarting a dead hotkey under `restart`:
+    /// the wait after the `n`th failed try is its
+    /// [`backoff`](RetryPolicy::backoff)`(n)`; its attempt limit and jitter
+    /// are not used (the supervisor never gives up).
+    pub fn with_restart_policy(
+        spec: HotkeySpec,
+        factory: impl Fn(HotkeySpec) -> H + Send + Sync + 'static,
+        restart: RetryPolicy,
+    ) -> (Self, HotkeyControl) {
         let shared = Arc::new(Shared {
             factory: Box::new(factory),
+            restart,
             state: Mutex::new(State {
                 spec,
                 source: None,
@@ -197,20 +270,169 @@ impl<H: HotkeySource + 'static> ConfigurableHotkey<H> {
                 generation: 0,
             }),
             delivery: Arc::new(Mutex::new(Delivery::default())),
+            wake: Arc::new(Condvar::new()),
         });
         let control = HotkeyControl {
             switch: Arc::clone(&shared) as Arc<dyn Switch>,
         };
-        (Self { shared }, control)
+        (
+            Self {
+                shared,
+                supervisor: None,
+            },
+            control,
+        )
+    }
+}
+
+/// Says, at warn, that the hotkey for `spec` can't listen and will come
+/// back by itself. A missing Accessibility grant is logged as
+/// `PermissionMissing`, which is what the e2e scenarios look for.
+fn log_down(error: &HotkeyError, spec: HotkeySpec) {
+    if *error == HotkeyError::PermissionDenied {
+        tracing::warn!(
+            error = %DictationError::PermissionMissing(Permission::Accessibility),
+            hotkey = %spec,
+            "PermissionMissing: the hotkey is off until Accessibility is granted; it starts by itself then"
+        );
+    } else {
+        tracing::warn!(%error, hotkey = %spec, "the hotkey can't listen yet; it starts as soon as it can");
+    }
+}
+
+/// What one try of the supervisor's came to.
+enum Restart {
+    /// The hotkey listens (again, or a switch had already brought it back).
+    Listening,
+    /// It is still down.
+    Failed,
+    /// The hotkey was stopped meanwhile.
+    Stopped,
+}
+
+/// The supervisor thread: waits until the hotkey is dead, then tries to
+/// bring it back after each backoff until it listens, and again whenever it
+/// dies; ends once the hotkey is stopped.
+fn supervise<H: HotkeySource>(shared: &Shared<H>) {
+    let mut failures = 0_u32;
+    loop {
+        if !shared.wait_until_dead() {
+            return;
+        }
+        failures = failures.saturating_add(1);
+        if !shared.sleep(shared.restart.backoff(failures)) {
+            return;
+        }
+        match shared.restart(failures) {
+            Restart::Listening => failures = 0,
+            Restart::Failed => {}
+            Restart::Stopped => return,
+        }
     }
 }
 
 impl<H: HotkeySource> Shared<H> {
     /// A sink for the source of `generation`: passes its events on while it
-    /// is the current one, and tracks whether its key is held.
+    /// is the current one, tracks whether its key is held, and wakes the
+    /// supervisor when it dies.
     fn forwarder(&self, generation: u64) -> HotkeySink {
         let delivery = Arc::clone(&self.delivery);
-        Box::new(move |event| lock(&delivery).deliver(generation, event))
+        let wake = Arc::clone(&self.wake);
+        Box::new(move |event| {
+            if lock(&delivery).deliver(generation, event) {
+                wake.notify_all();
+            }
+        })
+    }
+
+    /// [`Delivery::hand_over`], waking the supervisor if the new source has
+    /// already died.
+    fn hand_over(&self) -> bool {
+        let died = lock(&self.delivery).hand_over();
+        if died {
+            self.wake.notify_all();
+        }
+        died
+    }
+
+    /// Blocks until the hotkey is dead (`true`) or stopped (`false`).
+    fn wait_until_dead(&self) -> bool {
+        let mut delivery = lock(&self.delivery);
+        loop {
+            if delivery.closed {
+                return false;
+            }
+            if delivery.dead {
+                return true;
+            }
+            delivery = self
+                .wake
+                .wait(delivery)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
+    /// Waits `delay`; `false` if the hotkey is stopped first, which ends
+    /// the wait at once.
+    fn sleep(&self, delay: Duration) -> bool {
+        let deadline = Instant::now() + delay;
+        let mut delivery = lock(&self.delivery);
+        loop {
+            if delivery.closed {
+                return false;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return true;
+            }
+            delivery = self
+                .wake
+                .wait_timeout(delivery, deadline - now)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
+
+    /// One try to bring the dead hotkey back, the `failures`th in a row:
+    /// stops what is left of the dead source, then starts a new one for the
+    /// current spec, which takes over if it listens.
+    fn restart(&self, failures: u32) -> Restart {
+        let mut state = lock(&self.state);
+        if !state.started {
+            return Restart::Stopped;
+        }
+        if !lock(&self.delivery).dead {
+            // A switch brought it back meanwhile.
+            return Restart::Listening;
+        }
+        if let Some(mut dead) = state.source.take() {
+            // Its events no longer count; its thread (if any) ends.
+            dead.stop();
+        }
+        state.generation += 1;
+        let generation = state.generation;
+        lock(&self.delivery).begin(generation);
+        match self.start_source(state.spec, generation) {
+            Ok(source) => {
+                state.source = Some(source);
+                if self.hand_over() {
+                    return Restart::Failed;
+                }
+                state.last_error = None;
+                tracing::info!(hotkey = %state.spec, failures, "the hotkey listens again");
+                Restart::Listening
+            }
+            Err(error) => {
+                lock(&self.delivery).abandon();
+                if failures == 1 {
+                    log_down(&error, state.spec);
+                } else {
+                    tracing::debug!(%error, failures, "the hotkey still can't listen");
+                }
+                state.last_error = Some(error);
+                Restart::Failed
+            }
+        }
     }
 
     /// Builds and starts a source for `spec` that sends as `generation`.
@@ -222,6 +444,14 @@ impl<H: HotkeySource> Shared<H> {
 }
 
 impl<H: HotkeySource + 'static> HotkeySource for ConfigurableHotkey<H> {
+    /// Starts the source for the current spec and the supervisor. If the
+    /// source can't start, sends [`HotkeyEvent::Failed`] and still returns
+    /// `Ok`: the supervisor brings the hotkey up as soon as it can.
+    ///
+    /// # Errors
+    ///
+    /// [`HotkeyError::AlreadyStarted`], or [`HotkeyError::Unavailable`] if
+    /// the supervisor thread can't be created (then nothing listens).
     fn start(&mut self, sink: HotkeySink) -> Result<(), HotkeyError> {
         let shared = &self.shared;
         let mut state = lock(&shared.state);
@@ -235,34 +465,74 @@ impl<H: HotkeySource + 'static> HotkeySource for ConfigurableHotkey<H> {
             active: generation,
             ..Delivery::default()
         };
-        match shared.start_source(state.spec, generation) {
-            Ok(source) => {
-                state.source = Some(source);
-                state.started = true;
-                state.last_error = None;
-                Ok(())
-            }
+        // First, so a supervisor that can't run means nothing started. It
+        // waits for the state lock or for the hotkey to die.
+        let supervised = Arc::clone(shared);
+        let supervisor = thread::Builder::new()
+            .name("hotkey-supervisor".into())
+            .spawn(move || supervise(&supervised));
+        let supervisor = match supervisor {
+            Ok(handle) => handle,
             Err(error) => {
                 // As the trait says: on error the sink is dropped.
                 lock(&shared.delivery).sink = None;
-                state.last_error = Some(error.clone());
-                Err(error)
+                return Err(HotkeyError::Unavailable(error.to_string()));
+            }
+        };
+        self.supervisor = Some(supervisor);
+        state.started = true;
+        match shared.start_source(state.spec, generation) {
+            Ok(source) => {
+                state.source = Some(source);
+                state.last_error = None;
+            }
+            Err(error) => {
+                log_down(&error, state.spec);
+                state.last_error = Some(error);
+                let mut delivery = lock(&shared.delivery);
+                delivery.dead = true;
+                delivery.send(HotkeyEvent::Failed);
+                shared.wake.notify_all();
             }
         }
+        Ok(())
     }
 
     fn stop(&mut self) {
         let shared = &self.shared;
-        let mut state = lock(&shared.state);
-        state.started = false;
-        if let Some(mut source) = state.source.take() {
-            // Its stop may wait for a sink call, which takes only the
-            // delivery lock, never the state's.
-            source.stop();
+        {
+            let mut state = lock(&shared.state);
+            state.started = false;
+            if let Some(mut source) = state.source.take() {
+                // Its stop may wait for a sink call, which takes only the
+                // delivery lock, never the state's.
+                source.stop();
+            }
+            let mut delivery = lock(&shared.delivery);
+            delivery.sink = None;
+            delivery.held = false;
+            delivery.dead = false;
+            delivery.closed = true;
+            shared.wake.notify_all();
         }
-        let mut delivery = lock(&shared.delivery);
-        delivery.sink = None;
-        delivery.held = false;
+        // Without the locks, which it may be waiting for.
+        if let Some(supervisor) = self.supervisor.take() {
+            // A panic in it already ended it; nothing to undo.
+            let _ = supervisor.join();
+        }
+    }
+}
+
+impl<H> Drop for ConfigurableHotkey<H> {
+    fn drop(&mut self) {
+        if let Some(supervisor) = self.supervisor.take() {
+            {
+                let mut delivery = lock(&self.shared.delivery);
+                delivery.closed = true;
+                self.shared.wake.notify_all();
+            }
+            let _ = supervisor.join();
+        }
     }
 }
 
@@ -273,7 +543,8 @@ impl<H: HotkeySource + 'static> Switch for Shared<H> {
 
     fn switch(&self, spec: HotkeySpec) -> Result<Switched, HotkeyError> {
         let mut state = lock(&self.state);
-        if state.started && state.source.is_some() && state.spec == spec {
+        let dead = lock(&self.delivery).dead;
+        if state.started && !dead && state.source.is_some() && state.spec == spec {
             return Ok(Switched::Unchanged);
         }
         if !state.started {
@@ -287,6 +558,14 @@ impl<H: HotkeySource + 'static> Switch for Shared<H> {
         lock(&self.delivery).begin(generation);
         let source = match self.start_source(spec, generation) {
             Ok(source) => source,
+            Err(error) if dead => {
+                // Nothing listens anyway: `spec` is the hotkey the
+                // supervisor brings back.
+                lock(&self.delivery).abandon();
+                state.spec = spec;
+                state.last_error = Some(error.clone());
+                return Ok(Switched::NotListening(Some(error)));
+            }
             Err(error) => {
                 lock(&self.delivery).abandon();
                 return Err(error);
@@ -294,7 +573,7 @@ impl<H: HotkeySource + 'static> Switch for Shared<H> {
         };
         // The handoff, atomic with delivery: the new source's events reach
         // the pipeline from here on, the old one's never again.
-        lock(&self.delivery).hand_over();
+        self.hand_over();
         if let Some(mut old) = state.source.replace(source) {
             // Outside the delivery lock: the old source's stop may wait for
             // an event of its own in flight, which is then dropped. The new
@@ -321,10 +600,14 @@ impl HotkeyControl {
     /// [`HotkeyEvent::Interrupted`]. Blocks while the old source stops (it
     /// may wait for its thread); the new key is already heard meanwhile.
     ///
+    /// While the hotkey is down, a source for `spec` is tried at once; if it
+    /// can't start either, `spec` is kept as the one to bring back
+    /// ([`Switched::NotListening`]).
+    ///
     /// # Errors
     ///
-    /// The new source's error if it can't start; the old hotkey keeps
-    /// listening and stays current.
+    /// The new source's error if it can't start while the old one listens;
+    /// the old hotkey keeps listening and stays current.
     pub fn switch(&self, spec: HotkeySpec) -> Result<Switched, HotkeyError> {
         self.switch.switch(spec)
     }
@@ -390,10 +673,10 @@ impl HotkeyChange {
             Self::Unchanged | Self::Switched { .. } | Self::Invalid => None,
             Self::NotListening { wanted, reason } => Some(match reason {
                 Some(HotkeyError::PermissionDenied) => format!(
-                    "The hotkey {wanted} is saved, but dictation-app can't listen to the keyboard: allow it in System Settings, Privacy & Security, Accessibility, then restart dictation-app."
+                    "The hotkey {wanted} is saved, but dictation-app can't listen to the keyboard yet: allow it in System Settings, Privacy & Security, Accessibility, and {wanted} starts working by itself."
                 ),
                 Some(error) => format!(
-                    "The hotkey {wanted} is saved, but no hotkey is listening right now ({error}). Restart dictation-app to use it."
+                    "The hotkey {wanted} is saved, but no hotkey is listening right now ({error}). {wanted} starts working as soon as it can."
                 ),
                 None => format!(
                     "The hotkey {wanted} is saved, but no hotkey is listening right now. Restart dictation-app to use it."

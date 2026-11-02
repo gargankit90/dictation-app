@@ -122,14 +122,27 @@ impl HotkeyMatcher {
         } else if self.spec.key().is_none() {
             completes = input.down;
         }
+        self.settle(input.held, completes)
+    }
 
+    /// The event a key no spec can name (Page Up, Caps Lock, a mouse
+    /// button) produces, if any, with `held` the modifiers it reports. It
+    /// never presses the hotkey, but it can release one whose release was
+    /// missed: the OS reports the real modifiers with every key (#47).
+    pub fn on_unmapped(&mut self, held: Held) -> Option<HotkeyEvent> {
+        self.settle(held, false)
+    }
+
+    /// Releases the hotkey if `held` (and the key) no longer make it up, or
+    /// presses it if this event `completes` it and `held` is exactly it.
+    fn settle(&mut self, held: Held, completes: bool) -> Option<HotkeyEvent> {
         let key_ok = self.spec.key().is_none() || self.key_held;
         let mut required = true;
         let mut exact = true;
         for modifier in Modifier::ALL {
             match self.spec.modifier(modifier) {
-                Some(side) => required &= input.held.satisfies(modifier, side),
-                None => exact &= !input.held.any(modifier),
+                Some(side) => required &= held.satisfies(modifier, side),
+                None => exact &= !held.any(modifier),
             }
         }
 
@@ -396,6 +409,38 @@ mod tests {
         assert_eq!(
             events,
             [Pressed, CancelPressed, Released, Pressed, Released]
+        );
+    }
+
+    /// #47, the second case: the modifier's release is missed and the next
+    /// key is one no spec can name (Page Up, Caps Lock, a mouse button). Its
+    /// modifiers let the hotkey go, and the next press works at once.
+    #[test]
+    fn an_unmapped_key_after_a_missed_modifier_release_clears_the_stuck_state() {
+        let mut matcher = HotkeyMatcher::new("RightAlt".parse().unwrap());
+        assert_eq!(matcher.on_input(modifier(RIGHT_ALT, true)), Some(Pressed));
+        // The release never arrives; Page Up goes down with nothing held.
+        assert_eq!(matcher.on_unmapped(Held::NONE), Some(Released));
+        assert_eq!(matcher.on_unmapped(Held::NONE), None);
+        assert_eq!(matcher.on_input(modifier(RIGHT_ALT, true)), Some(Pressed));
+        assert_eq!(
+            matcher.on_input(modifier(Held::NONE, false)),
+            Some(Released)
+        );
+    }
+
+    #[test]
+    fn an_unmapped_key_never_presses_and_keeps_a_real_hold() {
+        let mut matcher = HotkeyMatcher::new("RightAlt".parse().unwrap());
+        // RightAlt alone is held when Page Up goes down: not a press.
+        assert_eq!(matcher.on_unmapped(RIGHT_ALT), None);
+        assert_eq!(matcher.on_input(modifier(Held::NONE, false)), None);
+        // While the hotkey is really held, an unmapped key doesn't end it.
+        assert_eq!(matcher.on_input(modifier(RIGHT_ALT, true)), Some(Pressed));
+        assert_eq!(matcher.on_unmapped(RIGHT_ALT), None);
+        assert_eq!(
+            matcher.on_input(modifier(Held::NONE, false)),
+            Some(Released)
         );
     }
 

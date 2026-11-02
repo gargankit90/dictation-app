@@ -50,16 +50,14 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Context as _;
-use dictation_core::coordinator::Phase;
 use dictation_pipeline::debug_audio::SavingAudio;
-#[cfg(not(debug_assertions))]
-use dictation_pipeline::hotkey::PermissionTolerantHotkey;
 use dictation_pipeline::hotkey_setting::{self, ConfigurableHotkey, HotkeyControl};
 use dictation_pipeline::pipeline::{Config, CursorReader, Pipeline, Ports, UiEvent};
 use dictation_pipeline::stand_ins::{GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
 #[cfg(debug_assertions)]
-use dictation_pipeline::test_hooks::SyntheticHotkey;
+use dictation_pipeline::test_hooks::{Breakable, HotkeyOutage, SyntheticHotkey};
+use dictation_pipeline::tray::{TrayStatus, TrayView};
 use dictation_pipeline::ui_events::{UiReceiver, UiSender};
 use dictation_platform::audio::{FileAudioSource, SystemMicrophone};
 use dictation_platform::clock::SystemClock;
@@ -83,11 +81,6 @@ const REVEAL_LOG_ID: &str = "reveal-log";
 const SETTINGS_WINDOW: &str = "main";
 const TRAY_ID: &str = "main";
 const TOOLTIP: &str = "dictation-app";
-/// The tray's title while an error is shown: short and the same for every
-/// error, so the status item always fits in the menu bar (#151). A long
-/// title made macOS hide the item, and with it the way to Settings. The
-/// whole message is in the tooltip (and the overlay).
-const TRAY_ERROR_TITLE: &str = "\u{26a0} Dictation failed";
 /// Where a launch's flags came from, for the log.
 const THIS_LAUNCH: &str = "this launch";
 const SECOND_LAUNCH: &str = "a second launch";
@@ -103,17 +96,23 @@ struct RunningPipeline(Mutex<Option<Pipeline>>);
 /// pipeline while this one shuts down.
 struct SingleInstance(Mutex<Option<Instance>>);
 
-/// The real hotkey for the saved spec, switched when Settings is saved.
+/// Debug builds: the real hotkey for the saved spec, switched when Settings
+/// is saved and restarted when it dies; the outage flags can break it.
+#[cfg(debug_assertions)]
+type SavedHotkey = ConfigurableHotkey<Breakable<SystemHotkey>>;
+/// Release builds: the real hotkey for the saved spec, switched when
+/// Settings is saved and restarted when it dies. A missing Accessibility
+/// grant isn't fatal: the hotkey starts once it is granted (#88).
+#[cfg(not(debug_assertions))]
 type SavedHotkey = ConfigurableHotkey<SystemHotkey>;
 
-/// Debug builds: the real hotkey plus injected test flags; a missing
-/// Accessibility grant (or no adapter) leaves only the test flags.
+/// Debug builds: the real hotkey plus injected test flags, which work
+/// whether or not the real one listens.
 #[cfg(debug_assertions)]
 type ShellHotkey = SyntheticHotkey<SavedHotkey>;
-/// Release builds: only the real hotkey. A missing Accessibility grant is
-/// logged and not fatal; any other hotkey error stops startup.
+/// Release builds: only the real hotkey.
 #[cfg(not(debug_assertions))]
-type ShellHotkey = PermissionTolerantHotkey<SavedHotkey>;
+type ShellHotkey = SavedHotkey;
 
 /// The permissions the pipeline checks on each press: the real microphone
 /// permission (Accessibility isn't checked on press: the paste reports it
@@ -173,15 +172,19 @@ fn shell_audio(
 fn shell_hotkey(
     spec: dictation_core::hotkey_spec::HotkeySpec,
 ) -> (ShellHotkey, HotkeyControl, Option<Injector>) {
-    let (saved, control) = ConfigurableHotkey::new(spec, SystemHotkey::new);
     #[cfg(debug_assertions)]
     {
+        let outage = HotkeyOutage::default();
+        let breaker = outage.clone();
+        let (saved, control) =
+            ConfigurableHotkey::new(spec, move |spec| breaker.wrap(SystemHotkey::new(spec)));
         let (hotkey, injector) = SyntheticHotkey::new(saved);
-        (hotkey, control, Some(injector))
+        (hotkey, control, Some(injector.with_outage(outage)))
     }
     #[cfg(not(debug_assertions))]
     {
-        (PermissionTolerantHotkey::new(saved), control, None)
+        let (saved, control) = ConfigurableHotkey::new(spec, SystemHotkey::new);
+        (saved, control, None)
     }
 }
 
@@ -502,6 +505,15 @@ fn handle_flags(
     for flag in &flags.ignored {
         tracing::warn!(%flag, from, "ignoring an unknown flag");
     }
+    for command in flags.outage_commands {
+        let delivered = injector.is_some_and(|injector| injector.outage(command));
+        if !delivered {
+            tracing::warn!(?command, from, "test hook: this build has no hotkey outage");
+            return Err(Rejected);
+        }
+        // This line's text is what the e2e scenario waits for.
+        tracing::info!(?command, from, "test hook outage");
+    }
     for event in flags.events {
         let delivered = injector.is_some_and(|injector| injector.inject(event));
         if !delivered {
@@ -580,48 +592,45 @@ fn show_settings(app: &AppHandle) {
 }
 
 /// Logs each state change (never the transcript), passes each event to the
-/// overlay, and shows a dictation error in the tray (a short title, the
-/// message in the tooltip) until the next recording starts.
+/// overlay, and shows in the tray's title and tooltip a dictation error
+/// until the next recording starts, and "Hotkey unavailable" while the
+/// hotkey doesn't work ([`TrayStatus`]).
 async fn show_ui_events(app: AppHandle, mut events: UiReceiver, overlay: Option<UiSender>) {
+    let mut tray = TrayStatus::default();
     while let Some(event) = events.recv().await {
         if let Some(overlay) = &overlay {
             // Bounded and never blocks (#112): a stalled overlay can't hold
             // up the tray or grow the queue.
             overlay.send(event.clone());
         }
-        match event {
-            UiEvent::StateChanged(phase) => {
-                tracing::info!(?phase, "state changed");
-                if phase == Phase::Recording {
-                    show_in_tray(&app, None);
-                }
-            }
-            UiEvent::Error(error) => {
-                tracing::info!(%error, "shown to the user");
-                show_in_tray(&app, Some(&error.to_string()));
-            }
+        match &event {
+            UiEvent::StateChanged(phase) => tracing::info!(?phase, "state changed"),
+            UiEvent::Error(error) => tracing::info!(%error, "shown to the user"),
+            // This line's text is what the e2e scenario waits for.
+            UiEvent::HotkeyRestored => tracing::info!("hotkey restored; shown to the user"),
+        }
+        if let Some(view) = tray.on_event(&event) {
+            show_in_tray(&app, &view);
         }
     }
 }
 
-/// The tray's title and tooltip for `error`, or for none.
-fn tray_texts(error: Option<&str>) -> (Option<&'static str>, String) {
-    match error {
-        Some(error) => (Some(TRAY_ERROR_TITLE), format!("{TOOLTIP}: {error}")),
-        None => (None, TOOLTIP.to_owned()),
-    }
+/// The tray's tooltip for `view`: the app's name, then the detail if any.
+fn tray_tooltip(view: &TrayView) -> String {
+    view.detail.as_ref().map_or_else(
+        || TOOLTIP.to_owned(),
+        |detail| format!("{TOOLTIP}: {detail}"),
+    )
 }
 
-/// Shows that `error` happened in the tray: a short title next to the icon,
-/// the message in the tooltip; or clears both.
-fn show_in_tray(app: &AppHandle, error: Option<&str>) {
+/// Puts `view` in the tray's title (next to the icon) and tooltip.
+fn show_in_tray(app: &AppHandle, view: &TrayView) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
-    let (title, tooltip) = tray_texts(error);
     if let Err(error) = tray
-        .set_title(title)
-        .and_then(|()| tray.set_tooltip(Some(tooltip)))
+        .set_title(view.title.as_deref())
+        .and_then(|()| tray.set_tooltip(Some(tray_tooltip(view))))
     {
         tracing::warn!(%error, "could not update the tray");
     }
@@ -656,6 +665,7 @@ fn shut_down(app: &AppHandle) {
 #[cfg(test)]
 mod tray_tests {
     use dictation_core::error::{DictationError, Permission};
+    use dictation_pipeline::tray::{DICTATION_FAILED, HOTKEY_UNAVAILABLE, MAX_TITLE_CHARS};
 
     use super::*;
 
@@ -692,17 +702,25 @@ mod tray_tests {
     #[test]
     fn the_tray_title_stays_short_for_every_error() {
         for error in every_error() {
-            let message = error.to_string();
-            let (title, tooltip) = tray_texts(Some(&message));
-            assert_eq!(title, Some(TRAY_ERROR_TITLE), "{message}");
-            assert!(TRAY_ERROR_TITLE.chars().count() <= 20);
-            assert_eq!(tooltip, format!("dictation-app: {message}"));
+            let mut tray = TrayStatus::default();
+            let view = tray.on_event(&UiEvent::Error(error.clone()));
+            let view = view.unwrap_or_else(|| tray.view().clone());
+            let title = view.title.clone().unwrap_or_default();
+            assert!(title.chars().count() <= MAX_TITLE_CHARS, "{error}: {title}");
+            let expected = match error {
+                DictationError::HotkeyFailed => HOTKEY_UNAVAILABLE,
+                _ => DICTATION_FAILED,
+            };
+            assert_eq!(title, expected, "{error}");
+            assert_eq!(tray_tooltip(&view), format!("dictation-app: {error}"));
         }
     }
 
     #[test]
     fn no_error_clears_the_title() {
-        assert_eq!(tray_texts(None), (None, "dictation-app".to_owned()));
+        let view = TrayView::default();
+        assert_eq!(view.title, None);
+        assert_eq!(tray_tooltip(&view), "dictation-app");
     }
 }
 

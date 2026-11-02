@@ -14,15 +14,15 @@
 )]
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use dictation_core::coordinator::Phase::{Idle, Inserting, Recording, Transcribing};
+use dictation_core::error::DictationError;
 use dictation_core::hotkey_spec::HotkeySpec;
 use dictation_core::settings::Settings;
 use dictation_pipeline::config::Config as SettingsFile;
-use dictation_pipeline::hotkey::PermissionTolerantHotkey;
 use dictation_pipeline::hotkey_setting::{
     self, ConfigurableHotkey, HotkeyChange, HotkeyControl, Switched,
 };
@@ -104,6 +104,9 @@ struct Keyboard {
     built: Arc<Mutex<Vec<(HotkeySpec, FakeHotkey, StopHook)>>>,
     fail_next: Arc<Mutex<Option<HotkeyError>>>,
     after_next_start: Arc<Mutex<Option<StartHook>>>,
+    /// While set, every source built fails to start, as without
+    /// Accessibility.
+    denied: Arc<AtomicBool>,
 }
 
 impl Keyboard {
@@ -113,6 +116,8 @@ impl Keyboard {
             let fake = FakeHotkey::new();
             if let Some(error) = keyboard.fail_next.lock().unwrap().take() {
                 fake.fail_next_start(error);
+            } else if keyboard.denied.load(Ordering::SeqCst) {
+                fake.fail_next_start(HotkeyError::PermissionDenied);
             }
             let on_stop = StopHook::default();
             keyboard
@@ -130,6 +135,12 @@ impl Keyboard {
 
     fn fail_next_start(&self, error: HotkeyError) {
         *self.fail_next.lock().unwrap() = Some(error);
+    }
+
+    /// Turns keyboard access (Accessibility) off or on for the sources
+    /// built from now on.
+    fn deny_access(&self, denied: bool) {
+        self.denied.store(denied, Ordering::SeqCst);
     }
 
     /// Runs `hook` on the next source built, right after it starts
@@ -443,14 +454,20 @@ async fn a_switch_during_a_hold_ends_it_instead_of_leaving_it_stuck() {
     app.pipeline.shutdown().await;
 }
 
+/// #88: without keyboard access the app still starts and says the hotkey is
+/// unavailable; a hotkey saved meanwhile is kept, and it is the one that
+/// starts by itself once access is granted, with no restart.
 #[tokio::test(flavor = "multi_thread")]
-async fn without_keyboard_access_the_hotkey_is_saved_for_the_next_start() {
+async fn without_keyboard_access_the_saved_hotkey_starts_once_allowed() {
     let dir = TempDir::new("no-access");
     let file = dir.settings_file();
     let keyboard = Keyboard::default();
-    keyboard.fail_next_start(HotkeyError::PermissionDenied);
-    // The release build's wrapper: no Accessibility doesn't stop the app.
-    let app = App::start_with(&file, keyboard, PermissionTolerantHotkey::new);
+    keyboard.deny_access(true);
+    let mut app = App::start_with(&file, keyboard, |hotkey| hotkey);
+    assert_eq!(
+        app.next().await,
+        UiEvent::Error(DictationError::HotkeyFailed)
+    );
 
     let change = app.save(&file, "F6");
     assert_eq!(
@@ -462,15 +479,13 @@ async fn without_keyboard_access_the_hotkey_is_saved_for_the_next_start() {
     );
     let problem = change.problem().expect("not a plain success");
     assert!(problem.contains("Accessibility"), "{problem}");
-    assert!(problem.contains("restart"), "{problem}");
-    // Saved, so the next start uses it; nothing new was registered now.
+    assert!(problem.contains("by itself"), "{problem}");
+    assert!(!problem.contains("restart"), "{problem}");
     assert_eq!(file.settings().unwrap().hotkey, "F6");
-    assert_eq!(app.keyboard.specs(), [HotkeySpec::default()]);
-    app.pipeline.shutdown().await;
 
-    // Restarted with access granted: the saved hotkey listens.
-    let mut app = App::start(&file);
-    assert_eq!(app.keyboard.specs(), [spec("F6")]);
+    app.keyboard.deny_access(false);
+    assert_eq!(app.next().await, UiEvent::HotkeyRestored);
+    assert_eq!(app.control.spec(), spec("F6"));
     app.dictate_with(spec("F6")).await;
     app.pipeline.shutdown().await;
 }
@@ -587,6 +602,8 @@ async fn a_hotkey_that_died_listens_again_after_a_switch() {
         Ok(Switched::Now),
         "a new hotkey starts even though the old one died"
     );
+    // #88: the hotkey works again, and the UI hears so.
+    assert_eq!(app.next().await, UiEvent::HotkeyRestored);
     app.dictate_with(spec("F6")).await;
     app.pipeline.shutdown().await;
 }
