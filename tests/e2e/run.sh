@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Runs the e2e scenarios against the built app inside the Lume VM. Not part
-# of CI (CI has no VM). See tests/e2e/README.md.
+# Runs the e2e scenarios against the built app inside the Lume VM. PRs don't
+# run it (the Tester does); the T6 job runs it on every push to main, through
+# tests/e2e/ci-run.sh. See tests/e2e/README.md.
 #
 #   tests/e2e/run.sh                     # build, reset the VM, run every scenario
 #   tests/e2e/run.sh e2e_startup         # just one scenario
 #   tests/e2e/run.sh --no-build --no-reset e2e_press_release
 #   E2E_VM=dictation-vm-2 tests/e2e/run.sh           # the second VM
+#   tests/e2e/run.sh --exclude e2e_real_groq         # all but this one (repeatable)
 #   tests/e2e/run.sh --clear-stale-lock <vm>         # remove a dead run's lock
 #
 # Exits 0 only if no scenario failed and no required one was skipped. The
@@ -48,6 +50,7 @@ APP_PATH=target/debug/bundle/macos/$APP_NAME.app
 build=1
 reset=1
 scenarios=()
+excluded=()
 while [ $# -gt 0 ]; do
   arg=$1
   shift
@@ -61,8 +64,13 @@ while [ $# -gt 0 ]; do
       ;;
     --no-build) build=0 ;;
     --no-reset) reset=0 ;;
+    --exclude)
+      [ $# -gt 0 ] || die "--exclude needs a scenario name"
+      excluded+=("$1")
+      shift
+      ;;
     -h | --help)
-      sed -n '2,12p' "$0"
+      sed -n '2,14p' "$0"
       exit 0
       ;;
     -*) die "unknown option $arg" ;;
@@ -70,6 +78,15 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ ${#scenarios[@]} -gt 0 ] || scenarios=("${ALL_SCENARIOS[@]}")
+for scenario in ${excluded[@]+"${excluded[@]}"}; do
+  declare -F "$scenario" >/dev/null || die "--exclude: no scenario named $scenario"
+  kept=()
+  for name in "${scenarios[@]}"; do
+    [ "$name" = "$scenario" ] || kept+=("$name")
+  done
+  scenarios=(${kept[@]+"${kept[@]}"})
+done
+[ ${#scenarios[@]} -gt 0 ] || die "no scenario left to run"
 for scenario in "${scenarios[@]}"; do
   declare -F "$scenario" >/dev/null || die "no scenario named $scenario"
 done
@@ -81,7 +98,7 @@ done
 ensure_host_key_alias
 
 # The VM's name is in the output dir, so two runs (one per VM) don't share one.
-OUT_DIR=$E2E_DIR/out/$(date +%Y%m%d-%H%M%S)-$VM
+OUT_DIR=${E2E_OUT_DIR:-$E2E_DIR/out/$(date +%Y%m%d-%H%M%S)-$VM}
 mkdir -p "$OUT_DIR"
 
 if [ $build = 1 ]; then
