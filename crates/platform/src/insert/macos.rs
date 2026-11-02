@@ -17,7 +17,7 @@ use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{NSPasteboard, NSPasteboardItem, NSPasteboardTypeString, NSPasteboardWriting};
 use objc2_core_graphics::{
-    CGEvent, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation,
+    CGEvent, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation, CGEventType,
 };
 use objc2_foundation::{NSArray, NSData, NSString};
 
@@ -322,9 +322,78 @@ impl Clipboard for MacPasteboard {
     }
 }
 
+/// The left Command and left Control keys' virtual key codes
+/// (`kVK_Command`, `kVK_Control` in Carbon's `Events.h`).
+const LEFT_COMMAND_KEY_CODE: u16 = 55;
+const LEFT_CONTROL_KEY_CODE: u16 = 59;
+
+/// The device bits that say which Command or Control key is down: left and
+/// right (`NX_DEVICELCMDKEYMASK`, `NX_DEVICERCMDKEYMASK`,
+/// `NX_DEVICELCTLKEYMASK`, `NX_DEVICERCTLKEYMASK` in `IOLLEvent.h`).
+const COMMAND_KEY_BITS: CGEventFlags = CGEventFlags::from_bits_retain(0x8 | 0x10);
+const CONTROL_KEY_BITS: CGEventFlags = CGEventFlags::from_bits_retain(0x1 | 0x2000);
+
+/// One key event of a paste.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PasteEvent {
+    key_code: u16,
+    /// A key down or up, or a modifier key's change (`FlagsChanged`).
+    kind: PasteEventKind,
+    flags: CGEventFlags,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PasteEventKind {
+    KeyDown,
+    KeyUp,
+    FlagsChanged,
+}
+
+/// The events of one paste: the chord's key down and up, each with the
+/// modifier's flag (and no other, so a modifier the user holds can't turn ⌘V
+/// into ⌘⇧V), then the modifier key's own release, which puts the modifier
+/// state back to `before`, what the system had before the paste, without
+/// the chord's modifier (in case it was already stuck), so afterwards no app
+/// sees it held. Other modifiers in `before` stay.
+///
+/// Without that last event the system keeps the modifier set after the key
+/// is up (#140, measured in the VM: `CGEventSourceFlagsState` read Command
+/// for the combined session and the HID system after one paste, and every
+/// key event created without a source carried it, so another app's
+/// synthetic "hello" typed ⌘H ⌘E ⌘L ⌘O).
+fn paste_events(chord: PasteChord, before: CGEventFlags) -> [PasteEvent; 3] {
+    let (flags, key_bits, modifier_key) = match chord.modifier {
+        ChordModifier::Command => (
+            CGEventFlags::MaskCommand,
+            COMMAND_KEY_BITS,
+            LEFT_COMMAND_KEY_CODE,
+        ),
+        ChordModifier::Control => (
+            CGEventFlags::MaskControl,
+            CONTROL_KEY_BITS,
+            LEFT_CONTROL_KEY_CODE,
+        ),
+    };
+    let key = |kind| PasteEvent {
+        key_code: chord.key_code,
+        kind,
+        flags,
+    };
+    [
+        key(PasteEventKind::KeyDown),
+        key(PasteEventKind::KeyUp),
+        PasteEvent {
+            key_code: modifier_key,
+            kind: PasteEventKind::FlagsChanged,
+            flags: before.difference(flags | key_bits),
+        },
+    ]
+}
+
 /// Sends ⌘ plus the key that types `v` in the current keyboard layout
-/// (resolved on every paste, so a layout switch mid-dictation counts).
-/// Needs Accessibility.
+/// (resolved on every paste, so a layout switch mid-dictation counts), then
+/// releases ⌘ so no app sees it held afterwards (#140). Needs
+/// Accessibility.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MacPasteKeys;
 
@@ -337,16 +406,27 @@ impl MacPasteKeys {
 
     fn post(chord: PasteChord) -> Result<(), InsertError> {
         let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState);
-        let flags = match chord.modifier {
-            ChordModifier::Command => CGEventFlags::MaskCommand,
-            ChordModifier::Control => CGEventFlags::MaskControl,
-        };
-        for down in [true, false] {
-            let event = CGEvent::new_keyboard_event(source.as_deref(), chord.key_code, down)
-                .ok_or_else(|| {
-                    InsertError::Failed("could not create the paste key event".into())
-                })?;
-            CGEvent::set_flags(Some(&event), flags);
+        let before = CGEventSource::flags_state(CGEventSourceStateID::HIDSystemState);
+        for planned in paste_events(chord, before) {
+            let down = planned.kind == PasteEventKind::KeyDown;
+            let Some(event) =
+                CGEvent::new_keyboard_event(source.as_deref(), planned.key_code, down)
+            else {
+                if planned.kind == PasteEventKind::FlagsChanged {
+                    // The paste itself was sent; say why a modifier may now
+                    // look held, but don't report a paste that happened as
+                    // failed.
+                    tracing::warn!("could not create the modifier release after pasting");
+                    return Ok(());
+                }
+                return Err(InsertError::Failed(
+                    "could not create the paste key event".into(),
+                ));
+            };
+            if planned.kind == PasteEventKind::FlagsChanged {
+                CGEvent::set_type(Some(&event), CGEventType::FlagsChanged);
+            }
+            CGEvent::set_flags(Some(&event), planned.flags);
             CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
         }
         Ok(())
@@ -546,6 +626,76 @@ mod tests {
     use objc2::msg_send;
 
     use super::*;
+
+    fn chord(modifier: ChordModifier) -> PasteChord {
+        PasteChord {
+            modifier,
+            key_code: 9,
+        }
+    }
+
+    /// #140: ⌘V, then Command's release back to the state before the paste.
+    #[test]
+    fn a_paste_ends_with_the_modifier_released_to_the_state_before() {
+        let events = paste_events(chord(ChordModifier::Command), CGEventFlags::empty());
+        assert_eq!(
+            events,
+            [
+                PasteEvent {
+                    key_code: 9,
+                    kind: PasteEventKind::KeyDown,
+                    flags: CGEventFlags::MaskCommand,
+                },
+                PasteEvent {
+                    key_code: 9,
+                    kind: PasteEventKind::KeyUp,
+                    flags: CGEventFlags::MaskCommand,
+                },
+                PasteEvent {
+                    key_code: LEFT_COMMAND_KEY_CODE,
+                    kind: PasteEventKind::FlagsChanged,
+                    flags: CGEventFlags::empty(),
+                },
+            ]
+        );
+    }
+
+    /// A modifier the user holds stays held after the paste, and doesn't
+    /// get into the chord.
+    #[test]
+    fn a_paste_restores_a_held_modifier_and_keeps_it_out_of_the_chord() {
+        let held = CGEventFlags::MaskShift | CGEventFlags::MaskNonCoalesced;
+        let events = paste_events(chord(ChordModifier::Command), held);
+        assert_eq!(events[0].flags, CGEventFlags::MaskCommand);
+        assert_eq!(events[1].flags, CGEventFlags::MaskCommand);
+        assert_eq!(events[2].flags, held);
+    }
+
+    /// A Command already stuck before the paste (another app's synthetic
+    /// events) is cleared too; a held Shift stays.
+    #[test]
+    fn a_paste_clears_a_command_that_was_already_set() {
+        let stuck = CGEventFlags::MaskCommand
+            | COMMAND_KEY_BITS
+            | CGEventFlags::MaskShift
+            | CGEventFlags::MaskNonCoalesced;
+        let events = paste_events(chord(ChordModifier::Command), stuck);
+        assert_eq!(
+            events[2].flags,
+            CGEventFlags::MaskShift | CGEventFlags::MaskNonCoalesced
+        );
+    }
+
+    #[test]
+    fn a_control_chord_releases_control() {
+        let events = paste_events(chord(ChordModifier::Control), CGEventFlags::empty());
+        assert_eq!(events[0].flags, CGEventFlags::MaskControl);
+        assert_eq!(events[2].key_code, LEFT_CONTROL_KEY_CODE);
+        assert_eq!(events[2].kind, PasteEventKind::FlagsChanged);
+        let stuck = CGEventFlags::MaskControl | CONTROL_KEY_BITS | CGEventFlags::MaskCommand;
+        let events = paste_events(chord(ChordModifier::Control), stuck);
+        assert_eq!(events[2].flags, CGEventFlags::MaskCommand);
+    }
 
     /// A private pasteboard, released when dropped, so tests never touch
     /// the user's clipboard.
