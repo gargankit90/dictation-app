@@ -29,6 +29,10 @@
 //!
 //! M5.1: the `overlay` window shows Recording, Transcribing and errors
 //! without taking focus ([`overlay`]).
+//!
+//! T2: the hotkey is the saved one, at startup and as soon as Settings is
+//! saved (`dictation_pipeline::hotkey_setting`); a save whose hotkey can't
+//! start keeps the old one and says so.
 
 // Only the build script and the capability tests need the list.
 #[cfg(test)]
@@ -45,10 +49,10 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Context as _;
 use dictation_core::coordinator::Phase;
-use dictation_core::hotkey_spec::HotkeySpec;
 use dictation_pipeline::debug_audio::SavingAudio;
 #[cfg(not(debug_assertions))]
 use dictation_pipeline::hotkey::PermissionTolerantHotkey;
+use dictation_pipeline::hotkey_setting::{self, ConfigurableHotkey, HotkeyControl};
 use dictation_pipeline::pipeline::{Config, CursorReader, Pipeline, Ports, UiEvent};
 use dictation_pipeline::stand_ins::{GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
@@ -93,14 +97,17 @@ struct RunningPipeline(Mutex<Option<Pipeline>>);
 /// pipeline while this one shuts down.
 struct SingleInstance(Mutex<Option<Instance>>);
 
+/// The real hotkey for the saved spec, switched when Settings is saved.
+type SavedHotkey = ConfigurableHotkey<SystemHotkey>;
+
 /// Debug builds: the real hotkey plus injected test flags; a missing
 /// Accessibility grant (or no adapter) leaves only the test flags.
 #[cfg(debug_assertions)]
-type ShellHotkey = SyntheticHotkey<SystemHotkey>;
+type ShellHotkey = SyntheticHotkey<SavedHotkey>;
 /// Release builds: only the real hotkey. A missing Accessibility grant is
 /// logged and not fatal; any other hotkey error stops startup.
 #[cfg(not(debug_assertions))]
-type ShellHotkey = PermissionTolerantHotkey<SystemHotkey>;
+type ShellHotkey = PermissionTolerantHotkey<SavedHotkey>;
 
 /// The permissions the pipeline checks on each press: the real microphone
 /// permission (Accessibility isn't checked on press: the paste reports it
@@ -154,18 +161,21 @@ fn shell_audio(
     (audio, permissions)
 }
 
-/// The hotkey for this build, and the injector for the test flags (debug
-/// builds only).
-fn shell_hotkey() -> (ShellHotkey, Option<Injector>) {
-    let system = SystemHotkey::new(HotkeySpec::default());
+/// The hotkey for this build, listening for `spec` once the pipeline starts
+/// it; the control that switches it when Settings is saved; and the
+/// injector for the test flags (debug builds only).
+fn shell_hotkey(
+    spec: dictation_core::hotkey_spec::HotkeySpec,
+) -> (ShellHotkey, HotkeyControl, Option<Injector>) {
+    let (saved, control) = ConfigurableHotkey::new(spec, SystemHotkey::new);
     #[cfg(debug_assertions)]
     {
-        let (hotkey, injector) = SyntheticHotkey::new(system);
-        (hotkey, Some(injector))
+        let (hotkey, injector) = SyntheticHotkey::new(saved);
+        (hotkey, control, Some(injector))
     }
     #[cfg(not(debug_assertions))]
     {
-        (PermissionTolerantHotkey::new(system), None)
+        (PermissionTolerantHotkey::new(saved), control, None)
     }
 }
 
@@ -234,10 +244,9 @@ pub fn run() {
         )),
     };
 
-    let (hotkey, injector) = shell_hotkey();
-
     // The updater and the native dialogs (M5.4), then no Dock icon and no
-    // focus stolen at launch (#59).
+    // focus stolen at launch (#59, T2): `menu_bar::builder` doesn't activate
+    // the app while another one is active.
     let builder =
         dictation_platform::menu_bar::builder(updater::plugins(tauri::Builder::default()));
     #[allow(clippy::expect_used)] // No UI exists yet to report a startup failure to.
@@ -256,7 +265,7 @@ pub fn run() {
             }
         })
         .setup(move |app| {
-            setup(app, hotkey, injector, instance)?;
+            setup(app, instance)?;
             Ok(())
         })
         .build(context)
@@ -289,12 +298,7 @@ fn exit_early(reason: &str) -> ! {
     std::process::exit(1);
 }
 
-fn setup(
-    app: &mut App,
-    hotkey: ShellHotkey,
-    injector: Option<Injector>,
-    mut instance: Instance,
-) -> anyhow::Result<()> {
+fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     let log_dir = app.path().app_log_dir().context("no log directory")?;
     logging::init(&log_dir).context("could not start logging")?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), log_dir = %log_dir.display(), "starting");
@@ -312,6 +316,9 @@ fn setup(
         dictation_platform::secrets::KeychainSecretStore::new(),
     ));
     tracing::info!(path = %config.path().display(), "settings file");
+    // The saved hotkey (a file read; the keychain isn't touched).
+    let (hotkey, hotkey_control, injector) =
+        shell_hotkey(hotkey_setting::startup_spec(config.settings()));
 
     let choice = launch.transcriber.unwrap_or_default();
     // `--mock-text` and `--mock-text-sequence` shape the mock engine only.
@@ -369,6 +376,7 @@ fn setup(
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
     app.manage(commands::AppConfig(Arc::clone(&config)));
     app.manage(commands::LoginItem(Arc::new(SystemLaunchAtLogin::new())));
+    app.manage(commands::ActiveHotkey(hotkey_control.clone()));
     app.manage(live.clone());
     if let Err(error) = live.rebuild_in_background(config) {
         tracing::error!(%error, "could not start reading the API key");
@@ -378,7 +386,7 @@ fn setup(
         .inspect_err(|error| tracing::error!(%error, "could not create the overlay"))
         .ok();
     tauri::async_runtime::spawn(show_ui_events(app.handle().clone(), ui_events, overlay));
-    tracing::info!(hotkey = %HotkeySpec::default(), "ready");
+    tracing::info!(hotkey = %hotkey_control.spec(), "ready");
 
     // This launch's own flags first, so they come before any forwarded one.
     // A failed injection is already logged; nothing waits for this launch.

@@ -73,11 +73,15 @@ step scripts/vendor-tests.sh
 step npx tsc -b --noEmit
 step npx eslint . --max-warnings 0
 step npx vitest run
+# The production frontend the app bundle ships (#103 P2-04): a missing asset
+# or a broken transform fails here, not when the app opens. About 2 s.
+step npm run build
 
 # Spelling and guards
 step typos
 step scripts/test-guards.sh
 step tests/e2e/test-key-handling.sh
 step tests/e2e/test-vm-lock.sh
+step tests/e2e/test-runner.sh
 
 printf '\ngate: all checks passed\n'

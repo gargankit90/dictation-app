@@ -42,9 +42,41 @@ q() {
 
 # Runs a command in the VM (as the GUI user, but outside the GUI session:
 # GUI apps must be started with `open`, which LaunchServices runs in it).
+# Returns the command's exit status. The whole command has a deadline,
+# VM_CMD_TIMEOUT seconds (default 120), not just the connection: a command
+# that hangs (a dialog nobody answers, a stuck osascript) is cancelled and
+# vm returns 124, so a scenario can't wait forever on the VM.
 vm() {
+  local limit=${VM_CMD_TIMEOUT:-120} pid watchdog status=0 start=$SECONDS
+  # In the background so the watchdog can stop it; `<&0` keeps the caller's
+  # stdin (a background command would otherwise read /dev/null).
   ssh -i "$SSH_KEY" -o HostKeyAlias="$VM" -o BatchMode=yes -o ConnectTimeout=5 \
-    "$VM_USER@$VM_IP" "$@"
+    "$VM_USER@$VM_IP" "$@" <&0 &
+  pid=$!
+  # Its output goes nowhere, so a $(vm ...) doesn't wait for it to end.
+  deadline_watch "$limit" "$pid" >/dev/null 2>&1 &
+  watchdog=$!
+  wait "$pid" 2>/dev/null || status=$?
+  kill "$watchdog" 2>/dev/null || true
+  wait "$watchdog" 2>/dev/null || true
+  if [ "$status" = 143 ] && [ $((SECONDS - start + 1)) -ge "$limit" ]; then
+    log "vm: no answer within ${limit}s; cancelled: $(printf '%.100s' "$*")"
+    return 124
+  fi
+  return "$status"
+}
+
+# deadline_watch <seconds> <pid>: sends TERM to <pid> once <seconds> have
+# passed, unless it ended first (checked every second, so the watcher itself
+# ends within a second of it).
+deadline_watch() {
+  local limit=$1 pid=$2 i=0
+  while [ "$i" -lt "$limit" ]; do
+    sleep 1
+    kill -0 "$pid" 2>/dev/null || return 0
+    i=$((i + 1))
+  done
+  kill -TERM "$pid" 2>/dev/null || true
 }
 
 # Stops and deletes $VM, clones it fresh from the golden image, sets its
@@ -97,7 +129,8 @@ install_app() {
   local app=$1
   log "installing $(basename "$app") in the VM"
   vm "mkdir -p ~/Applications && rm -rf $(q "$VM_APP")"
-  tar -C "$(dirname "$app")" -cf - "$(basename "$app")" | vm "tar -C ~/Applications -xf -"
+  tar -C "$(dirname "$app")" -cf - "$(basename "$app")" |
+    VM_CMD_TIMEOUT=600 vm "tar -C ~/Applications -xf -"
   vm "codesign --verify --deep $(q "$VM_APP")" || die "the app's signature didn't survive the copy"
 }
 
@@ -109,11 +142,37 @@ install_fixtures() {
   tar -C "$dir" -cf - . | vm "tar -C $(q "$VM_FIXTURES") -xf -"
 }
 
-# Quits every running copy of the app and clears its logs.
+# Kills every running copy of the app (TERM, then KILL) and clears its logs.
+# A setup step, not a Quit: a scenario whose journey is quitting uses
+# quit_from_tray (lib_full.sh), which fails if the app doesn't go by
+# itself. Returns 1 (and says so) if a copy is still running 5 seconds
+# after the KILL, so a scenario can't go on against a stale app.
 fresh_app_state() {
-  local name
+  local name i
   name=$(q "$APP_NAME")
   vm "pkill -x $name; sleep 1; pkill -9 -x $name; rm -rf $(q "$VM_LOG_DIR")" || true
+  for i in 1 2 3 4 5; do
+    [ "$(app_count)" = 0 ] && return 0
+    sleep 1
+  done
+  log "  the app is still running after pkill -9"
+  return 1
+}
+
+# Waits up to `timeout` seconds until no copy of the app is running.
+wait_for_no_app() {
+  local timeout=${1:-10} i
+  for i in $(seq 1 "$timeout"); do
+    [ "$(app_count)" = 0 ] && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# Clears the app's log (with the app quit), so a relaunch's lines can be
+# counted on their own.
+clear_app_log() {
+  vm "rm -rf $(q "$VM_LOG_DIR")"
 }
 
 # Launches the app in the VM's GUI session with `args` as its arguments.
@@ -147,6 +206,19 @@ wait_for_log() {
   local pattern=$1 timeout=${2:-20} i
   for i in $(seq 1 "$timeout"); do
     if app_log | grep -Eq "$pattern"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# wait_for_log_count <regex> <n> [timeout]: waits up to `timeout` seconds
+# (default 20) until at least <n> lines of the log match.
+wait_for_log_count() {
+  local pattern=$1 want=$2 timeout=${3:-20} i
+  for i in $(seq 1 "$timeout"); do
+    if [ "$(app_log | grep -Ec "$pattern" || true)" -ge "$want" ]; then
       return 0
     fi
     sleep 1
@@ -191,4 +263,108 @@ expect() {
     log "  FAIL: $what"
     SCENARIO_FAILED=1
   fi
+}
+
+# --- Running scenarios ---------------------------------------------------------
+
+# run_scenario <name>: runs one scenario in a subshell of its own, with
+# `set -e`, so an early end (a failed command, die, a trap's exit) ends only
+# that scenario, and sets SCENARIO_RESULT to PASS, FAIL or SKIP. A scenario
+# passes only if it reached its end with no failed check: one that ended
+# early fails with its exit status, even 0 (an `exit 0` half way is not a
+# pass). An early end saves the app's log and a screenshot, which a scenario
+# that died may not have done.
+run_scenario() {
+  local name=$1 result status=0 saved_e=0 flags
+  result="$OUT_DIR/.result-$name"
+  rm -f "$result"
+  case $- in *e*) saved_e=1 ;; esac
+  # Not `( ... ) || status=$?`: in a || list bash ignores set -e inside the
+  # subshell too, and the scenario's failed commands would go unnoticed.
+  set +e
+  (
+    set -e
+    SCENARIO_FAILED=0
+    SCENARIO_SKIPPED=0
+    "$name"
+    printf '%s %s\n' "$SCENARIO_FAILED" "$SCENARIO_SKIPPED" >"$result"
+  )
+  status=$?
+  [ "$saved_e" = 0 ] || set -e
+  if [ ! -s "$result" ]; then
+    log "scenario $name ended early (exit status $status) before reaching its end"
+    collect_log "$name" || true
+    SCENARIO_RESULT=FAIL
+    return 0
+  fi
+  flags=$(cat "$result")
+  rm -f "$result"
+  if [ "$status" != 0 ]; then
+    # It reached its end, but an exit trap failed it (a failed cleanup).
+    log "scenario $name: its cleanup failed (exit status $status)"
+    SCENARIO_RESULT=FAIL
+  elif [ "${flags#* }" = 1 ]; then
+    SCENARIO_RESULT=SKIP
+  elif [ "${flags% *}" = 1 ]; then
+    SCENARIO_RESULT=FAIL
+  else
+    SCENARIO_RESULT=PASS
+  fi
+}
+
+is_optional() {
+  local name
+  for name in ${OPTIONAL_SCENARIOS[@]+"${OPTIONAL_SCENARIOS[@]}"}; do
+    [ "$name" = "$1" ] && return 0
+  done
+  return 1
+}
+
+# run_scenarios <name...>: runs each scenario, prints one line per scenario
+# and a total (also to $OUT_DIR/results.txt), and returns 0 only if none
+# failed and no required one was skipped. The optional ones
+# (OPTIONAL_SCENARIOS) may skip; the summary still says so. Call it outside
+# any `if`, `||` or `&&`, or the scenarios' `set -e` is ignored.
+run_scenarios() {
+  local scenario summary passed=() failed=() skipped=() bad_skips=() results=()
+  for scenario in "$@"; do
+    log "scenario $scenario"
+    run_scenario "$scenario"
+    case $SCENARIO_RESULT in
+      SKIP)
+        skipped+=("$scenario")
+        if is_optional "$scenario"; then
+          log "scenario $scenario: SKIP (optional)"
+          results+=("SKIP     $scenario (optional)")
+        else
+          bad_skips+=("$scenario")
+          log "scenario $scenario: SKIP (required: this fails the run)"
+          results+=("SKIP     $scenario (REQUIRED: counts as a failure)")
+        fi
+        ;;
+      FAIL)
+        failed+=("$scenario")
+        log "scenario $scenario: FAIL"
+        results+=("FAIL     $scenario")
+        ;;
+      *)
+        passed+=("$scenario")
+        log "scenario $scenario: PASS"
+        results+=("PASS     $scenario")
+        ;;
+    esac
+  done
+  summary="${#passed[@]} passed, ${#failed[@]} failed, ${#skipped[@]} skipped"
+  {
+    printf '%s\n' ${results[@]+"${results[@]}"}
+    echo "$summary"
+  } | tee "$OUT_DIR/results.txt" >&2
+  if [ ${#failed[@]} -gt 0 ] || [ ${#bad_skips[@]} -gt 0 ]; then
+    log "$summary; failed: ${failed[*]:-none}; required but skipped: ${bad_skips[*]:-none}"
+    return 1
+  fi
+  if [ ${#skipped[@]} -gt 0 ]; then
+    log "OK, but skipped: ${skipped[*]} (optional)"
+  fi
+  log "no scenario failed ($summary)"
 }
