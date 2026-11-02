@@ -44,6 +44,10 @@ export CI=true
 # The notice bundled into the app must match the dependencies (#24).
 scripts/check-licences.sh
 
+# Clear the bundle directory first, so the DMG found below is the one this
+# build made and never an older one left in a reused target/.
+rm -rf "target/$profile/bundle/dmg"
+
 npm run tauri build -- ${tauri_profile[@]+"${tauri_profile[@]}"} ${signing[@]+"${signing[@]}"} --bundles dmg
 
 dmg=$(find "target/$profile/bundle/dmg" -name '*.dmg' -print -quit)
