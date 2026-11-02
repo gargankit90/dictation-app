@@ -1,4 +1,4 @@
-# T4a, #115: the user quits from the tray while the provider has the
+# T4a, #115, M5.8 #4: the user quits from the tray while the provider has the
 # request and hasn't answered.
 #
 # The app must exit by itself within QUIT_BOUND seconds (no kill), having
@@ -17,9 +17,9 @@ quit_within_bound() {
   QUIT_TIMEOUT=$QUIT_BOUND quit_from_tray
 }
 
-e2e_quit_during_request() {
+e2e_quit_during_transcription_then_relaunch() {
   local start
-  arm_key_cleanup e2e_quit_during_request
+  arm_key_cleanup e2e_quit_during_transcription_then_relaunch
   KEY_CLEANUP_HOOK=provider_cleanup
   fresh_app_state
   settings_reset
@@ -52,7 +52,7 @@ e2e_quit_during_request() {
   expect "nothing was inserted" test "$(phases_since 0)" = "Recording Transcribing"
   expect "TextEdit got nothing (read back exactly)" textedit_is ""
   expect "the clipboard is untouched" test "$(clipboard)" = "$PROVIDER_SENTINEL"
-  collect_log e2e_quit_during_request-before-relaunch
+  collect_log e2e_quit_during_transcription_then_relaunch-before-relaunch
 
   # Start again: a dictation works.
   clear_app_log
@@ -62,7 +62,7 @@ e2e_quit_during_request() {
   expect "it pasted the transcript" textedit_is "$(esc_b64 "$PROVIDER_TEXT")"
   expect "two requests in all" provider_requests_are 2
 
-  [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_quit_during_request
-  collect_log e2e_quit_during_request
+  [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_quit_during_transcription_then_relaunch
+  collect_log e2e_quit_during_transcription_then_relaunch
   key_scenario_end
 }
