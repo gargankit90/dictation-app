@@ -64,7 +64,16 @@ Tauri is a thin layer on top.
 - One instance per user through `dictation_platform::single_instance` (a
   lock file plus a socket with bounded reads; it replaced the single-instance
   plugin in M1.7), with CLI flags forwarded (`--press`/`--release` are test
-  hooks). Updater plugin with a minisign key.
+  hooks).
+- Updates (M5.4): `tauri-plugin-updater` trusts only the owner's minisign
+  public key in `tauri.conf.json` and fetches `latest.json` from the public
+  `gargankit90/dictation-app-releases`. It checks quietly at launch and from
+  the tray; nothing installs until the user picks "Install and restart",
+  which restarts through the normal exit (`request_restart`, as M5.2's
+  relaunch). Releases are signed `dictation-app Dev` so Microphone and
+  Accessibility survive an update. `scripts/release.sh` builds a release on
+  the owner's Mac with the private key from the Keychain (never printed or
+  written); `docs/releasing.md` has the steps. Tests use throwaway keys only.
 
 ## TypeScript / React
 

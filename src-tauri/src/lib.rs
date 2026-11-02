@@ -327,7 +327,9 @@ fn exit_early(reason: &str) -> ! {
 fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     let log_dir = app.path().app_log_dir().context("no log directory")?;
     logging::init(&log_dir).context("could not start logging")?;
-    tracing::info!(version = env!("CARGO_PKG_VERSION"), log_dir = %log_dir.display(), "starting");
+    // The bundle's version (tauri.conf.json), the one the updater compares.
+    let version = app.package_info().version.to_string();
+    tracing::info!(version, log_dir = %log_dir.display(), "starting");
     app.manage(LogDir(log_dir));
 
     build_tray(app).context("could not create the tray icon")?;
@@ -442,6 +444,15 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
             ),
         },
     );
+    // M5.4: a quiet update check; a dialog only if there is an update.
+    let scripted = onboarding::scripted_launch(
+        launch.audio_file.is_some(),
+        choice == flags::TranscriberChoice::Mock,
+        false,
+    );
+    if updater::check_at_launch_wanted(scripted, launch.check_updates) {
+        updater::check_at_launch(app.handle());
+    }
 
     // This launch's own flags first, so they come before any forwarded one.
     // A failed injection is already logged; nothing waits for this launch.

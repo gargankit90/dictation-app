@@ -40,6 +40,14 @@
 //                                    it is; prints "checked" or "unchecked"
 //   wait-text <app> <window> <text> <secs>  until some element shows <text>
 //   close <app> <window>             presses the window's close button
+//   alert-press <app> <text> <button> <secs>  until a window of the app shows
+//                                    <text> (untitled alerts, such as
+//                                    UserNotificationCenter's), then presses
+//                                    <button> in that window; prints "pressed"
+//   alert-count <app> <text>         how many of the app's windows show <text>
+//   alert-dismiss <app> <text> <button...>  in every window showing <text>,
+//                                    presses the first of <button...> it has;
+//                                    prints how many it dismissed
 //   overlay <app>                    what the overlay window shows: "hidden"
 //                                    (no window titled "overlay" in AXWindows,
 //                                    which lists only windows on screen) or
@@ -371,6 +379,19 @@ function findButton(window, title) {
   return found;
 }
 
+// The app's windows (AXWindows) in which some element shows <wanted>.
+function windowsShowing(appEl, wanted) {
+  const windows = get(appEl, "AXWindows");
+  const found = [];
+  if (windows !== undefined) {
+    for (let i = 0; i < windows.count; i++) {
+      const window = windows.objectAtIndex(i);
+      if (showsText(window, wanted)) found.push(window);
+    }
+  }
+  return found;
+}
+
 function showsText(window, wanted) {
   return (
     walk(window, (element) =>
@@ -559,6 +580,34 @@ function run(argv) {
       const window = findWindow(appEl, rest[0]);
       waitFor(Number(rest[2] || 10), JSON.stringify(rest[1]), () => showsText(window, rest[1]));
       return "shown " + rest[1];
+    }
+    case "alert-press": {
+      let target;
+      waitFor(Number(rest[2] || 10), "a window showing " + JSON.stringify(rest[0]), () => {
+        target = windowsShowing(appEl, rest[0])[0];
+        return target !== undefined;
+      });
+      const err = press(findButton(target, rest[1]), 5.0);
+      if (err !== 0) fail("pressing " + rest[1] + " failed (AX error " + err + ")");
+      return "pressed " + rest[1];
+    }
+    case "alert-count":
+      return String(windowsShowing(appEl, rest[0]).length);
+    case "alert-dismiss": {
+      let dismissed = 0;
+      for (const window of windowsShowing(appEl, rest[0])) {
+        for (const title of rest.slice(1)) {
+          let button;
+          try {
+            button = findButton(window, title);
+          } catch (e) {
+            continue;
+          }
+          if (press(button, 5.0) === 0) dismissed++;
+          break;
+        }
+      }
+      return "dismissed " + dismissed;
     }
     case "close": {
       const button = get(findWindow(appEl, rest[0]), "AXCloseButton");

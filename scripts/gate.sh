@@ -54,6 +54,10 @@ step no_tauri_in_pipeline
 # The third-party licence notice that ships in the app is current, and the
 # check itself fails when it should (#24).
 step scripts/test-check-licences.sh
+# The release script (M5.4): never prints the updater key, verifies the
+# signature, refuses --publish without a clean tree and the tag. Stubs only;
+# no Keychain, network or real key.
+step scripts/test-release.sh
 step scripts/check-licences.sh
 
 # Rust tests and coverage. nextest fails a run that finds no tests, so a
