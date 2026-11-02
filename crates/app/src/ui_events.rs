@@ -338,6 +338,31 @@ mod tests {
         assert_eq!(Vec::from(queue.events), [phase(Phase::Idle)]);
     }
 
+    /// #88: a UI that showed the hotkey as down still learns it is back.
+    #[test]
+    fn coalescing_keeps_the_newest_hotkey_restored_in_order() {
+        let mut queue = Queue::default();
+        let failed = UiEvent::Error(DictationError::HotkeyFailed);
+        queue.events.extend([
+            failed.clone(),
+            UiEvent::HotkeyRestored,
+            phase(Phase::Recording),
+            failed.clone(),
+            UiEvent::HotkeyRestored,
+            phase(Phase::Idle),
+        ]);
+        queue.coalesce();
+        assert_eq!(
+            Vec::from(queue.events),
+            [
+                failed.clone(),
+                failed,
+                UiEvent::HotkeyRestored,
+                phase(Phase::Idle)
+            ]
+        );
+    }
+
     #[test]
     fn dropped_errors_are_counted_and_logged_sparsely() {
         let (tx, _rx) = ui_channel();
