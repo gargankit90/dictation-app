@@ -81,7 +81,7 @@ points at `dictation-vm`) don't reset each other's VM.
   ```
 
   Run that command and start again. `--clear-stale-lock <name>` needs no
-  build, VM or `lume`. It removes the lock only if its pid is not running (it
+  build or VM, and `lume` only for `vm-start` (below). It removes the lock only if its pid is not running (it
   refuses with `pid N is still running` otherwise) and only for
   `dictation-vm`, `dictation-vm-2` and the two host-wide locks (`vm-start`,
   `golden-clone`); any other name, the golden image and its backups
@@ -89,7 +89,10 @@ points at `dictation-vm`) don't reset each other's VM.
   `golden-clone`. If the pid was reused by an unrelated process, the command
   refuses too; check the lock with `readlink ~/.cache/dictation-e2e/<name>.lock`
   and remove that file by hand. Run it only when no run is starting on that
-  VM.
+  VM. `vm-start` is stricter: its lock stands for a start nobody confirmed, so
+  `--clear-stale-lock vm-start` also asks `lume ls` and refuses while the VM
+  the lock was taken for is running, while two macOS VMs are running, or when
+  `lume ls` fails; it names the VM to `lume stop` first.
 - **At most two running VMs:** a reset refuses to start when two other macOS
   VMs are running already (`lume ls`; the golden image counts if it is
   running). The count and `lume run` are one step under `vm-start.lock`, held
@@ -98,7 +101,11 @@ points at `dictation-vm`) don't reset each other's VM.
   while the start is unconfirmed, so a third start is refused (or waits, up to
   `E2E_START_LOCK_WAIT` seconds, 300) until then. If the deadline passes
   (or `lume ls` keeps failing), the reset runs `lume stop <vm>`, releases the
-  lock and fails with `lume ls didn't list <vm> as running within N s`. Two
+  lock and fails with `lume ls didn't list <vm> as running within N s`. If
+  `lume stop` fails, or the run gets a signal after `lume run`, the lock is
+  kept instead (stale once the run exits): the next start fails with the
+  stale-lock message until the VM is stopped and `--clear-stale-lock vm-start`
+  is run. Two
   resets together can't both start. Lock order: VM lock, then the clone lock
   or the start lock (never both).
 - The lock is per VM, not per checkout: two worktrees pointing at the same VM

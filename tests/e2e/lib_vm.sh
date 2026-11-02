@@ -15,6 +15,13 @@ E2E_MAX_RUNNING_VMS=2
 E2E_LOCK_DIR="${E2E_LOCK_DIR:-$HOME/.cache/dictation-e2e}"
 # The locks this process holds, released by release_run_locks.
 E2E_HELD_LOCKS=()
+# 1 from just before `lume run` until the start is confirmed (listed as running)
+# or undone (lume stop worked). While it is 1 the vm-start lock is never
+# released: see start_vm.
+E2E_START_PENDING=0
+# Text lock_try appends to the lock's owner ("<pid> <time> <note>"); set per
+# call by start_vm, which notes the VM the reservation is for.
+LOCK_NOTE=""
 
 validate_vm_name() {
   local name=$1 ok
@@ -101,7 +108,7 @@ lock_try() {
   local name=$1 path mine cur tries=0
   path=$(lock_path "$name")
   mkdir -p "$E2E_LOCK_DIR"
-  mine="$$ $(date '+%F %T')"
+  mine="$$ $(date '+%F %T')${LOCK_NOTE:+ $LOCK_NOTE}"
   while [ "$tries" -lt 4 ]; do
     tries=$((tries + 1))
     # (`ln -s` onto an old-style lock directory would link inside it.)
@@ -186,6 +193,7 @@ clear_stale_lock() {
   pid=${cur%% *}
   pid_alive "$pid" &&
     die "not removing the '$name' lock: pid $pid is still running (since ${cur#* })"
+  [ "$name" != vm-start ] || refuse_clear_vm_start "$cur"
   # Gone since we read it, or replaced by a live run's: leave that alone.
   [ "$(lock_read "$name" || true)" = "$cur" ] ||
     die "the '$name' lock changed while checking it; run this again"
@@ -193,9 +201,39 @@ clear_stale_lock() {
   log "removed the stale '$name' lock (pid ${pid:-unknown} is not running)"
 }
 
+# refuse_clear_vm_start <lock contents>: a dead run's vm-start lock stands for
+# a start nobody confirmed, so it is cleared only once `lume ls` shows no VM
+# is left from it: the VM the reservation names is not running, and fewer than
+# E2E_MAX_RUNNING_VMS macOS VMs are. Otherwise dies, naming what to stop first.
+# Fails closed when lume ls fails.
+refuse_clear_vm_start() {
+  local vm=${1##* } json running count
+  validate_vm_name "$vm" || vm=
+  json=$(lume ls -f json 2>/dev/null) ||
+    die "not removing the 'vm-start' lock: lume ls failed, so I can't tell whether ${vm:-a VM} from that start is still running"
+  running=$(printf '%s' "$json" |
+    jq -r '[.[] | select(.os == "macOS" and .status == "running") | .name] | join(" ")') ||
+    die "can't read the output of lume ls"
+  if [ -n "$vm" ] && [[ " $running " == *" $vm "* ]]; then
+    die "not removing the 'vm-start' lock: $vm, the VM it was taken for, is still running (it may be the unconfirmed start); stop it first: lume stop $vm"
+  fi
+  count=$(printf '%s\n' "$running" | wc -w | tr -d ' ')
+  if [ "$count" -ge "$E2E_MAX_RUNNING_VMS" ]; then
+    die "not removing the 'vm-start' lock: $count macOS VMs are running ($running) and Apple allows $E2E_MAX_RUNNING_VMS; stop the one that was being started (${vm:-the one started last}) first: lume stop <name>, then run this again"
+  fi
+}
+
 release_run_locks() {
   local name
   for name in ${E2E_HELD_LOCKS[@]+"${E2E_HELD_LOCKS[@]}"}; do
+    if [ "$name" = vm-start ] && [ "$E2E_START_PENDING" = 1 ]; then
+      # Interrupted between `lume run` and the VM showing up (or its stop):
+      # whether $VM is starting is unknown, so the reservation stays. It is a
+      # stale lock once this process exits.
+      lock_forget vm-start
+      log "interrupted while $VM was starting; leaving the vm-start lock. Check lume ls and stop $VM if it is listed, then: tests/e2e/run.sh --clear-stale-lock vm-start"
+      continue
+    fi
     lock_release "$name"
   done
 }
@@ -258,14 +296,19 @@ ensure_host_key_alias() {
 # runs resetting their VMs together would otherwise both count one other VM
 # and both start, one too many. If the VM isn't listed by the deadline the
 # start is undone (the VM is stopped) and the run fails; the lock is never
-# released while the start is unconfirmed. Lock order: VM lock, then (never
+# released while the start is unconfirmed: if lume stop fails, or the run is
+# interrupted after `lume run`, the lock stays (stale once this process exits)
+# and the next start is refused until --clear-stale-lock vm-start, which itself
+# waits for the VMs to be sorted out. Lock order: VM lock, then (never
 # together) the clone lock or the start lock.
 start_vm() {
-  lock_take vm-start "${E2E_START_LOCK_WAIT:-300}"
+  LOCK_NOTE=$VM lock_take vm-start "${E2E_START_LOCK_WAIT:-300}"
   refuse_third_vm
+  E2E_START_PENDING=1
   lume run "$VM" --no-display --detach >/dev/null || abort_start "lume run failed"
   wait_vm_listed_running ||
     abort_start "lume ls didn't list $VM as running within ${E2E_START_VISIBLE_WAIT:-120} s"
+  E2E_START_PENDING=0
   lock_release vm-start
 }
 
@@ -284,15 +327,18 @@ wait_vm_listed_running() {
   done
 }
 
-# The start of $VM wasn't confirmed: stops it (it may be starting), releases
-# the start lock only then, and ends the run.
+# The start of $VM wasn't confirmed: stops it (it may be starting) and, only if
+# that worked, releases the start lock; ends the run. If lume stop fails the
+# lock stays, as a stale lock once this process exits.
 abort_start() {
   local why=$1 stopped=0
   validate_vm_name "$VM" || die "refusing lume stop on '$VM'"
   lume stop "$VM" >/dev/null 2>&1 && stopped=1
-  lock_release vm-start
   if [ "$stopped" = 1 ]; then
+    E2E_START_PENDING=0
+    lock_release vm-start
     die "$why; stopped $VM. Check lume ls, then run again"
   fi
-  die "$why, and lume stop $VM failed; it may still be starting. Check lume ls and stop it before running again"
+  lock_forget vm-start
+  die "$why, and lume stop $VM failed; it may still be starting, so the vm-start lock stays. Check lume ls and stop $VM, then: tests/e2e/run.sh --clear-stale-lock vm-start"
 }
