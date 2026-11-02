@@ -23,6 +23,11 @@
 set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
+# Under git's pre-push run of the gate, git exports GIT_DIR and friends; left
+# set, the throwaway repository's commits and tags below would land in this
+# one. Every git command from here on finds its repository by its folder.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_PREFIX GIT_NAMESPACE
 tauri_cli=$root/node_modules/.bin/tauri
 [ -x "$tauri_cli" ] || {
   echo "test-release: no $tauri_cli (npm ci first)" >&2
@@ -143,6 +148,11 @@ printf 'target/\n' >"$repo/.gitignore"
 (
   cd "$repo"
   git init -q
+  # Refuse to go on unless git now means the throwaway repository.
+  [ "$(cd "$(git rev-parse --git-dir)" && pwd -P)" = "$(cd "$repo/.git" && pwd -P)" ] || {
+    echo "test-release: git doesn't point at the throwaway repository; stopping" >&2
+    exit 1
+  }
   git -c user.name=t -c user.email=t@example.invalid add -A
   git -c user.name=t -c user.email=t@example.invalid commit -qm init
 )
