@@ -302,12 +302,20 @@ pub fn take_resume_marker(config_dir: &Path) -> bool {
 }
 
 /// Whether onboarding shows at launch: when dictation can't work yet, or the
-/// last launch was Relaunch, or a test asks (`forced`). A scripted test
-/// launch (`scripted`: debug builds with a debug audio file) doesn't get it
-/// unasked, so it can't take the focus from the window the test pastes into.
+/// last launch was Relaunch. A scripted test launch (`scripted`) gets it only
+/// after Relaunch, so it can't take the focus from the window the test
+/// pastes into.
 #[must_use]
-pub fn show_at_launch(readiness: Readiness, resumed: bool, forced: bool, scripted: bool) -> bool {
-    forced || resumed || (!scripted && readiness.needs_onboarding())
+pub fn show_at_launch(readiness: Readiness, resumed: bool, scripted: bool) -> bool {
+    resumed || (!scripted && readiness.needs_onboarding())
+}
+
+/// Whether a launch is a scripted test (debug builds): it records a debug
+/// audio file or runs the mock engine, unless it asks to be treated like a
+/// person's launch (`--debug-onboarding`).
+#[must_use]
+pub fn scripted_launch(audio_file: bool, mock_engine: bool, like_a_person: bool) -> bool {
+    (audio_file || mock_engine) && !like_a_person
 }
 
 #[cfg(test)]
@@ -557,14 +565,21 @@ mod tests {
             key_saved: false,
             ..Readiness::READY
         };
-        assert!(show_at_launch(missing, false, false, false));
-        assert!(!show_at_launch(Readiness::READY, false, false, false));
+        assert!(show_at_launch(missing, false, false));
+        assert!(!show_at_launch(Readiness::READY, false, false));
         // After Relaunch, even with everything in place.
-        assert!(show_at_launch(Readiness::READY, true, false, false));
-        // A scripted test launch only when it asks.
-        assert!(!show_at_launch(missing, false, false, true));
-        assert!(show_at_launch(missing, false, true, true));
-        assert!(show_at_launch(Readiness::READY, true, false, true));
+        assert!(show_at_launch(Readiness::READY, true, false));
+        // A scripted test launch only after Relaunch.
+        assert!(!show_at_launch(missing, false, true));
+        assert!(show_at_launch(Readiness::READY, true, true));
+    }
+
+    #[test]
+    fn test_launches_are_scripted_unless_they_ask_not_to_be() {
+        assert!(!scripted_launch(false, false, false), "a person's launch");
+        assert!(scripted_launch(true, false, false));
+        assert!(scripted_launch(false, true, false));
+        assert!(!scripted_launch(true, true, true), "--debug-onboarding");
     }
 
     #[test]

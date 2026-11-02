@@ -37,10 +37,12 @@
 //!   that must tell which dictation's text ended up where (the texts can't
 //!   hold a comma). Only the first launch's counts.
 //!
-//! - `--debug-onboarding` shows onboarding at launch (M5.2). A launch with
-//!   `--debug-audio-file` is a scripted test, which otherwise never gets
-//!   onboarding at launch, so it can't take the focus from the window the
-//!   test pastes into. Only the first launch's counts.
+//! - `--debug-onboarding` makes a scripted test launch decide about
+//!   onboarding like a person's launch (M5.2): it shows at launch if a
+//!   permission or the key is missing. A launch with `--debug-audio-file` or
+//!   the mock engine otherwise never shows it at launch, so it can't take
+//!   the focus from the window the test pastes into. Only the first launch's
+//!   counts.
 //!
 //! A release build treats them like any other unknown flag: logged and
 //! ignored.
@@ -69,8 +71,8 @@ pub const MOCK_TEXT_FLAG: &str = "--mock-text";
 /// builds only).
 pub const MOCK_TEXT_SEQUENCE_FLAG: &str = "--mock-text-sequence";
 
-/// `--debug-onboarding`: show onboarding at launch even in a scripted test
-/// launch (debug builds only).
+/// `--debug-onboarding`: decide about onboarding at launch like a person's
+/// launch, even in a scripted test launch (debug builds only).
 pub const DEBUG_ONBOARDING_FLAG: &str = "--debug-onboarding";
 
 /// Whether this build acts on the test hooks.
@@ -147,7 +149,8 @@ pub struct LaunchFlags {
     pub mock_text_sequence: Option<Vec<String>>,
     /// The engine `--transcriber` asked for; the last one wins.
     pub transcriber: Option<TranscriberChoice>,
-    /// Show onboarding at launch (debug builds only, `--debug-onboarding`).
+    /// Decide about onboarding at launch like a person's launch (debug builds
+    /// only, `--debug-onboarding`).
     pub show_onboarding: bool,
     /// Engine names `--transcriber` was given that no engine has.
     pub unknown_engines: Vec<String>,

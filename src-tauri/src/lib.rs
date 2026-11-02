@@ -416,8 +416,11 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         live,
         LaunchOnboarding {
             resumed: onboarding::take_resume_marker(&config_dir),
-            forced: launch.show_onboarding,
-            scripted: launch.audio_file.is_some(),
+            scripted: onboarding::scripted_launch(
+                launch.audio_file.is_some(),
+                choice == flags::TranscriberChoice::Mock,
+                launch.show_onboarding,
+            ),
         },
     );
 
@@ -456,9 +459,7 @@ impl commands::Shell for TauriShell {
 struct LaunchOnboarding {
     /// The last launch was Relaunch.
     resumed: bool,
-    /// `--debug-onboarding`.
-    forced: bool,
-    /// A scripted test launch (`--debug-audio-file`).
+    /// A scripted test launch ([`onboarding::scripted_launch`]).
     scripted: bool,
 }
 
@@ -477,12 +478,7 @@ fn onboarding_at_launch(
             let readiness = onboarding::readiness(&SystemPermissions::new(), true, || {
                 onboarding::key_saved(&config, &live)
             });
-            if !onboarding::show_at_launch(
-                readiness,
-                launch.resumed,
-                launch.forced,
-                launch.scripted,
-            ) {
+            if !onboarding::show_at_launch(readiness, launch.resumed, launch.scripted) {
                 tracing::info!(?readiness, ?launch, "onboarding not shown at launch");
                 return;
             }
