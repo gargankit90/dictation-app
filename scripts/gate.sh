@@ -89,6 +89,10 @@ step npm run build
 # Spelling and guards
 step typos
 step scripts/test-guards.sh
+# No workflow can reach the owner's Mac or a secret (PUB1): hosted runners only,
+# pinned actions, read-only token. And e2e-main.sh refuses non-main commits.
+step scripts/check-workflows.sh
+step scripts/test-e2e-main.sh
 step tests/e2e/test-key-handling.sh
 step tests/e2e/test-vm-lock.sh
 step tests/e2e/test-runner.sh
