@@ -81,6 +81,7 @@ step npm run build
 step typos
 step scripts/test-guards.sh
 step tests/e2e/test-key-handling.sh
+step tests/e2e/test-vm-lock.sh
 step tests/e2e/test-runner.sh
 
 printf '\ngate: all checks passed\n'

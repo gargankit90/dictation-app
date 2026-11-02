@@ -5,6 +5,8 @@
 #   tests/e2e/run.sh                     # build, reset the VM, run every scenario
 #   tests/e2e/run.sh e2e_startup         # just one scenario
 #   tests/e2e/run.sh --no-build --no-reset e2e_press_release
+#   E2E_VM=dictation-vm-2 tests/e2e/run.sh           # the second VM
+#   tests/e2e/run.sh --clear-stale-lock <vm>         # remove a dead run's lock
 #
 # Exits 0 only if no scenario failed and no required one was skipped. The
 # optional ones (OPTIONAL_SCENARIOS) may be skipped; the summary says so.
@@ -41,12 +43,21 @@ APP_PATH=target/debug/bundle/macos/$APP_NAME.app
 build=1
 reset=1
 scenarios=()
-for arg in "$@"; do
+while [ $# -gt 0 ]; do
+  arg=$1
+  shift
   case $arg in
+    --clear-stale-lock)
+      # <vm>: dictation-vm, dictation-vm-2 (or vm-start, golden-clone). Takes
+      # no VM, tools or build: it only looks at the lock.
+      [ $# -gt 0 ] || die "--clear-stale-lock needs a lock name: ${E2E_CLEARABLE_LOCKS[*]}"
+      clear_stale_lock "$1"
+      exit 0
+      ;;
     --no-build) build=0 ;;
     --no-reset) reset=0 ;;
     -h | --help)
-      sed -n '2,10p' "$0"
+      sed -n '2,12p' "$0"
       exit 0
       ;;
     -*) die "unknown option $arg" ;;
@@ -62,8 +73,10 @@ for tool in lume jq ssh tar; do
   command -v "$tool" >/dev/null || die "$tool is not installed"
 done
 [ -f "$SSH_KEY" ] || die "no VM ssh key at $SSH_KEY"
+ensure_host_key_alias
 
-OUT_DIR=$E2E_DIR/out/$(date +%Y%m%d-%H%M%S)
+# The VM's name is in the output dir, so two runs (one per VM) don't share one.
+OUT_DIR=$E2E_DIR/out/$(date +%Y%m%d-%H%M%S)-$VM
 mkdir -p "$OUT_DIR"
 
 if [ $build = 1 ]; then
@@ -72,6 +85,12 @@ if [ $build = 1 ]; then
     die "build failed; see $OUT_DIR/build.log"
 fi
 [ -d "$APP_PATH" ] || die "no app at $APP_PATH; run without --no-build"
+
+# One run per VM at a time, held until the run ends (after the build, which
+# doesn't need the VM). The traps come first, so no lock is ever held without
+# them.
+arm_run_traps
+vm_lock_take
 
 if [ $reset = 1 ]; then
   reset_vm
