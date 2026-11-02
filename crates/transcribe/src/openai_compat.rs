@@ -195,7 +195,7 @@ impl<W: Wait> OpenAiCompat<W> {
         wait: W,
         seed: u64,
     ) -> Result<Self, TranscribeError> {
-        let client = crate::http::client(config.timeout)?;
+        let client = crate::http::client(config.timeout, &config.base_url)?;
         let endpoint = format!(
             "{}/audio/transcriptions",
             config.base_url.trim_end_matches('/')

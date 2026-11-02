@@ -3,8 +3,9 @@
 //! M1.5: a menu-bar app with a tray menu (Settings and Quit) that runs the
 //! pipeline with the real hotkey and the stand-ins for transcription and
 //! paste. M2.2: it records from the real microphone, and
-//! a dictation error (such as a missing microphone permission) shows as the
-//! tray's title and tooltip until the next recording. A second launch
+//! a dictation error (such as a missing microphone permission) shows in the
+//! tray until the next recording: a short title next to the icon (#151) and
+//! the message in the tooltip. A second launch
 //! forwards its flags to the running app and exits (M1.7:
 //! `dictation_platform::single_instance`, which replaced the
 //! single-instance plugin). Debug builds act on the test flags (`--press`,
@@ -353,6 +354,7 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
             )
         }
     };
+    let live = with_provider_url(live, &launch, choice);
     tracing::info!(
         transcriber = choice.name(),
         engine = transcribers.name(),
@@ -408,6 +410,36 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         .context("could not listen for later launches")?;
     app.manage(SingleInstance(Mutex::new(Some(instance))));
     Ok(())
+}
+
+/// Test builds: points the real engine at `--debug-provider-url` (a local
+/// stand-in provider, T4a). Release builds have no such flag (it is never
+/// parsed) and this does nothing: the engine always talks to the provider.
+#[cfg(debug_assertions)]
+fn with_provider_url(
+    live: engine::LiveEngine,
+    launch: &flags::LaunchFlags,
+    choice: flags::TranscriberChoice,
+) -> engine::LiveEngine {
+    let Some(url) = &launch.provider_url else {
+        return live;
+    };
+    if choice == flags::TranscriberChoice::Mock {
+        tracing::warn!(%url, "test hook: --debug-provider-url needs the real engine; ignored with the mock");
+        return live;
+    }
+    // This line's text is what the e2e scenarios wait for.
+    tracing::info!(%url, "test hook: the provider is reached at a local URL");
+    live.at(url)
+}
+
+#[cfg(not(debug_assertions))]
+fn with_provider_url(
+    live: engine::LiveEngine,
+    _: &flags::LaunchFlags,
+    _: flags::TranscriberChoice,
+) -> engine::LiveEngine {
+    live
 }
 
 /// Hands each later launch's flags to the running pipeline, and
@@ -466,6 +498,9 @@ fn handle_flags(
             from,
             "the API key commands only run as a process of their own; ignored"
         );
+    }
+    for url in &flags.refused_provider_urls {
+        tracing::warn!(%url, from, "ignoring --debug-provider-url: only a loopback http URL is allowed");
     }
     for flag in &flags.ignored {
         tracing::warn!(%flag, from, "ignoring an unknown flag");
@@ -580,18 +615,22 @@ async fn show_ui_events(app: AppHandle, mut events: UiReceiver, overlay: Option<
     }
 }
 
+/// The tray's tooltip for `view`: the app's name, then the detail if any.
+fn tray_tooltip(view: &TrayView) -> String {
+    view.detail.as_ref().map_or_else(
+        || TOOLTIP.to_owned(),
+        |detail| format!("{TOOLTIP}: {detail}"),
+    )
+}
+
 /// Puts `view` in the tray's title (next to the icon) and tooltip.
 fn show_in_tray(app: &AppHandle, view: &TrayView) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
-    let tooltip = view.detail.as_ref().map_or_else(
-        || TOOLTIP.to_owned(),
-        |detail| format!("{TOOLTIP}: {detail}"),
-    );
     if let Err(error) = tray
         .set_title(view.title.as_deref())
-        .and_then(|()| tray.set_tooltip(Some(tooltip)))
+        .and_then(|()| tray.set_tooltip(Some(tray_tooltip(view))))
     {
         tracing::warn!(%error, "could not update the tray");
     }
@@ -620,6 +659,68 @@ fn shut_down(app: &AppHandle) {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .take(),
         );
+    }
+}
+
+#[cfg(test)]
+mod tray_tests {
+    use dictation_core::error::{DictationError, Permission};
+    use dictation_pipeline::tray::{DICTATION_FAILED, HOTKEY_UNAVAILABLE, MAX_TITLE_CHARS};
+
+    use super::*;
+
+    /// One of each error, with reasons as long as the summary lets through.
+    fn every_error() -> Vec<DictationError> {
+        let long = "The provider rejected your API key. Check it in Settings. ".repeat(4);
+        let all = vec![
+            DictationError::TranscriptionFailed {
+                reason: long.clone(),
+            },
+            DictationError::EmptyTranscript,
+            DictationError::InsertFailed { reason: long },
+            DictationError::SecureInput,
+            DictationError::PermissionMissing(Permission::Microphone),
+            DictationError::PermissionMissing(Permission::Accessibility),
+            DictationError::HotkeyFailed,
+        ];
+        // A new kind of error fails to compile here until it is listed above.
+        for error in &all {
+            match error {
+                DictationError::TranscriptionFailed { .. }
+                | DictationError::EmptyTranscript
+                | DictationError::InsertFailed { .. }
+                | DictationError::SecureInput
+                | DictationError::PermissionMissing(_)
+                | DictationError::HotkeyFailed => {}
+            }
+        }
+        all
+    }
+
+    /// #151: whatever the error, the title is the same short text, so the
+    /// status item fits in the menu bar; the whole message is the tooltip.
+    #[test]
+    fn the_tray_title_stays_short_for_every_error() {
+        for error in every_error() {
+            let mut tray = TrayStatus::default();
+            let view = tray.on_event(&UiEvent::Error(error.clone()));
+            let view = view.unwrap_or_else(|| tray.view().clone());
+            let title = view.title.clone().unwrap_or_default();
+            assert!(title.chars().count() <= MAX_TITLE_CHARS, "{error}: {title}");
+            let expected = match error {
+                DictationError::HotkeyFailed => HOTKEY_UNAVAILABLE,
+                _ => DICTATION_FAILED,
+            };
+            assert_eq!(title, expected, "{error}");
+            assert_eq!(tray_tooltip(&view), format!("dictation-app: {error}"));
+        }
+    }
+
+    #[test]
+    fn no_error_clears_the_title() {
+        let view = TrayView::default();
+        assert_eq!(view.title, None);
+        assert_eq!(tray_tooltip(&view), "dictation-app");
     }
 }
 

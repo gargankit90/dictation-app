@@ -28,6 +28,10 @@
 //                                    (focus, empty it, the keys; lowercase
 //                                    letters and digits only), as a person
 //                                    would; prints "typed"
+//   secret-set <app> <window> <field> <value>  field-set for a password
+//                                    field, whose value can't be read back:
+//                                    checks only that it holds as many
+//                                    characters; prints "typed"
 //   press <app> <window> <button>    presses a button
 //   wait-text <app> <window> <text> <secs>  until some element shows <text>
 //   close <app> <window>             presses the window's close button
@@ -346,7 +350,15 @@ function postKey(code, flags) {
   }
 }
 
-function typeInto(appEl, window, field, value) {
+// How many characters a field holds. A password field (AXSecureTextField)
+// shows only bullets, if anything, so its count is all a test can check.
+function charCount(field) {
+  const count = get(field, "AXNumberOfCharacters");
+  if (count !== undefined && typeof ObjC.unwrap(count) === "number") return ObjC.unwrap(count);
+  return text(field, "AXValue").length;
+}
+
+function typeInto(appEl, window, field, value, secret = false) {
   const keys = [];
   for (const ch of value) {
     if (!/^[a-z0-9]$/.test(ch)) {
@@ -366,12 +378,22 @@ function typeInto(appEl, window, field, value) {
   // the page's input events with the whole value, so a framework holding
   // the old value catches up); else, or when nothing is typed after it,
   // select all and delete, as a person would.
-  if (value === "" || setAttr(field, "AXValue", $("")) !== 0 || text(field, "AXValue") !== "") {
+  if (
+    value === "" ||
+    setAttr(field, "AXValue", $("")) !== 0 ||
+    (secret ? charCount(field) : text(field, "AXValue").length) !== 0
+  ) {
     postKey(KEY_A, COMMAND);
     postKey(KEY_DELETE, 0);
   }
   for (const code of keys) postKey(code, 0);
   delay(0.5);
+  if (secret) {
+    const count = charCount(field);
+    if (count !== value.length)
+      fail("typed " + value.length + " characters but the field holds " + count);
+    return "typed";
+  }
   const now = text(field, "AXValue");
   if (now !== value)
     fail("typed " + JSON.stringify(value) + " but the field shows " + JSON.stringify(now));
@@ -442,6 +464,10 @@ function run(argv) {
     case "field-set": {
       const window = findWindow(appEl, rest[0]);
       return typeInto(appEl, window, findField(window, rest[1]), rest[2] || "");
+    }
+    case "secret-set": {
+      const window = findWindow(appEl, rest[0]);
+      return typeInto(appEl, window, findField(window, rest[1]), rest[2] || "", true);
     }
     case "press": {
       const err = press(findButton(findWindow(appEl, rest[0]), rest[1]), 5.0);

@@ -37,6 +37,15 @@
 //!   that must tell which dictation's text ended up where (the texts can't
 //!   hold a comma). Only the first launch's counts.
 //!
+//! - `--debug-provider-url <url>` sends the real engine's requests (and
+//!   Settings' Test key) to `url` instead of the provider's own endpoint, so
+//!   the signed test build can talk to a local stand-in provider (T4a). Only
+//!   a loopback `http` URL is taken (`http://127.0.0.1:<port>/…`,
+//!   `http://localhost…`, `http://[::1]…`); anything else is ignored with a
+//!   warning, so even a debug build can't be pointed at another host. Like
+//!   the audio flags it shapes the pipeline, so only the first launch's
+//!   counts.
+//!
 //! A release build treats them like any other unknown flag: logged and
 //! ignored.
 //!
@@ -63,6 +72,11 @@ pub const MOCK_TEXT_FLAG: &str = "--mock-text";
 /// transcriber answers to the first dictations, one each, in order (debug
 /// builds only).
 pub const MOCK_TEXT_SEQUENCE_FLAG: &str = "--mock-text-sequence";
+
+/// `--debug-provider-url <url>` (or `=<url>`): where the real engine sends
+/// its requests instead of the provider's endpoint (debug builds only;
+/// loopback `http` URLs only).
+pub const DEBUG_PROVIDER_URL_FLAG: &str = "--debug-provider-url";
 
 /// Whether this build acts on the test hooks.
 pub const TEST_FLAGS: bool = cfg!(debug_assertions);
@@ -136,6 +150,12 @@ pub struct LaunchFlags {
     /// The texts the mock transcriber answers the first dictations with (debug
     /// builds only); the last one given wins.
     pub mock_text_sequence: Option<Vec<String>>,
+    /// Where the real engine sends its requests instead of the provider's own
+    /// endpoint (debug builds only, loopback only); the last one given wins.
+    pub provider_url: Option<String>,
+    /// `--debug-provider-url` values refused because they aren't a loopback
+    /// `http` URL, for a warning.
+    pub refused_provider_urls: Vec<String>,
     /// The engine `--transcriber` asked for; the last one wins.
     pub transcriber: Option<TranscriberChoice>,
     /// Engine names `--transcriber` was given that no engine has.
@@ -152,7 +172,34 @@ impl LaunchFlags {
             || self.save_audio
             || self.mock_text.is_some()
             || self.mock_text_sequence.is_some()
+            || self.provider_url.is_some()
     }
+
+    fn provider_url(&mut self, url: &str) {
+        if is_loopback_http(url) {
+            self.provider_url = Some(url.to_owned());
+        } else {
+            self.refused_provider_urls.push(url.to_owned());
+        }
+    }
+}
+
+/// Whether `url` is plain `http` to this machine: `127.0.0.0/8`, `::1` or
+/// `localhost`, with no user name or password.
+fn is_loopback_http(url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    // An IPv6 host comes back in brackets ("[::1]").
+    let loopback = url.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback())
+    });
+    url.scheme() == "http" && loopback && url.username().is_empty() && url.password().is_none()
 }
 
 fn split_texts(texts: &str) -> Vec<String> {
@@ -225,6 +272,24 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
                     .strip_prefix(MOCK_TEXT_SEQUENCE_FLAG)
                     .and_then(|rest| rest.strip_prefix('='))
                     .map(split_texts);
+            }
+            DEBUG_PROVIDER_URL_FLAG if test_flags => match args.next() {
+                Some(url) => flags.provider_url(url),
+                None => flags.ignored.push(arg.clone()),
+            },
+            other
+                if test_flags
+                    && other
+                        .strip_prefix(DEBUG_PROVIDER_URL_FLAG)
+                        .and_then(|rest| rest.strip_prefix('='))
+                        .is_some() =>
+            {
+                if let Some(url) = other
+                    .strip_prefix(DEBUG_PROVIDER_URL_FLAG)
+                    .and_then(|rest| rest.strip_prefix('='))
+                {
+                    flags.provider_url(url);
+                }
             }
             TRANSCRIBER_FLAG => match args.next() {
                 Some(name) => flags.transcriber(name),
@@ -574,6 +639,94 @@ mod tests {
         );
         assert!(flags.key_commands.is_empty());
         assert_eq!(flags.ignored.len(), 2);
+    }
+
+    const LOCAL: &str = "http://127.0.0.1:18731/v1";
+
+    #[test]
+    fn debug_builds_take_a_loopback_provider_url_in_either_form() {
+        let flags = parse(&argv(&["--debug-provider-url", LOCAL, "--press"]), true);
+        assert_eq!(flags.provider_url.as_deref(), Some(LOCAL));
+        assert_eq!(flags.events, [Pressed]);
+        assert!(flags.ignored.is_empty());
+        assert!(flags.configure_pipeline(), "only the first launch's counts");
+        for url in [
+            "http://localhost:9/v1",
+            "http://LOCALHOST/v1",
+            "http://127.0.0.2:80",
+            "http://[::1]:18731/v1",
+        ] {
+            let flags = parse(&argv(&[&format!("--debug-provider-url={url}")]), true);
+            assert_eq!(flags.provider_url.as_deref(), Some(url));
+        }
+        // The last one wins; without a value the flag is ignored.
+        let flags = parse(
+            &argv(&[
+                "--debug-provider-url=http://localhost:1",
+                "--debug-provider-url",
+                LOCAL,
+            ]),
+            true,
+        );
+        assert_eq!(flags.provider_url.as_deref(), Some(LOCAL));
+        let flags = parse(&argv(&["--debug-provider-url"]), true);
+        assert_eq!(flags.provider_url, None);
+        assert_eq!(flags.ignored, ["--debug-provider-url"]);
+    }
+
+    /// Even a debug build can't be pointed at another machine, over TLS or
+    /// not, or at a URL carrying credentials.
+    #[test]
+    fn a_provider_url_that_is_not_loopback_http_is_refused() {
+        for url in [
+            "https://127.0.0.1:18731/v1",
+            "http://api.groq.com/openai/v1",
+            "http://10.0.0.1/v1",
+            "http://localhost.example.com/v1",
+            "http://user:pw@127.0.0.1/v1",
+            "file:///tmp/x",
+            "127.0.0.1:18731",
+            "",
+        ] {
+            let flags = parse(&argv(&["--debug-provider-url", url]), true);
+            assert_eq!(flags.provider_url, None, "{url}");
+            assert_eq!(flags.refused_provider_urls, [url], "{url}");
+            assert!(!flags.configure_pipeline(), "{url}");
+        }
+    }
+
+    /// T4a criterion 1: a release build never honours the override; the flag
+    /// and its value are unknown arguments there.
+    #[test]
+    fn release_builds_ignore_the_provider_url() {
+        let flags = parse(
+            &argv(&[
+                "--debug-provider-url",
+                LOCAL,
+                &format!("--debug-provider-url={LOCAL}"),
+            ]),
+            false,
+        );
+        assert_eq!(flags.provider_url, None);
+        assert!(flags.refused_provider_urls.is_empty());
+        assert!(!flags.configure_pipeline());
+        assert_eq!(
+            flags.ignored,
+            [
+                "--debug-provider-url".to_owned(),
+                LOCAL.to_owned(),
+                format!("--debug-provider-url={LOCAL}")
+            ]
+        );
+    }
+
+    /// The build the app runs as decides: a test build (debug) honours the
+    /// override and a release build doesn't. Run under `--release` this
+    /// checks the release side.
+    #[test]
+    fn the_provider_url_is_honoured_only_in_test_builds() {
+        let flags = parse(&argv(&["--debug-provider-url", LOCAL]), TEST_FLAGS);
+        assert_eq!(flags.provider_url.is_some(), cfg!(debug_assertions));
     }
 
     #[test]

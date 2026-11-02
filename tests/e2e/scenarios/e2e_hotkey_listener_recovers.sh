@@ -14,8 +14,14 @@
 # sources the app's factory builds, and the restart is the real one: a new
 # CGEventTap through handy-keys.
 #
-# Uses tray_title_is from e2e_tray_error_clears_on_next_recording.sh (every
-# scenario file is sourced first).
+# Uses tray_shows, tray_is_clear and TRAY_TOOLTIP from
+# e2e_tray_error_clears_on_next_recording.sh (every scenario file is sourced
+# first).
+
+# The tray while the hotkey doesn't work: HOTKEY_UNAVAILABLE in
+# crates/app/src/tray.rs, and DictationError::HotkeyFailed in the tooltip.
+TRAY_HOTKEY_TITLE="Hotkey unavailable"
+TRAY_HOTKEY_ERROR="The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself."
 
 e2e_hotkey_listener_recovers() {
   arm_key_cleanup e2e_hotkey_listener_recovers
@@ -23,7 +29,7 @@ e2e_hotkey_listener_recovers() {
   launch_full
   expect "the app starts and logs ready" wait_for_log 'INFO .*ready'
   expect "the real hotkey is on (Accessibility granted to the app)" hotkey_is_on
-  expect "the tray starts with no title" tray_title_is ""
+  expect "the tray starts with no title" tray_is_clear
   textedit_fresh
 
   local before recordings
@@ -38,7 +44,8 @@ posted up" real_key_hold 1.5
     wait_for_log 'test hook outage command=Begin from="a second launch"'
   expect "the app says the hotkey isn't working" \
     wait_for_log "shown to the user error=The dictation hotkey isn.t working"
-  expect "the tray says Hotkey unavailable" tray_title_is "Hotkey unavailable" 10
+  expect "the tray says Hotkey unavailable" \
+    tray_shows "$TRAY_HOTKEY_TITLE" "$TRAY_TOOLTIP: $TRAY_HOTKEY_ERROR" 10
   expect "the supervisor is retrying (Accessibility looks missing)" \
     wait_for_log 'PermissionMissing: the hotkey is off until Accessibility is granted; it starts by itself then' 10
 
@@ -57,7 +64,7 @@ posted up" real_key_hold 1.5
   expect "the hotkey listens again by itself, within a few seconds" \
     wait_for_log 'the hotkey listens again' 10
   expect "the app says it is restored" wait_for_log 'hotkey restored; shown to the user'
-  expect "the tray's title clears" tray_title_is "" 10
+  expect "the tray's title clears" tray_is_clear 10
 
   textedit_fresh
   before=$(idle_count)
