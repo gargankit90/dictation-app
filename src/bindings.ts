@@ -9,8 +9,10 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 export const commands = {
 	/**
 	 *  The saved settings (the defaults if none were saved), with
-	 *  `launch_at_login` as the OS reports it: the user may have changed the
-	 *  login item in System Settings since the last save.
+	 *  `launch_at_login` as the OS reports it (the user may have changed the
+	 *  login item in System Settings since the last save) and `hotkey` as the
+	 *  one listening (a save whose write and rollback both failed leaves another
+	 *  hotkey listening than the file holds; T3 round 2).
 	 */
 	getSettings: () => typedError<Settings_Serialize, string>(__TAURI_INVOKE("get_settings")),
 	/**

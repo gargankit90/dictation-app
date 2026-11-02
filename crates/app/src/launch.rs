@@ -131,6 +131,50 @@ pub fn restore(
     }
 }
 
+/// Why the login item couldn't be put back after a failed save, and where
+/// the OS left it. The text is for the user (T3 round 2).
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("{}", describe_not_restored(problem, *now))]
+pub struct NotRestored {
+    /// Why [`restore`] failed.
+    pub problem: LaunchProblem,
+    /// The OS's state afterwards, if it can say.
+    pub now: Option<LaunchAtLoginState>,
+}
+
+fn describe_not_restored(problem: &LaunchProblem, now: Option<LaunchAtLoginState>) -> String {
+    let state = match now {
+        Some(LaunchAtLoginState::Enabled) => {
+            "so dictation-app still opens at login; Settings shows it on"
+        }
+        Some(LaunchAtLoginState::Disabled) => {
+            "so dictation-app doesn't open at login; Settings shows it off"
+        }
+        Some(LaunchAtLoginState::RequiresApproval) => {
+            "so it waits for your approval in System Settings, General, Login Items"
+        }
+        None => "and the system can't say its state: check System Settings, General, Login Items",
+    };
+    format!("Launch at login couldn't be put back ({problem}), {state}.")
+}
+
+/// [`restore`], with the OS's state read back if it fails, so the caller
+/// can tell the user where the login item really is.
+///
+/// # Errors
+///
+/// [`NotRestored`] if [`restore`] fails.
+pub fn restore_or_report(
+    login: &dyn LaunchAtLogin,
+    before: Option<LaunchAtLoginState>,
+) -> Result<(), NotRestored> {
+    restore(login, before).map_err(|problem| {
+        let now = login.state().ok();
+        tracing::warn!(%problem, ?now, "could not put the login item back after a failed save");
+        NotRestored { problem, now }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use dictation_platform::fakes::FakeLaunchAtLogin;
@@ -310,5 +354,42 @@ mod tests {
             restore(&login, Some(LaunchAtLoginState::Enabled)),
             Err(LaunchProblem::NotApplied)
         );
+    }
+
+    #[test]
+    fn a_failed_restore_says_where_the_login_item_was_left() {
+        let login = FakeLaunchAtLogin::new();
+        restore_or_report(&login, Some(LaunchAtLoginState::Disabled)).unwrap();
+
+        for (now, says) in [
+            (LaunchAtLoginState::Enabled, "still opens at login"),
+            (LaunchAtLoginState::Disabled, "doesn't open at login"),
+            (
+                LaunchAtLoginState::RequiresApproval,
+                "waits for your approval",
+            ),
+        ] {
+            let login = FakeLaunchAtLogin::new();
+            login.set_state(now);
+            // Any other state than `now` needs a change, which is refused.
+            let before = if now == LaunchAtLoginState::Enabled {
+                LaunchAtLoginState::Disabled
+            } else {
+                LaunchAtLoginState::Enabled
+            };
+            let failed = restore_or_report(&RefusingLogin(login), Some(before)).unwrap_err();
+            assert_eq!(failed.problem, LaunchProblem::Os("no bundle".into()));
+            assert_eq!(failed.now, Some(now));
+            let message = failed.to_string();
+            assert!(message.contains("couldn't be put back"), "{message}");
+            assert!(message.contains("no bundle"), "{message}");
+            assert!(message.contains(says), "{now:?}: {message}");
+        }
+
+        let login = FakeLaunchAtLogin::new();
+        login.fail_with(LaunchAtLoginError::Os("gone".into()));
+        let failed = restore_or_report(&login, Some(LaunchAtLoginState::Enabled)).unwrap_err();
+        assert_eq!(failed.now, None);
+        assert!(failed.to_string().contains("can't say"), "{failed}");
     }
 }

@@ -486,11 +486,91 @@ async fn a_failed_file_write_puts_the_old_hotkey_back() {
     let change = hotkey_setting::apply(&app.control, &mut settings);
     assert_eq!(change, HotkeyChange::Switched { previous: old });
     // The shell's save_settings: the write failed, so undo.
-    change.undo(&app.control);
+    change.undo(&app.control).unwrap();
     assert_eq!(app.control.spec(), old);
     app.dictate_with(old).await;
     app.assert_deaf_to(spec("F6")).await;
     app.pipeline.shutdown().await;
+}
+
+/// T3 round 2: the write failed and the old hotkey can't start again. The
+/// new one keeps listening, the undo says so with both hotkeys, and what
+/// Settings reads back is the one listening, not the file's.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_undo_names_the_hotkey_that_still_works() {
+    let dir = TempDir::new("undo-fails");
+    let file = dir.settings_file();
+    let mut app = App::start(&file);
+    let old = HotkeySpec::default();
+    let mut settings = file.settings().unwrap();
+    settings.hotkey = "F6".into();
+    let change = hotkey_setting::apply(&app.control, &mut settings);
+    assert_eq!(change, HotkeyChange::Switched { previous: old });
+
+    app.keyboard
+        .fail_next_start(HotkeyError::Unavailable("busy".into()));
+    let failed = change.undo(&app.control).unwrap_err();
+    assert_eq!(
+        failed,
+        hotkey_setting::UndoFailed {
+            previous: old,
+            active: spec("F6"),
+            error: HotkeyError::Unavailable("busy".into()),
+        }
+    );
+    let message = failed.to_string();
+    assert!(
+        message.contains(&format!("back to {old} failed")),
+        "{message}"
+    );
+    assert!(
+        message.contains("F6 is the hotkey that works now"),
+        "{message}"
+    );
+
+    assert_eq!(app.control.spec(), spec("F6"));
+    app.dictate_with(spec("F6")).await;
+    app.assert_deaf_to(old).await;
+    // The file still holds the old hotkey; Settings shows the working one.
+    let saved = file.settings().unwrap();
+    assert_eq!(saved.hotkey, old.to_string());
+    let shown = hotkey_setting::with_active(app.control.spec(), saved.clone());
+    assert_eq!(shown.hotkey, "F6");
+    assert_eq!(shown.language, saved.language, "only the hotkey differs");
+    app.pipeline.shutdown().await;
+}
+
+#[test]
+fn settings_show_the_hotkey_that_listens() {
+    let saved = |hotkey: &str| Settings {
+        hotkey: hotkey.into(),
+        ..Settings::default()
+    };
+    // Matching (in any spelling the parser takes): left as saved.
+    assert_eq!(
+        hotkey_setting::with_active(spec("LeftAlt"), saved("leftalt")).hotkey,
+        "leftalt"
+    );
+    // Another hotkey listens: that one is shown.
+    assert_eq!(
+        hotkey_setting::with_active(spec("F6"), saved("RightAlt")).hotkey,
+        "F6"
+    );
+    // A hotkey that doesn't parse: the default listens, and is shown.
+    assert_eq!(
+        hotkey_setting::with_active(HotkeySpec::default(), saved("Ctrl+Banana")).hotkey,
+        HotkeySpec::default().to_string()
+    );
+}
+
+#[test]
+fn undoing_a_save_that_did_not_switch_does_nothing() {
+    let keyboard = Keyboard::default();
+    let (_hotkey, control) = ConfigurableHotkey::new(HotkeySpec::default(), keyboard.factory());
+    for change in [HotkeyChange::Unchanged, HotkeyChange::Invalid] {
+        change.undo(&control).unwrap();
+    }
+    assert!(keyboard.specs().is_empty(), "nothing was built");
 }
 
 #[tokio::test(flavor = "multi_thread")]
