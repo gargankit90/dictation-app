@@ -32,9 +32,41 @@ export const commands = {
 	 *  key never comes back; the result is success or a [`KeyTestError`].
 	 */
 	testApiKey: (provider: Provider, key: string | null) => typedError<null, KeyTestError>(__TAURI_INVOKE("test_api_key", { provider, key })),
+	/**
+	 *  The view the settings window shows and, for onboarding (M5.2), the step
+	 *  the user is on and the two permissions. Never blocks: the key isn't read.
+	 */
+	getOnboarding: () => typedError<OnboardingStatus, string>(__TAURI_INVOKE("get_onboarding")),
+	/**
+	 *  Asks macOS for `permission`: its prompt while it hasn't been asked,
+	 *  System Settings at the permission's page once refused (Accessibility:
+	 *  both). Returns at once; `get_onboarding` shows the answer once the user
+	 *  gives it.
+	 */
+	requestPermission: (permission: AppPermission) => typedError<OnboardingStatus, string>(__TAURI_INVOKE("request_permission", { permission })),
+	/**
+	 *  Moves onboarding to `step`, if every step before it is done (the key is
+	 *  read from the keychain only to move to the last step). An error says
+	 *  which step comes first; the user stays where they were.
+	 */
+	setOnboardingStep: (step: Step) => typedError<OnboardingStatus, string>(__TAURI_INVOKE("set_onboarding_step", { step })),
+	/**  Ends onboarding: the window goes back to the settings view and hides. */
+	finishOnboarding: () => typedError<null, string>(__TAURI_INVOKE("finish_onboarding")),
+	/**
+	 *  Restarts the app and shows onboarding again when it is back (for an
+	 *  Accessibility grant macOS doesn't hand to the running app, #50).
+	 */
+	relaunchApp: () => typedError<null, string>(__TAURI_INVOKE("relaunch_app")),
 };
 
 /* Types */
+/**  A permission the onboarding steps ask for. */
+export type AppPermission = 
+/**  The microphone. */
+"microphone" | 
+/**  Accessibility. */
+"accessibility";
+
 /**  Why a key test failed. Never contains the key. */
 export type KeyTestError = {
 	/**  The category. */
@@ -57,6 +89,30 @@ export type KeyTestKind =
 "server" | 
 /**  The saved key couldn't be read from the keychain. */
 "keychain";
+
+/**  What the settings window needs to show onboarding. */
+export type OnboardingStatus = {
+	/**  Which view to show. */
+	view: View,
+	/**  The step the user is on. */
+	step: Step,
+	/**  The microphone permission. */
+	microphone: PermissionState,
+	/**  The Accessibility permission. */
+	accessibility: PermissionState,
+};
+
+/**  A permission's state, for the onboarding steps. */
+export type PermissionState = 
+/**  Granted. */
+"granted" | 
+/**  Refused: only System Settings can grant it now. */
+"denied" | 
+/**
+ *  Not granted yet (for Accessibility, macOS can't tell this from
+ *  refused).
+ */
+"not_determined";
 
 /**  The cloud speech-to-text provider. */
 export type Provider = 
@@ -113,6 +169,24 @@ export type Settings_Serialize = {
 	 */
 	launch_at_login: boolean,
 };
+
+/**  One onboarding step, in order. */
+export type Step = 
+/**  Allow the microphone. */
+"microphone" | 
+/**  Allow Accessibility (the hotkey and the paste need it). */
+"accessibility" | 
+/**  Pick the provider and add a working API key. */
+"key" | 
+/**  Try a dictation into a text field in the onboarding window. */
+"try";
+
+/**  What the settings window shows. */
+export type View = 
+/**  The settings form. */
+"settings" | 
+/**  The onboarding steps. */
+"onboarding";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
