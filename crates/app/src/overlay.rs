@@ -3,6 +3,10 @@
 //! [`OverlayModel`] is the pure part: it turns each event into the view the
 //! overlay should show. [`run`] drives it against an [`OverlaySurface`] (the
 //! shell's overlay window) and hides an error after [`ERROR_VISIBLE_FOR`].
+//! Its events come through the same bounded queue as the main UI's
+//! ([`crate::ui_events`], #84, #112): an overlay webview that stops reading
+//! can't make the app grow, and the overlay still ends on the current phase.
+//!
 //! The overlay never shows the transcript: an error shows only the
 //! [`DictationError`](dictation_core::error::DictationError)'s user-facing
 //! text, which never contains the transcript or an API key.
@@ -10,10 +14,10 @@
 use std::time::Duration;
 
 use dictation_core::coordinator::Phase;
-use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
 use crate::pipeline::UiEvent;
+use crate::ui_events::UiReceiver;
 
 /// How long an error stays on screen unless something newer replaces it.
 pub const ERROR_VISIBLE_FOR: Duration = Duration::from_secs(4);
@@ -116,10 +120,30 @@ pub trait OverlaySurface {
     fn show(&mut self, view: &OverlayView);
 }
 
+/// Where [`run`] reads its events: the app passes the bounded
+/// [`UiReceiver`] (#112); tests may pass a plain channel. `next` must be
+/// cancel-safe (it is raced against the error timer).
+pub trait OverlayEvents: Send {
+    /// The next event; `None` once no more will come.
+    fn next(&mut self) -> impl Future<Output = Option<UiEvent>> + Send;
+}
+
+impl OverlayEvents for UiReceiver {
+    fn next(&mut self) -> impl Future<Output = Option<UiEvent>> + Send {
+        self.recv()
+    }
+}
+
+impl OverlayEvents for tokio::sync::mpsc::UnboundedReceiver<UiEvent> {
+    fn next(&mut self) -> impl Future<Output = Option<UiEvent>> + Send {
+        self.recv()
+    }
+}
+
 /// Shows each event on `surface` until `events` closes; an error hides
 /// after `error_visible_for`.
 pub async fn run<S: OverlaySurface>(
-    mut events: UnboundedReceiver<UiEvent>,
+    mut events: impl OverlayEvents,
     mut surface: S,
     error_visible_for: Duration,
 ) {
@@ -127,7 +151,7 @@ pub async fn run<S: OverlaySurface>(
     let mut error_deadline: Option<Instant> = None;
     loop {
         let change = tokio::select! {
-            event = events.recv() => {
+            event = events.next() => {
                 let Some(event) = event else { break };
                 model.on_event(&event)
             }
@@ -156,9 +180,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use dictation_core::error::DictationError;
-    use tokio::sync::mpsc;
 
     use super::*;
+    use crate::ui_events::{UI_ERRORS_QUEUED, UI_EVENTS_QUEUED, ui_channel};
 
     fn error() -> UiEvent {
         UiEvent::Error(DictationError::EmptyTranscript)
@@ -298,10 +322,10 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn run_shows_each_change_and_stops_when_the_events_close() {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = ui_channel();
         let recorder = Recorder::default();
         for phase in [Phase::Recording, Phase::Transcribing, Phase::Idle] {
-            tx.send(UiEvent::StateChanged(phase)).unwrap();
+            tx.send(UiEvent::StateChanged(phase));
         }
         drop(tx);
         run(rx, recorder.clone(), VISIBLE).await;
@@ -317,11 +341,11 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn run_hides_an_error_after_it_has_been_visible_long_enough() {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = ui_channel();
         let recorder = Recorder::default();
         let task = tokio::spawn(run(rx, recorder.clone(), VISIBLE));
-        tx.send(error()).unwrap();
-        tx.send(UiEvent::StateChanged(Phase::Idle)).unwrap();
+        tx.send(error());
+        tx.send(UiEvent::StateChanged(Phase::Idle));
         tokio::time::sleep(VISIBLE * 2).await;
         drop(tx);
         task.await.unwrap();
@@ -333,16 +357,51 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn run_does_not_hide_a_recording_that_replaced_an_error() {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = ui_channel();
         let recorder = Recorder::default();
         let task = tokio::spawn(run(rx, recorder.clone(), VISIBLE));
-        tx.send(error()).unwrap();
+        tx.send(error());
         tokio::time::sleep(VISIBLE / 2).await;
-        tx.send(UiEvent::StateChanged(Phase::Recording)).unwrap();
+        tx.send(UiEvent::StateChanged(Phase::Recording));
         tokio::time::sleep(VISIBLE * 2).await;
         drop(tx);
         task.await.unwrap();
 
         assert_eq!(recorder.views(), [error_view(), OverlayView::Recording]);
+    }
+
+    /// #112: an overlay that stops reading (a stalled webview) keeps a
+    /// bounded queue under the same policy as the main UI's: phases
+    /// coalesce, the oldest errors are kept, and once it reads again it ends
+    /// on the pipeline's current phase.
+    #[tokio::test(start_paused = true)]
+    async fn a_stalled_overlay_stays_bounded_and_ends_on_the_current_phase() {
+        let (tx, rx) = ui_channel();
+        // Nothing reads while the pipeline runs a thousand dictations, each
+        // failing.
+        for _ in 0..1000 {
+            for phase in [Phase::Recording, Phase::Transcribing, Phase::Idle] {
+                tx.send(UiEvent::StateChanged(phase));
+            }
+            tx.send(error());
+        }
+        tx.send(UiEvent::StateChanged(Phase::Recording));
+        assert!(rx.queued() <= UI_EVENTS_QUEUED, "{} queued", rx.queued());
+        assert_eq!(
+            rx.dropped_errors(),
+            1000 - u64::try_from(UI_ERRORS_QUEUED).unwrap()
+        );
+
+        // It reads again.
+        let recorder = Recorder::default();
+        drop(tx);
+        run(rx, recorder.clone(), VISIBLE).await;
+        let views = recorder.views();
+        assert_eq!(views.last(), Some(&OverlayView::Recording), "{views:?}");
+        let errors = views
+            .iter()
+            .filter(|view| matches!(view, OverlayView::Error { .. }))
+            .count();
+        assert_eq!(errors, UI_ERRORS_QUEUED);
     }
 }

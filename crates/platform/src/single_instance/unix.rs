@@ -379,6 +379,7 @@ pub(super) fn forward(config: &Config, frame: &[u8]) -> Result<(), Forward> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::sync::atomic::AtomicBool;
     use std::sync::mpsc;
 
@@ -386,10 +387,16 @@ mod tests {
     use crate::single_instance::{Instance, Launch, acquire};
 
     /// A [`Config`] in a fresh, short directory (socket paths are limited to
-    /// ~100 bytes) that is removed when the test ends, pass or fail.
+    /// ~100 bytes), and the scratch directory that holds it, removed with
+    /// everything in it when the test ends, pass or fail (#127).
+    ///
+    /// The config's directory is `root/d`, so the shapes tests put next to
+    /// it (a symlink's target, a regular file in its place) are inside
+    /// `root` too. Declare it before anything that uses it, so it's dropped
+    /// after the instances and threads.
     struct TempConfig {
         config: Config,
-        dir: PathBuf,
+        root: PathBuf,
     }
 
     impl std::ops::Deref for TempConfig {
@@ -408,7 +415,8 @@ mod tests {
 
     impl Drop for TempConfig {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.dir);
+            // Doesn't follow symlinks: removes them, not their targets.
+            let _ = std::fs::remove_dir_all(&self.root);
         }
     }
 
@@ -421,11 +429,11 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .subsec_nanos();
-        let dir = std::env::temp_dir().join(format!("si-{}-{n}-{nanos}", std::process::id()));
-        let mut config = Config::in_dir(dir.clone(), "t");
+        let root = std::env::temp_dir().join(format!("si-{}-{n}-{nanos}", std::process::id()));
+        let mut config = Config::in_dir(root.join("d"), "t");
         config.forward_timeout = Duration::from_secs(3);
         config.io_timeout = Duration::from_millis(300);
-        TempConfig { config, dir }
+        TempConfig { config, root }
     }
 
     fn message(arg: &str) -> Message {
@@ -874,6 +882,7 @@ mod tests {
     #[test]
     fn a_directory_that_is_a_file_is_refused() {
         let config = temp_config();
+        std::fs::create_dir_all(&config.root).unwrap();
         std::fs::write(&config.dir, b"").unwrap();
         assert!(acquire(&config, &message("a")).is_err());
     }
@@ -888,5 +897,150 @@ mod tests {
         let error = acquire(&config, &message("a")).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert_eq!(std::fs::read(&target).unwrap(), b"keep");
+    }
+
+    /// #130: when the last delivery ends, the shutdown wait wakes at once
+    /// instead of waiting out its limit. The limit is far longer than the
+    /// failure bound, so only the wake-up passes; nothing here is timed.
+    #[test]
+    fn delivery_completion_wakes_shutdown_without_waiting_for_deadline() {
+        const LIMIT: Duration = Duration::from_secs(300);
+        const BOUND: Duration = Duration::from_secs(20);
+        let shutdown = Arc::new(Shutdown::default());
+        let (events_tx, events) = mpsc::channel();
+        *shutdown.wait_started.lock().unwrap() = Some(events_tx);
+        let Some(delivery) = shutdown.start_delivery() else {
+            panic!("no delivery started");
+        };
+        assert!(shutdown.begin());
+        let (done_tx, done) = mpsc::channel();
+        let waiter = {
+            let shutdown = Arc::clone(&shutdown);
+            std::thread::spawn(move || {
+                let _ = done_tx.send(shutdown.wait_for_deliveries(LIMIT));
+            })
+        };
+        // Announced with the state lock held, which the drop below needs: the
+        // waiter is inside the condvar wait before the delivery can end.
+        let waiting = events.recv_timeout(BOUND);
+        drop(delivery);
+        let woke = done.recv_timeout(BOUND);
+        if woke.is_err() {
+            // Free the waiter before failing, so no thread sits out LIMIT.
+            shutdown.idle.notify_all();
+        }
+        waiter.join().unwrap();
+        assert_eq!(waiting, Ok(StopEvent::Waiting));
+        assert_eq!(
+            woke,
+            Ok(true),
+            "the last delivery's end didn't wake the wait"
+        );
+    }
+
+    /// #133: while shutdown waits for a message being answered, the lock is
+    /// still held, so no launch can become the instance before it finishes.
+    #[test]
+    fn lock_stays_held_until_delivery_shutdown_finishes() {
+        // Failure bound only; nothing here passes or fails by elapsed time.
+        const BOUND: Duration = Duration::from_secs(30);
+        let mut config = temp_config();
+        config.io_timeout = Duration::from_secs(5);
+        let Launch::Primary(mut instance) = acquire(&config, &message("a")).unwrap() else {
+            panic!("not the primary");
+        };
+        let (entered_tx, entered) = mpsc::channel();
+        let (release_tx, release) = mpsc::channel::<()>();
+        let (handled_tx, handled) = mpsc::channel();
+        instance
+            .listen(move |message| {
+                let _ = entered_tx.send(());
+                let _ = release.recv();
+                let _ = handled_tx.send(message);
+            })
+            .unwrap();
+        let (events_tx, events) = mpsc::channel();
+        *instance.server.shutdown.wait_started.lock().unwrap() = Some(events_tx);
+        let second = {
+            let config = config.clone();
+            std::thread::spawn(move || acquire(&config, &message("b")))
+        };
+        let entered = entered.recv_timeout(BOUND);
+        let stopper = std::thread::spawn(move || drop(instance));
+        // `stop` is blocked inside its wait on the delivery.
+        let waiting = events.recv_timeout(BOUND);
+        let other = std::fs::File::open(config.lock_path()).unwrap();
+        let during_shutdown = other.try_lock();
+        let held = matches!(during_shutdown, Err(std::fs::TryLockError::WouldBlock));
+        if !held {
+            let _ = other.unlock();
+        }
+        drop(other);
+        // Clean up before asserting: release the callback, let both finish.
+        let _ = release_tx.send(());
+        stopper.join().unwrap();
+        let second = second.join().unwrap();
+        let acknowledged = handled.recv_timeout(BOUND);
+        assert_eq!(entered, Ok(()));
+        assert_eq!(waiting, Ok(StopEvent::Waiting), "stop didn't wait");
+        assert!(
+            held,
+            "the lock was free while a delivery was still being answered: {during_shutdown:?}"
+        );
+        assert!(matches!(second, Ok(Launch::Forwarded)), "{second:?}");
+        assert_eq!(acknowledged, Ok(message("b")));
+        // Once shutdown has finished, the next launch runs.
+        let next = acquire(&config, &message("c"));
+        assert!(matches!(next, Ok(Launch::Primary(_))), "{next:?}");
+    }
+
+    /// #127: the scratch owner removes whatever a test leaves at or next to
+    /// its directory, whether the test passes or unwinds.
+    #[test]
+    fn scratch_cleans_directory_file_and_symlink_shapes() {
+        fn gone(path: &Path) -> bool {
+            matches!(std::fs::symlink_metadata(path), Err(error) if error.kind() == io::ErrorKind::NotFound)
+        }
+        let shapes: [fn(&TempConfig); 3] = [
+            // A directory with a lock, a socket and more inside.
+            |scratch| {
+                std::fs::create_dir_all(scratch.dir.join("nested")).unwrap();
+                std::fs::write(scratch.dir.join("nested/file"), b"x").unwrap();
+                std::fs::write(scratch.lock_path(), b"").unwrap();
+                drop(UnixListener::bind(scratch.socket_path()).unwrap());
+            },
+            // A regular file where the directory should be.
+            |scratch| {
+                std::fs::create_dir_all(&scratch.root).unwrap();
+                std::fs::write(&scratch.dir, b"").unwrap();
+            },
+            // A symlink where the directory should be, and its target.
+            |scratch| {
+                let target = scratch.dir.with_extension("target");
+                std::fs::create_dir_all(&target).unwrap();
+                std::fs::write(target.join("t.lock"), b"").unwrap();
+                std::os::unix::fs::symlink(&target, &scratch.dir).unwrap();
+            },
+        ];
+        for (n, shape) in shapes.into_iter().enumerate() {
+            let scratch = temp_config();
+            let root = scratch.root.clone();
+            shape(&scratch);
+            assert!(!gone(&root), "shape {n} made nothing");
+            drop(scratch);
+            assert!(gone(&root), "shape {n} left {}", root.display());
+
+            let (root_tx, root_rx) = mpsc::channel();
+            let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let scratch = temp_config();
+                root_tx.send(scratch.root.clone()).unwrap();
+                shape(&scratch);
+                // Unwinds without the panic hook's noise.
+                std::panic::resume_unwind(Box::new("unwinding on purpose"));
+            }));
+            assert!(unwound.is_err());
+            let root = root_rx.recv().unwrap();
+            assert!(gone(&root), "shape {n} left {} on unwind", root.display());
+        }
     }
 }

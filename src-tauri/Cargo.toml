@@ -41,5 +41,5 @@ tracing-subscriber.workspace = true
 tauri = { workspace = true, features = ["test"] }
 tauri-utils.workspace = true
 dictation-platform = { workspace = true, features = ["testing"] }
-tokio = { workspace = true, features = ["rt", "macros", "time"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
 wiremock.workspace = true

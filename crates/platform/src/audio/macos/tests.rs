@@ -237,9 +237,10 @@ fn record_exact(
             .collect();
         assert!(device.fake.push(&samples), "the stream took the block");
         frame += frames;
-        thread::sleep(Duration::from_millis(1));
     }
-    mic.stop().unwrap()
+    // The clips are under the 2 s ring, so nothing is dropped without
+    // pacing, and the stop drains them all.
+    stop_acknowledged(&device.fake, mic).unwrap()
 }
 
 /// M2.3 criterion 4 (#77 M2): a clip is as long as its input, counting the
@@ -272,6 +273,130 @@ fn m2_3_criterion_4_the_clip_is_as_long_as_the_input() {
                     (input_frame - want).abs() < 2.0,
                     "{case}: output frame {k} holds input frame {input_frame}, expected {want}"
                 );
+            }
+        }
+    }
+}
+
+/// Stops `mic` while a stand-in audio thread acknowledges the recorder's
+/// pause with empty blocks, as a running device's next callback would, so
+/// the stop ends cleanly (`StopCalled`, not a stall) and adds no audio.
+/// Every frame pushed before it is the recording's: handy-recorder drains
+/// its ring and flushes the resampler's tail before `stop` returns, so the
+/// stop is the consumption fence. Bounded: the stand-in gives up after
+/// [`WAIT`] (the stop then stalls and fails, and the caller sees it).
+fn stop_acknowledged(fake: &FakeMic, mic: &mut MacMicrophone) -> Result<Audio, AudioError> {
+    let done = AtomicBool::new(false);
+    thread::scope(|scope| {
+        let acknowledger = scope.spawn(|| {
+            let deadline = Instant::now() + WAIT;
+            while !done.load(Ordering::Acquire) {
+                if Instant::now() >= deadline {
+                    return false;
+                }
+                fake.push(&[]);
+                thread::yield_now();
+            }
+            true
+        });
+        let audio = mic.stop();
+        done.store(true, Ordering::Release);
+        assert!(
+            acknowledger.join().unwrap(),
+            "the stop took longer than {WAIT:?}"
+        );
+        audio
+    })
+}
+
+/// The rate tests' marker: input frame `f` of an `input`-frame clip is
+/// `min(f, input - 1 - f) / MARK`, a tent that starts and ends at 0 and
+/// steps by `1 / MARK` per frame. A sample's value says which input frame
+/// it came from, on either slope, and with no step at either end the
+/// resampler doesn't ring there, so the very first and last samples can be
+/// checked too.
+const MARK: f32 = 10_000_000.0;
+
+fn tent(f: usize, input: usize) -> f32 {
+    #[allow(clippy::cast_precision_loss, reason = "a few hundred thousand frames")]
+    let value = f.min(input - 1 - f) as f32 / MARK;
+    value
+}
+
+/// Input frame `f` as the device delivers it: mono, or in stereo `3x` on
+/// the left and `-x` on the right, so only their average (not either
+/// channel, nor their sum) gives the tent.
+fn device_frame(f: usize, input: usize, channels: u16) -> Vec<f32> {
+    let x = tent(f, input);
+    match channels {
+        1 => vec![x],
+        2 => vec![3.0 * x, -x],
+        _ => unreachable!("mono or stereo"),
+    }
+}
+
+/// How far a 16 kHz sample may sit from where its input frame belongs, in
+/// 16 kHz frames. Measured: at most 0.55 (96 kHz, whose resampler delay
+/// rounds by half a frame); a lost or extra frame at either end is 1.
+const ALIGNMENT_TOLERANCE: f64 = 0.75;
+
+/// #125: through the real adapter and capture engine (ring, mono mix,
+/// resampler, the adapter's delay skip), a finite clip at each supported
+/// rate comes out exactly `floor(input * 16 kHz / rate)` samples long (no
+/// tolerance on the count), and every sample, the first and the last
+/// included, holds the input frame it should: nothing lost at the start
+/// or the tail, no padding, nothing doubled. Clips: empty, one frame, less
+/// than one resampler chunk (1024 frames), a 30 ms word plus an odd tail,
+/// and a second plus an odd tail, all pushed in 10 ms device blocks with a
+/// final partial block. The longest is under the 2 s ring, so no frame can
+/// be dropped however slowly the delivery thread runs.
+#[test]
+fn exact_clip_length_and_alignment_across_supported_rates() {
+    for rate in [8_000, 16_000, 22_050, 24_000, 44_100, 48_000, 96_000] {
+        let frames_per_block = rate as usize / 100;
+        let inputs = [0, 1, 1_000, frames_per_block * 3 + 7, rate as usize + 333];
+        for channels in [1, 2] {
+            let device = device(rate, channels);
+            // Warm, so the device staying open shows each stop was clean.
+            let mut mic = device.microphone(Permission::Granted, WAIT * 10);
+            for input in inputs {
+                let case = format!("{rate} Hz x{channels}, {input} frames");
+                mic.start().unwrap();
+                let mut frame = 0;
+                while frame < input {
+                    let end = (frame + frames_per_block).min(input);
+                    let block: Vec<f32> = (frame..end)
+                        .flat_map(|f| device_frame(f, input, channels))
+                        .collect();
+                    assert!(device.fake.push(&block), "{case}: the stream took it");
+                    frame = end;
+                }
+                let audio = stop_acknowledged(&device.fake, &mut mic).unwrap();
+                assert!(mic.is_open(), "{case}: the stop stalled or failed");
+
+                assert_eq!(audio.sample_rate, 16_000, "{case}");
+                let expected = input * 16_000 / rate as usize;
+                assert_eq!(audio.samples.len(), expected, "{case}: length");
+                let ratio = f64::from(rate) / 16_000.0;
+                #[allow(clippy::cast_precision_loss, reason = "a few hundred thousand frames")]
+                let last_input = input.saturating_sub(1) as f64;
+                for (k, &sample) in audio.samples.iter().enumerate() {
+                    #[allow(clippy::cast_precision_loss, reason = "under 20 000 samples")]
+                    let at = k as f64 * ratio;
+                    // Around the peak the two slopes meet and the value is
+                    // ambiguous; everywhere else it says the frame.
+                    if (at - last_input / 2.0).abs() < 8.0 * ratio {
+                        continue;
+                    }
+                    // Past the last input frame (upsampling) the input is
+                    // silence, as it is at the tent's foot.
+                    let want = at.min(last_input - at).max(0.0);
+                    let off = (f64::from(sample) * f64::from(MARK) - want).abs() / ratio;
+                    assert!(
+                        off <= ALIGNMENT_TOLERANCE,
+                        "{case}: sample {k} of {expected} is {off:.2} frames from input frame {at:.1}"
+                    );
+                }
             }
         }
     }

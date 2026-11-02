@@ -555,9 +555,21 @@ mod tests {
     }
 
     impl TestBoard {
+        /// Named by us, not with `pasteboardWithUniqueName`: its names are
+        /// time based (`CFPasteboardUnique-<hex>`) and two test processes
+        /// that nextest starts together can get the same one, then write to
+        /// (and release) each other's board (#139).
         fn new() -> Self {
-            let board = NSPasteboard::pasteboardWithUniqueName();
-            let name = board.name().to_string();
+            static BOARDS: AtomicU64 = AtomicU64::new(0);
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos());
+            let name = format!(
+                "dictation-app-test-{}-{nanos}-{}",
+                std::process::id(),
+                BOARDS.fetch_add(1, Ordering::Relaxed)
+            );
+            let board = NSPasteboard::pasteboardWithName(&NSString::from_str(&name));
             Self { board, name }
         }
 

@@ -410,20 +410,71 @@ impl HotkeyChange {
     }
 
     /// Puts the previous hotkey back after a save that switched it failed,
-    /// so the listener matches the file again. Best effort: a failure is
-    /// logged.
-    pub fn undo(&self, control: &HotkeyControl) {
-        if let Self::Switched { previous } = self {
-            match control.switch(*previous) {
-                Ok(_) => tracing::info!(hotkey = %previous, "hotkey restored after a failed save"),
-                Err(error) => tracing::warn!(
+    /// so the listener matches the file again.
+    ///
+    /// # Errors
+    ///
+    /// [`UndoFailed`] if the previous hotkey can't start again: the new one
+    /// then still listens, and the error names both, so the caller can tell
+    /// the user which hotkey works (T3 round 2).
+    pub fn undo(&self, control: &HotkeyControl) -> Result<(), UndoFailed> {
+        let Self::Switched { previous } = self else {
+            return Ok(());
+        };
+        match control.switch(*previous) {
+            Ok(_) => {
+                tracing::info!(hotkey = %previous, "hotkey restored after a failed save");
+                Ok(())
+            }
+            Err(error) => {
+                let active = control.spec();
+                tracing::warn!(
                     %error,
                     hotkey = %previous,
+                    active = %active,
                     "could not restore the hotkey after a failed save"
-                ),
+                );
+                Err(UndoFailed {
+                    previous: *previous,
+                    active,
+                    error,
+                })
             }
         }
     }
+}
+
+/// Why [`HotkeyChange::undo`] couldn't put the previous hotkey back. The
+/// text is for the user and says which hotkey works now.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "Switching the hotkey back to {previous} failed ({error}), so {active} is the hotkey that works now; Settings shows it, and saving again keeps it."
+)]
+pub struct UndoFailed {
+    /// The hotkey from before the save, which couldn't start again.
+    pub previous: HotkeySpec,
+    /// The hotkey still listening (or to start with).
+    pub active: HotkeySpec,
+    /// Why `previous` couldn't start.
+    pub error: HotkeyError,
+}
+
+/// `saved` with its hotkey set to `active`, the one that listens now (or
+/// starts with the pipeline), if they differ: the file can hold another
+/// hotkey after a save whose write and undo both failed ([`UndoFailed`]), or
+/// one that doesn't parse, for which the default listens. Settings then
+/// shows the hotkey that really works, as it shows the OS's login item.
+#[must_use]
+pub fn with_active(active: HotkeySpec, mut saved: Settings) -> Settings {
+    if saved.hotkey.parse::<HotkeySpec>().ok() != Some(active) {
+        tracing::info!(
+            saved = %saved.hotkey,
+            active = %active,
+            "the hotkey listening isn't the saved one; showing the one listening"
+        );
+        saved.hotkey = active.to_string();
+    }
+    saved
 }
 
 /// What saving Settings does with its hotkey field: write it in canonical

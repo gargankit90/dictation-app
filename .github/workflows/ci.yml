@@ -59,7 +59,27 @@ jobs:
       - run: npm ci
 
       - name: Quality gate
-        run: scripts/gate.sh
+        shell: bash # -o pipefail, so tee doesn't hide a failure
+        run: |
+          mkdir -p target/test-evidence
+          scripts/gate.sh 2>&1 | tee target/test-evidence/gate.log
+
+      # Keeps what a failed run needs to be told apart from a broken runner
+      # (#128): the gate's log (with the coverage per crate) and nextest's
+      # JUnit, with anything key-shaped hidden. CI never has a real key.
+      - name: Collect test evidence
+        if: always()
+        shell: bash
+        run: scripts/ci-evidence.sh "gate-${{ runner.os }}" "${{ job.status }}"
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-evidence-gate-${{ github.sha }}
+          path: target/test-evidence/
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Disk usage
         if: always()
@@ -100,3 +120,17 @@ jobs:
       # The vendored hotkey and CoreAudio crates are not workspace members, so
       # nothing above runs their patch tests (#77, #80, #88).
       - run: scripts/vendor-tests.sh
+
+      - name: Collect test evidence
+        if: always()
+        shell: bash
+        run: scripts/ci-evidence.sh "platform-${{ runner.os }}" "${{ job.status }}"
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-evidence-macos-${{ github.sha }}
+          path: target/test-evidence/
+          retention-days: 14
+          if-no-files-found: warn

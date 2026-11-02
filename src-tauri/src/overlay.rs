@@ -5,11 +5,10 @@
 //! page (`src/overlay/`) as [`EVENT`].
 
 use dictation_pipeline::overlay::{self, ERROR_VISIBLE_FOR, OverlaySurface, OverlayView};
-use dictation_pipeline::pipeline::UiEvent;
+use dictation_pipeline::ui_events::{UiSender, ui_channel};
 use dictation_platform::overlay::{Overlay, OverlaySpec};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, EventTarget, LogicalSize, Runtime};
-use tokio::sync::mpsc::{self, UnboundedSender};
 
 /// The overlay window's label; `capabilities/overlay.json` names it.
 pub const LABEL: &str = "overlay";
@@ -35,10 +34,11 @@ fn spec() -> OverlaySpec {
 /// # Errors
 ///
 /// If the window can't be created.
-pub fn start<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<UnboundedSender<UiEvent>> {
+pub fn start<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<UiSender> {
     let window = Overlay::create(app, spec())?;
     log_native_window(&window);
-    let (events, receiver) = mpsc::unbounded_channel();
+    // Bounded, like the main UI's queue (#112).
+    let (events, receiver) = ui_channel();
     tauri::async_runtime::spawn(overlay::run(
         receiver,
         Surface {
