@@ -562,26 +562,121 @@ async fn a_missing_permission_shows_an_error_and_never_records() {
     assert!(transcriber.calls().is_empty());
 }
 
+/// Only Accessibility granted: the microphone hasn't been asked for yet.
+fn microphone_undetermined() -> FakePermissions {
+    let permissions = FakePermissions::new();
+    permissions.set(Permission::Accessibility, PermissionStatus::Granted);
+    permissions
+}
+
+/// Waits until the pipeline has asked for `count` prompts: it reads keys on
+/// its own task.
+async fn wait_for_requests(permissions: &FakePermissions, count: usize) {
+    tokio::time::timeout(WAIT, async {
+        while permissions.requests().len() < count {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the pipeline never asked for the prompt");
+}
+
+// M5.7 criterion 1 (#161): allowed in the prompt. The press that asked shows
+// nothing and records nothing; the next press records without a relaunch.
 #[tokio::test]
-async fn an_undetermined_permission_prompts_and_the_next_press_records() {
+async fn m5_7_criterion_1_an_undetermined_microphone_prompts_quietly_and_allow_works_at_once() {
     let mut harness = Harness::with(Setup {
-        permissions: FakePermissions::new(),
+        permissions: microphone_undetermined(),
+        ..Setup::default()
+    });
+    harness.dictate();
+    // The fake's user clicked Allow at once.
+    wait_for_requests(&harness.permissions, 1).await;
+
+    // The first event is the next dictation's: the asking press showed
+    // nothing, not even an error, and never left Idle.
+    harness.dictate();
+    assert_eq!(
+        harness.until_idle().await,
+        states(&[Recording, Transcribing, Inserting, Idle])
+    );
+    assert_eq!(harness.permissions.requests(), [Permission::Microphone]);
+    let (inserter, transcriber) = harness.finish().await;
+    assert_eq!(inserter.inserted(), ["fixed text"]);
+    assert_eq!(transcriber.calls().len(), 1);
+}
+
+// M5.7 criterion 1 (#161): presses while the prompt is still up show nothing;
+// the denial error comes only after "Don't Allow".
+#[tokio::test]
+async fn m5_7_criterion_1_no_denial_error_until_the_prompt_is_refused() {
+    let permissions = microphone_undetermined();
+    // The prompt stays on screen: no answer yet.
+    permissions.answer_requests_with(PermissionStatus::NotDetermined);
+    let mut harness = Harness::with(Setup {
+        permissions,
+        ..Setup::default()
+    });
+    harness.dictate();
+    harness.dictate();
+    wait_for_requests(&harness.permissions, 2).await;
+    assert_eq!(
+        harness.permissions.requests(),
+        [Permission::Microphone, Permission::Microphone]
+    );
+
+    // "Don't Allow": the next press is the first to show anything.
+    harness
+        .permissions
+        .set(Permission::Microphone, PermissionStatus::Denied);
+    harness.dictate();
+    assert_eq!(
+        harness.next().await,
+        UiEvent::Error(DictationError::PermissionMissing(Permission::Microphone))
+    );
+    // Refused: no prompt again.
+    assert_eq!(harness.permissions.requests().len(), 2);
+    let (inserter, transcriber) = harness.finish().await;
+    assert!(inserter.inserted().is_empty());
+    assert!(transcriber.calls().is_empty());
+}
+
+// A prompt that couldn't be shown leaves nothing to wait for: the error.
+#[tokio::test]
+async fn a_microphone_prompt_that_cannot_show_is_the_error() {
+    let permissions = microphone_undetermined();
+    permissions.fail_requests(true);
+    let mut harness = Harness::with(Setup {
+        permissions,
+        ..Setup::default()
+    });
+    harness.dictate();
+    assert_eq!(
+        harness.next().await,
+        UiEvent::Error(DictationError::PermissionMissing(Permission::Microphone))
+    );
+    let (inserter, _) = harness.finish().await;
+    assert!(inserter.inserted().is_empty());
+}
+
+// Accessibility can't be told apart from refused on macOS, so undetermined
+// is still the error, after the prompt is asked for.
+#[tokio::test]
+async fn an_undetermined_accessibility_prompts_and_shows_the_error() {
+    let permissions = FakePermissions::new();
+    permissions.set(Permission::Microphone, PermissionStatus::Granted);
+    let mut harness = Harness::with(Setup {
+        permissions,
         ..Setup::default()
     });
     harness.press();
     assert_eq!(
         harness.next().await,
-        UiEvent::Error(DictationError::PermissionMissing(Permission::Microphone))
-    );
-    assert_eq!(harness.permissions.requests(), [Permission::Microphone]);
-
-    // The fake granted the microphone; Accessibility is next.
-    harness.press();
-    assert_eq!(
-        harness.next().await,
         UiEvent::Error(DictationError::PermissionMissing(Permission::Accessibility))
     );
+    assert_eq!(harness.permissions.requests(), [Permission::Accessibility]);
 
+    // The fake granted it; the next dictation records.
     harness.dictate();
     assert_eq!(
         harness.until_idle().await,

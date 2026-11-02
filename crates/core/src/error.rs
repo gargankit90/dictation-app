@@ -39,9 +39,10 @@ pub enum DictationError {
     #[error("A password field is focused; dictation wasn't pasted.")]
     SecureInput,
     /// The OS has not granted a permission dictation needs. The microphone's
-    /// message says where to allow it and that the app must be reopened
-    /// then: macOS doesn't tell a running app about a grant made in System
-    /// Settings after a refusal (#126, `docs/ENGINEERING.md`).
+    /// message says where to allow it and that the app must be relaunched
+    /// then (the tray offers Relaunch while it is denied, M5.7): macOS
+    /// doesn't tell a running app about a grant made in System Settings
+    /// after a refusal (#126, `docs/ENGINEERING.md`).
     #[error("{}", permission_message(*.0))]
     PermissionMissing(Permission),
     /// The global hotkey doesn't work (macOS: often because Accessibility
@@ -79,7 +80,7 @@ impl fmt::Debug for DictationError {
 fn permission_message(permission: Permission) -> &'static str {
     match permission {
         Permission::Microphone => {
-            "Microphone permission is missing. Allow it in Privacy & Security, Microphone, then reopen the app."
+            "Microphone is off. Allow it in Privacy & Security, Microphone, then relaunch from the menu bar."
         }
         Permission::Accessibility => "Accessibility permission is missing.",
     }
@@ -111,7 +112,7 @@ mod tests {
             ),
             (
                 DictationError::PermissionMissing(Permission::Microphone),
-                "Microphone permission is missing. Allow it in Privacy & Security, Microphone, then reopen the app.",
+                "Microphone is off. Allow it in Privacy & Security, Microphone, then relaunch from the menu bar.",
             ),
             (
                 DictationError::PermissionMissing(Permission::Accessibility),
@@ -125,6 +126,16 @@ mod tests {
         for (error, message) in cases {
             assert_eq!(error.to_string(), message);
         }
+    }
+
+    /// The overlay shows two lines of an error (M5.1); T4b saw the old
+    /// 99-character microphone message fill them whole (#161 asks that the
+    /// new one doesn't clip either).
+    #[test]
+    fn the_microphone_message_fits_the_overlay() {
+        let text = DictationError::PermissionMissing(Permission::Microphone).to_string();
+        assert!(text.chars().count() <= 99, "{text}");
+        assert!(text.contains("relaunch"), "{text}");
     }
 
     #[test]
