@@ -1,4 +1,4 @@
-Reviewer: CHANGES REQUESTED
+Reviewer: APPROVED
 
 # T5 review, round 2
 
@@ -10,7 +10,9 @@ R1 is fixed: independently removing only the deadline cancellation `pkill` in an
 
 | ID | Severity | Location | Finding | Suggested fix |
 | --- | --- | --- | --- | --- |
-| R2 | Major | `tests/e2e/test-runner.sh:98` (cleanup at lines 16–18) | The new 600-second fixture is not always cleaned up. With the supported `KEEP=1` mode, the unmodified runner exits 0 with 73/73 checks but leaves `$tmp/longsleep 600` alive: KEEP replaces the EXIT cleanup with an echo-only trap. Keeping diagnostic files must not keep this new ten-minute process running. | Always terminate the fixture processes during cleanup; make KEEP conditional only around directory removal. Ensure the same cleanup is reached on handled interruption, and verify success, failed assertion, and interrupted runs without leaving the fixture alive. |
+| R2 | Minor | `tests/e2e/test-runner.sh:98` (cleanup at lines 16–18) | The new 600-second fixture is not always cleaned up. With the supported `KEEP=1` mode, the unmodified runner exits 0 with 73/73 checks but leaves `$tmp/longsleep 600` alive: KEEP replaces the EXIT cleanup with an echo-only trap. Keeping diagnostic files must not keep this new ten-minute process running. | Always terminate the fixture processes during cleanup; make KEEP conditional only around directory removal. Ensure the same cleanup is reached on handled interruption, and verify success, failed assertion, and interrupted runs without leaving the fixture alive. |
+
+The Lead classified R2 as nonblocking: KEEP is opt-in debugging, the sleep ends within ten minutes, and it cannot make an assertion pass or fail incorrectly. Follow-up: [tech-debt #164](https://github.com/gargankit90/dictation-app/issues/164). There are no open blocker or major findings.
 
 ## Validation and reproduction
 
@@ -24,11 +26,11 @@ R1 is fixed: independently removing only the deadline cancellation `pkill` in an
 
 | Section | Assessment |
 | --- | --- |
-| 1. Scope | R1 fix is focused; R2 prevents the requested fixture lifecycle guarantee |
+| 1. Scope | R1 fix is focused; R2 is a nonblocking diagnostic-mode cleanup follow-up |
 | 2. Correctness | R2: new long-lived fixture survives supported diagnostic-mode success |
 | 3. Security and privacy | OK: no new secrets, data collection, or network access |
 | 4. Architecture | OK: shell test fixture only |
 | 5. Rust and TypeScript practice | Not affected |
 | 6. Licences and reuse | OK: no dependencies or copied external code |
-| 7. Tests | R1 sensitivity restored; R2 cleanup gap reproduced independently |
-| 8. Git and PR | Focused test commit; no guard or specification changes; no minor findings |
+| 7. Tests | R1 sensitivity restored; R2 diagnostic-mode cleanup gap reproduced independently and tracked |
+| 8. Git and PR | Focused test commit; no guard or specification changes; minor R2 tracked in #164 |
