@@ -891,3 +891,175 @@ describe("launch at login", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Hotkey").value).toBe("F5");
   });
 });
+
+// T2 (P2-01): what a half-finished save, a failed re-read, a late key-test
+// reply and an extra Enter do to the form.
+describe("T2: settings edges", () => {
+  const form = () => {
+    const element = screen.getByLabelText("Hotkey").closest("form");
+    if (element === null) throw new Error("no form");
+    return element;
+  };
+
+  it("partial_save_keeps_saved_key_status_and_allows_retry", async () => {
+    await open();
+    type(/API key/, KEY);
+    type("Language", "de");
+    // The key is stored; the settings file then can't be written.
+    backend.failing.set("save_settings", "could not write the settings file: disk full");
+    click("Save");
+    expect((await screen.findByRole("alert")).textContent).toContain("disk full");
+
+    // The key really is saved: the form says so and won't send it again.
+    expect(backend.keys.groq).toBe(true);
+    expect(screen.getByText("Key saved")).toBeTruthy();
+    expect(keyBox().value).toBe("");
+    expect(screen.queryByText("Settings saved.")).toBeNull();
+    // The rest is still the user's, ready to retry.
+    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("de");
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Save" }).disabled).toBe(false);
+
+    backend.failing.delete("save_settings");
+    click("Save");
+    await screen.findByText("Settings saved.");
+    expect(backend.named("set_api_key")).toHaveLength(1);
+    expect(backend.named("save_settings")).toHaveLength(2);
+    expect(backend.settings.language).toBe("de");
+    expect(screen.getByText("Key saved")).toBeTruthy();
+  });
+
+  it("failed_reread_does_not_claim_unsaved_values", async () => {
+    // A save that worked, then a re-read that failed: the form shows exactly
+    // what was saved, and the next save builds on it.
+    backend.settings = { ...backend.settings, model: "whisper-large-v3" };
+    await open();
+    type("Provider", "openai");
+    type("Hotkey", "  F6 ");
+    const handle = backend.handle;
+    let rereads = 0;
+    mockIPC(async (command, payload) => {
+      const saved = backend.named("save_settings").length > 0;
+      if (command === "get_settings" && saved && rereads++ === 0) {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw "the settings file is busy";
+      }
+      return handle(command, payload);
+    });
+    click("Save");
+    await screen.findByText("Settings saved.");
+    expect(screen.getByLabelText<HTMLInputElement>("Hotkey").value).toBe("F6");
+    expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("openai");
+    expect(screen.queryByText(/default model/)).toBeNull();
+    type("Language", "fr");
+    click("Save");
+    await waitFor(() => {
+      expect(backend.named("save_settings")).toHaveLength(2);
+    });
+    expect(backend.settings.model).toBe("whisper-1");
+
+    // A save that didn't take, then a re-read that failed: the box isn't
+    // passed off as the OS's state, so the choice is sent again on retry.
+    cleanup();
+    backend = new Backend();
+    mockIPC((command, payload) => backend.handle(command, payload));
+    await open();
+    const box = screen.getByLabelText<HTMLInputElement>("Launch at login");
+    fireEvent.click(box);
+    backend.failing.set("save_settings", "Couldn't change launch at login: refused");
+    const failingHandle = backend.handle;
+    mockIPC(async (command, payload) => {
+      if (command === "get_settings" && backend.named("save_settings").length > 0) {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw "the settings file is busy";
+      }
+      return failingHandle(command, payload);
+    });
+    click("Save");
+    await screen.findByText(/refused/);
+    await flush();
+    // A focus would re-read a box that "follows the OS"; this one is the
+    // user's pending choice, so it isn't overwritten.
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await flush();
+    expect(box.checked).toBe(true);
+    backend.failing.delete("save_settings");
+    mockIPC((command, payload) => backend.handle(command, payload));
+    click("Save");
+    await screen.findByText("Settings saved.");
+    const sent = backend.named("save_settings").map((call) => call.args.settings);
+    expect((sent[1] as Settings_Serialize).launch_at_login).toBe(true);
+  });
+
+  it("late_provider_test_result_is_ignored", async () => {
+    backend.keys = { groq: true, openai: false };
+    await open();
+    const late = gate();
+    backend.holdTest = late.closed;
+    backend.testResult = { kind: "invalid_key", message: "Groq rejected this API key." };
+    click("Test key");
+    await screen.findByRole("button", { name: "Testing…" });
+
+    // The user moves to OpenAI before Groq answers.
+    type("Provider", "openai");
+    late.open();
+    await flush();
+
+    expect(screen.queryByText(/Groq rejected/)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Test key" }).disabled).toBe(
+      false,
+    );
+    expect(screen.getByLabelText(/OpenAI API key/)).toBeTruthy();
+  });
+
+  it("a hotkey the app couldn't switch to is not reported as saved", async () => {
+    await open();
+    type("Hotkey", "F6");
+    type("Language", "de");
+    backend.failing.set(
+      "save_settings",
+      "Couldn't switch the hotkey to F6 (hotkey unavailable: busy). RightAlt still works, and your other settings were saved.",
+    );
+    click("Save");
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("RightAlt still works");
+    expect(screen.queryByText("Settings saved.")).toBeNull();
+    // What the user typed stays, so Save can be tried again.
+    expect(screen.getByLabelText<HTMLInputElement>("Hotkey").value).toBe("F6");
+    backend.failing.delete("save_settings");
+    click("Save");
+    await screen.findByText("Settings saved.");
+    expect(backend.settings.hotkey).toBe("F6");
+  });
+
+  it("enter_while_busy_starts_no_save", async () => {
+    await open();
+    type(/API key/, KEY);
+    const hold = gate();
+    backend.holdSetKey = hold.closed;
+    // Enter in a field submits the form: once, then again while saving.
+    fireEvent.submit(form());
+    await screen.findByRole("button", { name: "Saving…" });
+    fireEvent.submit(form());
+    fireEvent.submit(form());
+    hold.open();
+    await screen.findByText("Settings saved.");
+    expect(backend.named("set_api_key")).toHaveLength(1);
+    expect(backend.named("save_settings")).toHaveLength(1);
+
+    // While a key test runs, Save is disabled, and Enter does nothing either.
+    const test = gate();
+    backend.holdTest = test.closed;
+    click("Test key");
+    await screen.findByRole("button", { name: "Testing…" });
+    type("Language", "de");
+    fireEvent.submit(form());
+    await flush();
+    expect(backend.named("save_settings")).toHaveLength(1);
+    test.open();
+    await screen.findByRole("status");
+    expect(backend.settings.language).toBeNull();
+  });
+});

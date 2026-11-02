@@ -14,8 +14,9 @@ export const commands = {
 	 */
 	getSettings: () => typedError<Settings_Serialize, string>(__TAURI_INVOKE("get_settings")),
 	/**
-	 *  Validates and saves the settings, and applies the launch-at-login choice
-	 *  to the OS.
+	 *  Validates and saves the settings, applies the launch-at-login choice to
+	 *  the OS and switches to the saved hotkey. An error means something didn't
+	 *  take effect; its text says what was saved and what wasn't.
 	 */
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, string>(__TAURI_INVOKE("save_settings", { settings })),
 	/**  Stores `key` as `provider`'s API key in the keychain. Write-only. */
