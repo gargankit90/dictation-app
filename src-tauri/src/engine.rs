@@ -52,7 +52,8 @@ pub struct LiveEngine {
     /// `None` when the engine is pinned (`--transcriber mock`).
     transcribers: Option<Transcribers>,
     /// Where the provider is reached instead of its own endpoint; only
-    /// tests set it.
+    /// tests and test builds (`--debug-provider-url`) set it, so in a
+    /// release build it is always `None`.
     base_url: Option<String>,
     /// How long one keychain read may take.
     key_timeout: Duration,
@@ -87,13 +88,26 @@ impl LiveEngine {
         }
     }
 
-    /// Sends requests to `base_url` (a wiremock server) instead of the
-    /// provider's own endpoint.
-    #[cfg(test)]
+    /// Sends requests to `base_url` (a wiremock server, or the e2e tests'
+    /// local provider through `--debug-provider-url`) instead of the
+    /// provider's own endpoint. Not compiled into release builds.
+    #[cfg(any(test, debug_assertions))]
     #[must_use]
     pub(crate) fn at(mut self, base_url: &str) -> Self {
         self.base_url = Some(base_url.to_owned());
         self
+    }
+
+    /// The API root `provider` is reached at: its own endpoint, unless a test
+    /// build was pointed elsewhere ([`at`](Self::at)). Settings' Test key
+    /// uses it, so a key is tested where dictation sends it.
+    #[must_use]
+    pub fn provider_base_url(&self, provider: Provider) -> String {
+        self.base_url.clone().unwrap_or_else(|| {
+            dictation_transcribe::openai_compat::Preset::for_provider(provider)
+                .base_url
+                .to_owned()
+        })
     }
 
     /// `provider`'s saved key, for the settings commands (`has_api_key`, a

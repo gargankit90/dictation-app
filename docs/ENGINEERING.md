@@ -125,6 +125,12 @@ Tauri is a thin layer on top.
   Relaunch button, which restarts the app and reopens onboarding.
 - **Overlay:** a non-activating panel that never takes focus
   (`tauri-nspanel`), or the paste lands in the overlay.
+- **Paste target:** the text goes to whatever has keyboard focus when it is
+  pasted, not where the dictation started. A user who switches windows (or
+  apps) while a transcription is pending gets the text in the new one; the
+  app doesn't remember or restore the first target, and none of its own
+  windows (the overlay, Settings) takes focus on the way. Checked by
+  `e2e_focus_switch_during_transcription` (T4a, #117).
 - **Recording length:** maximum 5 minutes (16 kHz mono WAV ≈ 1.9 MB/min, so
   about 9.6 MB, under Groq's upload limit).
 - **Groq upload limit** (checked 2026-10-31 at

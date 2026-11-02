@@ -10,8 +10,18 @@ use dictation_core::error::DictationError;
 
 use crate::pipeline::UiEvent;
 
-/// The tray's title while the hotkey doesn't work.
+/// The tray's title while a dictation error shows: short and the same for
+/// every error, so the status item always fits in the menu bar (#151). A
+/// long title made macOS hide the item, and with it the way to Settings. The
+/// whole message is the tooltip's detail (and the overlay shows it).
+pub const DICTATION_FAILED: &str = "\u{26a0} Dictation failed";
+
+/// The tray's title while the hotkey doesn't work; as short as
+/// [`DICTATION_FAILED`], for the same reason.
 pub const HOTKEY_UNAVAILABLE: &str = "Hotkey unavailable";
+
+/// The longest a tray title may be, in characters (#151).
+pub const MAX_TITLE_CHARS: usize = 20;
 
 /// What the tray shows.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -59,7 +69,7 @@ impl TrayStatus {
         }
         let view = match (&self.error, self.hotkey_down) {
             (Some(error), _) => TrayView {
-                title: Some(error.clone()),
+                title: Some(DICTATION_FAILED.to_owned()),
                 detail: Some(error.clone()),
             },
             (None, true) => TrayView {
@@ -91,6 +101,13 @@ mod tests {
     }
 
     #[test]
+    fn both_titles_are_short() {
+        for title in [DICTATION_FAILED, HOTKEY_UNAVAILABLE] {
+            assert!(title.chars().count() <= MAX_TITLE_CHARS, "{title}");
+        }
+    }
+
+    #[test]
     fn starts_with_nothing() {
         assert_eq!(TrayStatus::default().view(), &TrayView::default());
     }
@@ -99,8 +116,8 @@ mod tests {
     fn a_dictation_error_shows_until_the_next_recording() {
         let mut tray = TrayStatus::default();
         let shown = tray.on_event(&no_key()).unwrap();
-        assert_eq!(shown.title.as_deref(), Some(no_key_text().as_str()));
-        assert_eq!(shown.detail, shown.title);
+        assert_eq!(shown.title.as_deref(), Some(DICTATION_FAILED));
+        assert_eq!(shown.detail, Some(no_key_text()));
         assert_eq!(tray.on_event(&UiEvent::StateChanged(Phase::Idle)), None);
         assert_eq!(
             tray.on_event(&UiEvent::StateChanged(Phase::Recording)),
@@ -148,7 +165,13 @@ mod tests {
     fn a_newer_error_shows_over_it_and_it_comes_back_after() {
         let mut tray = TrayStatus::default();
         tray.on_event(&UiEvent::Error(DictationError::HotkeyFailed));
-        assert_eq!(title(tray.on_event(&no_key())), Some(Some(no_key_text())));
+        assert_eq!(
+            tray.on_event(&no_key()),
+            Some(TrayView {
+                title: Some(DICTATION_FAILED.to_owned()),
+                detail: Some(no_key_text()),
+            })
+        );
         assert_eq!(
             title(tray.on_event(&UiEvent::StateChanged(Phase::Recording))),
             Some(Some(HOTKEY_UNAVAILABLE.to_owned()))
@@ -161,7 +184,7 @@ mod tests {
         tray.on_event(&UiEvent::Error(DictationError::HotkeyFailed));
         tray.on_event(&no_key());
         assert_eq!(tray.on_event(&UiEvent::HotkeyRestored), None);
-        assert_eq!(tray.view().title, Some(no_key_text()));
+        assert_eq!(tray.view().detail, Some(no_key_text()));
         // The hotkey failing again replaces it: that's what matters now.
         assert_eq!(
             title(tray.on_event(&UiEvent::Error(DictationError::HotkeyFailed))),

@@ -140,8 +140,10 @@ points at `dictation-vm`) don't reset each other's VM.
    input source), `clipboard-image.js` (puts a PNG on the clipboard or reads
    it back), `image-24.png` (a 24x24 test image), `ax.js` (drives the tray,
    menus and windows through the Accessibility API; see "The app's UI" below)
-   and `clipboard-race.js` (copies like a user while a dictation's paste is
-   pending, for `e2e_user_copy_wins`).
+   `clipboard-race.js` (copies like a user while a dictation's paste is
+   pending, for `e2e_user_copy_wins`), `keys.js` (presses Escape and the
+   arrows, alone or with Shift, Command or Right Option, with real key
+   events) and `local-provider.pl` (the local provider, below).
 4. **Scenarios:** each one quits any running copy of the app, clears its log
    (`~/Library/Logs/com.dictationapp.desktop/` in the VM), launches the app
    with `open -n …/dictation-app.app --args <flags>`, and checks the log and
@@ -171,9 +173,14 @@ points at `dictation-vm`) don't reset each other's VM.
 | `e2e_user_copy_wins` | T2 #7 (P2-05) | A clipboard sentinel, then a dictation while `clipboard-race.js` (over ssh) watches the clipboard: on the app's dictation write (its `com.dictationapp.session` item) it waits 0.2 s (`E2E_USER_COPY_DELAY`), checks that item is still there (`pending=yes`: the restore hasn't run) and copies a new text. TextEdit got the transcript; at the end the clipboard holds the user's copy, not the sentinel or the transcript, and its change count is the one right after the copy (nothing wrote after it). |
 | `e2e_secure_input_blocks_paste` | T2 #7 (P2-05), M4.2 #1 | The target is a Terminal window running `cat` in non-canonical mode, saving what is pasted into it to a file. Control: with Secure Keyboard Entry off, a dictation's word lands in the file. Then Terminal restarts with `defaults write com.apple.Terminal SecureKeyboardEntry -bool true` (Terminal's menu item if that doesn't do it), Secure Input must be on (`ioreg` `kCGSSessionSecureInputPID`), and a second dictation leaves the file and a clipboard sentinel unchanged and logs `shown to the user error=A password field is focused; dictation wasn't pasted.`. Secure Keyboard Entry goes off again however it ends (an EXIT trap), and Secure Input must then be off. |
 | `e2e_quit_during_recording_then_relaunch` | T2 #7 (P2-05) | `--press`, then Quit dictation-app in the tray menu (`ax.js tray-click`) while recording: the app exits by itself within 15 s (`QUIT_TIMEOUT`; no kill), logs `quit from the tray` and `stopped`, never reached Inserting, TextEdit is empty and Right Option is up. A relaunch logs one `starting`, and a dictation pastes. |
-| `e2e_tray_error_clears_on_next_recording` | T2 #7 (P2-01) | No key in the keychain and the real engine (`--transcriber settings`): a dictation fails offline with `Transcription failed: Add your API key in Settings.`, which is the tray's title (`ax.js tray-info`, the status item's AXTitle). The next `--press` clears the title while it records; its release shows the error again. Then Quit from the tray, a relaunch on the mock: the dictation pastes and the title stays empty. |
+| `e2e_tray_error_clears_on_next_recording` | T2 #7 (P2-01) | No key in the keychain and the real engine (`--transcriber settings`): a dictation fails offline with `Transcription failed: Add your API key in Settings.`: the tray's title becomes `⚠ Dictation failed` (the same short text for every error, so the status item always fits in the menu bar, #151) and its tooltip `dictation-app: ` and the message (`ax.js tray-info`, the status item's AXTitle and AXHelp). The next `--press` clears both while it records; its release shows the error again. Then Quit from the tray, a relaunch on the mock: the dictation pastes and the tray stays clear. |
 | `e2e_settings_save_reopen` | T2 #1, #7 (P1-03, P2-01) | Settings… in the tray opens the window (on screen, by the window server's list); it shows `RightAlt` and no language. `de` and `leftalt` are typed into Language and Hotkey (`ax.js field-set`: focus, keys), Save shows `Settings saved.`, the app logs `hotkey applied … hotkey=LeftAlt`, the form shows `LeftAlt`, and `settings.json` has both. The close button hides the window; Settings… shows it again with the saved values. A real Left Option hold (`post-key.js`) then dictates into TextEdit with no restart, and a Right Option hold starts nothing. Quit from the tray and relaunch: `ready … hotkey=LeftAlt`, Left Option dictates, Right Option doesn't. The key cleanup releases both keys and removes `settings.json` (the defaults). |
 
+| `e2e_settings_key_provider_recovery` | T4a #3 (#114) | On the local provider, with a wrong key in the keychain: a dictation is rejected (`auth=bad`, a 401), the error is shown, nothing is pasted and the clipboard is untouched. The right key is typed into Settings' password field (`ax.js secret-set`), Test key says it works (the test reached the provider with the typed key), Save says `Settings saved.` and the engine is rebuilt. With the same pid, the next dictation is sent with the new key (default model, no language) and pastes exactly `hello world`, and the tray's error is gone; after Quit and a relaunch it still does. Neither key is in any file of the app's (settings, logs, caches, web storage, preferences) or the provider's. |
+| `e2e_cancel_and_busy_presses` | T4a #3 (#116) | Real keys: Right Option down, Esc (with Right Option held) once the log shows Recording, Right Option up: `Recording Idle`, no request, nothing pasted, the clipboard untouched; a fresh hold pastes. Then a hold whose reply is held: another hold and an Esc while it is pending start nothing (no Recording, no second request); the release pastes the original transcript once and nothing follows; the next hold pastes. |
+| `e2e_focus_switch_during_transcription` | T4a #3 (#117) | Two TextEdit documents, A with text and B empty. A dictation starts with A in front; while its reply is held B comes to the front; B gets exactly one transcript and A is byte for byte unchanged, TextEdit stays frontmost. Again with Settings opened and closed from the tray while the reply is held, B put back in front: B gets the second transcript after the first, A unchanged, Settings closed. The policy is in `docs/ENGINEERING.md` ("Paste target"). |
+| `e2e_unicode_multiline_selection_paste` | T4a #3 (#118) | The provider answers texts with non-BMP emoji (as JSON surrogate pairs), a flag, a ZWJ sequence, combining marks, Hebrew and Arabic, a tab and inner newlines, wrapped in blanks and newlines. Pasted at a caret inside existing text, over a selected range (placed with real arrow keys), and at a caret again in a fresh document: each time the whole document, read back as base64 of its UTF-8, is exactly the text around it plus the transcript trimmed of its surrounding whitespace only; the clipboard is the user's after each. |
+| `e2e_quit_during_request` | T4a #3 (#115) | While the provider holds the reply to a dictation's request, Quit in the tray: the app exits by itself within 10 s, the provider sees the connection close, and the reply it then sends pastes nothing (no Inserting, TextEdit empty, the clipboard untouched) and is never retried (one request). A relaunch dictates and pastes. |
 ## Key cleanup
 
 A scenario that posts a real key-down (`e2e_hold_release`, `e2e_held_at_launch`,
@@ -272,6 +279,45 @@ field, makes the app frontmost (AX), empties the field and posts the keys at
 the HID tap; it types lowercase letters and digits (the US layout's key codes). When a UI scenario fails, `dump_ui` saves the tree to
 `<scenario>.ax.txt`; `ax dump dictation-app` shows it by hand (run it in
 Terminal in the VM).
+
+## The local provider (T4a)
+
+The scenarios that need the real engine without Groq (a wrong key, a reply
+that is late, a transcript with every kind of character) use
+`fixtures/local-provider.pl`, a small OpenAI-compatible transcription server
+on the VM's loopback, in plain Perl (the VM has no Python). The debug build
+is pointed at it with `--debug-provider-url http://127.0.0.1:18731/v1`: the
+real engine, the key from the keychain, the real HTTP client, retries and
+JSON parsing, and Settings' Test key, all go there instead of the provider.
+The flag exists only in debug (test) builds and takes only a loopback `http`
+URL; a release build treats it as an unknown argument
+(`flags::tests::release_builds_ignore_the_provider_url`).
+
+`scenarios/_provider_helpers.sh` starts it fresh for each scenario
+(`provider_start <key>`) and drives it through files in `~/e2e-provider` in
+the VM:
+
+- **Keys:** it accepts one made-up key (lowercase letters and digits, so
+  `ax.js` can type it into Settings) and answers any other with a 401, as
+  Groq does. Only the key's SHA-256 is on disk, so a scenario can check that
+  no file holds a key. The key reaches the app's keychain through the app
+  itself (`groq_key_store`, as for Groq).
+- **The gate:** `provider_gate_close` makes it hold each reply once the
+  request is read whole; `provider_release` lets them go. A held reply keeps
+  the text it came with. Holds stay well under the app's 30 s request
+  timeout, past which the app would retry.
+- **What it saw:** one line per event in `events`: `request n=… auth=good|bad
+  model=… language=…`, `held`, `closed` (the client hung up), `released`,
+  `replied … status=…`; never a key or a transcript. `provider_requests_are`,
+  `provider_wait_event` and `provider_request_has` read it.
+- **Replies:** `provider_reply <base64>` sets the transcript, byte for byte.
+  Texts in the scenarios are written as ASCII with `\n`, `\t` and `\u{hex}`
+  escapes (`esc_b64`), and TextEdit is read back as base64 of its UTF-8
+  (`textedit_b64`, `textedit_is`), so no whitespace is lost on the way.
+
+Each provider scenario arms the key cleanup with `provider_cleanup` as its
+hook: however it ends, the reply is released, the provider stopped, the key
+removed from the keychain and the settings reset.
 
 ## Real Groq (opt-in)
 
@@ -421,7 +467,7 @@ using the helpers in `lib.sh` (`launch`, `wait_for_log`, `logged_phases`,
 `lib_full.sh` (`launch_full`, `textedit_fresh`, `textedit_trimmed`,
 `set_clipboard`, `clipboard`, `dictate_once`, `real_key_hold`,
 `post_key_hold`, `job_says`, `ax`, `ax_ok`, `tray_info`, `quit_from_tray`,
-`dump_ui`). A scenario that
+`dump_ui`) and, on the local provider, `scenarios/_provider_helpers.sh`. A scenario that
 posts a real key-down calls `arm_key_cleanup` first and `key_scenario_end` last.
 Wait on a predicate with a deadline (`wait_for_log`, `wait_for_idle_count`,
 `app_count_is`, `wait_for_no_app`) rather than a fixed sleep; keep a fixed

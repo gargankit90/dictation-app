@@ -476,14 +476,8 @@ pub async fn test_api_key(
     provider: Provider,
     key: Option<String>,
 ) -> Result<(), KeyTestError> {
-    key_test(
-        &state.0,
-        engine.inner(),
-        provider,
-        key,
-        Preset::for_provider(provider).base_url,
-    )
-    .await
+    let base_url = engine.provider_base_url(provider);
+    key_test(&state.0, engine.inner(), provider, key, &base_url).await
 }
 
 /// The view the settings window shows and, for onboarding (M5.2), the step
@@ -1770,14 +1764,43 @@ mod tests {
 
         #[test]
         fn each_provider_tests_against_its_own_base_url() {
-            assert_eq!(
-                Preset::for_provider(Provider::Groq).base_url,
-                "https://api.groq.com/openai/v1"
-            );
-            assert_eq!(
-                Preset::for_provider(Provider::OpenAi).base_url,
-                "https://api.openai.com/v1"
-            );
+            for live in [
+                LiveEngine::fixed(),
+                LiveEngine::follow(dictation_transcribe::engine::Transcribers::new(
+                    crate::engine::starting(),
+                )),
+            ] {
+                assert_eq!(
+                    live.provider_base_url(Provider::Groq),
+                    "https://api.groq.com/openai/v1"
+                );
+                assert_eq!(
+                    live.provider_base_url(Provider::OpenAi),
+                    "https://api.openai.com/v1"
+                );
+            }
+        }
+
+        /// T4a: a test build pointed at a local provider tests keys there
+        /// too, for either provider, so Test key and dictation agree.
+        #[tokio::test]
+        async fn a_test_build_tests_the_key_where_it_dictates() {
+            let server = provider(200, TYPED).await;
+            let live = LiveEngine::fixed().at(&server.uri());
+            for provider in [Provider::Groq, Provider::OpenAi] {
+                assert_eq!(live.provider_base_url(provider), server.uri());
+            }
+            let (config, _) = config(&temp());
+            key_test(
+                &config,
+                &live,
+                Provider::Groq,
+                Some(TYPED.to_owned()),
+                &live.provider_base_url(Provider::Groq),
+            )
+            .await
+            .unwrap();
+            assert_eq!(server.received_requests().await.unwrap().len(), 1);
         }
     }
 }

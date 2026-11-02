@@ -372,5 +372,28 @@ run_case quit_click_fails 'quit_from_tray' STUB_FAST_SLEEP=1 STUB_APP_COUNT=0 ST
 check "a Quit that couldn't be clicked fails, even if the app is gone" \
   test "$(status_of quit_click_fails)" != 0
 
+# --- The local provider's helpers (T4a) ------------------------------------------------
+#
+# A check of "nothing happened" must not pass because the VM couldn't be
+# read.
+
+run_case provider_unread 'vm() { return 124; }; provider_requests_are 0'
+check "no requests: a provider whose events can't be read fails, not 0" \
+  test "$(status_of provider_unread)" != 0
+check "and says so" has "could not read the provider's events" "$(err provider_unread)"
+
+run_case provider_counts 'vm() { printf "listening port=1 pid=2\nrequest n=1 auth=bad\nreplied n=1 status=401\nrequest n=2 auth=good\n"; }
+  provider_requests_are 2 && provider_request_has 2 auth=good && ! provider_request_has 1 auth=good'
+check "the provider's requests are counted and read from its events" \
+  test "$(status_of provider_counts)" = 0
+
+run_case textedit_unread 'vm() { return 124; }; textedit_is ""'
+check "an empty TextEdit: a document that can't be read fails, not empty" \
+  test "$(status_of textedit_unread)" != 0
+
+run_case textedit_exact 'vm() { esc_b64 "a\nb\n"; }; textedit_is "$(esc_b64 "a\nb\n")" && ! textedit_is "$(esc_b64 "a\nb")"'
+check "TextEdit's text is compared exactly, a trailing newline too" \
+  test "$(status_of textedit_exact)" = 0
+
 echo "runner tests: $passed passed, $failed failed"
 [ "$failed" = 0 ]
