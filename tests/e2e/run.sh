@@ -34,10 +34,10 @@ ALL_SCENARIOS=(
   e2e_settings_save_reopen e2e_onboarding_first_run
   e2e_settings_key_provider_recovery e2e_cancel_and_busy_presses
   e2e_focus_switch_during_transcription e2e_unicode_multiline_selection_paste
-  e2e_quit_during_request
+  e2e_quit_during_transcription_then_relaunch
   e2e_error_bad_key e2e_real_groq
   e2e_overlay_focus e2e_overlay_rendered_states_and_error
-  e2e_smart_space e2e_layout_paste e2e_image_clipboard_restore
+  e2e_smart_space e2e_password_field_not_read e2e_layout_paste e2e_image_clipboard_restore
   e2e_dmg_install
   e2e_launch_at_login
 )
