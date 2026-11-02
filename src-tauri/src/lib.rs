@@ -242,6 +242,9 @@ fn run_key_commands(argv: &[String], mut stdin: impl std::io::Read) -> Option<i3
 /// Panics if Tauri fails to start, which leaves the app with nothing to show.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // First, before anything that can panic or fail (#144): Rust's default
+    // hook would print a panic's message to stderr as it is.
+    logging::install_panic_hook();
     // The API key commands (debug builds) run in this process, before the
     // single-instance check: a second launch does its own key work and exits,
     // and never forwards it to the running app (which ignores such flags).

@@ -7,22 +7,29 @@
 //! that cannot print it (`dictation_core::redact`, `dictation_ports::Secret`,
 //! the `Debug` of `Event`, `Command` and the error enums), and, as a last
 //! resort, by [`scrub::ScrubbingWriter`], which cleans every line that is
-//! written. Panics are reported through the same log, their message hidden,
-//! instead of by Rust's default hook ([`log_panic`]). `DICTATION_LOG=debug`
-//! turns on debug output for our own crates, for testers who are asked to.
+//! written. Panics are reported through the same log instead of by Rust's
+//! default hook ([`log_panic`]): a literal message shown, a formatted one
+//! hidden (#144). `DICTATION_LOG=debug` turns on debug output for our own
+//! crates, for testers who are asked to.
 
 pub mod rotation;
 pub mod scrub;
 #[cfg(test)]
+mod spawned_panic;
+#[cfg(test)]
 mod spawned_privacy;
 
+use std::any::Any;
 use std::backtrace::{Backtrace, BacktraceStatus};
+use std::fmt as std_fmt;
 use std::io;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Once;
 
 use dictation_core::redact::Hidden;
 use tracing::Subscriber;
+use tracing::subscriber::NoSubscriber;
 use tracing_subscriber::filter::{LevelFilter, Targets};
 use tracing_subscriber::fmt::{self, MakeWriter};
 use tracing_subscriber::prelude::*;
@@ -144,8 +151,10 @@ fn init_with(dir: &Path, limits: Limits) -> anyhow::Result<()> {
     let level = level_from(std::env::var(LEVEL_VARIABLE).ok().as_deref());
     let (subscriber, failure) =
         app_subscriber(dir, level, ScrubbingWriter::new(io::stderr()), limits);
+    // Already installed by the app's first line (`crate::run`); here too
+    // for callers that start logging without it.
+    install_panic_hook();
     subscriber.try_init()?;
-    std::panic::set_hook(Box::new(log_panic));
     if let Some(error) = failure {
         tracing::warn!(
             %error,
@@ -156,24 +165,95 @@ fn init_with(dir: &Path, limits: Limits) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Replaces Rust's default panic hook with [`log_panic`]. The app calls it
+/// first, before anything that can panic or fail, logging included (#144):
+/// the default hook prints the panic message to stderr as it is. Once is
+/// enough; later calls do nothing.
+pub fn install_panic_hook() {
+    static INSTALLED: Once = Once::new();
+    INSTALLED.call_once(|| std::panic::set_hook(Box::new(log_panic)));
+}
+
 /// Reports a panic through the log (file and stderr, both scrubbed) instead
 /// of Rust's default hook, which prints the panic message to stderr as it
-/// is (#124). The message can hold whatever the panicking code had in hand,
-/// a transcript or a key, so, as for a crashed pipeline job, only its length
-/// is logged; where it happened is, and the backtrace if `RUST_BACKTRACE`
-/// asks for one.
+/// is (#124): the thread, where it happened, the message as far as it is
+/// safe ([`PanicMessage`]), and the backtrace if `RUST_BACKTRACE` asks for
+/// one. Before logging starts, the same report goes to stderr, scrubbed.
 fn log_panic(info: &std::panic::PanicHookInfo<'_>) {
     let thread = std::thread::current();
-    let thread = thread.name().unwrap_or("unnamed");
     let location = info
         .location()
         .map_or_else(|| "unknown".to_owned(), ToString::to_string);
-    let payload = Hidden(info.payload_as_str().unwrap_or_default());
+    report_panic(
+        thread.name().unwrap_or("unnamed"),
+        &location,
+        info.payload(),
+        &mut io::stderr(),
+    );
+}
+
+/// [`log_panic`]'s report; `stderr` is where it goes while no subscriber is
+/// set.
+fn report_panic(
+    thread: &str,
+    location: &str,
+    payload: &(dyn Any + Send),
+    stderr: &mut dyn io::Write,
+) {
+    let message = PanicMessage::of(payload);
     let backtrace = Backtrace::capture();
-    if backtrace.status() == BacktraceStatus::Captured {
-        tracing::error!(thread, %location, %payload, %backtrace, "a thread panicked");
+    let captured = backtrace.status() == BacktraceStatus::Captured;
+    let logging = tracing::dispatcher::get_default(|dispatch| !dispatch.is::<NoSubscriber>());
+    if !logging {
+        let mut line = format!(
+            "dictation-app: a thread panicked before logging started thread={thread} location={location} message={message}"
+        );
+        if captured {
+            line.push_str(&format!(" backtrace={backtrace}"));
+        }
+        line.push('\n');
+        // Nowhere to report a failed write to.
+        let _ = stderr.write_all(scrub::scrub(&line).as_bytes());
+    } else if captured {
+        tracing::error!(thread, %location, %message, %backtrace, "a thread panicked");
     } else {
-        tracing::error!(thread, %location, %payload, "a thread panicked");
+        tracing::error!(thread, %location, %message, "a thread panicked");
+    }
+}
+
+/// A panic's message, as far as it can be logged (#144). A `&'static str`
+/// payload is a literal in the code (`panic!("…")` without arguments,
+/// `unwrap()` on `None`), which can't hold a key or a transcript, so it is
+/// shown. A formatted one (a `String`: `panic!("{x}")`, `expect`, an index
+/// out of bounds) can hold whatever the code had in hand, so, as for a
+/// crashed pipeline job, only its length is shown, at every level: the
+/// rules allow a transcript's length at debug, nothing more.
+enum PanicMessage<'a> {
+    Literal(&'static str),
+    Formatted(Hidden<'a>),
+    /// A payload of another type (`std::panic::panic_any`).
+    Other,
+}
+
+impl<'a> PanicMessage<'a> {
+    fn of(payload: &'a (dyn Any + Send)) -> Self {
+        if let Some(literal) = payload.downcast_ref::<&'static str>() {
+            Self::Literal(literal)
+        } else if let Some(formatted) = payload.downcast_ref::<String>() {
+            Self::Formatted(Hidden(formatted))
+        } else {
+            Self::Other
+        }
+    }
+}
+
+impl std_fmt::Display for PanicMessage<'_> {
+    fn fmt(&self, f: &mut std_fmt::Formatter<'_>) -> std_fmt::Result {
+        match self {
+            Self::Literal(literal) => write!(f, "{literal:?}"),
+            Self::Formatted(hidden) => write!(f, "formatted, {hidden}"),
+            Self::Other => f.write_str("not text"),
+        }
     }
 }
 
@@ -397,6 +477,117 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
         assert!(found.contains("hello [key hidden]"), "{found}");
+    }
+
+    /// A fake key and a transcript in one formatted message.
+    fn formatted_payload() -> Box<dyn Any + Send> {
+        Box::new(format!("index 5 of {TRANSCRIPT} with {KEY}"))
+    }
+
+    fn literal_payload() -> Box<dyn Any + Send> {
+        Box::new("called `Option::unwrap()` on a `None` value")
+    }
+
+    /// The payloads real panics carry: a literal one is a `&'static str`,
+    /// a formatted one a `String`.
+    #[test]
+    fn real_panics_carry_the_payload_types_the_hook_tells_apart() {
+        let quiet = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let literal = std::panic::catch_unwind(|| panic!("a literal")).unwrap_err();
+        let formatted = std::panic::catch_unwind(|| {
+            panic!("{}", std::hint::black_box(TRANSCRIPT));
+        })
+        .unwrap_err();
+        let indexed = std::panic::catch_unwind(|| {
+            let items = std::hint::black_box([1, 2, 3]);
+            items[std::hint::black_box(5)]
+        })
+        .unwrap_err();
+        std::panic::set_hook(quiet);
+        assert!(matches!(
+            PanicMessage::of(&*literal),
+            PanicMessage::Literal("a literal")
+        ));
+        assert!(matches!(
+            PanicMessage::of(&*formatted),
+            PanicMessage::Formatted(_)
+        ));
+        assert!(matches!(
+            PanicMessage::of(&*indexed),
+            PanicMessage::Formatted(_)
+        ));
+        assert!(matches!(PanicMessage::of(&42_u8), PanicMessage::Other));
+    }
+
+    /// #144: at info (and every other level) a literal message reaches the
+    /// log; a formatted one shows only its length.
+    #[test]
+    fn a_literal_panic_message_is_logged_and_a_formatted_one_is_hidden() {
+        for level in [LevelFilter::INFO, LevelFilter::DEBUG, LevelFilter::TRACE] {
+            let log = captured(level, || {
+                let mut stderr = Vec::new();
+                report_panic("worker", "src/x.rs:1:2", &*literal_payload(), &mut stderr);
+                report_panic("worker", "src/x.rs:3:4", &*formatted_payload(), &mut stderr);
+                assert!(stderr.is_empty(), "logging has started: nothing on stderr");
+            });
+            assert!(
+                log.contains("called `Option::unwrap()` on a `None` value"),
+                "{level}: {log}"
+            );
+            assert!(log.contains("thread=\"worker\""), "{level}: {log}");
+            assert!(log.contains("src/x.rs:3:4"), "{level}: {log}");
+            assert!(log.contains("formatted, <"), "{level}: {log}");
+            assert!(
+                !log.contains(TRANSCRIPT) && !log.contains(KEY),
+                "{level}: {log}"
+            );
+        }
+    }
+
+    /// Before logging starts, the report goes to stderr, under the same rule
+    /// and scrubbed.
+    #[test]
+    fn before_logging_starts_the_report_goes_to_stderr() {
+        let mut stderr = Vec::new();
+        report_panic("main", "src/lib.rs:9:9", &*literal_payload(), &mut stderr);
+        report_panic("main", "src/lib.rs:9:9", &*formatted_payload(), &mut stderr);
+        let text = String::from_utf8(stderr).unwrap();
+        assert_eq!(text.lines().count(), 2, "{text}");
+        assert!(
+            text.lines().all(|line| line.contains(
+                "a thread panicked before logging started thread=main location=src/lib.rs:9:9"
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains("called `Option::unwrap()` on a `None` value"),
+            "{text}"
+        );
+        assert!(!text.contains(TRANSCRIPT) && !text.contains(KEY), "{text}");
+    }
+
+    /// #144: the app installs the hook first thing, before the key
+    /// commands, the single-instance check and Tauri (whose `setup` starts
+    /// logging), so nothing that runs before can panic through Rust's
+    /// default hook. `spawned_panic` checks that the hook works in that
+    /// order.
+    #[test]
+    fn the_app_installs_the_panic_hook_before_anything_else() {
+        let source = include_str!("../lib.rs");
+        let body = source
+            .split_once("pub fn run() {")
+            .expect("lib.rs has `pub fn run`")
+            .1;
+        let first = body
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty() && !line.starts_with("//"))
+            .unwrap();
+        assert_eq!(first, "logging::install_panic_hook();");
+        let hook = body.find("logging::install_panic_hook();").unwrap();
+        let init = body.find("logging::init(").unwrap_or(usize::MAX);
+        assert!(hook < init);
     }
 
     #[test]

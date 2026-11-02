@@ -14,6 +14,7 @@
 use std::time::Duration;
 
 use dictation_core::coordinator::Phase;
+use dictation_core::error::DictationError;
 use tokio::time::Instant;
 
 use crate::pipeline::UiEvent;
@@ -53,6 +54,9 @@ pub struct Change {
 #[derive(Debug, Default)]
 pub struct OverlayModel {
     view: OverlayView,
+    /// Whether the error showing is [`DictationError::HotkeyFailed`], which
+    /// [`UiEvent::HotkeyRestored`] hides (#155).
+    hotkey_error: bool,
 }
 
 impl OverlayModel {
@@ -67,7 +71,9 @@ impl OverlayModel {
     /// Recording and Transcribing show while the pipeline is in those
     /// phases; pasting (Inserting) keeps Transcribing up until the pipeline
     /// is idle again. An error shows until [`ERROR_VISIBLE_FOR`] passes or
-    /// the next recording starts; going idle doesn't hide it.
+    /// the next recording starts; going idle doesn't hide it. The hotkey's
+    /// error also hides as soon as the hotkey works again; other errors
+    /// don't.
     pub fn on_event(&mut self, event: &UiEvent) -> Option<Change> {
         let view = match event {
             UiEvent::StateChanged(Phase::Recording) => OverlayView::Recording,
@@ -78,7 +84,7 @@ impl OverlayModel {
                 OverlayView::Error { .. } => return None,
                 _ => OverlayView::Hidden,
             },
-            // The hotkey error, if it still shows, goes with its timer.
+            UiEvent::HotkeyRestored if self.hotkey_error => OverlayView::Hidden,
             UiEvent::HotkeyRestored => return None,
             UiEvent::Error(error) => {
                 // Always a change, even with the same text: it restarts the
@@ -86,6 +92,7 @@ impl OverlayModel {
                 self.view = OverlayView::Error {
                     message: error.to_string(),
                 };
+                self.hotkey_error = matches!(error, DictationError::HotkeyFailed);
                 return Some(Change {
                     view: self.view.clone(),
                     expires: true,
@@ -108,6 +115,8 @@ impl OverlayModel {
             return None;
         }
         self.view = view.clone();
+        // Every view `set` shows is not an error.
+        self.hotkey_error = false;
         Some(Change {
             view,
             expires: false,
@@ -180,8 +189,6 @@ async fn expiry(deadline: Option<Instant>) {
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
-
-    use dictation_core::error::DictationError;
 
     use super::*;
     use crate::ui_events::{UI_ERRORS_QUEUED, UI_EVENTS_QUEUED, ui_channel};
@@ -295,6 +302,68 @@ mod tests {
         );
     }
 
+    fn hotkey_error_view() -> OverlayView {
+        OverlayView::Error {
+            message: DictationError::HotkeyFailed.to_string(),
+        }
+    }
+
+    /// #155's reproduction: the hotkey's error hides as soon as the hotkey
+    /// works again, not when its timer runs out.
+    #[test]
+    fn the_hotkey_error_hides_when_the_hotkey_is_restored() {
+        let mut model = OverlayModel::default();
+        model.on_event(&UiEvent::Error(DictationError::HotkeyFailed));
+        assert_eq!(model.view(), &hotkey_error_view());
+        assert_eq!(
+            model.on_event(&UiEvent::HotkeyRestored),
+            shown(OverlayView::Hidden)
+        );
+        assert_eq!(model.view(), &OverlayView::Hidden);
+        // Its timer, if it still fires, hides nothing more.
+        assert_eq!(model.on_error_expired(), None);
+    }
+
+    /// Other errors, and whatever replaced the hotkey's error, stay.
+    #[test]
+    fn a_restored_hotkey_leaves_other_views_alone() {
+        let mut model = OverlayModel::default();
+        model.on_event(&error());
+        assert_eq!(model.on_event(&UiEvent::HotkeyRestored), None);
+        assert_eq!(model.view(), &error_view());
+
+        // A dictation error that replaced the hotkey's.
+        let mut model = OverlayModel::default();
+        model.on_event(&UiEvent::Error(DictationError::HotkeyFailed));
+        model.on_event(&error());
+        assert_eq!(model.on_event(&UiEvent::HotkeyRestored), None);
+        assert_eq!(model.view(), &error_view());
+
+        // A recording that replaced it.
+        let mut model = OverlayModel::default();
+        model.on_event(&UiEvent::Error(DictationError::HotkeyFailed));
+        model.on_event(&UiEvent::StateChanged(Phase::Recording));
+        assert_eq!(model.on_event(&UiEvent::HotkeyRestored), None);
+        assert_eq!(model.view(), &OverlayView::Recording);
+
+        // Nothing showing.
+        let mut model = OverlayModel::default();
+        assert_eq!(model.on_event(&UiEvent::HotkeyRestored), None);
+    }
+
+    /// The hotkey's error, still showing after the pipeline went idle,
+    /// hides on the return too.
+    #[test]
+    fn the_hotkey_error_hides_on_restore_after_going_idle() {
+        let mut model = OverlayModel::default();
+        model.on_event(&UiEvent::Error(DictationError::HotkeyFailed));
+        assert_eq!(model.on_event(&UiEvent::StateChanged(Phase::Idle)), None);
+        assert_eq!(
+            model.on_event(&UiEvent::HotkeyRestored),
+            shown(OverlayView::Hidden)
+        );
+    }
+
     /// Records what the overlay was told to show, and when.
     #[derive(Clone, Default)]
     struct Recorder(Arc<Mutex<Vec<(OverlayView, Instant)>>>);
@@ -355,6 +424,25 @@ mod tests {
         assert_eq!(recorder.views(), [error_view(), OverlayView::Hidden]);
         let times = recorder.times();
         assert_eq!(times[1] - times[0], VISIBLE);
+    }
+
+    /// In `run`: the restore hides the hotkey's error at once, and its
+    /// timer doesn't hide anything later.
+    #[tokio::test(start_paused = true)]
+    async fn run_hides_the_hotkey_error_when_the_hotkey_is_restored() {
+        let (tx, rx) = ui_channel();
+        let recorder = Recorder::default();
+        let task = tokio::spawn(run(rx, recorder.clone(), VISIBLE));
+        tx.send(UiEvent::Error(DictationError::HotkeyFailed));
+        tokio::time::sleep(VISIBLE / 4).await;
+        tx.send(UiEvent::HotkeyRestored);
+        tokio::time::sleep(VISIBLE * 2).await;
+        drop(tx);
+        task.await.unwrap();
+
+        assert_eq!(recorder.views(), [hotkey_error_view(), OverlayView::Hidden]);
+        let times = recorder.times();
+        assert_eq!(times[1] - times[0], VISIBLE / 4);
     }
 
     #[tokio::test(start_paused = true)]
