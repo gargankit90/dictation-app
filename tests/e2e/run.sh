@@ -43,6 +43,7 @@ ALL_SCENARIOS=(
   e2e_dmg_install
   e2e_launch_at_login
   e2e_hotkey_shortcuts e2e_no_words_transcript
+  e2e_accessibility_revoked
 )
 # Scenarios that need something the VM may lack (a microphone, a Groq key):
 # they may SKIP. Any other scenario that SKIPs fails the run.
