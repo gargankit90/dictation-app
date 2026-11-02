@@ -256,10 +256,11 @@ unsafe extern "C-unwind" fn event_tap_callback(
         // Patched (dictation-app): and say so, since presses and releases
         // may have been lost and no further event may come to show it.
         if let Ok(mut state) = ctx.state.lock() {
-            state.current_modifiers = modifiers_from_flags(
-                state.current_modifiers,
-                CGEventSource::flags_state(CGEventSourceStateID::CombinedSessionState),
-            );
+            // Patched (dictation-app, #156): through the same seam as the key
+            // and mouse path, so a test can give it fixed flags instead of
+            // the live keyboard's.
+            state.current_modifiers =
+                modifiers_from_flags(state.current_modifiers, (ctx.session_flags)());
             let _ = state
                 .event_sender
                 .send(KeyEvent::resync(state.current_modifiers));
@@ -795,6 +796,19 @@ mod tests {
         }
     }
 
+    /// A callback context without a tap (the pseudo-event handler re-enables
+    /// one only if there is one), so what it does with the modifiers can be
+    /// tested without the Accessibility grant, and with the session flags
+    /// the test chooses, not the live keyboard's (#156).
+    fn make_ctx_without_tap(session_flags: fn() -> CGEventFlags) -> CallbackCtx {
+        let (tx, _rx) = mpsc::channel();
+        CallbackCtx {
+            state: Arc::new(Mutex::new(ListenerState::new(tx, None))),
+            tap: Cell::new(None),
+            session_flags,
+        }
+    }
+
     fn deliver_tap_disabled(ctx: &CallbackCtx, event_type: CGEventType) {
         let event = CGEvent::new(None).expect("failed to create CGEvent");
         let returned = unsafe {
@@ -862,24 +876,46 @@ mod tests {
         );
     }
 
+    fn session_nothing_held() -> CGEventFlags {
+        CGEventFlags(0)
+    }
+
+    /// The session says the left Control key is held (and nothing else).
+    fn session_left_control_held() -> CGEventFlags {
+        CGEventFlags(CGEventFlags::MaskControl.0 | 0x0000_0001)
+    }
+
     /// The pseudo-event handler must reconcile modifier state (the original
     /// purpose of PR #4): stale tracked modifiers with no physically-held
-    /// keys must be cleared.
+    /// keys must be cleared. The session's flags are fixed, so holding a key
+    /// while the tests run can't change the outcome (#156).
     #[test]
     fn tap_disabled_pseudo_event_reconciles_modifiers() {
-        let Some(tap) = create_test_tap() else { return };
-
-        let ctx = make_ctx(&tap);
+        let ctx = make_ctx_without_tap(session_nothing_held);
         ctx.state.lock().unwrap().current_modifiers = Modifiers::CTRL_LEFT | Modifiers::SHIFT_RIGHT;
 
         deliver_tap_disabled(&ctx, CGEventType::TapDisabledByTimeout);
 
-        // No modifier keys are physically held while tests run, so
-        // reconciliation against OS flags must clear the stale state.
         assert_eq!(
             ctx.state.lock().unwrap().current_modifiers,
             Modifiers::empty(),
             "stale modifiers must be reconciled away on tap-disable"
+        );
+    }
+
+    /// The reconciliation follows the session's flags (#156): a modifier the
+    /// session still shows as held stays, the one it doesn't is dropped. A
+    /// handler that read the live keyboard instead would not.
+    #[test]
+    fn tap_disabled_pseudo_event_takes_the_session_flags() {
+        let ctx = make_ctx_without_tap(session_left_control_held);
+        ctx.state.lock().unwrap().current_modifiers = Modifiers::CTRL_LEFT | Modifiers::SHIFT_RIGHT;
+
+        deliver_tap_disabled(&ctx, CGEventType::TapDisabledByUserInput);
+
+        assert_eq!(
+            ctx.state.lock().unwrap().current_modifiers,
+            Modifiers::CTRL_LEFT
         );
     }
 }
