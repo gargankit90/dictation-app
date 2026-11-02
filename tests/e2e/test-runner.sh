@@ -423,6 +423,19 @@ run_case textedit_unread 'vm() { return 124; }; textedit_is ""'
 check "an empty TextEdit: a document that can't be read fails, not empty" \
   test "$(status_of textedit_unread)" != 0
 
+# The harness stubs textedit_text; these cases use the real one (lib_full.sh)
+# over a stubbed vm.
+run_case textedit_empty_unread '. tests/e2e/lib_full.sh; vm() { return 124; }; textedit_is_empty'
+check "textedit_is_empty: a document that can't be read is not empty (#153)" \
+  test "$(status_of textedit_empty_unread)" != 0
+check "and says so" has "could not read TextEdit" "$(err textedit_empty_unread)"
+
+run_case textedit_empty_blank '. tests/e2e/lib_full.sh; vm() { printf " \n\n"; }; textedit_is_empty'
+check "textedit_is_empty: a blank document is empty" test "$(status_of textedit_empty_blank)" = 0
+
+run_case textedit_empty_text '. tests/e2e/lib_full.sh; vm() { printf "pasted\n"; }; textedit_is_empty'
+check "textedit_is_empty: a document with text is not empty" test "$(status_of textedit_empty_text)" != 0
+
 run_case textedit_exact 'vm() { esc_b64 "a\nb\n"; }; textedit_is "$(esc_b64 "a\nb\n")" && ! textedit_is "$(esc_b64 "a\nb")"'
 check "TextEdit's text is compared exactly, a trailing newline too" \
   test "$(status_of textedit_exact)" = 0
