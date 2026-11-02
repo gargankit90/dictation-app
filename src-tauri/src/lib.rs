@@ -345,6 +345,7 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
             )
         }
     };
+    let live = with_provider_url(live, &launch, choice);
     tracing::info!(
         transcriber = choice.name(),
         engine = transcribers.name(),
@@ -400,6 +401,36 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         .context("could not listen for later launches")?;
     app.manage(SingleInstance(Mutex::new(Some(instance))));
     Ok(())
+}
+
+/// Test builds: points the real engine at `--debug-provider-url` (a local
+/// stand-in provider, T4a). Release builds have no such flag (it is never
+/// parsed) and this does nothing: the engine always talks to the provider.
+#[cfg(debug_assertions)]
+fn with_provider_url(
+    live: engine::LiveEngine,
+    launch: &flags::LaunchFlags,
+    choice: flags::TranscriberChoice,
+) -> engine::LiveEngine {
+    let Some(url) = &launch.provider_url else {
+        return live;
+    };
+    if choice == flags::TranscriberChoice::Mock {
+        tracing::warn!(%url, "test hook: --debug-provider-url needs the real engine; ignored with the mock");
+        return live;
+    }
+    // This line's text is what the e2e scenarios wait for.
+    tracing::info!(%url, "test hook: the provider is reached at a local URL");
+    live.at(url)
+}
+
+#[cfg(not(debug_assertions))]
+fn with_provider_url(
+    live: engine::LiveEngine,
+    _: &flags::LaunchFlags,
+    _: flags::TranscriberChoice,
+) -> engine::LiveEngine {
+    live
 }
 
 /// Hands each later launch's flags to the running pipeline, and
@@ -458,6 +489,9 @@ fn handle_flags(
             from,
             "the API key commands only run as a process of their own; ignored"
         );
+    }
+    for url in &flags.refused_provider_urls {
+        tracing::warn!(%url, from, "ignoring --debug-provider-url: only a loopback http URL is allowed");
     }
     for flag in &flags.ignored {
         tracing::warn!(%flag, from, "ignoring an unknown flag");
