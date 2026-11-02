@@ -39,6 +39,10 @@
 //! T2: the hotkey is the saved one, at startup and as soon as Settings is
 //! saved (`dictation_pipeline::hotkey_setting`); a save whose hotkey can't
 //! start keeps the old one and says so.
+//!
+//! M5.7: while the microphone is denied the tray menu offers "Relaunch
+//! dictation-app" (M5.2's restart), since a grant made in System Settings
+//! reaches the app only after a relaunch.
 
 // Only the build script and the capability tests need the list.
 #[cfg(test)]
@@ -80,12 +84,15 @@ use dictation_transcribe::engine::{Engine, Transcribers};
 use dictation_transcribe::mock::MockTranscriber;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{App, AppHandle, Manager, RunEvent, WindowEvent};
+use tauri::{App, AppHandle, Manager, RunEvent, WindowEvent, Wry};
 
 const QUIT_ID: &str = "quit";
 const SETTINGS_ID: &str = "settings";
 const REVEAL_LOG_ID: &str = "reveal-log";
 const ONBOARDING_ID: &str = "onboarding";
+const RELAUNCH_ID: &str = "relaunch";
+/// The tray's Relaunch item, offered while the microphone is denied (M5.7).
+const RELAUNCH_LABEL: &str = "Relaunch dictation-app";
 const TRAY_ID: &str = "main";
 const TOOLTIP: &str = "dictation-app";
 /// Where a launch's flags came from, for the log.
@@ -377,6 +384,8 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         .context("no data directory")?
         .join("debug-recordings");
     let (audio, permissions) = shell_audio(&launch, &recordings);
+    // Already refused at launch: the tray offers Relaunch before any press.
+    let microphone_denied = permissions.check(Permission::Microphone) == PermissionStatus::Denied;
     let ports = Ports {
         hotkey,
         audio,
@@ -413,7 +422,12 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     let overlay = overlay::start(app.handle())
         .inspect_err(|error| tracing::error!(%error, "could not create the overlay"))
         .ok();
-    tauri::async_runtime::spawn(show_ui_events(app.handle().clone(), ui_events, overlay));
+    tauri::async_runtime::spawn(show_ui_events(
+        app.handle().clone(),
+        ui_events,
+        overlay,
+        microphone_denied,
+    ));
     tracing::info!(hotkey = %hotkey_control.spec(), "ready");
     onboarding_at_launch(
         app.handle(),
@@ -650,6 +664,37 @@ fn handle_flags(
     Ok(())
 }
 
+/// The tray's menu and its Relaunch item, which [`show_in_tray`] adds and
+/// removes (Tauri menu items can't be hidden).
+struct TrayMenu {
+    menu: Menu<Wry>,
+    relaunch: MenuItem<Wry>,
+}
+
+/// What a tray menu item does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrayAction {
+    Settings,
+    Onboarding,
+    CheckForUpdates,
+    RevealLog,
+    Relaunch,
+    Quit,
+}
+
+/// The action for a tray menu item's id.
+fn tray_action(id: &str) -> Option<TrayAction> {
+    Some(match id {
+        SETTINGS_ID => TrayAction::Settings,
+        ONBOARDING_ID => TrayAction::Onboarding,
+        updater::CHECK_ID => TrayAction::CheckForUpdates,
+        REVEAL_LOG_ID => TrayAction::RevealLog,
+        RELAUNCH_ID => TrayAction::Relaunch,
+        QUIT_ID => TrayAction::Quit,
+        _ => return None,
+    })
+}
+
 fn build_tray(app: &App) -> tauri::Result<()> {
     let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, None::<&str>)?;
     let setup = MenuItem::with_id(app, ONBOARDING_ID, "Set up dictation…", true, None::<&str>)?;
@@ -662,28 +707,33 @@ fn build_tray(app: &App) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit dictation-app", true, None::<&str>)?;
+    // Not in the menu until the microphone is denied.
+    let relaunch = MenuItem::with_id(app, RELAUNCH_ID, RELAUNCH_LABEL, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&settings, &setup, &updates, &reveal, &quit])?;
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip(TOOLTIP)
         .menu(&menu)
-        .on_menu_event(|app, event| {
-            if event.id() == QUIT_ID {
+        .on_menu_event(|app, event| match tray_action(event.id().as_ref()) {
+            Some(TrayAction::Quit) => {
                 tracing::info!("quit from the tray");
                 app.exit(0);
-            } else if event.id() == SETTINGS_ID {
-                show_settings(app);
-            } else if event.id() == ONBOARDING_ID {
-                show_onboarding(app);
-            } else if event.id() == REVEAL_LOG_ID {
-                reveal_log(app);
-            } else if event.id() == updater::CHECK_ID {
-                updater::check_from_tray(app);
             }
+            Some(TrayAction::Settings) => show_settings(app),
+            Some(TrayAction::Onboarding) => show_onboarding(app),
+            Some(TrayAction::RevealLog) => reveal_log(app),
+            Some(TrayAction::CheckForUpdates) => updater::check_from_tray(app),
+            Some(TrayAction::Relaunch) => {
+                if let Some(shell) = app.try_state::<commands::AppShell>() {
+                    commands::relaunch_from_tray(&shell);
+                }
+            }
+            None => {}
         });
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
     tray.build(app)?;
+    app.manage(TrayMenu { menu, relaunch });
     Ok(())
 }
 
@@ -701,9 +751,18 @@ fn reveal_log(app: &AppHandle) {
 /// Logs each state change (never the transcript), passes each event to the
 /// overlay, and shows in the tray's title and tooltip a dictation error
 /// until the next recording starts, and "Hotkey unavailable" while the
-/// hotkey doesn't work ([`TrayStatus`]).
-async fn show_ui_events(app: AppHandle, mut events: UiReceiver, overlay: Option<UiSender>) {
-    let mut tray = TrayStatus::default();
+/// hotkey doesn't work, and in its menu Relaunch while the microphone is
+/// denied (`microphone_denied` at launch; [`TrayStatus`]).
+async fn show_ui_events(
+    app: AppHandle,
+    mut events: UiReceiver,
+    overlay: Option<UiSender>,
+    microphone_denied: bool,
+) {
+    let mut tray = TrayStatus::new(microphone_denied);
+    if microphone_denied {
+        show_in_tray(&app, tray.view());
+    }
     while let Some(event) = events.recv().await {
         if let Some(overlay) = &overlay {
             // Bounded and never blocks (#112): a stalled overlay can't hold
@@ -730,7 +789,7 @@ fn tray_tooltip(view: &TrayView) -> String {
     )
 }
 
-/// Puts `view` in the tray's title (next to the icon) and tooltip.
+/// Puts `view` in the tray's title (next to the icon), tooltip and menu.
 fn show_in_tray(app: &AppHandle, view: &TrayView) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
@@ -740,6 +799,25 @@ fn show_in_tray(app: &AppHandle, view: &TrayView) {
         .and_then(|()| tray.set_tooltip(Some(tray_tooltip(view))))
     {
         tracing::warn!(%error, "could not update the tray");
+    }
+    if let Some(menu) = app.try_state::<TrayMenu>() {
+        offer_relaunch(&menu, view.relaunch);
+    }
+}
+
+/// Adds Relaunch at the top of the tray menu, or removes it, unless it is
+/// already so.
+fn offer_relaunch(tray: &TrayMenu, offered: bool) {
+    let shown = tray.menu.get(RELAUNCH_ID).is_some();
+    let result = match (shown, offered) {
+        (false, true) => tray.menu.insert(&tray.relaunch, 0),
+        (true, false) => tray.menu.remove(&tray.relaunch),
+        _ => return,
+    };
+    match result {
+        // This line's text is what the e2e scenario waits for.
+        Ok(()) => tracing::info!(offered, "tray relaunch item"),
+        Err(error) => tracing::warn!(%error, "could not update the tray menu"),
     }
 }
 
@@ -821,6 +899,23 @@ mod tray_tests {
             assert_eq!(title, expected, "{error}");
             assert_eq!(tray_tooltip(&view), format!("dictation-app: {error}"));
         }
+    }
+
+    /// M5.7 criterion 2: the Relaunch item's id is the Relaunch action, which
+    /// calls the restart M5.2's `relaunch_app` uses
+    /// (`commands::tests::the_tray_relaunch_restarts_the_app`).
+    #[test]
+    fn m5_7_criterion_2_the_relaunch_item_is_the_relaunch_action() {
+        assert_eq!(tray_action(RELAUNCH_ID), Some(TrayAction::Relaunch));
+        assert_eq!(tray_action(QUIT_ID), Some(TrayAction::Quit));
+        assert_eq!(tray_action(SETTINGS_ID), Some(TrayAction::Settings));
+        assert_eq!(tray_action(ONBOARDING_ID), Some(TrayAction::Onboarding));
+        assert_eq!(tray_action(REVEAL_LOG_ID), Some(TrayAction::RevealLog));
+        assert_eq!(
+            tray_action(updater::CHECK_ID),
+            Some(TrayAction::CheckForUpdates)
+        );
+        assert_eq!(tray_action("something else"), None);
     }
 
     #[test]

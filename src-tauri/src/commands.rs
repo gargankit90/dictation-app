@@ -576,6 +576,16 @@ pub async fn relaunch_app(
     Ok(())
 }
 
+/// The tray's Relaunch while the microphone is denied (M5.7, #161): the
+/// same restart as [`relaunch_app`], without its onboarding marker. The
+/// relaunched app shows onboarding by itself if dictation still can't
+/// work.
+pub fn relaunch_from_tray(shell: &AppShell) {
+    // This line's text is what the e2e scenario waits for.
+    tracing::info!("relaunching from the tray");
+    shell.0.restart();
+}
+
 /// Every command, for the invoke handler and the bindings. Generic over the
 /// runtime so the ACL tests can run the real handler on Tauri's mock runtime.
 pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
@@ -630,6 +640,27 @@ mod tests {
             std::fs::write(committed(), &text).unwrap();
         }
         text
+    }
+
+    /// Counts restarts.
+    #[derive(Default)]
+    struct CountingShell(std::sync::atomic::AtomicUsize);
+
+    impl Shell for CountingShell {
+        fn hide_window(&self) {}
+        fn restart(&self) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    /// M5.7 criterion 2: the tray's Relaunch restarts the app once, through
+    /// the same `Shell::restart` as `relaunch_app`.
+    #[test]
+    fn the_tray_relaunch_restarts_the_app() {
+        let counting = Arc::new(CountingShell::default());
+        let shell = AppShell(Arc::clone(&counting) as Arc<dyn Shell>);
+        relaunch_from_tray(&shell);
+        assert_eq!(counting.0.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]
