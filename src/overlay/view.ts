@@ -13,6 +13,23 @@ export type OverlayView =
 /** The one event the overlay listens to (sent only to the overlay window). */
 export const OVERLAY_EVENT = "overlay-view";
 
+/**
+ * The document title the overlay sets once its listener is registered, with a
+ * count after it. An event sent before that is lost, and the page may not
+ * call commands or emit events, so the title is how it tells the app to send
+ * the current view again (#119; `LISTENING_TITLE` in
+ * `src-tauri/src/overlay.rs`).
+ */
+export const LISTENING_TITLE = "dictation-app overlay listening";
+
+let listening = 0;
+
+/** Sets a new listening title, so the app sees a change each time. */
+export function announceListening() {
+  listening += 1;
+  document.title = `${LISTENING_TITLE} ${String(listening)}`;
+}
+
 export const HIDDEN: OverlayView = { state: "hidden" };
 
 /** Reads an event payload; anything unexpected hides the overlay. */

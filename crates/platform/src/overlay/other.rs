@@ -4,7 +4,7 @@
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{AppHandle, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
-use super::{NativeWindow, OverlaySpec};
+use super::{NativeWindow, OnTitle, OverlaySpec};
 
 pub(super) fn plugin<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("dictation-overlay").build()
@@ -19,6 +19,7 @@ impl<R: Runtime> Window<R> {
         app: &AppHandle<R>,
         spec: &OverlaySpec,
         url: WebviewUrl,
+        on_title: OnTitle,
     ) -> tauri::Result<Self> {
         let window = WebviewWindowBuilder::new(app, spec.label, url)
             .title(spec.label)
@@ -32,6 +33,7 @@ impl<R: Runtime> Window<R> {
             .focused(false)
             .focusable(false)
             .visible(false)
+            .on_document_title_changed(move |_, title| on_title(title))
             .build()?;
         window.set_ignore_cursor_events(true)?;
         Ok(Self { window })

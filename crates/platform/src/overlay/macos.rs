@@ -20,7 +20,7 @@ use tauri_nspanel::{
     CollectionBehavior, PanelBuilder, PanelHandle, PanelLevel, StyleMask, tauri_panel,
 };
 
-use super::{NativeWindow, OverlaySpec};
+use super::{NativeWindow, OnTitle, OverlaySpec};
 
 tauri_panel! {
     panel!(OverlayPanel {
@@ -49,6 +49,7 @@ impl<R: Runtime> Window<R> {
         app: &AppHandle<R>,
         spec: &OverlaySpec,
         url: WebviewUrl,
+        on_title: OnTitle,
     ) -> tauri::Result<Self> {
         let panel = PanelBuilder::<R, OverlayPanel<R>>::new(app, spec.label)
             .url(url)
@@ -80,6 +81,7 @@ impl<R: Runtime> Window<R> {
                     .focusable(false)
                     .skip_taskbar(true)
                     .visible(false)
+                    .on_document_title_changed(move |_, title| on_title(title))
             })
             .build()?;
         // Not `panel.to_window()`, which turns the panel back into a window.
