@@ -24,7 +24,8 @@ for scenario_file in "$E2E_DIR"/scenarios/*.sh; do
 done
 
 ALL_SCENARIOS=(
-  e2e_startup e2e_single_instance_cold_race e2e_press_release e2e_real_mic
+  e2e_startup e2e_single_instance_cold_race e2e_press_release
+  e2e_microphone_denied_then_recover e2e_real_mic
   e2e_mock_paste e2e_paste_leaves_no_modifier e2e_clipboard_restore e2e_user_copy_wins
   e2e_silence e2e_rapid
   e2e_secure_input_blocks_paste
@@ -35,7 +36,7 @@ ALL_SCENARIOS=(
   e2e_focus_switch_during_transcription e2e_unicode_multiline_selection_paste
   e2e_quit_during_request
   e2e_error_bad_key e2e_real_groq
-  e2e_overlay_focus
+  e2e_overlay_focus e2e_overlay_rendered_states_and_error
   e2e_smart_space e2e_layout_paste e2e_image_clipboard_restore
   e2e_dmg_install
   e2e_launch_at_login

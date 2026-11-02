@@ -124,7 +124,18 @@ Tauri is a thin layer on top.
   has opened System Settings, the step also says "Relaunch to finish" with a
   Relaunch button, which restarts the app and reopens onboarding.
 - **Overlay:** a non-activating panel that never takes focus
-  (`tauri-nspanel`), or the paste lands in the overlay.
+  (`tauri-nspanel`), or the paste lands in the overlay. An event sent to its
+  page before the page's listener is registered is lost, so the page says
+  when it listens (its document title; it may not call commands) and the
+  app sends the current view again (#119). Checked by
+  `e2e_overlay_rendered_states_and_error` (T4b).
+- **Microphone permission:** the first press asks (the macOS prompt); an
+  "Allow" there works at once. After "Don't Allow", a grant in System
+  Settings › Privacy & Security › Microphone reaches the app only after it
+  is quit and reopened: macOS 15 keeps reporting the refusal to the running
+  app (`AVCaptureDevice` authorization status, checked in the VM over 25 s,
+  T4b). So the error says to allow it there and reopen the app. Checked by
+  `e2e_microphone_denied_then_recover` (#126).
 - **Paste target:** the text goes to whatever has keyboard focus when it is
   pasted, not where the dictation started. A user who switches windows (or
   apps) while a transcription is pending gets the text in the new one; the

@@ -82,6 +82,12 @@ pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
     imp::plugin()
 }
 
+/// Called with the overlay page's document title whenever it changes. The
+/// page has no commands and can't emit events (its capability only lets it
+/// listen), so its title is the one thing it can tell the app: the shell
+/// uses it to learn when the page's event listener is registered (#119).
+pub type OnTitle = Box<dyn Fn(String) + Send + 'static>;
+
 /// The overlay window, created hidden.
 pub struct Overlay<R: Runtime> {
     app: AppHandle<R>,
@@ -91,13 +97,14 @@ pub struct Overlay<R: Runtime> {
 
 impl<R: Runtime> Overlay<R> {
     /// Creates the overlay window, hidden. Call on the main thread (in the
-    /// app's `setup`), after registering [`plugin`].
+    /// app's `setup`), after registering [`plugin`]. `on_title` gets the
+    /// page's document title each time it changes ([`OnTitle`]).
     ///
     /// # Errors
     ///
     /// If Tauri can't create the window (or, on macOS, turn it into a panel).
-    pub fn create(app: &AppHandle<R>, spec: OverlaySpec) -> tauri::Result<Self> {
-        let inner = imp::Window::create(app, &spec, WebviewUrl::App(spec.page.into()))?;
+    pub fn create(app: &AppHandle<R>, spec: OverlaySpec, on_title: OnTitle) -> tauri::Result<Self> {
+        let inner = imp::Window::create(app, &spec, WebviewUrl::App(spec.page.into()), on_title)?;
         Ok(Self {
             app: app.clone(),
             spec,

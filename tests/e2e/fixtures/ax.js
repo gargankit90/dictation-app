@@ -33,8 +33,24 @@
 //                                    checks only that it holds as many
 //                                    characters; prints "typed"
 //   press <app> <window> <button>    presses a button
+//   check-get <app> <window> <box>   "checked" or "unchecked" (a checkbox,
+//                                    matched like a field)
+//   check-set <app> <window> <box> <on|off>  presses the checkbox if it
+//                                    isn't already so, then waits (5 s) until
+//                                    it is; prints "checked" or "unchecked"
 //   wait-text <app> <window> <text> <secs>  until some element shows <text>
 //   close <app> <window>             presses the window's close button
+//   overlay <app>                    what the overlay window shows: "hidden"
+//                                    (no window titled "overlay" in AXWindows,
+//                                    which lists only windows on screen) or
+//                                    "shown: <text>", its WebView's text
+//                                    (AXStaticText values, space-joined;
+//                                    "shown: " alone for a blank page)
+//   overlay-wait <app> <want> <secs>  until overlay prints <want> exactly
+//                                    ("hidden", "shown: Recording", ...); prints it
+//   overlay-watch <app> <secs>       samples overlay every 0.1 s for <secs> and
+//                                    prints "<ms> <what overlay printed>" at the
+//                                    start and at each change
 //   dump <app> [window]              the element tree, for debugging a failure
 //
 // <window> is text in the window's title; if no title has it and the app has
@@ -313,6 +329,30 @@ function matchesField(element, field) {
   return names.some((name) => name.trim().toLowerCase() === want);
 }
 
+function matchesCheckbox(element, name) {
+  if (text(element, "AXRole") !== "AXCheckBox") return false;
+  const want = name.toLowerCase();
+  const names = [
+    text(element, "AXDOMIdentifier"),
+    text(element, "AXIdentifier"),
+    text(element, "AXTitle"),
+    text(element, "AXDescription"),
+  ];
+  return names.some((n) => n.trim().toLowerCase() === want);
+}
+
+function findCheckbox(window, name) {
+  const found = walk(window, (element) => matchesCheckbox(element, name));
+  if (found === undefined) fail("no checkbox " + JSON.stringify(name));
+  return found;
+}
+
+// A checkbox's AXValue is a number: 1 checked, 0 not (2 mixed).
+function isChecked(box) {
+  const value = get(box, "AXValue");
+  return value !== undefined && Number(ObjC.unwrap(value)) === 1;
+}
+
 function findField(window, field) {
   const found = walk(window, (element) => matchesField(element, field));
   if (found === undefined) fail("no text field " + JSON.stringify(field));
@@ -337,6 +377,34 @@ function showsText(window, wanted) {
       ["AXValue", "AXTitle", "AXDescription"].some((name) => text(element, name).includes(wanted)),
     ) !== undefined
   );
+}
+
+// --- The overlay ------------------------------------------------------------------
+
+const OVERLAY_TITLE = "overlay";
+
+// What the overlay shows: "hidden", or "shown: " and its rendered text. Read
+// from the WebView's accessibility tree, so it is what WebKit laid out, not
+// what the app meant to send.
+function overlayState(appEl) {
+  const windows = get(appEl, "AXWindows");
+  let overlay;
+  if (windows !== undefined) {
+    for (let i = 0; i < windows.count; i++) {
+      const w = windows.objectAtIndex(i);
+      if (text(w, "AXTitle") === OVERLAY_TITLE) overlay = w;
+    }
+  }
+  if (overlay === undefined) return "hidden";
+  const parts = [];
+  walk(overlay, (element) => {
+    if (text(element, "AXRole") === "AXStaticText") {
+      const value = text(element, "AXValue").trim();
+      if (value !== "") parts.push(value);
+    }
+    return false;
+  });
+  return "shown: " + parts.join(" ");
 }
 
 // --- Keys -----------------------------------------------------------------------
@@ -474,6 +542,19 @@ function run(argv) {
       if (err !== 0) fail("pressing " + rest[1] + " failed (AX error " + err + ")");
       return "pressed " + rest[1];
     }
+    case "check-get":
+      return isChecked(findCheckbox(findWindow(appEl, rest[0]), rest[1])) ? "checked" : "unchecked";
+    case "check-set": {
+      if (rest[2] !== "on" && rest[2] !== "off") fail("check-set wants on or off, not " + rest[2]);
+      const want = rest[2] === "on";
+      const box = findCheckbox(findWindow(appEl, rest[0]), rest[1]);
+      if (isChecked(box) !== want) {
+        const err = press(box, 5.0);
+        if (err !== 0) fail("pressing " + rest[1] + " failed (AX error " + err + ")");
+        waitFor(5, rest[1] + " " + rest[2], () => isChecked(box) === want);
+      }
+      return want ? "checked" : "unchecked";
+    }
     case "wait-text": {
       const window = findWindow(appEl, rest[0]);
       waitFor(Number(rest[2] || 10), JSON.stringify(rest[1]), () => showsText(window, rest[1]));
@@ -485,6 +566,41 @@ function run(argv) {
       const err = press(button, 5.0);
       if (err !== 0) fail("pressing the close button failed (AX error " + err + ")");
       return "closed";
+    }
+    case "overlay":
+      return overlayState(appEl);
+    case "overlay-wait": {
+      const deadline = Date.now() + Number(rest[1] || 10) * 1000;
+      for (;;) {
+        const now = overlayState(appEl);
+        if (now === rest[0]) return now;
+        if (Date.now() > deadline) {
+          fail(
+            "overlay " +
+              JSON.stringify(rest[0]) +
+              " not within " +
+              rest[1] +
+              "s; it is " +
+              JSON.stringify(now),
+          );
+        }
+        delay(0.1);
+      }
+    }
+    case "overlay-watch": {
+      const start = Date.now();
+      const end = start + Number(rest[0] || 5) * 1000;
+      const lines = [];
+      let last;
+      while (Date.now() < end) {
+        const now = overlayState(appEl);
+        if (now !== last) {
+          lines.push(Date.now() - start + " " + now);
+          last = now;
+        }
+        delay(0.1);
+      }
+      return lines.join("\n");
     }
     case "dump": {
       const lines = [];

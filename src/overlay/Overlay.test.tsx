@@ -6,7 +6,7 @@ import { emit } from "@tauri-apps/api/event";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Overlay, OverlayContent } from "./Overlay";
-import { OVERLAY_EVENT, parseView } from "./view";
+import { LISTENING_TITLE, OVERLAY_EVENT, parseView } from "./view";
 import type { OverlayView } from "./view";
 
 const MESSAGE = "No speech was recognised.";
@@ -80,6 +80,41 @@ describe("criterion_m5_1_1 Overlay follows the overlay event", () => {
 
     await send({ state: "hidden" });
     expect(container.innerHTML).toBe("");
+  });
+
+  // #119: an event sent before the listener is registered is lost, so the
+  // page says it listens through its title and the app sends the view again.
+  it("says through its title once it listens, with a new title each time", async () => {
+    // The same text as LISTENING_TITLE in src-tauri/src/overlay.rs.
+    expect(LISTENING_TITLE).toBe("dictation-app overlay listening");
+    document.title = "dictation-app overlay";
+    const first = render(<Overlay />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const title = document.title;
+    expect(title.startsWith(`${LISTENING_TITLE} `)).toBe(true);
+    // And it does listen by then.
+    await send({ state: "recording" });
+    expect(screen.getByRole("status").textContent).toBe("Recording");
+    first.unmount();
+
+    render(<Overlay />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(document.title.startsWith(`${LISTENING_TITLE} `)).toBe(true);
+    expect(document.title).not.toBe(title);
+  });
+
+  it("doesn't announce a listener it has already dropped", async () => {
+    document.title = "dictation-app overlay";
+    const { unmount } = render(<Overlay />);
+    unmount();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(document.title).toBe("dictation-app overlay");
   });
 
   it("stops listening once unmounted", async () => {

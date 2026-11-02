@@ -345,6 +345,49 @@ quit_from_tray() {
   return 1
 }
 
+# --- The overlay's rendered text (T4b, #119) -----------------------------------
+#
+# What the overlay window really shows, read from its WebView's accessibility
+# tree (ax.js overlay): "hidden" when the panel isn't on screen, otherwise
+# "shown: " and the text WebKit laid out ("shown: " alone for a blank page).
+# The log's `overlay shown state=…` only says what the app sent.
+
+OVERLAY_HIDDEN=hidden
+OVERLAY_RECORDING="shown: Recording"
+OVERLAY_TRANSCRIBING="shown: Transcribing…"
+
+# overlay_shows <want> [seconds]: until the overlay shows exactly <want>,
+# within [seconds] (default 5); says what it showed instead.
+overlay_shows() {
+  job_says "$1" ax overlay-wait "$APP_NAME" "$1" "${2:-5}"
+}
+
+# overlay_watch <seconds>: what the overlay showed over the next <seconds>,
+# one "<ms> <state>" line at the start and at each change.
+overlay_watch() {
+  ax overlay-watch "$APP_NAME" "$1"
+}
+
+# log_gap_ms <from regex> <to regex>: the milliseconds between the last log
+# line matching <from> and the first line after it matching <to>; fails if
+# either is missing.
+log_gap_ms() {
+  app_log | awk -v from="$1" -v to="$2" '
+    function secs(line,   t, h, m, s) {
+      t = substr(line, index(line, "T") + 1)
+      h = substr(t, 1, 2); m = substr(t, 4, 2); s = substr(t, 7, 9)
+      return h * 3600 + m * 60 + s
+    }
+    $0 ~ from { start = secs($0); end = ""; next }
+    start != "" && end == "" && $0 ~ to { end = secs($0) }
+    END {
+      if (start == "" || end == "") exit 1
+      gap = end - start
+      if (gap < 0) gap += 86400
+      printf "%d\n", gap * 1000 + 0.5
+    }'
+}
+
 # --- TextEdit and processes, small predicates for expect -----------------------
 
 textedit_is_empty() {
@@ -489,8 +532,9 @@ key_scenario_end() {
 
 # For testing the cleanup: E2E_INJECT_FAILURE=<point> makes a scenario fail
 # at that point, as a crash would. Points: after_key_down (right after a
-# key-down is posted) and mid_hold (inside real_key_hold's job, between its
-# down and up).
+# key-down is posted), mid_hold (inside real_key_hold's job, between its
+# down and up) and after_mic_denied (e2e_microphone_denied_then_recover,
+# right after the microphone was refused).
 inject_failure() {
   if [ "${E2E_INJECT_FAILURE:-}" = "$1" ]; then
     die "injected failure at $1"

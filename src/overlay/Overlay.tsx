@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { HIDDEN, OVERLAY_EVENT, parseView } from "./view";
+import { HIDDEN, OVERLAY_EVENT, announceListening, parseView } from "./view";
 import type { OverlayView } from "./view";
 import "./overlay.css";
 
 /**
  * The overlay window's content: follows {@link OVERLAY_EVENT}. The window
  * itself is shown and hidden from Rust; this only draws the state, and
- * draws nothing while hidden.
+ * draws nothing while hidden. Once it listens it says so through the
+ * document title ({@link announceListening}), and the app sends the current
+ * state again.
  */
 export function Overlay() {
   const [view, setView] = useState<OverlayView>(HIDDEN);
@@ -19,6 +21,15 @@ export function Overlay() {
         setView(parseView(event.payload));
       }
     });
+    // Anything sent before now was lost: ask for the current view (#119).
+    subscribed.then(
+      () => {
+        if (active) {
+          announceListening();
+        }
+      },
+      () => undefined,
+    );
     return () => {
       active = false;
       subscribed.then(
