@@ -237,6 +237,31 @@ mod tests {
         assert_eq!(again, [error]);
     }
 
+    /// #155 with #119: once the restored hotkey hides its error, a page
+    /// that starts listening after that gets Hidden, not the stale error.
+    #[test]
+    fn a_page_listening_after_the_hotkey_is_restored_gets_hidden() {
+        use dictation_core::error::DictationError;
+        use dictation_pipeline::overlay::OverlayModel;
+        use dictation_pipeline::pipeline::UiEvent;
+
+        let mut model = OverlayModel::default();
+        let relay = Relay::default();
+        let mut sent = Vec::new();
+        for event in [
+            UiEvent::Error(DictationError::HotkeyFailed),
+            UiEvent::HotkeyRestored,
+        ] {
+            let change = model.on_event(&event).expect("a change");
+            relay.send(&change.view, |view| sent.push(view.clone()));
+        }
+        assert_eq!(sent.last(), Some(&OverlayView::Hidden));
+
+        let (did, again) = title_sends(&relay, &format!("{LISTENING_TITLE} 1"));
+        assert!(did);
+        assert_eq!(again, [OverlayView::Hidden]);
+    }
+
     #[test]
     fn before_any_view_a_listening_page_gets_hidden() {
         let (did, sent) = title_sends(&Relay::default(), &format!("{LISTENING_TITLE} 1"));

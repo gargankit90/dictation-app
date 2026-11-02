@@ -37,6 +37,13 @@
 //!   that must tell which dictation's text ended up where (the texts can't
 //!   hold a comma). Only the first launch's counts.
 //!
+//! - `--debug-onboarding` makes a scripted test launch decide about
+//!   onboarding like a person's launch (M5.2): it shows at launch if a
+//!   permission or the key is missing. A launch with `--debug-audio-file` or
+//!   the mock engine otherwise never shows it at launch, so it can't take
+//!   the focus from the window the test pastes into. Only the first launch's
+//!   counts.
+//!
 //! - `--debug-provider-url <url>` sends the real engine's requests (and
 //!   Settings' Test key) to `url` instead of the provider's own endpoint, so
 //!   the signed test build can talk to a local stand-in provider (T4a). Only
@@ -72,6 +79,10 @@ pub const MOCK_TEXT_FLAG: &str = "--mock-text";
 /// transcriber answers to the first dictations, one each, in order (debug
 /// builds only).
 pub const MOCK_TEXT_SEQUENCE_FLAG: &str = "--mock-text-sequence";
+
+/// `--debug-onboarding`: decide about onboarding at launch like a person's
+/// launch, even in a scripted test launch (debug builds only).
+pub const DEBUG_ONBOARDING_FLAG: &str = "--debug-onboarding";
 
 /// `--debug-provider-url <url>` (or `=<url>`): where the real engine sends
 /// its requests instead of the provider's endpoint (debug builds only;
@@ -158,6 +169,9 @@ pub struct LaunchFlags {
     pub refused_provider_urls: Vec<String>,
     /// The engine `--transcriber` asked for; the last one wins.
     pub transcriber: Option<TranscriberChoice>,
+    /// Decide about onboarding at launch like a person's launch (debug builds
+    /// only, `--debug-onboarding`).
+    pub show_onboarding: bool,
     /// Engine names `--transcriber` was given that no engine has.
     pub unknown_engines: Vec<String>,
     /// Arguments this build doesn't act on, for a warning.
@@ -217,6 +231,7 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
             PRESS_FLAG if test_flags => flags.events.push(HotkeyEvent::Pressed),
             RELEASE_FLAG if test_flags => flags.events.push(HotkeyEvent::Released),
             DEBUG_SAVE_AUDIO_FLAG if test_flags => flags.save_audio = true,
+            DEBUG_ONBOARDING_FLAG if test_flags => flags.show_onboarding = true,
             key_flag if test_flags && KeyCommand::from_flag(key_flag).is_some() => {
                 flags.key_commands.extend(KeyCommand::from_flag(key_flag));
             }
@@ -411,6 +426,18 @@ mod tests {
         let flags = parse(&argv(&["--debug-hotkey-outage"]), false);
         assert!(flags.outage_commands.is_empty());
         assert_eq!(flags.ignored, ["--debug-hotkey-outage"]);
+    }
+
+    /// M5.2: only a debug build can be told to show onboarding.
+    #[test]
+    fn debug_builds_take_the_onboarding_flag() {
+        let flags = parse(&argv(&["--debug-onboarding"]), true);
+        assert!(flags.show_onboarding);
+        assert!(flags.ignored.is_empty());
+        assert!(!flags.configure_pipeline());
+        let flags = parse(&argv(&["--debug-onboarding"]), false);
+        assert!(!flags.show_onboarding);
+        assert_eq!(flags.ignored, ["--debug-onboarding"]);
     }
 
     #[test]

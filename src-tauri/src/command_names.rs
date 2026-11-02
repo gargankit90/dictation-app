@@ -13,4 +13,9 @@ pub const COMMAND_NAMES: &[&str] = &[
     "set_api_key",
     "has_api_key",
     "test_api_key",
+    "get_onboarding",
+    "request_permission",
+    "set_onboarding_step",
+    "finish_onboarding",
+    "relaunch_app",
 ];

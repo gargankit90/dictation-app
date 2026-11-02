@@ -18,6 +18,13 @@
 //! - **The hotkey's return is kept.** The newest
 //!   [`UiEvent::HotkeyRestored`] stays too, so a UI that showed the hotkey
 //!   as down learns it works again.
+//! - **So is its newest outage (#154).** A
+//!   [`DictationError::HotkeyFailed`] that arrives with the error limit
+//!   reached is queued anyway, and the hotkey transitions queued before it
+//!   (outages and returns, which it supersedes) are dropped, so the last
+//!   transition a UI reads is always the listener's real state. The older
+//!   outages dropped this way count as dropped errors. The limit is then
+//!   exceeded by at most this one error.
 //! - **Recovery.** Reading again picks up at once: what's queued, then the
 //!   live stream.
 
@@ -25,6 +32,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use dictation_core::error::DictationError;
 use tokio::sync::Notify;
 use tokio::sync::mpsc::error::TryRecvError;
 
@@ -51,6 +59,16 @@ impl Queue {
             .iter()
             .filter(|event| matches!(event, UiEvent::Error(_)))
             .count()
+    }
+
+    /// Drops every queued hotkey transition ([`DictationError::HotkeyFailed`]
+    /// and [`UiEvent::HotkeyRestored`]); returns how many outages (errors)
+    /// that dropped.
+    fn drop_hotkey_transitions(&mut self) -> u64 {
+        let before = self.errors();
+        self.events.retain(|event| !is_hotkey_transition(event));
+        // At most UI_EVENTS_QUEUED, so the conversion can't fail.
+        u64::try_from(before - self.errors()).unwrap_or(u64::MAX)
     }
 
     /// Keeps every error, the newest phase and the newest
@@ -114,6 +132,18 @@ impl UiSender {
             if queue.events.len() >= UI_EVENTS_QUEUED {
                 queue.coalesce();
             }
+            if is_hotkey_outage(&event) && queue.errors() >= UI_ERRORS_QUEUED {
+                // #154: the newest outage is the listener's real state; the
+                // transitions before it are history it supersedes.
+                let superseded = queue.drop_hotkey_transitions();
+                queue.events.push_back(event);
+                drop(queue);
+                if superseded > 0 {
+                    self.count_dropped_errors(superseded);
+                }
+                self.shared.ready.notify_one();
+                return;
+            }
             if matches!(event, UiEvent::Error(_)) && queue.errors() >= UI_ERRORS_QUEUED {
                 drop(queue);
                 let dropped = self.count_dropped_error();
@@ -131,8 +161,23 @@ impl UiSender {
 impl UiSender {
     /// Counts one more dropped error and returns the total so far.
     fn count_dropped_error(&self) -> u64 {
-        self.shared.dropped_errors.fetch_add(1, Ordering::Relaxed) + 1
+        self.count_dropped_errors(1)
     }
+
+    /// Counts `n` more dropped errors and returns the total so far.
+    fn count_dropped_errors(&self, n: u64) -> u64 {
+        self.shared.dropped_errors.fetch_add(n, Ordering::Relaxed) + n
+    }
+}
+
+/// An outage of the hotkey listener.
+fn is_hotkey_outage(event: &UiEvent) -> bool {
+    matches!(event, UiEvent::Error(DictationError::HotkeyFailed))
+}
+
+/// A change in whether the hotkey works: an outage or its return.
+fn is_hotkey_transition(event: &UiEvent) -> bool {
+    is_hotkey_outage(event) || matches!(event, UiEvent::HotkeyRestored)
 }
 
 /// Whether the `dropped`th dropped error is logged: the first, then one in
@@ -215,9 +260,9 @@ impl std::fmt::Debug for UiReceiver {
 #[cfg(test)]
 mod tests {
     use dictation_core::coordinator::Phase;
-    use dictation_core::error::DictationError;
 
     use super::*;
+    use crate::tray::{HOTKEY_UNAVAILABLE, TrayStatus};
 
     fn phase(phase: Phase) -> UiEvent {
         UiEvent::StateChanged(phase)
@@ -361,6 +406,96 @@ mod tests {
                 phase(Phase::Idle)
             ]
         );
+    }
+
+    /// The tray's title after reading everything queued.
+    fn tray_title_after(rx: &mut UiReceiver) -> Option<String> {
+        let mut tray = TrayStatus::default();
+        for event in drain(rx) {
+            tray.on_event(&event);
+        }
+        tray.view().title.clone()
+    }
+
+    fn hotkey_failed() -> UiEvent {
+        UiEvent::Error(DictationError::HotkeyFailed)
+    }
+
+    /// #154's reproduction: with the error limit nearly reached, an outage,
+    /// its return and a newer outage. The tray must end on the newer
+    /// outage, not clear.
+    #[test]
+    fn a_full_error_queue_keeps_the_newest_hotkey_outage() {
+        let (tx, mut rx) = ui_channel();
+        for _ in 0..UI_ERRORS_QUEUED - 1 {
+            tx.send(error());
+        }
+        tx.send(hotkey_failed());
+        tx.send(UiEvent::HotkeyRestored);
+        tx.send(hotkey_failed());
+        // The first outage was superseded (and counted); the newest is kept.
+        assert_eq!(rx.dropped_errors(), 1);
+        assert_eq!(rx.queued(), UI_ERRORS_QUEUED);
+        assert_eq!(
+            tray_title_after(&mut rx).as_deref(),
+            Some(HOTKEY_UNAVAILABLE)
+        );
+    }
+
+    /// The reverse: the same sequence then one more return. The tray must
+    /// end clear.
+    #[test]
+    fn a_full_error_queue_keeps_the_newest_hotkey_return() {
+        let (tx, mut rx) = ui_channel();
+        for _ in 0..UI_ERRORS_QUEUED - 1 {
+            tx.send(error());
+        }
+        tx.send(hotkey_failed());
+        tx.send(UiEvent::HotkeyRestored);
+        tx.send(hotkey_failed());
+        tx.send(UiEvent::HotkeyRestored);
+        assert_eq!(tray_title_after(&mut rx), None);
+    }
+
+    /// An outage after its return was already read, with the limit
+    /// reached by other errors: nothing queued to supersede, still kept.
+    #[test]
+    fn an_outage_is_kept_when_other_errors_fill_the_limit() {
+        let (tx, mut rx) = ui_channel();
+        tx.send(hotkey_failed());
+        tx.send(UiEvent::HotkeyRestored);
+        assert_eq!(tray_title_after(&mut rx), None);
+        for _ in 0..UI_ERRORS_QUEUED {
+            tx.send(error());
+        }
+        tx.send(hotkey_failed());
+        assert_eq!(rx.dropped_errors(), 0);
+        assert_eq!(rx.queued(), UI_ERRORS_QUEUED + 1);
+        let read = drain(&mut rx);
+        assert_eq!(read.last(), Some(&hotkey_failed()));
+    }
+
+    /// A listener that keeps failing and coming back while nothing reads
+    /// keeps the queue bounded, and the last transition is the real one.
+    #[test]
+    fn a_flapping_hotkey_stays_bounded_and_ends_on_its_state() {
+        for ends_down in [true, false] {
+            let (tx, mut rx) = ui_channel();
+            for _ in 0..UI_ERRORS_QUEUED {
+                tx.send(error());
+            }
+            for _ in 0..1000 {
+                tx.send(hotkey_failed());
+                tx.send(phase(Phase::Idle));
+                tx.send(UiEvent::HotkeyRestored);
+                assert!(rx.queued() <= UI_EVENTS_QUEUED);
+            }
+            if ends_down {
+                tx.send(hotkey_failed());
+            }
+            let expected = ends_down.then(|| HOTKEY_UNAVAILABLE.to_owned());
+            assert_eq!(tray_title_after(&mut rx), expected, "ends_down={ends_down}");
+        }
     }
 
     #[test]

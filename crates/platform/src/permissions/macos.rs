@@ -8,11 +8,14 @@ use objc2::runtime::Bool;
 use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio};
 
 // SAFETY: these declarations match the C signatures in ApplicationServices
-// (AXUIElement.h); each call site's `unsafe` block upholds its contract.
+// (AXUIElement.h); each call site's `unsafe` block upholds its contract. Both
+// functions return `Boolean`, an `unsigned char` (MacTypes.h), so `u8`, not
+// `bool`: any non-zero value is true (#46), as for
+// `IsSecureEventInputEnabled` in `secure_input.rs`.
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
-    fn AXIsProcessTrusted() -> bool;
-    fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+    fn AXIsProcessTrusted() -> u8;
+    fn AXIsProcessTrustedWithOptions(options: *const c_void) -> u8;
     static kAXTrustedCheckOptionPrompt: *const c_void;
 }
 
@@ -47,7 +50,7 @@ unsafe extern "C" {
 pub fn is_accessibility_trusted() -> bool {
     // SAFETY: AXIsProcessTrusted takes no arguments, has no preconditions
     // and is safe to call from any thread.
-    unsafe { AXIsProcessTrusted() }
+    unsafe { AXIsProcessTrusted() != 0 }
 }
 
 /// Shows the system Accessibility prompt if this process isn't trusted yet
@@ -78,7 +81,7 @@ fn prompt_for_accessibility() -> Result<bool, PermissionError> {
     // SAFETY: `options` is the non-null CFDictionary created above, which we
     // own (Create rule) and release exactly once after the call.
     let trusted = unsafe {
-        let trusted = AXIsProcessTrustedWithOptions(options);
+        let trusted = AXIsProcessTrustedWithOptions(options) != 0;
         CFRelease(options);
         trusted
     };

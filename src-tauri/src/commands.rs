@@ -25,6 +25,7 @@
 
 use std::sync::Arc;
 
+use dictation_core::onboarding::Step;
 use dictation_core::settings::{Provider, Settings};
 use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, UndoFailed};
@@ -37,6 +38,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::engine::{self, LiveEngine};
+use crate::onboarding::{self, AppPermission, Onboarding, OnboardingStatus, OsPermissions};
 
 /// Where the bindings go, relative to `src-tauri/`.
 pub const BINDINGS_PATH: &str = "../src/bindings.ts";
@@ -49,6 +51,20 @@ pub struct LoginItem(pub Arc<dyn LaunchAtLogin>);
 
 /// The running hotkey, which saving the settings switches (T2).
 pub struct ActiveHotkey(pub HotkeyControl);
+
+/// The app's config directory, where Relaunch leaves its marker (M5.2).
+pub struct ConfigDir(pub std::path::PathBuf);
+
+/// What the onboarding commands ask of the app itself (M5.2).
+pub trait Shell: Send + Sync {
+    /// Hides the settings window.
+    fn hide_window(&self);
+    /// Quits and starts the app again.
+    fn restart(&self);
+}
+
+/// The app, for the onboarding commands.
+pub struct AppShell(pub Arc<dyn Shell>);
 
 /// Runs `call` on the config on the blocking pool; errors become the
 /// message the UI shows (never a key).
@@ -464,6 +480,102 @@ pub async fn test_api_key(
     key_test(&state.0, engine.inner(), provider, key, &base_url).await
 }
 
+/// The view the settings window shows and, for onboarding (M5.2), the step
+/// the user is on and the two permissions. Never blocks: the key isn't read.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_onboarding(
+    onboarding: State<'_, Arc<Onboarding>>,
+    permissions: State<'_, OsPermissions>,
+) -> Result<OnboardingStatus, String> {
+    Ok(onboarding.status(&*permissions.0))
+}
+
+/// Asks macOS for `permission`: its prompt while it hasn't been asked,
+/// System Settings at the permission's page once refused (Accessibility:
+/// both). Returns at once; `get_onboarding` shows the answer once the user
+/// gives it.
+#[tauri::command]
+#[specta::specta]
+pub async fn request_permission(
+    onboarding: State<'_, Arc<Onboarding>>,
+    permissions: State<'_, OsPermissions>,
+    permission: AppPermission,
+) -> Result<OnboardingStatus, String> {
+    let os = Arc::clone(&permissions.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        onboarding::request(
+            &*os,
+            permission.into(),
+            dictation_platform::system_settings::open_privacy_settings,
+        )
+    })
+    .await
+    .map_err(|_| "the permission task crashed".to_owned())??;
+    Ok(onboarding.status(&*permissions.0))
+}
+
+/// Moves onboarding to `step`, if every step before it is done (the key is
+/// read from the keychain only to move to the last step). An error says
+/// which step comes first; the user stays where they were.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_onboarding_step(
+    state: State<'_, AppConfig>,
+    engine: State<'_, LiveEngine>,
+    onboarding: State<'_, Arc<Onboarding>>,
+    permissions: State<'_, OsPermissions>,
+    step: Step,
+) -> Result<OnboardingStatus, String> {
+    let (config, live, os) = (
+        Arc::clone(&state.0),
+        engine.inner().clone(),
+        Arc::clone(&permissions.0),
+    );
+    let readiness = tauri::async_runtime::spawn_blocking(move || {
+        onboarding::readiness(&*os, step > Step::Key, || {
+            onboarding::key_saved(&config, &live)
+        })
+    })
+    .await
+    .map_err(|_| "the onboarding task crashed".to_owned())?;
+    onboarding
+        .go_to(step, readiness)
+        .map_err(|not_yet| not_yet.to_string())?;
+    Ok(onboarding.status(&*permissions.0))
+}
+
+/// Ends onboarding: the window goes back to the settings view and hides.
+#[tauri::command]
+#[specta::specta]
+pub async fn finish_onboarding(
+    shell: State<'_, AppShell>,
+    onboarding: State<'_, Arc<Onboarding>>,
+) -> Result<(), String> {
+    onboarding.close();
+    tracing::info!("onboarding finished");
+    shell.0.hide_window();
+    Ok(())
+}
+
+/// Restarts the app and shows onboarding again when it is back (for an
+/// Accessibility grant macOS doesn't hand to the running app, #50).
+#[tauri::command]
+#[specta::specta]
+pub async fn relaunch_app(
+    shell: State<'_, AppShell>,
+    dirs: State<'_, ConfigDir>,
+) -> Result<(), String> {
+    onboarding::leave_resume_marker(&dirs.0).map_err(|error| {
+        tracing::warn!(%error, "couldn't leave the onboarding marker");
+        "Couldn't prepare the relaunch. Quit dictation-app from the menu bar and open it again."
+            .to_owned()
+    })?;
+    tracing::info!("relaunching for onboarding");
+    shell.0.restart();
+    Ok(())
+}
+
 /// Every command, for the invoke handler and the bindings. Generic over the
 /// runtime so the ACL tests can run the real handler on Tauri's mock runtime.
 pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
@@ -473,6 +585,11 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         set_api_key,
         has_api_key,
         test_api_key,
+        get_onboarding,
+        request_permission,
+        set_onboarding_step,
+        finish_onboarding,
+        relaunch_app,
     ])
 }
 
@@ -526,7 +643,7 @@ mod tests {
     }
 
     #[test]
-    fn criterion_2_the_bindings_have_exactly_the_five_commands() {
+    fn criterion_2_the_bindings_have_exactly_the_ten_commands() {
         let bindings = std::fs::read_to_string(committed()).unwrap();
         for command in [
             "getSettings",
@@ -534,6 +651,11 @@ mod tests {
             "setApiKey",
             "hasApiKey",
             "testApiKey",
+            "getOnboarding",
+            "requestPermission",
+            "setOnboardingStep",
+            "finishOnboarding",
+            "relaunchApp",
         ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
@@ -542,7 +664,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 5,
+            commands, 10,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1952,6 +2074,12 @@ mod capability_tests {
         )));
         app.manage(LiveEngine::fixed());
         app.manage(super::ActiveHotkey(super::tests::hotkey::listening().0));
+        app.manage(std::sync::Arc::new(crate::onboarding::Onboarding::new()));
+        app.manage(crate::onboarding::OsPermissions(std::sync::Arc::new(
+            dictation_platform::fakes::FakePermissions::all_granted(),
+        )));
+        app.manage(super::ConfigDir(dir.clone()));
+        app.manage(super::AppShell(std::sync::Arc::new(NoShell)));
         let windows = labels
             .iter()
             .map(|label| {
@@ -1961,6 +2089,14 @@ mod capability_tests {
             })
             .collect();
         (app, windows)
+    }
+
+    /// The app itself, without a window to hide or a process to restart.
+    struct NoShell;
+
+    impl super::Shell for NoShell {
+        fn hide_window(&self) {}
+        fn restart(&self) {}
     }
 
     fn invoke(
@@ -1990,6 +2126,8 @@ mod capability_tests {
             }
             "set_api_key" => serde_json::json!({ "provider": "groq", "key": "gsk_not_a_real_key" }),
             "has_api_key" | "test_api_key" => serde_json::json!({ "provider": "groq" }),
+            "request_permission" => serde_json::json!({ "permission": "microphone" }),
+            "set_onboarding_step" => serde_json::json!({ "step": "microphone" }),
             _ => serde_json::json!({}),
         }
     }
@@ -2010,7 +2148,13 @@ mod capability_tests {
     /// through when they are rejected, and the command itself never runs,
     /// so no keychain or network is touched.
     fn unusable_args() -> serde_json::Value {
-        serde_json::json!({ "provider": "not-a-provider", "settings": 0, "key": 0 })
+        serde_json::json!({
+            "provider": "not-a-provider",
+            "settings": 0,
+            "key": 0,
+            "permission": "camera",
+            "step": "done",
+        })
     }
 
     /// M5.1 criterion 2 and #110: ...while the settings window may call
@@ -2023,14 +2167,15 @@ mod capability_tests {
     /// `main_capability_denies_native_tray_and_menu_mutation`, on Tauri's
     /// resolver; this is the same ACL at run time.)
     #[test]
-    fn the_settings_window_may_invoke_all_five_app_commands() {
+    fn the_settings_window_may_invoke_all_ten_app_commands() {
         let (_app, windows) = app_with_windows(&[MAIN, OVERLAY]);
         let (main, overlay) = (&windows[0], &windows[1]);
         for command in COMMAND_NAMES {
             let reached = match *command {
-                "get_settings" | "save_settings" => {
-                    invoke(main, command, args(command)).map(|_| ())
-                }
+                // No keychain, network or OS prompt: the onboarding ones
+                // run on fakes (granted permissions, no shell).
+                "get_settings" | "save_settings" | "get_onboarding" | "finish_onboarding"
+                | "relaunch_app" => invoke(main, command, args(command)).map(|_| ()),
                 _ => match invoke(main, command, unusable_args()) {
                     Err(error) if error.to_string().contains("invalid args") => Ok(()),
                     other => other.map(|_| ()),
@@ -2045,7 +2190,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 5);
+        assert_eq!(COMMAND_NAMES.len(), 10);
     }
 
     #[test]

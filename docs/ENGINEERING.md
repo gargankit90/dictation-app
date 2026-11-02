@@ -109,6 +109,20 @@ Tauri is a thin layer on top.
 - **Hotkey:** default is modifier-only (Right Option). Under Secure Input,
   normal-key shortcuts stop silently while modifier-only ones keep working;
   show a warning while Secure Input is on.
+- **Accessibility grant while running (#50, M5.2):** an app bundle doesn't
+  need a relaunch to see a grant made in System Settings:
+  `AXIsProcessTrusted()` turns true in the running process, and the hotkey
+  supervisor (M5.5b) then starts a new event tap by itself. Onboarding's
+  Accessibility step polls it every second and moves on by itself. FreeFlow
+  and Muesli build their onboarding on the same polling. The #50 report was
+  a command-line probe run from Terminal: there the grant belongs to
+  Terminal (the responsible process) and didn't reach the probe while it
+  ran, which is the case the relaunch advice is about. Not yet watched with
+  a real grant in our VM, since SIP keeps the TCC database out of a script's
+  reach and the grant's password sheet refuses synthetic keys: that needs a
+  person at the VM's display (M5.2 criterion 4). Until then, once the user
+  has opened System Settings, the step also says "Relaunch to finish" with a
+  Relaunch button, which restarts the app and reopens onboarding.
 - **Overlay:** a non-activating panel that never takes focus
   (`tauri-nspanel`), or the paste lands in the overlay. An event sent to its
   page before the page's listener is registered is lost, so the page says

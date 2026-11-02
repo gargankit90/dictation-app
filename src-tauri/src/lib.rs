@@ -31,6 +31,11 @@
 //! M5.1: the `overlay` window shows Recording, Transcribing and errors
 //! without taking focus ([`overlay`]).
 //!
+//! M5.2: onboarding. The settings window shows the first-run steps
+//! ([`onboarding`]) at launch while dictation can't work yet (a permission
+//! missing or no key saved), after Relaunch, and from the tray's "Set up
+//! dictation…".
+//!
 //! T2: the hotkey is the saved one, at startup and as soon as Settings is
 //! saved (`dictation_pipeline::hotkey_setting`); a save whose hotkey can't
 //! start keeps the old one and says so.
@@ -43,8 +48,10 @@ pub mod engine;
 mod flags;
 mod key_writes;
 mod logging;
+pub mod onboarding;
 mod overlay;
 mod updater;
+mod window;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -66,6 +73,7 @@ use dictation_platform::hotkey::SystemHotkey;
 use dictation_platform::insert::SystemInserter;
 use dictation_platform::launch::SystemLaunchAtLogin;
 use dictation_platform::permissions::SystemPermissions;
+use dictation_platform::secrets::KeychainSecretStore;
 use dictation_platform::single_instance::{self, Instance, Launch, Message, Rejected};
 use dictation_ports::{AudioSource, Permission, PermissionError, PermissionStatus, Permissions};
 use dictation_transcribe::engine::{Engine, Transcribers};
@@ -77,8 +85,7 @@ use tauri::{App, AppHandle, Manager, RunEvent, WindowEvent};
 const QUIT_ID: &str = "quit";
 const SETTINGS_ID: &str = "settings";
 const REVEAL_LOG_ID: &str = "reveal-log";
-/// The one window: it holds the settings UI (`src/Settings.tsx`).
-const SETTINGS_WINDOW: &str = "main";
+const ONBOARDING_ID: &str = "onboarding";
 const TRAY_ID: &str = "main";
 const TOOLTIP: &str = "dictation-app";
 /// Where a launch's flags came from, for the log.
@@ -235,6 +242,9 @@ fn run_key_commands(argv: &[String], mut stdin: impl std::io::Read) -> Option<i3
 /// Panics if Tauri fails to start, which leaves the app with nothing to show.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // First, before anything that can panic or fail (#144): Rust's default
+    // hook would print a panic's message to stderr as it is.
+    logging::install_panic_hook();
     // The API key commands (debug builds) run in this process, before the
     // single-instance check: a second launch does its own key work and exits,
     // and never forwards it to the running app (which ignores such flags).
@@ -387,8 +397,16 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     app.manage(commands::AppConfig(Arc::clone(&config)));
     app.manage(commands::LoginItem(Arc::new(SystemLaunchAtLogin::new())));
     app.manage(commands::ActiveHotkey(hotkey_control.clone()));
+    app.manage(commands::ConfigDir(config_dir.clone()));
+    app.manage(commands::AppShell(Arc::new(TauriShell(
+        app.handle().clone(),
+    ))));
+    app.manage(Arc::new(onboarding::Onboarding::new()));
+    app.manage(onboarding::OsPermissions(
+        Arc::new(SystemPermissions::new()),
+    ));
     app.manage(live.clone());
-    if let Err(error) = live.rebuild_in_background(config) {
+    if let Err(error) = live.rebuild_in_background(Arc::clone(&config)) {
         tracing::error!(%error, "could not start reading the API key");
     }
     // Dictation still works without the overlay.
@@ -397,6 +415,19 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         .ok();
     tauri::async_runtime::spawn(show_ui_events(app.handle().clone(), ui_events, overlay));
     tracing::info!(hotkey = %hotkey_control.spec(), "ready");
+    onboarding_at_launch(
+        app.handle(),
+        config,
+        live,
+        LaunchOnboarding {
+            resumed: onboarding::take_resume_marker(&config_dir),
+            scripted: onboarding::scripted_launch(
+                launch.audio_file.is_some(),
+                choice == flags::TranscriberChoice::Mock,
+                launch.show_onboarding,
+            ),
+        },
+    );
 
     // This launch's own flags first, so they come before any forwarded one.
     // A failed injection is already logged; nothing waits for this launch.
@@ -410,6 +441,94 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         .context("could not listen for later launches")?;
     app.manage(SingleInstance(Mutex::new(Some(instance))));
     Ok(())
+}
+
+/// The running app, for the onboarding commands.
+struct TauriShell(AppHandle);
+
+impl commands::Shell for TauriShell {
+    fn hide_window(&self) {
+        window::hide(&self.0);
+    }
+
+    fn restart(&self) {
+        // Quits as Quit does (the pipeline stops and the single-instance
+        // hold is released in `shut_down`), then Tauri starts the app again
+        // with the same arguments, through LaunchServices on macOS.
+        self.0.request_restart();
+    }
+}
+
+/// What a launch says about showing onboarding.
+#[derive(Debug, Clone, Copy)]
+struct LaunchOnboarding {
+    /// The last launch was Relaunch.
+    resumed: bool,
+    /// A scripted test launch ([`onboarding::scripted_launch`]).
+    scripted: bool,
+}
+
+/// Shows onboarding if this launch needs it ([`onboarding::show_at_launch`]).
+/// On a thread of its own, since it reads the keychain (bounded).
+fn onboarding_at_launch(
+    app: &AppHandle,
+    config: Arc<dictation_pipeline::config::Config<KeychainSecretStore>>,
+    live: engine::LiveEngine,
+    launch: LaunchOnboarding,
+) {
+    let app = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("onboarding".into())
+        .spawn(move || {
+            let readiness = onboarding::readiness(&SystemPermissions::new(), true, || {
+                onboarding::key_saved(&config, &live)
+            });
+            if !onboarding::show_at_launch(readiness, launch.resumed, launch.scripted) {
+                tracing::info!(?readiness, ?launch, "onboarding not shown at launch");
+                return;
+            }
+            let step = app.state::<Arc<onboarding::Onboarding>>().open(readiness);
+            // This line's text is what the e2e scenario waits for.
+            tracing::info!(?step, ?readiness, ?launch, "onboarding shown at launch");
+            window::show(&app, onboarding::View::Onboarding);
+        });
+    if let Err(error) = spawned {
+        tracing::error!(%error, "could not start the onboarding check");
+    }
+}
+
+/// Opens onboarding from the tray, at the step the user was on. The key is
+/// read (bounded) on a thread of its own, in case this is the first time.
+fn show_onboarding(app: &AppHandle) {
+    let (Some(config), Some(live)) = (
+        app.try_state::<commands::AppConfig>(),
+        app.try_state::<engine::LiveEngine>(),
+    ) else {
+        tracing::warn!("onboarding isn't ready yet");
+        return;
+    };
+    let (config, live, app) = (Arc::clone(&config.0), live.inner().clone(), app.clone());
+    let spawned = std::thread::Builder::new()
+        .name("onboarding".into())
+        .spawn(move || {
+            let readiness = onboarding::readiness(&SystemPermissions::new(), true, || {
+                onboarding::key_saved(&config, &live)
+            });
+            let step = app.state::<Arc<onboarding::Onboarding>>().open(readiness);
+            tracing::info!(?step, "onboarding opened from the tray");
+            window::show(&app, onboarding::View::Onboarding);
+        });
+    if let Err(error) = spawned {
+        tracing::error!(%error, "could not open onboarding");
+    }
+}
+
+/// Shows the settings form.
+fn show_settings(app: &AppHandle) {
+    if let Some(onboarding) = app.try_state::<Arc<onboarding::Onboarding>>() {
+        onboarding.close();
+    }
+    window::show(app, onboarding::View::Settings);
 }
 
 /// Test builds: points the real engine at `--debug-provider-url` (a local
@@ -533,6 +652,7 @@ fn handle_flags(
 
 fn build_tray(app: &App) -> tauri::Result<()> {
     let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, None::<&str>)?;
+    let setup = MenuItem::with_id(app, ONBOARDING_ID, "Set up dictation…", true, None::<&str>)?;
     let reveal = MenuItem::with_id(app, REVEAL_LOG_ID, "Reveal log", true, None::<&str>)?;
     let updates = MenuItem::with_id(
         app,
@@ -542,7 +662,7 @@ fn build_tray(app: &App) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit dictation-app", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&settings, &updates, &reveal, &quit])?;
+    let menu = Menu::with_items(app, &[&settings, &setup, &updates, &reveal, &quit])?;
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip(TOOLTIP)
         .menu(&menu)
@@ -552,6 +672,8 @@ fn build_tray(app: &App) -> tauri::Result<()> {
                 app.exit(0);
             } else if event.id() == SETTINGS_ID {
                 show_settings(app);
+            } else if event.id() == ONBOARDING_ID {
+                show_onboarding(app);
             } else if event.id() == REVEAL_LOG_ID {
                 reveal_log(app);
             } else if event.id() == updater::CHECK_ID {
@@ -573,21 +695,6 @@ fn reveal_log(app: &AppHandle) {
     };
     if let Err(error) = dictation_platform::reveal::reveal_folder(&dir.0) {
         tracing::warn!(%error, "could not open the log folder");
-    }
-}
-
-/// Shows the settings window in front, even when it's minimized or hidden.
-fn show_settings(app: &AppHandle) {
-    let Some(window) = app.get_webview_window(SETTINGS_WINDOW) else {
-        tracing::warn!("the settings window doesn't exist");
-        return;
-    };
-    let shown = window
-        .unminimize()
-        .and_then(|()| window.show())
-        .and_then(|()| window.set_focus());
-    if let Err(error) = shown {
-        tracing::warn!(%error, "could not show the settings window");
     }
 }
 
