@@ -25,7 +25,8 @@ done
 
 ALL_SCENARIOS=(
   e2e_startup e2e_single_instance_cold_race e2e_press_release e2e_real_mic
-  e2e_mock_paste e2e_clipboard_restore e2e_user_copy_wins e2e_silence e2e_rapid
+  e2e_mock_paste e2e_paste_leaves_no_modifier e2e_clipboard_restore e2e_user_copy_wins
+  e2e_silence e2e_rapid
   e2e_secure_input_blocks_paste
   e2e_hold_release e2e_held_at_launch e2e_hotkey_listener_recovers
   e2e_quit_during_recording_then_relaunch e2e_tray_error_clears_on_next_recording
