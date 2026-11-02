@@ -1,4 +1,4 @@
-//! Traits for the boundaries to the OS and the network: hotkey, audio, transcriber, text inserter, clipboard, secrets, permissions, launch at login, clock.
+//! Traits for the boundaries to the OS and the network: hotkey, audio, transcriber, text inserter, text before the cursor, clipboard, secrets, permissions, launch at login, clock.
 //!
 //! `platform` implements them for each OS (and as fakes behind its `testing`
 //! feature), `transcribe` implements [`Transcriber`], and `app` runs the
@@ -37,6 +37,7 @@
 mod audio;
 mod clipboard;
 mod clock;
+mod cursor;
 mod hotkey;
 mod insert;
 mod launch;
@@ -49,6 +50,7 @@ pub use clipboard::{
     Clipboard, ClipboardError, ClipboardItem, ClipboardMarkers, ClipboardSnapshot, SessionMarker,
 };
 pub use clock::Clock;
+pub use cursor::{BeforeCursor, CursorReadError, TextBeforeCursor};
 pub use dictation_core::error::Permission;
 pub use dictation_core::text::Transcript;
 pub use hotkey::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};
