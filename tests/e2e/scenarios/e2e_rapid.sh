@@ -4,7 +4,8 @@
 # sequences and ends in Idle. The mock answers each dictation with its own
 # word (--mock-text-sequence), so TextEdit holds exactly "one" to "five"
 # pasted one after another: a paste out of order, doubled, dropped or
-# replayed from an earlier dictation changes the document.
+# replayed from an earlier dictation changes the document. Since M5.5a the
+# smart leading space (#93) puts one space before each word after the first.
 
 e2e_rapid() {
   local cycles=5 i words=(one two three four five) want_text=""
@@ -24,7 +25,7 @@ e2e_rapid() {
   phases=$(logged_phases | paste -sd ' ' -)
   for i in $(seq 1 "$cycles"); do
     want="$want${want:+ }Recording Transcribing Inserting Idle"
-    want_text="$want_text${words[$((i - 1))]}"
+    want_text="$want_text${want_text:+ }${words[$((i - 1))]}"
   done
   log "  phases logged: $phases"
   expect "five complete sequences, ending in Idle" test "$phases" = "$want"

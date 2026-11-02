@@ -20,7 +20,17 @@ writes to `tests/e2e/out/<timestamp>/` (git-ignored): `build.log`,
 `results.txt` and, per scenario, the
 app's own log copied back from the VM (`<scenario>.app.log`) and a screenshot
 of the VM's desktop at the end (`<scenario>.png`, taken through the
-`cua-driver` daemon in the VM).
+`cua-driver` daemon in the VM). A scenario that drives the app's UI and fails
+also saves the app's accessibility tree and tray state
+(`<scenario>.ax.txt`), which shows what the scenario could and couldn't find.
+
+Each scenario runs in a subshell of its own with `set -e`, so one that dies
+(a failed command, `die`, a signal) ends only itself: it is a `FAIL` with
+its exit status (`ended early (exit status N)`), its log and screenshot are
+saved, and the run goes on. A scenario passes only by reaching its end with
+no failed check; one that exits half way, even with status 0, fails. See
+"Trusting the helpers" below for what else keeps a failure from looking
+like a pass.
 
 ## What a run does
 
@@ -38,8 +48,16 @@ of the VM's desktop at the end (`<scenario>.png`, taken through the
    `~/Applications` in the VM, and its signature is checked there.
    `tests/e2e/fixtures/` goes to `~/e2e-fixtures` in the VM: `tone-16k.wav` (a
    1.5 s 440 Hz tone, 16 kHz mono 16-bit; no voice), `silence-16k.wav` (1.5 s
-   of zeros) and `right-option.js` (posts a real Right Option key event, or
-   says with `state` whether the system thinks it is held).
+   of zeros), `right-option.js` (posts a real Right Option key event, or
+   says with `state` whether the system thinks it is held), `post-key.js`
+   (the same for any modifier key: `post-key.js left-option down|up|state`),
+   `type-keys.js` (types a-z and spaces with real key events, US key
+   positions, no modifiers), `input-source.js` (reads or switches the keyboard
+   input source), `clipboard-image.js` (puts a PNG on the clipboard or reads
+   it back), `image-24.png` (a 24x24 test image), `ax.js` (drives the tray,
+   menus and windows through the Accessibility API; see "The app's UI" below)
+   and `clipboard-race.js` (copies like a user while a dictation's paste is
+   pending, for `e2e_user_copy_wins`).
 4. **Scenarios:** each one quits any running copy of the app, clears its log
    (`~/Library/Logs/com.dictationapp.desktop/` in the VM), launches the app
    with `open -n …/dictation-app.app --args <flags>`, and checks the log and
@@ -53,30 +71,46 @@ of the VM's desktop at the end (`<scenario>.png`, taken through the
 | `e2e_mock_paste` | M4.3 #1 | Full app: the tone fixture, `--mock-text "hello world"`, the real paste. TextEdit (a fresh document in front) holds exactly `hello world`, read back with `osascript`; the log has the full state sequence and not the transcript. |
 | `e2e_clipboard_restore` | M4.3 #2 | A `pbcopy` sentinel is still on the clipboard after a dictation, and after a second one; the transcript is not left there. |
 | `e2e_silence` | M4.3 #3 | `silence-16k.wav`: `Recording Transcribing Idle` (never Inserting), the log says `not transcribing … verdict=Silent` and no `dictation failed` (the dropped dictation shows no error), TextEdit stays empty and the clipboard sentinel is untouched. |
-| `e2e_rapid` | M4.3 #4 | Five dictations in a row (0.4 s holds, each started once the last is back in Idle): five complete `Recording Transcribing Inserting Idle` sequences, ending in Idle, and `--mock-text-sequence one,two,three,four,five` gives each dictation its own word, and TextEdit must hold exactly `onetwothreefourfive`: a paste out of order, doubled, dropped or replayed from an earlier dictation changes it. |
+| `e2e_rapid` | M4.3 #4 | Five dictations in a row (0.4 s holds, each started once the last is back in Idle): five complete `Recording Transcribing Inserting Idle` sequences, ending in Idle, and `--mock-text-sequence one,two,three,four,five` gives each dictation its own word, and TextEdit must hold exactly `one two three four five` (the spaces are the smart leading space, M5.5a): a paste out of order, doubled, dropped or replayed from an earlier dictation changes it. |
 | `e2e_hold_release` | #90, M1.6 #4 | A real Right Option hold (down, 1.5 s, up) posted from Terminal.app: one `Recording … Idle` sequence and the transcript in TextEdit, with no synthetic `--press` flag in the log. However it ends, the key is released (see "Key cleanup"). |
 | `e2e_held_at_launch` | #90, M1.6 B1 | Right Option down, then the app starts and stays up 5 s with the key still held: no Recording. The key goes up: still nothing. Then a normal hold: exactly one `Recording … Idle` sequence. |
 | `e2e_overlay_focus` | M5.1 #3, #102 M1 | The full app with the tone and the mock transcriber, TextEdit in front. Once started, the log's `overlay native window` line must say the overlay is still the non-activating panel (`non_activating_panel=true`: an `NSPanel` subclass, `canBecomeKeyWindow` and `canBecomeMainWindow` false, the non-activating style mask, and backing the overlay's webview window), read back by the app on the main thread. `--press`: the log shows `overlay shown state=recording` and the app has a 420x72 window at the status level (25) on screen, read with `CGWindowListCopyWindowInfo` through JXA over ssh (`cua-driver list_windows` leaves such windows out); a screenshot is saved as `e2e_overlay_focus.recording.png`. `--release`: `overlay shown state=transcribing`, back to Idle, `overlay hidden`, and the window is off screen again. The frontmost app, sampled with `lsappinfo` every 0.2 s from before the press until after Idle, is always TextEdit, and TextEdit holds exactly `hello world`. |
 | `e2e_error_bad_key` | M4.4 #2 | The VM's login keychain gets the invalid key `gsk_invalid_test_key`; the app starts on the real engine (`--transcriber settings`) and dictates the tone fixture. Groq's 401 shows as `The provider rejected your API key…` in the log (`shown to the user`), the phases are `Recording Transcribing Idle` (nothing inserted), TextEdit stays empty, and a second dictation fails the same way (the app is still usable). Then the app restarts on the mock and a dictation pastes `This is a test dictation.`. Real request to Groq, so the VM needs internet; needs no key from you. |
 | `e2e_real_groq` | M4.4 #1 | Skipped unless `GROQ_API_KEY` is set in the environment of the run. The VM makes a WAV of a sentence with `say`, the key goes into the VM's keychain for the dictation only, and the text pasted into TextEdit must contain at least 80% of the sentence's words. See "Real Groq" below. |
+| `e2e_dmg_install` | M5.4 #2 | The tester README's install, scripted: the debug build's DMG passes `scripts/check-dmg.sh`; it goes into the VM with the quarantine flag a browser sets, is mounted, the app is copied out and quarantined, and the README's `xattr -dr com.apple.quarantine` clears it; the app has its licence notice and a valid signature; then a first dictation (tone + mock) pastes `hello world` into TextEdit. The Gatekeeper dialog and the permission prompts are not scripted (manual, in the PR). |
+| `e2e_smart_space` | M5.5a #3 | The mock answers `world`. `hello` typed into TextEdit with real key events (`type-keys.js` in Terminal), then a dictation: TextEdit holds exactly `hello world` (the app read the `o` before the cursor over Accessibility). In a fresh empty document: exactly `world`. After `hello ` (typed space): `hello world`, no second space. The log never holds `hello`. |
+| `e2e_layout_paste` | M5.5a #4 | For AZERTY (`com.apple.keylayout.French`), Dvorak and Russian: the input source is selected in the GUI session (`input-source.js` in Terminal; enabled first if the clone lacks it), TextEdit comes to the front, a dictation pastes exactly `hello world`, and the layout is still selected afterwards (checked after the dictation: the check runs in Terminal, which takes the front). On Dvorak the chord must use key 47 (where V is); QWERTY's key 9 is ⌘K there and pastes nothing. The starting layout is selected again, and the sources it enabled are disabled again, however it ends (an EXIT trap). |
+| `e2e_image_clipboard_restore` | M5.5a #5 | `image-24.png` put on the clipboard as `public.png` (`clipboard-image.js`); after a dictation into TextEdit the clipboard's PNG has the same SHA-256 and the clipboard holds no text. |
 | `e2e_launch_at_login` | M5.3 #3 | The login item is off, then turned on through the app (`--debug-launch-at-login-on`, the code behind Settings' "Launch at login" toggle, run through `open` so it is in the GUI session). macOS in the VM is restarted cleanly (System Events `restart`, boot time checked): the app is running by itself once the GUI session is back, and logged `starting` and `ready` once. Turned off again, the flag reports `disabled`. Last in the run, since it reboots the VM (about two minutes). |
+| `e2e_single_instance_cold_race` | T2 #2 (P1-01) | Four copies launched at once in one ssh command (`open -g -n`, each with a first launch's flags), none waiting for another. Exactly one process is left, and stays; the log has one `starting`, one `ready` and one `engine` line; the other three launches were each handed to it (three `ignoring the debug audio and mock text flags` warnings, no `not delivered`); the tray has one status item (`ax.js tray-info`). A later `--press`/`--release` is forwarded (`delivered=true`) and the dictation pastes `hello world` into TextEdit. |
+| `e2e_user_copy_wins` | T2 #7 (P2-05) | A clipboard sentinel, then a dictation while `clipboard-race.js` (over ssh) watches the clipboard: on the app's dictation write (its `com.dictationapp.session` item) it waits 0.2 s (`E2E_USER_COPY_DELAY`), checks that item is still there (`pending=yes`: the restore hasn't run) and copies a new text. TextEdit got the transcript; at the end the clipboard holds the user's copy, not the sentinel or the transcript, and its change count is the one right after the copy (nothing wrote after it). |
+| `e2e_secure_input_blocks_paste` | T2 #7 (P2-05), M4.2 #1 | The target is a Terminal window running `cat` in non-canonical mode, saving what is pasted into it to a file. Control: with Secure Keyboard Entry off, a dictation's word lands in the file. Then Terminal restarts with `defaults write com.apple.Terminal SecureKeyboardEntry -bool true` (Terminal's menu item if that doesn't do it), Secure Input must be on (`ioreg` `kCGSSessionSecureInputPID`), and a second dictation leaves the file and a clipboard sentinel unchanged and logs `shown to the user error=A password field is focused; dictation wasn't pasted.`. Secure Keyboard Entry goes off again however it ends (an EXIT trap), and Secure Input must then be off. |
+| `e2e_quit_during_recording_then_relaunch` | T2 #7 (P2-05) | `--press`, then Quit dictation-app in the tray menu (`ax.js tray-click`) while recording: the app exits by itself within 15 s (`QUIT_TIMEOUT`; no kill), logs `quit from the tray` and `stopped`, never reached Inserting, TextEdit is empty and Right Option is up. A relaunch logs one `starting`, and a dictation pastes. |
+| `e2e_tray_error_clears_on_next_recording` | T2 #7 (P2-01) | No key in the keychain and the real engine (`--transcriber settings`): a dictation fails offline with `Transcription failed: Add your API key in Settings.`, which is the tray's title (`ax.js tray-info`, the status item's AXTitle). The next `--press` clears the title while it records; its release shows the error again. Then Quit from the tray, a relaunch on the mock: the dictation pastes and the title stays empty. |
+| `e2e_settings_save_reopen` | T2 #1, #7 (P1-03, P2-01) | Settings… in the tray opens the window (on screen, by the window server's list); it shows `RightAlt` and no language. `de` and `leftalt` are typed into Language and Hotkey (`ax.js field-set`: focus, keys), Save shows `Settings saved.`, the app logs `hotkey applied … hotkey=LeftAlt`, the form shows `LeftAlt`, and `settings.json` has both. The close button hides the window; Settings… shows it again with the saved values. A real Left Option hold (`post-key.js`) then dictates into TextEdit with no restart, and a Right Option hold starts nothing. Quit from the tray and relaunch: `ready … hotkey=LeftAlt`, Left Option dictates, Right Option doesn't. The key cleanup releases both keys and removes `settings.json` (the defaults). |
 
 ## Key cleanup
 
-A scenario that posts a real key-down (`e2e_hold_release`, `e2e_held_at_launch`)
-must not leave Right Option held in the VM, where it would spoil later hotkey
+A scenario that posts a real key-down (`e2e_hold_release`, `e2e_held_at_launch`,
+`e2e_settings_save_reopen`)
+must not leave a key held in the VM, where it would spoil later hotkey
 tests and `--no-reset` runs. Three layers:
 
-- `arm_key_cleanup <scenario>` (first thing in the scenario) sets an EXIT
-  trap, with INT, TERM and HUP routed to `exit`. However the scenario dies
-  (a failed command under `set -e`, `die`, Ctrl-C), the trap saves the app's
-  log and a screenshot, quits any Terminal job still running, quits the app,
-  posts Right Option up (an up with no down does nothing), closes TextEdit's
-  documents and Terminal, and exits with the scenario's own status. A normal
-  end does the same through `key_scenario_end`.
-- `real_key_hold`'s Terminal job has its own EXIT/INT/TERM/HUP trap that
-  posts the up if the down was posted, so a job cut short releases the key
-  with no help from the host.
+- `arm_key_cleanup <scenario> [key...]` (first thing in the scenario) sets an
+  EXIT trap, with INT, TERM and HUP routed to `exit`. However the scenario
+  dies (a failed command under `set -e`, `die`, Ctrl-C), the trap saves the
+  app's log and a screenshot, quits any Terminal job still running, quits the
+  app, runs `KEY_CLEANUP_HOOK` if the scenario set one (the settings reset),
+  posts Right Option up (and each key named, such as `left-option`; an up
+  with no down does nothing) and checks with `state` that the system sees it
+  up, closes TextEdit's documents and Terminal, and exits with the
+  scenario's own status. A normal end does the same through
+  `key_scenario_end`. A cleanup step that fails (the app won't quit, a key
+  still held, the hook) is reported and fails the scenario, but never
+  replaces the status a scenario died with.
+- `real_key_hold`'s (and `post_key_hold`'s) Terminal job has its own
+  EXIT/INT/TERM/HUP trap that posts the up if the down was posted, so a job
+  cut short releases the key with no help from the host.
 - `vm_terminal` kills a job that doesn't finish within
   `VM_TERMINAL_TIMEOUT` seconds (default 30), so it can't go on posting events;
   the kill reaches the job's trap.
@@ -92,6 +126,67 @@ ssh -i ~/.ssh/dictation_vm_ed25519 -o HostKeyAlias=dictation-vm lume@$(lume get 
 
 `after_key_down` dies right after the down is posted (a failed launch);
 `mid_hold` dies inside the hold job between its down and up.
+
+## Trusting the helpers
+
+A helper that reports success when the guest failed would turn a broken app
+green (P2-05 in the test audit, #103). So:
+
+- **`vm` has a deadline** for the whole command, not just the connection:
+  `VM_CMD_TIMEOUT` seconds (default 120; the app's copy into the VM gets
+  600). A command that hangs (a dialog nobody answers, a stuck `osascript`)
+  is cancelled and `vm` returns 124 with a `vm: no answer within …` line.
+  Otherwise it returns the guest command's own status.
+- **`vm_terminal` returns the guest's exit status.** The job writes
+  `<token> <status>` to its `.done` file (through a temporary file and a
+  rename), and `vm_terminal` returns that status after printing the job's
+  output. Each job's name is unique (the run's id, a counter shared by
+  subshells, and the calling shell's pid) and so is its token; any old
+  `.done` file under that name is removed before the job starts, and a
+  `.done` file without this job's token is refused (status 125). A job past
+  `VM_TERMINAL_TIMEOUT` is killed and `vm_terminal` returns 124.
+- **Checks look at the status and the output.** `job_says <output> <cmd…>`
+  is true only if the Terminal job exited 0 and printed exactly that, so a
+  key script that printed `posted down` and then failed is a failure.
+- **Cleanup doesn't hide a failed Quit.** `fresh_app_state` (TERM, then
+  KILL) is setup and fails if a copy is still running after the KILL. A
+  scenario whose journey is quitting uses `quit_from_tray`: Quit in the tray
+  menu, then the app must be gone within `QUIT_TIMEOUT` seconds (default 15)
+  by itself. If it isn't, it is killed so the next step starts clean, but
+  the check has already failed.
+
+`tests/e2e/test-runner.sh` (part of the gate, no VM) proves these with a
+stubbed `vm` that runs the runner's own bookkeeping in a temporary
+directory, a fake Terminal that runs the job with bash, and fake
+`osascript`, `open`, `sleep` and `ssh`: a guest exit status of 23 comes back
+as 23, a deadline fails, a stale or planted `.done` file is refused or
+removed, a key script that prints the right text but exits 1 fails
+`e2e_hold_release`, a key the cleanup can't release fails a scenario that
+had passed, a failed launch keeps its status (23) through the cleanup (also
+when the cleanup fails too), a failed setup fails before anything is
+launched, an `exit 0` half way fails, a required skip fails the run and an
+optional one is listed, and a Quit that doesn't end the app (or can't be
+clicked) fails.
+
+## The app's UI
+
+The app is a menu-bar app: its tray (the status item) and the Settings
+window are reached through the Accessibility API by `fixtures/ax.js`, run
+in Terminal (`ax <command> …` in `lib_full.sh`), since Accessibility is
+Terminal's grant; the ssh session has none, and System Events' UI scripting
+would need it too. `ax.js` calls the AX functions directly (through JXA's
+`ObjC.bindFunction`), so it needs no Automation grant either. It finds the
+status item through the app's `AXExtrasMenuBar`, opens its menu (a press
+with a short messaging timeout, since the press returns only when the menu
+closes) and presses an item by the start of its title (`Settings`, `Quit`);
+it reads a WebView's fields by their DOM id (`AXDOMIdentifier`: `hotkey`,
+`language`), presses buttons by title (`Save`) and waits for text
+(`Settings saved.`). Whether a window is on screen comes from the window
+server's list (`CGWindowListCopyWindowInfo`), not AX. Typing focuses the
+field, makes the app frontmost (AX), empties the field and posts the keys at
+the HID tap; it types lowercase letters and digits (the US layout's key codes). When a UI scenario fails, `dump_ui` saves the tree to
+`<scenario>.ax.txt`; `ax dump dictation-app` shows it by hand (run it in
+Terminal in the VM).
 
 ## Real Groq (opt-in)
 
@@ -238,7 +333,14 @@ Put a function in `tests/e2e/scenarios/<name>.sh`, named after the file,
 using the helpers in `lib.sh` (`launch`, `wait_for_log`, `logged_phases`,
 `app_count`, `expect`, `collect_log`) and, for full-app scenarios,
 `lib_full.sh` (`launch_full`, `textedit_fresh`, `textedit_trimmed`,
-`set_clipboard`, `clipboard`, `dictate_once`, `real_key_hold`). A scenario that
+`set_clipboard`, `clipboard`, `dictate_once`, `real_key_hold`,
+`post_key_hold`, `job_says`, `ax`, `ax_ok`, `tray_info`, `quit_from_tray`,
+`dump_ui`). A scenario that
 posts a real key-down calls `arm_key_cleanup` first and `key_scenario_end` last.
+Wait on a predicate with a deadline (`wait_for_log`, `wait_for_idle_count`,
+`app_count_is`, `wait_for_no_app`) rather than a fixed sleep; keep a fixed
+wait only for what is being tested (a hold's length) or to show that
+something does *not* happen. Leave the VM as you found it: the app quit,
+TextEdit's documents closed, Terminal quit, no key held, default settings.
 Add it to `ALL_SCENARIOS` in `run.sh`, and to `OPTIONAL_SCENARIOS` if it may
 skip without failing the run.

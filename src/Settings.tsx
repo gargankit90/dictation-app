@@ -208,7 +208,9 @@ export function Settings() {
 
   async function save(event: SyntheticEvent) {
     event.preventDefault();
-    if (loaded === null || saving) return;
+    // Busy like the Save button: a submit that gets past it (Enter in a field)
+    // starts nothing while a save or a key test runs.
+    if (loaded === null || saving || testing) return;
     const found: FieldErrors = {
       key: keyInput.trim() === "" ? undefined : (validateKey(keyInput) ?? undefined),
       language: validateLanguage(language) ?? undefined,
@@ -252,13 +254,19 @@ export function Settings() {
       };
       const saved = await commands.saveSettings(toSave);
       if (saved.status === "error") {
+        // Something didn't take effect: the login item (the OS can refuse,
+        // or want the user's approval) or the hotkey (the old one keeps
+        // working). The message says which. The typed values stay, so the
+        // user can retry.
         setNotice({ kind: "error", text: messageOf(saved.error) });
-        // The login item may not have changed (the OS can refuse, or want
-        // the user's approval): show what it really is. Nothing else in the
-        // form is touched.
+        // Show what the login item really is. If the app can't say, the box
+        // stays the user's own unapplied choice rather than claiming to be
+        // the OS's state.
         const actual = await commands.getSettings();
-        if (actual.status === "ok") setLaunchAtLogin(actual.data.launch_at_login);
-        setLaunchEdited(false);
+        if (actual.status === "ok") {
+          setLaunchAtLogin(actual.data.launch_at_login);
+          setLaunchEdited(false);
+        }
         return;
       }
       // Reload, so the form shows what was stored (the canonical hotkey). If
@@ -407,7 +415,8 @@ export function Settings() {
               }}
             />
             <p id="hotkey-hint" className="hint">
-              Hold it to talk. For example RightAlt (the right Option key) or Ctrl+Shift+Space.
+              Hold it to talk. For example RightAlt (the right Option key) or Ctrl+Shift+Space. A
+              new hotkey works as soon as you save.
             </p>
             <p id="hotkey-error" role={errors.hotkey ? "alert" : undefined} className="error">
               {errors.hotkey}

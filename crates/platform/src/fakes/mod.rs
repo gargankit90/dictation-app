@@ -4,6 +4,7 @@
 
 mod clipboard;
 mod clock;
+mod cursor;
 mod hotkey;
 mod inserter;
 mod launch;
@@ -17,6 +18,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 pub use crate::audio::FileAudioSource;
 pub use clipboard::MemClipboard;
 pub use clock::FakeClock;
+pub use cursor::FakeTextBeforeCursor;
 pub use hotkey::FakeHotkey;
 pub use inserter::FakeInserter;
 pub use launch::FakeLaunchAtLogin;

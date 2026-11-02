@@ -40,9 +40,15 @@ e2e_error_bad_key() {
   # The mock still works: restart on it and paste.
   expect "the wrong key is removed from the VM's keychain" groq_key_remove
   fresh_app_state
-  groq_textedit_new
   launch --debug-audio-file "$VM_TONE"
   expect "the app restarts with the mock" wait_for_log 'engine transcriber="mock"'
+  # TextEdit in front after the launch, not before: once a scenario has
+  # quit the app from its tray menu, the VM can leave TextEdit frontmost
+  # but its window not key after a later cold launch, and the paste goes
+  # nowhere (T2 VM probe: 9 of 9 missed that way after a tray Quit, 3 of 3
+  # landed on a fresh VM, and 3 of 3 landed with TextEdit put in front
+  # again after the launch). A second launch (--press) doesn't do this.
+  groq_textedit_new
   expect "a dictation with the mock ends Idle" groq_dictate 2
   expect "the mock's text is in TextEdit" \
     sh -c "printf '%s' \"\$1\" | grep -q 'This is a test dictation'" _ "$(groq_textedit_text)"

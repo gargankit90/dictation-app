@@ -9,7 +9,7 @@ e2e_held_at_launch() {
   # Before the first key event, so there is no way to leave the key down.
   arm_key_cleanup e2e_held_at_launch
   fresh_app_state
-  expect "Right Option goes down" test "$(real_key down)" = "posted down"
+  expect "Right Option goes down" job_says "posted down" real_key down
   inject_failure after_key_down
   launch_full
   expect "the app starts and logs ready" wait_for_log 'INFO .*ready'
@@ -19,15 +19,14 @@ e2e_held_at_launch() {
   sleep 5
   expect "no recording starts while the key is held from before launch" \
     test -z "$(logged_phases)"
-  expect "Right Option goes up" test "$(real_key up)" = "posted up"
+  expect "Right Option goes up" job_says "posted up" real_key up
   sleep 2
   expect "releasing it starts or stops nothing" test -z "$(logged_phases)"
 
-  local before keys
+  local before
   before=$(idle_count)
-  keys=$(real_key_hold 1.5)
-  expect "a normal hold goes down and up" test "$keys" = "posted down
-posted up"
+  expect "a normal hold goes down and up" job_says "posted down
+posted up" real_key_hold 1.5
   expect "the dictation gets back to Idle" wait_for_idle_count $((before + 1))
   local phases
   phases=$(logged_phases | paste -sd ' ' -)

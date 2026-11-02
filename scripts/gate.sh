@@ -46,6 +46,10 @@ no_tauri_in_pipeline() {
   ! grep -q '^tauri' <<<"$tree"
 }
 step no_tauri_in_pipeline
+# The third-party licence notice that ships in the app is current, and the
+# check itself fails when it should (#24).
+step scripts/test-check-licences.sh
+step scripts/check-licences.sh
 
 # Rust tests and coverage. nextest fails a run that finds no tests, so a
 # filter or `#[cfg]` that hides them all can't pass quietly.
@@ -69,10 +73,14 @@ step scripts/vendor-tests.sh
 step npx tsc -b --noEmit
 step npx eslint . --max-warnings 0
 step npx vitest run
+# The production frontend the app bundle ships (#103 P2-04): a missing asset
+# or a broken transform fails here, not when the app opens. About 2 s.
+step npm run build
 
 # Spelling and guards
 step typos
 step scripts/test-guards.sh
 step tests/e2e/test-key-handling.sh
+step tests/e2e/test-runner.sh
 
 printf '\ngate: all checks passed\n'

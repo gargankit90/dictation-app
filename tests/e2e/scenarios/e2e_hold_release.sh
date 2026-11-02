@@ -13,11 +13,10 @@ e2e_hold_release() {
   expect "the real hotkey is on (Accessibility granted to the app)" hotkey_is_on
   textedit_fresh
 
-  local before keys
+  local before
   before=$(idle_count)
-  keys=$(real_key_hold 1.5)
-  expect "Right Option goes down and up" test "$keys" = "posted down
-posted up"
+  expect "Right Option goes down and up (the job exits 0)" job_says "posted down
+posted up" real_key_hold 1.5
   expect "the dictation gets back to Idle" wait_for_idle_count $((before + 1))
   local phases
   phases=$(logged_phases | paste -sd ' ' -)
