@@ -2,14 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SyntheticEvent } from "react";
 import { commands } from "./bindings";
 import type { Provider, Settings_Serialize } from "./bindings";
+import { BROKEN, messageOf, testKey as runKeyTest } from "./keyTest";
+import type { Notice } from "./keyTest";
 import { PROVIDERS, providerInfo } from "./providers";
 import "./settings.css";
 import { normalizeLanguage, validateHotkey, validateKey, validateLanguage } from "./validation";
-
-interface Notice {
-  kind: "ok" | "error";
-  text: string;
-}
 
 /**
  * What the app knows about the selected provider's stored key. "checking" and
@@ -28,14 +25,6 @@ interface FieldErrors {
   key?: string;
   language?: string;
   hotkey?: string;
-}
-
-/** Shown when a command fails without a message of its own (the IPC itself broke). */
-const BROKEN = "Something went wrong talking to the app. Try again.";
-
-/** The message of a failed command: the app's own text, or [`BROKEN`]. */
-function messageOf(error: unknown): string {
-  return typeof error === "string" && error !== "" ? error : BROKEN;
 }
 
 /**
@@ -191,16 +180,7 @@ export function Settings() {
     testRun.current += 1;
     const run = testRun.current;
     setTesting(true);
-    let outcome: Notice;
-    try {
-      const result = await commands.testApiKey(provider, typed);
-      outcome =
-        result.status === "ok"
-          ? { kind: "ok", text: `The key works. ${info.name} accepted it.` }
-          : { kind: "error", text: result.error.message };
-    } catch {
-      outcome = { kind: "error", text: BROKEN };
-    }
+    const outcome = await runKeyTest(provider, typed);
     if (run !== testRun.current) return;
     setTesting(false);
     setNotice(outcome);

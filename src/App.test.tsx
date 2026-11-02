@@ -9,8 +9,16 @@ afterEach(() => {
 });
 
 describe("App", () => {
-  it("is the settings window", async () => {
+  it("is the settings window unless the app asks for onboarding", async () => {
     mockIPC((command) => {
+      if (command === "get_onboarding") {
+        return {
+          view: "settings",
+          step: "microphone",
+          microphone: "granted",
+          accessibility: "granted",
+        };
+      }
       if (command === "get_settings") {
         return {
           version: 2,
@@ -25,7 +33,7 @@ describe("App", () => {
     });
     render(<App />);
 
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Settings");
+    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Settings");
     expect(await screen.findByLabelText("Hotkey")).toBeTruthy();
   });
 });

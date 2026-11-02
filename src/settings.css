@@ -65,7 +65,8 @@ body {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   box-sizing: border-box;
   width: 100%;
   padding: 6px 8px;
@@ -147,4 +148,18 @@ button:disabled {
   margin: 0;
   padding: 0;
   border: 0;
+}
+
+.onboarding h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.onboarding section p {
+  margin: 4px 0;
+}
+
+.field textarea {
+  margin-top: 6px;
+  resize: vertical;
 }
