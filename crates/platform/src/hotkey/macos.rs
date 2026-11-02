@@ -636,6 +636,8 @@ mod tests {
                 CancelPressed => Event::CancelPressed,
                 Interrupted => Event::HotkeyInterrupted,
                 Failed => Event::HotkeyFailed,
+                // Only a supervisor sends it, never the adapter.
+                dictation_ports::HotkeyEvent::Restored => continue,
             };
             let (next, out) = coordinator::step(state, event);
             state = next;

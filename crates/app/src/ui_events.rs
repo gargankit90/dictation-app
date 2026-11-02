@@ -15,6 +15,9 @@
 //!   counted ([`UiReceiver::dropped_errors`]) and logged (the first, and
 //!   then once per [`DROPPED_LOG_EVERY`]); the oldest are the ones the user
 //!   most needs to see, and every one is also in the log.
+//! - **The hotkey's return is kept.** The newest
+//!   [`UiEvent::HotkeyRestored`] stays too, so a UI that showed the hotkey
+//!   as down learns it works again.
 //! - **Recovery.** Reading again picks up at once: what's queued, then the
 //!   live stream.
 
@@ -50,15 +53,20 @@ impl Queue {
             .count()
     }
 
-    /// Keeps every error and only the newest phase, in their order.
+    /// Keeps every error, the newest phase and the newest
+    /// [`UiEvent::HotkeyRestored`], in their order. Dropping an older
+    /// `HotkeyRestored` loses nothing: a later one says the same.
     fn coalesce(&mut self) {
-        let newest_phase = self
-            .events
-            .iter()
-            .rposition(|event| matches!(event, UiEvent::StateChanged(_)));
+        let newest = |kind: fn(&UiEvent) -> bool| self.events.iter().rposition(kind);
+        let newest_phase = newest(|event| matches!(event, UiEvent::StateChanged(_)));
+        let newest_restored = newest(|event| matches!(event, UiEvent::HotkeyRestored));
         let mut index = 0;
         self.events.retain(|event| {
-            let keep = matches!(event, UiEvent::Error(_)) || Some(index) == newest_phase;
+            let keep = match event {
+                UiEvent::Error(_) => true,
+                UiEvent::StateChanged(_) => Some(index) == newest_phase,
+                UiEvent::HotkeyRestored => Some(index) == newest_restored,
+            };
             index += 1;
             keep
         });

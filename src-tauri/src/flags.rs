@@ -22,6 +22,11 @@
 //!   login item (M5.3) through the same code as the Settings window, then
 //!   exit, again in a process of their own.
 //!
+//! - `--debug-hotkey-outage` makes the real hotkey die and fail to start,
+//!   as when Accessibility is turned off, until `--debug-hotkey-recover`;
+//!   the app brings it back by itself then (#88). Like `--press`, they act
+//!   on the running app, so a second launch forwards them.
+//!
 //! - `--mock-text <text>` makes the mock transcriber answer with that text
 //!   instead of its default, so a test can look for it where it is pasted.
 //!   Like the audio flags it shapes the pipeline, so only the first
@@ -45,8 +50,8 @@
 use std::path::PathBuf;
 
 use dictation_pipeline::test_hooks::{
-    DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, KeyCommand, LaunchCommand, PRESS_FLAG,
-    RELEASE_FLAG,
+    DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, KeyCommand, LaunchCommand, OutageCommand,
+    PRESS_FLAG, RELEASE_FLAG,
 };
 use dictation_ports::HotkeyEvent;
 
@@ -111,6 +116,9 @@ impl TranscriberChoice {
 pub struct LaunchFlags {
     /// Synthetic hotkey events to inject, in order (debug builds only).
     pub events: Vec<HotkeyEvent>,
+    /// `--debug-hotkey-outage` and `--debug-hotkey-recover`, in order (debug
+    /// builds only): done before the events.
+    pub outage_commands: Vec<OutageCommand>,
     /// The WAV to record instead of the microphone (debug builds only); the
     /// last one given wins.
     pub audio_file: Option<PathBuf>,
@@ -164,6 +172,11 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
             DEBUG_SAVE_AUDIO_FLAG if test_flags => flags.save_audio = true,
             key_flag if test_flags && KeyCommand::from_flag(key_flag).is_some() => {
                 flags.key_commands.extend(KeyCommand::from_flag(key_flag));
+            }
+            outage_flag if test_flags && OutageCommand::from_flag(outage_flag).is_some() => {
+                flags
+                    .outage_commands
+                    .extend(OutageCommand::from_flag(outage_flag));
             }
             login_flag if test_flags && LaunchCommand::from_flag(login_flag).is_some() => {
                 flags
@@ -317,6 +330,22 @@ mod tests {
         let flags = parse(&argv(&["--press", "--release", "--press"]), true);
         assert_eq!(flags.events, [Pressed, Released, Pressed]);
         assert!(flags.ignored.is_empty());
+    }
+
+    #[test]
+    fn debug_builds_act_on_the_hotkey_outage_flags() {
+        let flags = parse(
+            &argv(&["--debug-hotkey-outage", "--debug-hotkey-recover"]),
+            true,
+        );
+        assert_eq!(
+            flags.outage_commands,
+            [OutageCommand::Begin, OutageCommand::End]
+        );
+        assert!(flags.ignored.is_empty());
+        let flags = parse(&argv(&["--debug-hotkey-outage"]), false);
+        assert!(flags.outage_commands.is_empty());
+        assert_eq!(flags.ignored, ["--debug-hotkey-outage"]);
     }
 
     #[test]

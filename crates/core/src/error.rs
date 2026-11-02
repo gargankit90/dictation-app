@@ -41,10 +41,10 @@ pub enum DictationError {
     /// The OS has not granted a permission dictation needs.
     #[error("{} permission is missing.", permission_name(*.0))]
     PermissionMissing(Permission),
-    /// The global hotkey stopped working (macOS: often because
-    /// Accessibility was turned off).
+    /// The global hotkey doesn't work (macOS: often because Accessibility
+    /// is off). The app keeps trying and says when it works again.
     #[error(
-        "The dictation hotkey stopped working. Check the Accessibility permission, then restart the app."
+        "The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself."
     )]
     HotkeyFailed,
 }
@@ -114,7 +114,7 @@ mod tests {
             ),
             (
                 DictationError::HotkeyFailed,
-                "The dictation hotkey stopped working. Check the Accessibility permission, then restart the app.",
+                "The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself.",
             ),
         ];
         for (error, message) in cases {

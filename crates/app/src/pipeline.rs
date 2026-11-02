@@ -48,6 +48,9 @@ pub enum UiEvent {
     StateChanged(Phase),
     /// A dictation failed; show this to the user.
     Error(DictationError),
+    /// The hotkey listens again after it stopped working
+    /// ([`DictationError::HotkeyFailed`]); stop showing that.
+    HotkeyRestored,
 }
 
 /// The ports the pipeline runs against.
@@ -720,6 +723,12 @@ where
     /// Feeds a key, then a Tick that has come due: keys alone can't hold off
     /// the recording limit.
     async fn key(&mut self, key: HotkeyEvent, at: Duration) {
+        if key == HotkeyEvent::Restored {
+            // Nothing for the coordinator: the hotkey works again, so the
+            // UI stops saying it doesn't.
+            self.ui.send(UiEvent::HotkeyRestored);
+            return;
+        }
         if let Some(event) = self.key_event(key, at) {
             self.feed(event);
         }
@@ -784,6 +793,7 @@ where
             HotkeyEvent::CancelPressed => Event::CancelPressed,
             HotkeyEvent::Interrupted => Event::HotkeyInterrupted,
             HotkeyEvent::Failed => Event::HotkeyFailed,
+            HotkeyEvent::Restored => return None,
         })
     }
 
