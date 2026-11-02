@@ -38,8 +38,11 @@ pub enum DictationError {
     /// not pasted.
     #[error("A password field is focused; dictation wasn't pasted.")]
     SecureInput,
-    /// The OS has not granted a permission dictation needs.
-    #[error("{} permission is missing.", permission_name(*.0))]
+    /// The OS has not granted a permission dictation needs. The microphone's
+    /// message says where to allow it and that the app must be reopened
+    /// then: macOS doesn't tell a running app about a grant made in System
+    /// Settings after a refusal (#126, `docs/ENGINEERING.md`).
+    #[error("{}", permission_message(*.0))]
     PermissionMissing(Permission),
     /// The global hotkey doesn't work (macOS: often because Accessibility
     /// is off). The app keeps trying and says when it works again.
@@ -73,10 +76,12 @@ impl fmt::Debug for DictationError {
     }
 }
 
-fn permission_name(permission: Permission) -> &'static str {
+fn permission_message(permission: Permission) -> &'static str {
     match permission {
-        Permission::Microphone => "Microphone",
-        Permission::Accessibility => "Accessibility",
+        Permission::Microphone => {
+            "Microphone permission is missing. Allow it in System Settings, Privacy & Security, Microphone, then reopen the app."
+        }
+        Permission::Accessibility => "Accessibility permission is missing.",
     }
 }
 
@@ -106,7 +111,7 @@ mod tests {
             ),
             (
                 DictationError::PermissionMissing(Permission::Microphone),
-                "Microphone permission is missing.",
+                "Microphone permission is missing. Allow it in System Settings, Privacy & Security, Microphone, then reopen the app.",
             ),
             (
                 DictationError::PermissionMissing(Permission::Accessibility),
