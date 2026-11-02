@@ -67,6 +67,10 @@ export function Onboarding({ onFinished }: Props) {
   const [askedAccessibility, setAskedAccessibility] = useState(false);
   // The key step.
   const [settings, setSettings] = useState<Settings_Serialize | null>(null);
+  // Why the settings didn't load; the key step offers Retry then.
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  // Bumped by Retry to load the settings again.
+  const [settingsTry, setSettingsTry] = useState(0);
   const [provider, setProvider] = useState<Provider>("groq");
   const [keyInput, setKeyInput] = useState("");
   const [keySaved, setKeySaved] = useState(false);
@@ -79,6 +83,10 @@ export function Onboarding({ onFinished }: Props) {
   // step moves on only when it turns granted here, not when the user comes
   // back to a step that was already done.
   const seen = useRef<{ step: Step; state: PermissionState } | null>(null);
+  // The provider on screen, for replies that arrive after it changed, and
+  // whether the user picked it, so a late settings reply doesn't undo that.
+  const shownProvider = useRef<Provider>("groq");
+  const providerPicked = useRef(false);
 
   const goTo = useCallback(async (step: Step) => {
     setBusy(true);
@@ -174,19 +182,33 @@ export function Onboarding({ onFinished }: Props) {
     void (async () => {
       try {
         const result = await commands.getSettings();
-        if (!current() || result.status === "error") return;
+        if (!current()) return;
+        if (result.status === "error") {
+          setSettingsError(messageOf(result.error));
+          return;
+        }
+        // The key step tests and saves with this provider, so it changes
+        // only together with the typed key, and never after the user picked
+        // one.
+        if (!providerPicked.current && result.data.provider !== shownProvider.current) {
+          shownProvider.current = result.data.provider;
+          setProvider(result.data.provider);
+          setKeyInput("");
+        }
         setSettings(result.data);
-        setProvider(result.data.provider);
-        const saved = await commands.hasApiKey(result.data.provider);
-        if (current()) setKeySaved(saved.status === "ok" && saved.data);
+        const shown = shownProvider.current;
+        const saved = await commands.hasApiKey(shown);
+        if (current() && shownProvider.current === shown) {
+          setKeySaved(saved.status === "ok" && saved.data);
+        }
       } catch {
-        // The key step still works: Test asks for a key.
+        if (current()) setSettingsError(BROKEN);
       }
     })();
     return () => {
       state.cancelled = true;
     };
-  }, [step]);
+  }, [step, settingsTry]);
 
   // The paste goes wherever the focus is: put it in the field.
   useEffect(() => {
@@ -225,17 +247,21 @@ export function Onboarding({ onFinished }: Props) {
   }
 
   function changeProvider(next: Provider) {
+    providerPicked.current = true;
+    shownProvider.current = next;
     setProvider(next);
     setKeyInput("");
     setNotice(null);
     setKeySaved(false);
     void (async () => {
+      let saved = false;
       try {
-        const saved = await commands.hasApiKey(next);
-        setKeySaved(saved.status === "ok" && saved.data);
+        const result = await commands.hasApiKey(next);
+        saved = result.status === "ok" && result.data;
       } catch {
-        setKeySaved(false);
+        // Not saved, as far as the step knows.
       }
+      if (shownProvider.current === next) setKeySaved(saved);
     })();
   }
 
@@ -245,6 +271,8 @@ export function Onboarding({ onFinished }: Props) {
    * the reason, and nothing is saved.
    */
   async function testAndContinue() {
+    // The step's controls wait for the settings, so this is only a guard.
+    if (settings === null) return;
     const typed = keyInput.trim() === "" ? null : keyInput;
     if (typed === null && !keySaved) {
       setNotice({ kind: "error", text: "Paste your API key." });
@@ -266,16 +294,9 @@ export function Onboarding({ onFinished }: Props) {
         setNotice(outcome);
         return;
       }
-      if (typed !== null) {
-        const saved = await commands.setApiKey(provider, typed);
-        if (saved.status === "error") {
-          setNotice({ kind: "error", text: messageOf(saved.error) });
-          return;
-        }
-        setKeyInput("");
-        setKeySaved(true);
-      }
-      if (settings !== null && provider !== settings.provider) {
+      // The provider first, so the key is never kept for a provider the
+      // app doesn't use.
+      if (provider !== settings.provider) {
         const next: Settings_Serialize = {
           ...settings,
           provider,
@@ -287,6 +308,15 @@ export function Onboarding({ onFinished }: Props) {
           return;
         }
         setSettings(next);
+      }
+      if (typed !== null) {
+        const saved = await commands.setApiKey(provider, typed);
+        if (saved.status === "error") {
+          setNotice({ kind: "error", text: messageOf(saved.error) });
+          return;
+        }
+        setKeyInput("");
+        setKeySaved(true);
       }
     } catch {
       setNotice({ kind: "error", text: BROKEN });
@@ -333,6 +363,7 @@ export function Onboarding({ onFinished }: Props) {
   const previous = index > 0 ? STEPS[index - 1] : undefined;
   const next = STEPS[index + 1];
   const info = providerInfo(provider);
+  const settingsLoading = settings === null && settingsError === null;
 
   return (
     <main className="settings onboarding">
@@ -424,57 +455,80 @@ export function Onboarding({ onFinished }: Props) {
       {status.step === "key" && (
         <section>
           <h2>Add your API key</h2>
-          <div className="field">
-            <label htmlFor="onboarding-provider">Provider</label>
-            <select
-              id="onboarding-provider"
-              value={provider}
-              disabled={busy}
-              onChange={(event) => {
-                changeProvider(event.target.value as Provider);
-              }}
-            >
-              {PROVIDERS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
-            <p className="hint">Speech is sent to this service to be turned into text.</p>
-          </div>
-          <div className="field">
-            <label htmlFor="onboarding-key">{info.name} API key</label>
-            <input
-              id="onboarding-key"
-              type="password"
-              value={keyInput}
-              autoComplete="off"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              disabled={busy}
-              placeholder={keySaved ? "Paste a new key to replace it" : "Paste your key"}
-              aria-describedby="onboarding-key-hint"
-              onChange={(event) => {
-                setKeyInput(event.target.value);
-                setNotice(null);
-              }}
-            />
-            <p id="onboarding-key-hint" className="hint">
-              {keySaved
-                ? "A key is saved. Continue to test it, or paste a new one. "
-                : `Get one at ${KEY_PAGES[provider]}. `}
-              It is tested first and then kept in the system keychain; it is never shown again.
-            </p>
-            {notice !== null && (
-              <p
-                role={notice.kind === "error" ? "alert" : "status"}
-                className={`notice ${notice.kind}`}
-              >
-                {notice.text}
+          {settingsError !== null ? (
+            <div className="field">
+              <p role="alert" className="notice error">
+                Couldn&apos;t load your settings, so the key can&apos;t be set up yet:{" "}
+                {settingsError}
               </p>
-            )}
-          </div>
+              <div className="row">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettingsError(null);
+                    setSettingsTry((count) => count + 1);
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="field">
+                <label htmlFor="onboarding-provider">Provider</label>
+                <select
+                  id="onboarding-provider"
+                  value={provider}
+                  disabled={busy || settingsLoading}
+                  onChange={(event) => {
+                    changeProvider(event.target.value as Provider);
+                  }}
+                >
+                  {PROVIDERS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="hint">Speech is sent to this service to be turned into text.</p>
+              </div>
+              <div className="field">
+                <label htmlFor="onboarding-key">{info.name} API key</label>
+                <input
+                  id="onboarding-key"
+                  type="password"
+                  value={keyInput}
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  disabled={busy || settingsLoading}
+                  placeholder={keySaved ? "Paste a new key to replace it" : "Paste your key"}
+                  aria-describedby="onboarding-key-hint"
+                  onChange={(event) => {
+                    setKeyInput(event.target.value);
+                    setNotice(null);
+                  }}
+                />
+                <p id="onboarding-key-hint" className="hint">
+                  {settingsLoading && "Loading… "}
+                  {keySaved
+                    ? "A key is saved. Continue to test it, or paste a new one. "
+                    : `Get one at ${KEY_PAGES[provider]}. `}
+                  It is tested first and then kept in the system keychain; it is never shown again.
+                </p>
+                {notice !== null && (
+                  <p
+                    role={notice.kind === "error" ? "alert" : "status"}
+                    className={`notice ${notice.kind}`}
+                  >
+                    {notice.text}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
         </section>
       )}
 
@@ -522,7 +576,7 @@ export function Onboarding({ onFinished }: Props) {
           <button
             type="button"
             className="primary"
-            disabled={busy}
+            disabled={busy || settings === null}
             onClick={() => void testAndContinue()}
           >
             {testing ? "Testing…" : "Test and continue"}

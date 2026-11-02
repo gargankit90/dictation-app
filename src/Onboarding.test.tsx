@@ -140,6 +140,14 @@ function button(name: string): HTMLButtonElement {
   return screen.getByRole("button", { name });
 }
 
+/** The key step once its settings have loaded and Test can be pressed. */
+async function keyStepReady() {
+  await heading("Add your API key");
+  await waitFor(() => {
+    expect(button("Test and continue").disabled).toBe(false);
+  });
+}
+
 describe("the microphone step", () => {
   it("moves on only once the microphone is allowed, and then by itself", async () => {
     render(<Onboarding onFinished={() => undefined} />);
@@ -271,7 +279,7 @@ describe("the key step", () => {
       message: "Groq rejected this API key. Check that you copied the whole key from Groq.",
     };
     render(<Onboarding onFinished={() => undefined} />);
-    await heading("Add your API key");
+    await keyStepReady();
     fireEvent.change(screen.getByLabelText("Groq API key"), { target: { value: KEY } });
     fireEvent.click(button("Test and continue"));
 
@@ -288,7 +296,7 @@ describe("the key step", () => {
 
   it("asks for a key before testing when none is saved or typed", async () => {
     render(<Onboarding onFinished={() => undefined} />);
-    await heading("Add your API key");
+    await keyStepReady();
     fireEvent.click(button("Test and continue"));
     expect((await screen.findByRole("alert")).textContent).toBe("Paste your API key.");
     expect(backend.named("test_api_key")).toEqual([]);
@@ -296,7 +304,7 @@ describe("the key step", () => {
 
   it("saves a key that works and moves on", async () => {
     render(<Onboarding onFinished={() => undefined} />);
-    await heading("Add your API key");
+    await keyStepReady();
     fireEvent.change(screen.getByLabelText("Groq API key"), { target: { value: KEY } });
     fireEvent.click(button("Test and continue"));
 
@@ -324,6 +332,75 @@ describe("the key step", () => {
     expect(backend.settings.provider).toBe("openai");
     expect(backend.settings.model).toBe("whisper-1");
     expect(backend.keys.openai).toBe(true);
+  });
+
+  it("keeps the provider the user picked while the settings load, and tests with it", async () => {
+    let answer: (settings: Settings_Serialize) => void = () => undefined;
+    mockIPC((command, payload) =>
+      command === "get_settings"
+        ? new Promise((resolve) => {
+            backend.calls.push({ command, args: {} });
+            answer = resolve;
+          })
+        : backend.handle(command, payload),
+    );
+    render(<Onboarding onFinished={() => undefined} />);
+    await heading("Add your API key");
+    await waitFor(() => {
+      expect(backend.named("get_settings")).toHaveLength(1);
+    });
+    expect(screen.getByText(/Loading…/u)).toBeTruthy();
+    expect(button("Test and continue").disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+    fireEvent.change(await screen.findByLabelText("OpenAI API key"), {
+      target: { value: "sk-dummy-NOT-A-REAL-KEY" },
+    });
+    // The settings arrive late, still on Groq.
+    act(() => {
+      answer(backend.settings);
+    });
+    await keyStepReady();
+    fireEvent.click(button("Test and continue"));
+
+    await heading("Try it");
+    expect(backend.named("test_api_key")).toEqual([
+      { command: "test_api_key", args: { provider: "openai", key: "sk-dummy-NOT-A-REAL-KEY" } },
+    ]);
+    expect(backend.settings.provider).toBe("openai");
+    expect(backend.keys).toEqual({ groq: false, openai: true });
+  });
+
+  it("says when the settings don't load, and sets up the key after Retry", async () => {
+    let failures = 1;
+    mockIPC((command, payload) => {
+      if (command === "get_settings" && failures > 0) {
+        failures -= 1;
+        backend.calls.push({ command, args: {} });
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw "The settings file can't be read.";
+      }
+      return backend.handle(command, payload);
+    });
+    render(<Onboarding onFinished={() => undefined} />);
+    expect((await screen.findByRole("alert")).textContent).toMatch(
+      /Couldn.t load your settings.*The settings file can't be read\./u,
+    );
+    expect(screen.queryByLabelText("Provider")).toBeNull();
+    expect(button("Test and continue").disabled).toBe(true);
+
+    fireEvent.click(button("Retry"));
+    await keyStepReady();
+    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+    fireEvent.change(await screen.findByLabelText("OpenAI API key"), {
+      target: { value: "sk-dummy-NOT-A-REAL-KEY" },
+    });
+    fireEvent.click(button("Test and continue"));
+
+    await heading("Try it");
+    expect(backend.named("save_settings")).toHaveLength(1);
+    expect(backend.settings.provider).toBe("openai");
+    expect(backend.keys.openai).toBe(true);
+    expect(backend.step).toBe("try");
   });
 
   it("tests the saved key when the box is empty", async () => {
