@@ -148,6 +148,8 @@ def api(args):
     if method == "GET":
         return
     for endpoint in endpoints:
+        # Share host/path normalization between REST and GraphQL, including GHES.
+        endpoint = re.sub(r"^(?:https?://[^/]+)?/*(?:api/)?", "", endpoint, flags=re.I)
         if (method == "PUT" and re.search(r"/pulls/\d+/merge$", endpoint)) or (method == "POST" and endpoint.endswith("/merges")):
             block("merging through the API")
         if method in ("DELETE", "PATCH", "PUT") and re.search(r"(?:^|/)repos/[^/]+/[^/]+(?:$|/(?:rules|rulesets|branches|tags|git/refs|settings|interaction-limits)(?:/|$))", endpoint):

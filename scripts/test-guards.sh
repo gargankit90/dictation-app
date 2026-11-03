@@ -483,6 +483,24 @@ allowed 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=Tester
 allowed 'git --config-env=user.name=NAME status'
 allowed 'git commit -m "GIT_CONFIG_KEY_0=core.hooksPath; --config-env=core.hooksPath=HP"'
 
+# Round 2 M2: GraphQL endpoint spellings share the same mutation checks.
+printf '%s\n' '{"query":"mutation { mergePullRequest(input:{}) { clientMutationId } }"}' > "$tmp/round2-mutation.json"
+for endpoint in graphql /graphql graphql/ '/graphql?x=1' '/graphql/?x=1#fragment' https://api.github.com/graphql https://api.github.com/graphql/ 'https://api.github.com/graphql?x=1' /api/graphql api/graphql http://ghe.example/api/graphql https://ghe.example/api/graphql/ 'https://ghe.example:8443/api/graphql/?x=1'; do
+  blocked "gh api '$endpoint' -f 'query=mutation { mergePullRequest(input:{}) { clientMutationId } }'"
+  blocked "gh api '$endpoint' --input '$tmp/round2-mutation.json'"
+  allowed "gh api '$endpoint' -f 'query=query { viewer { login } }'"
+done
+blocked "gh api --hostname ghe.example /api/graphql -f 'query=mutation { deleteRef(input:{}) { clientMutationId } }'"
+allowed "gh api --hostname ghe.example /api/graphql -f 'query=query { viewer { login } }'"
+# REST endpoint normalization must preserve merge/settings blocks and GET reads.
+for prefix in repos /repos https://api.github.com/repos https://ghe.example/api/v3/repos; do
+  blocked "gh api -X PUT '$prefix/o/r/pulls/1/merge/?x=1#fragment'"
+  blocked "gh api -X POST '$prefix/o/r/merges/'"
+  blocked "gh api -X PATCH '$prefix/o/r?x=1' -f visibility=private"
+  blocked "gh api -X DELETE '$prefix/o/r/rulesets/1/'"
+  allowed "gh api -X GET '$prefix/o/r/rulesets/1/'"
+done
+
 # Block messages must name the actual role policy.
 message=$(jq -n '{tool_input:{command:"gh pr merge 1"}}' | "$hook" 2>&1) || :
 if [[ "$message" == *"Code Reviewer merges"* && "$message" == *"owner changes guards"* ]]; then code=0; else code=1; fi
