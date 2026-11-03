@@ -4,8 +4,10 @@ Hold a key, speak, let go, and your words are typed into whatever app is in
 front. Thank you for trying it. This page takes you from the DMG to your first
 dictation, and says what to send us when something goes wrong.
 
-You need a Mac with **macOS 13 (Ventura) or newer**, an internet connection
-(your speech goes to Groq to be turned into text) and a free Groq account.
+You need an **Apple Silicon Mac (M1 or newer; Intel Macs are not supported)**
+with **macOS 13 (Ventura) or newer**, an internet connection (your speech goes
+to Groq or OpenAI to be turned into text) and an API key for one of them. Groq
+has a free tier and is the one this guide uses; OpenAI works the same way.
 
 ## 1. Install
 
@@ -41,53 +43,67 @@ the warning, then go to **System Settings > Privacy & Security**, scroll down
 to _"dictation-app was blocked…"_ and click **Open Anyway**.
 
 dictation-app lives in the **menu bar** (top right of the screen, an icon
-without a Dock entry). If you see no window, that is normal: click the icon
-and choose **Settings…**.
+without a Dock entry), not in the Dock. The first time it opens, a **Set up
+dictation** window walks you through four steps. If you don't see it, click
+the menu-bar icon.
 
-## 3. Give it the two permissions
+## 3. First run: the Set up dictation window
 
-macOS asks for each one the first time it is needed. Allow both, or dictation
-can't work.
+The window shows "Step 1 of 4" and so on, and has **Back** and **Continue**
+buttons. A permission step moves on by itself once you have allowed it.
 
-| Permission        | What it is for                          | Where to grant it                                            |
-| ----------------- | --------------------------------------- | ------------------------------------------------------------ |
-| **Microphone**    | Hearing you while the hotkey is held    | A prompt appears at your first dictation: click **Allow**.   |
-| **Accessibility** | Seeing the hotkey and pasting the text  | **System Settings > Privacy & Security > Accessibility**: switch **dictation-app** on. |
+1. **Allow the microphone.** Click **Allow microphone**; macOS asks once, so
+   choose **Allow**. dictation-app records only while you hold the hotkey. If
+   you chose "Don't Allow" earlier, the step says the microphone is turned off:
+   click **Open System Settings** and switch **dictation-app** on under
+   **Privacy & Security > Microphone**.
+2. **Allow Accessibility.** The hotkey and pasting need it. Click **Open
+   System Settings** and switch **dictation-app** on under **Privacy &
+   Security > Accessibility**. If it is not in the list, click **+**, choose
+   `/Applications/dictation-app.app` and switch it on. If the step doesn't move
+   on after that, click **Relaunch**; the app opens again at this step.
+3. **Add your API key.** Pick the **Provider** (**Groq** is the recommended
+   one; **OpenAI** is the alternative), then paste your key into the key box.
+   - Groq: go to <https://console.groq.com/keys>, sign up (free; Google
+     sign-in works), click **Create API Key**, give it any name and copy it.
+     It starts with `gsk_`. You see it only once.
+   - OpenAI: create a key at <https://platform.openai.com/api-keys>
+     (needs a billing-enabled account).
 
-For Accessibility, macOS shows a prompt with a button that opens that screen.
-If you don't see dictation-app in the list, click **+**, choose
-`/Applications/dictation-app.app` and switch it on. After switching it on,
-**Quit dictation-app from its menu-bar icon and open it again** so it picks
-the permission up.
+   Click **Test and continue**. The key is tested first; a wrong one shows
+   the reason and nothing is saved. A good one is kept in your macOS keychain
+   and never shown again. The key is the only secret: it stays on your Mac and
+   is sent only to the provider you chose.
 
-Both are kept when you update to a newer build that we sign the same way. If
-a new build ever asks again, grant it again and tell us.
+4. **Try it.** Hold **the right Option key** (right of the space bar), say a
+   few words and let go. The text appears in the box in the window. When it
+   does, the window says "It works." Click **Done**.
 
-## 4. Get a Groq key and paste it in
+Both permissions are kept when you update to a newer build that we sign the
+same way. If a new build ever asks again, grant it again and report it (see "Report a bug").
 
-1. Go to <https://console.groq.com/keys> and sign up (free; Google sign-in
-   works).
-2. Click **Create API Key**, give it any name and copy the key. It starts
-   with `gsk_`. You see it only once.
-3. Click the dictation-app icon in the menu bar > **Settings…**.
-4. Paste the key into **Groq API key**.
-5. Click **Test key**. It should say _"The key works. Groq accepted it."_ A
-   wrong key says _"The provider rejected your API key"_.
-6. Click **Save**. The box then says **Key saved**. The key is kept in your
-   macOS keychain and is never shown again; to replace it, paste a new one.
+### Changing things later: Settings
 
-The key is the only secret. It stays on your Mac and is sent only to Groq.
+Menu-bar icon > **Settings…** is also where you go to fix things, and to
+change anything you set above:
 
-## 5. Dictate
+- **Provider** and **Groq/OpenAI API key**: paste a new key, click **Test
+  key** (it says _"The key works. Groq accepted it."_; a wrong key says _"The
+  provider rejected your API key"_), then **Save**. The box then says **Key
+  saved**.
+- **Hotkey**, **Language** and **Launch at login**.
+- A permission turned off by mistake: switch it back on in **System Settings >
+  Privacy & Security** (Microphone or Accessibility), then quit dictation-app
+  from its menu-bar icon and open it again.
+
+## 4. Dictate
 
 1. Click into any text field (Notes, Slack, a browser, a document).
-2. **Hold the right Option key** (the Option key right of the space bar),
-   speak, and let go. A small overlay shows that it is recording and then that
-   it is working. The first time, macOS asks to use the microphone: click
-   **Allow**, then dictate again.
+2. **Hold the right Option key**, speak, and let go. A small overlay shows
+   that it is recording and then that it is working.
 3. The text appears where your cursor was, a moment later.
 
-You can change the key in Settings (the **Hotkey** box). Password fields are
+Change the key with the **Hotkey** box in Settings. Password fields are
 skipped on purpose: nothing is pasted there.
 
 If nothing happens, see "Something went wrong" below.
@@ -110,7 +126,7 @@ You install from the DMG once. After that, dictation-app updates itself:
   knows it is the same app. You don't clear the quarantine flag again.
 - Every update is signed with our update key, and the app refuses one whose
   signature doesn't match (_"The update's signature didn't match this app's
-  update key, so it was not installed."_). If you see that, tell us.
+  update key, so it was not installed."_). If you see that, report it (see "Report a bug").
 
 If an update ever goes wrong, download the newest DMG from the release page
 and install it over the old app, as in section 1.
@@ -125,15 +141,29 @@ are not written at all.
 - **See it:** menu-bar icon > **Reveal log** opens the folder in Finder.
   It is `~/Library/Logs/com.dictationapp.desktop/`.
 - **Send it:** in that folder, select all the files, right-click > **Compress**,
-  and send us the zip (the files are small: at most 10 MB in all).
+  and attach the zip to a bug report (see "Report a bug" below; the files are
+  small: at most 10 MB in all).
 - **If we ask for more detail:** quit the app, then in Terminal run
   `open --env DICTATION_LOG=debug /Applications/dictation-app.app`, repeat the
   problem, and send the log again. Debug logs show how long a dictation was,
   still not its text.
 
-Please also tell us what you did, what you expected, what happened, your
-macOS version and the dictation-app version (the DMG's name, or the
-**Update available** dialog's "you have …").
+## Report a bug
+
+Open an issue: <https://github.com/gargankit90/dictation-app/issues/new/choose>
+and pick **Bug report**. The form asks for:
+
+- your macOS version (Apple menu > **About This Mac**) and Mac model,
+- the dictation-app version: menu-bar icon > **Check for updates…** says
+  "dictation-app _x.y.z_ is the newest version" (or what you have, if there is
+  an update),
+- what you did, what you expected and what happened,
+- the log zip from above. The log never holds your API key or what you said
+  (keys are removed before it is written; dictated text is not written at all),
+  but the issue is public, so open the zip and check it before you attach it.
+
+Never paste an API key into an issue. For a security problem, don't open a
+public issue; see [SECURITY.md](../SECURITY.md).
 
 ## Quit and uninstall
 
@@ -151,16 +181,16 @@ macOS version and the dictation-app version (the DMG's name, or the
             ~/Library/Application\ Support/com.dictationapp.desktop
      ```
 
-  4. Remove the saved Groq key: open **Keychain Access**, search for
+  4. Remove the saved API key: open **Keychain Access**, search for
      `com.dictationapp.desktop` and delete that entry. (You can also delete the
-     key itself at <https://console.groq.com/keys>.)
+     key itself on your provider's key page: Groq or OpenAI, as in section 3.)
   5. In **System Settings > Privacy & Security**, remove dictation-app from
      **Microphone** and **Accessibility** (select it, click **−**).
 
 ## Known limits
 
-- Mac only, macOS 13 or newer. Windows comes later.
+- Apple Silicon Macs only, macOS 13 or newer. Windows comes later.
 - Not notarised, hence the step in section 2.
-- Speech goes to Groq's servers while the alpha uses the cloud. Don't dictate
+- Speech goes to your chosen provider's servers (Groq or OpenAI) while the alpha uses the cloud. Don't dictate
   anything you would not send to a cloud service.
 - Recordings stop after 5 minutes.
