@@ -3,8 +3,9 @@ import type { Settings_Serialize } from "./bindings";
 import { BROKEN, messageOf } from "./keyTest";
 
 /**
- * Saves `hotkey` as the dictation key and returns what the app now stores.
- * Only the key changes: everything else is what the app holds right now. The
+ * Sets `hotkey` as the dictation key, through the command that is its only
+ * writer, and returns what the app now stores. The other settings are never
+ * touched, so this can't undo a Save of the form or the other way round. The
  * app switches the running hotkey as it saves, so the key works at once; if
  * it can't, the old key keeps working and `error` says why. Never throws.
  */
@@ -12,16 +13,18 @@ export async function saveHotkey(
   hotkey: string,
 ): Promise<{ error: string | null; settings: Settings_Serialize | null }> {
   try {
-    const current = await commands.getSettings();
-    if (current.status === "error") return { error: messageOf(current.error), settings: null };
-    const saved = await commands.saveSettings({ ...current.data, hotkey });
-    // Even a failed save can leave the settings partly changed: show what the
-    // app really holds.
+    const saved = await commands.setHotkey(hotkey);
+    // Even a failed change shows what the app really holds.
     const reread = await commands.getSettings();
     const settings = reread.status === "ok" ? reread.data : null;
     if (saved.status === "error") return { error: messageOf(saved.error), settings };
-    return { error: null, settings: settings ?? { ...current.data, hotkey } };
+    return { error: null, settings };
   } catch {
     return { error: BROKEN, settings: null };
   }
+}
+
+/** Tells the app the user is (or no longer is) choosing a key. Never throws. */
+export function setHotkeyRecording(recording: boolean): void {
+  void commands.setHotkeyRecording(recording).catch(() => undefined);
 }

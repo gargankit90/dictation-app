@@ -3,25 +3,31 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HotkeyRecorder } from "./HotkeyRecorder";
+import { HotkeyRecorder, RENEW_MS } from "./HotkeyRecorder";
+import { holdSilently, keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
-afterEach(cleanup);
+afterEach(() => {
+  releaseAllKeys();
+  cleanup();
+  vi.useRealTimers();
+});
 
-const down = (code: string) => {
-  act(() => void fireEvent.keyDown(window, { code }));
-};
-const up = (code: string) => {
-  act(() => void fireEvent.keyUp(window, { code }));
-};
+const down = keyDown;
+const up = keyUp;
 const record = () => {
   fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
 };
 
 function setup(value = "RightAlt", result: string | null = null) {
   const onChange = vi.fn<(spec: string) => Promise<string | null>>(() => Promise.resolve(result));
-  render(<HotkeyRecorder value={value} onChange={onChange} />);
+  const onRecording = vi.fn<(recording: boolean) => void>();
+  render(<HotkeyRecorder value={value} onChange={onChange} onRecording={onRecording} />);
+  recording = onRecording;
   return onChange;
 }
+
+/** The last `setup`'s recording notices. */
+let recording = vi.fn<(recording: boolean) => void>();
 
 describe("HotkeyRecorder", () => {
   it("shows the current key as a keycap", () => {
@@ -115,5 +121,79 @@ describe("HotkeyRecorder", () => {
     act(() => void fireEvent.blur(window));
     down("F5");
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("counts a modifier already held when recording starts", async () => {
+    const onChange = setup();
+    holdSilently("ShiftLeft");
+    record();
+    down("F5");
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith("Shift+F5");
+    });
+  });
+
+  it("keeps the held modifier across a refused key", async () => {
+    const onChange = setup();
+    record();
+    down("ControlLeft");
+    down("CapsLock");
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    up("CapsLock");
+    down("KeyK");
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith("Ctrl+K");
+    });
+  });
+});
+
+describe("HotkeyRecorder pausing the real hotkey", () => {
+  it("says so while recording, and when it ends by each way out", async () => {
+    // Esc, Cancel, a key chosen, a refusal that goes on, blur, unmount.
+    setup();
+    expect(recording).not.toHaveBeenCalled();
+    record();
+    expect(recording.mock.calls).toEqual([[true]]);
+    down("Escape");
+    expect(recording.mock.calls).toEqual([[true], [false]]);
+
+    record();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(recording.mock.calls.at(-1)).toEqual([false]);
+
+    record();
+    down("F6");
+    await waitFor(() => {
+      expect(recording.mock.calls.at(-1)).toEqual([false]);
+    });
+
+    record();
+    down("KeyA"); // refused: goes on recording
+    await screen.findByRole("alert");
+    expect(recording.mock.calls.at(-1)).toEqual([true]);
+    act(() => void fireEvent.blur(window));
+    expect(recording.mock.calls.at(-1)).toEqual([false]);
+
+    record();
+    cleanup();
+    expect(recording.mock.calls.at(-1)).toEqual([false]);
+  });
+
+  it("stops recording when the window is hidden", () => {
+    setup();
+    record();
+    const state = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    act(() => void fireEvent(document, new Event("visibilitychange")));
+    expect(recording.mock.calls.at(-1)).toEqual([false]);
+    state.mockRestore();
+  });
+
+  it("renews while recording goes on, so its pause doesn't lapse", () => {
+    vi.useFakeTimers();
+    setup();
+    record();
+    expect(recording).toHaveBeenCalledTimes(1);
+    act(() => void vi.advanceTimersByTime(RENEW_MS * 2 + 1));
+    expect(recording.mock.calls).toEqual([[true], [true], [true]]);
   });
 });

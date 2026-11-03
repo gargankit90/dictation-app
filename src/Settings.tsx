@@ -7,7 +7,7 @@ import { HotkeyRecorder } from "./HotkeyRecorder";
 import { LocalModels } from "./LocalModels";
 import type { Notice } from "./keyTest";
 import { PROVIDERS, providerInfo } from "./providers";
-import { saveHotkey } from "./saveHotkey";
+import { saveHotkey, setHotkeyRecording } from "./saveHotkey";
 import "./settings.css";
 import { normalizeLanguage, validateHotkey, validateKey, validateLanguage } from "./validation";
 
@@ -193,17 +193,27 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
     setNotice(outcome);
   }
 
-  /** Applies a recorded (or reset) key at once; returns a message if it can't. */
+  /**
+   * Applies a recorded (or reset) key at once; returns a message if it can't.
+   * Busy like a Save: neither starts while the other runs, and the key has
+   * one writer on the app's side, so the two can't undo each other.
+   */
   async function recordHotkey(spec: string): Promise<string | null> {
-    const result = await saveHotkey(spec);
-    if (result.settings !== null) {
-      setLoaded(result.settings);
-      // The form follows the key that listens, unless the save failed and
-      // the user has a typed value of their own.
-      if (result.error === null) setHotkey(result.settings.hotkey);
+    if (loaded === null || saving || testing) return "Wait for the other change to finish.";
+    setSaving(true);
+    try {
+      const result = await saveHotkey(spec);
+      if (result.settings !== null) {
+        setLoaded(result.settings);
+        // The form follows the key that listens, unless the change failed
+        // and the user has a typed value of their own.
+        if (result.error === null) setHotkey(result.settings.hotkey);
+      }
+      if (result.error === null) setNotice({ kind: "ok", text: "Dictation key saved." });
+      return result.error;
+    } finally {
+      setSaving(false);
     }
-    if (result.error === null) setNotice({ kind: "ok", text: "Dictation key saved." });
-    return result.error;
   }
 
   async function save(event: SyntheticEvent) {
@@ -249,12 +259,18 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
         // new provider's default (the form says so).
         model: provider === loaded.provider ? loaded.model : info.defaultModel,
         language: normalizeLanguage(language),
-        hotkey: hotkey.trim(),
         launch_at_login: launch,
         transcription,
         local_model: localModel,
       };
-      const saved = await commands.saveSettings(toSave);
+      let saved = await commands.saveSettings(toSave);
+      // The dictation key has its own writer: a typed one is set after the
+      // rest is saved, and says so if it can't be used.
+      const typedKey = hotkey.trim();
+      if (saved.status === "ok" && typedKey !== loaded.hotkey) {
+        const change = await saveHotkey(typedKey);
+        if (change.error !== null) saved = { status: "error", error: change.error };
+      }
       if (saved.status === "error") {
         // Something didn't take effect: the login item (the OS can refuse,
         // or want the user's approval) or the hotkey (the old one keeps
@@ -491,7 +507,12 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
             <span className="label" id="hotkey-label">
               Dictation key
             </span>
-            <HotkeyRecorder value={loaded.hotkey} disabled={saving} onChange={recordHotkey} />
+            <HotkeyRecorder
+              value={loaded.hotkey}
+              disabled={saving}
+              onChange={recordHotkey}
+              onRecording={setHotkeyRecording}
+            />
             <label htmlFor="hotkey">Or type it</label>
             <input
               id="hotkey"

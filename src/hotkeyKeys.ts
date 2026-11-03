@@ -55,9 +55,14 @@ export interface RecorderState {
   down: readonly string[];
   /** Every modifier code pressed since the last result, in order. */
   seen: readonly string[];
+  /**
+   * A key that isn't a modifier was pressed and refused. Letting go of the
+   * modifiers then is not a choice of a modifier-only key.
+   */
+  spoiled: boolean;
 }
 
-export const INITIAL_RECORDER: RecorderState = { down: [], seen: [] };
+export const INITIAL_RECORDER: RecorderState = { down: [], seen: [], spoiled: false };
 
 export type RecorderOutcome =
   { kind: "recorded"; spec: string } | { kind: "refused"; reason: string } | { kind: "cancelled" };
@@ -68,39 +73,83 @@ export interface RecorderStep {
   outcome?: RecorderOutcome;
 }
 
+/** A key event: its physical key and, when known, the modifiers held. */
+export interface RecorderEvent {
+  type: "down" | "up";
+  code: string;
+  /** `KeyboardEvent`'s modifier flags, which say what is held right now. */
+  flags?: { ctrl: boolean; alt: boolean; shift: boolean; meta: boolean };
+}
+
 const REFUSE_UNKNOWN = "That key can't be a dictation key. Try another, such as a modifier key.";
 
-function refused(reason: string): RecorderStep {
-  return { state: INITIAL_RECORDER, outcome: { kind: "refused", reason } };
+const MODIFIER_NAMES: Record<Mod, string> = {
+  Ctrl: "Ctrl",
+  Alt: "Option",
+  Shift: "Shift",
+  Cmd: "Command",
+};
+
+/** A refusal; the keys physically held stay held, so the next try counts them. */
+function refused(state: RecorderState, reason: string): RecorderStep {
+  return { state: { ...state, spoiled: true }, outcome: { kind: "refused", reason } };
+}
+
+/** The modifier keys held according to `flags`, if the event has them. */
+function heldModifiers(state: RecorderState, flags: RecorderEvent["flags"]): Set<Mod> {
+  if (flags === undefined) {
+    return new Set(state.down.flatMap((c) => MODIFIER_CODES[c]?.mod ?? []));
+  }
+  const held = new Set<Mod>();
+  if (flags.ctrl) held.add("Ctrl");
+  if (flags.alt) held.add("Alt");
+  if (flags.shift) held.add("Shift");
+  if (flags.meta) held.add("Cmd");
+  return held;
 }
 
 /**
  * One key event while recording. A non-modifier key ends it at once, with
- * the modifiers held then (either side, as `Ctrl+Shift+Space`). Modifiers
- * pressed and all released with no other key make a modifier-only key that
- * keeps its sides (`RightCmd`). Esc cancels.
+ * the modifiers held then (either side, as `Ctrl+Shift+Space`), including
+ * ones held before recording began. Modifiers pressed and all released with
+ * no other key make a modifier-only key that keeps its sides (`RightCmd`).
+ * Esc cancels. A refused key leaves the held modifiers as they are, and
+ * letting go of them afterwards records nothing.
  */
-export function recorderStep(
-  state: RecorderState,
-  event: { type: "down" | "up"; code: string },
-): RecorderStep {
+export function recorderStep(before: RecorderState, event: RecorderEvent): RecorderStep {
   const { code } = event;
   const modifier = MODIFIER_CODES[code];
+  // A modifier the flags say is up was let go where we couldn't see it.
+  const flagged = event.flags === undefined ? null : heldModifiers(before, event.flags);
+  const state: RecorderState =
+    flagged === null
+      ? before
+      : {
+          ...before,
+          down: before.down.filter((c) => {
+            // The key being let go is handled below, whatever the flags say.
+            if (event.type === "up" && c === code) return true;
+            const mod = MODIFIER_CODES[c]?.mod;
+            return mod !== undefined && flagged.has(mod);
+          }),
+        };
   if (event.type === "down") {
     if (code === "Escape") return { state: INITIAL_RECORDER, outcome: { kind: "cancelled" } };
     if (modifier !== undefined) {
       return {
         state: {
+          ...state,
           down: state.down.includes(code) ? state.down : [...state.down, code],
           seen: state.seen.includes(code) ? state.seen : [...state.seen, code],
         },
       };
     }
     const name = keyName(code);
-    if (name === null) return refused(REFUSE_UNKNOWN);
-    const held = new Set(state.down.map((c) => MODIFIER_CODES[c]?.mod));
+    if (name === null) return refused(state, REFUSE_UNKNOWN);
+    const held = heldModifiers(state, event.flags);
     if (TEXT_KEYS.test(name) && !held.has("Ctrl") && !held.has("Alt") && !held.has("Cmd")) {
       return refused(
+        state,
         `A plain ${name} would start dictation whenever you type it. Hold Ctrl, Option or Command with it, or use a modifier key alone.`,
       );
     }
@@ -110,15 +159,21 @@ export function recorderStep(
   if (modifier === undefined || !state.down.includes(code)) return { state };
   const down = state.down.filter((c) => c !== code);
   if (down.length > 0) return { state: { ...state, down } };
-  // Every modifier is up and no other key came: that was the key.
+  // Every modifier is up. After a refused key that is only the end of the
+  // attempt; otherwise no other key came, so the modifiers were the key.
+  if (state.spoiled) return { state: INITIAL_RECORDER };
   const sided = new Map<Mod, Side>();
   for (const seen of state.seen) {
     const found = MODIFIER_CODES[seen];
     if (found === undefined) continue;
     if (sided.has(found.mod) && sided.get(found.mod) !== found.side) {
-      return refused(
-        `Use one side of ${found.mod === "Alt" ? "Option" : found.mod === "Cmd" ? "Command" : found.mod}, not both.`,
-      );
+      return {
+        state: INITIAL_RECORDER,
+        outcome: {
+          kind: "refused",
+          reason: `Use one side of ${MODIFIER_NAMES[found.mod]}, not both.`,
+        },
+      };
     }
     sided.set(found.mod, found.side);
   }

@@ -2,17 +2,42 @@ import { describe, expect, it } from "vitest";
 import { INITIAL_RECORDER, keycapLabel, recorderStep } from "./hotkeyKeys";
 import type { RecorderOutcome } from "./hotkeyKeys";
 
-/** Plays `[type, code]` events and returns the outcome of the last one. */
-function play(...events: ["down" | "up", string][]): RecorderOutcome | undefined {
+const FLAG_OF: Record<string, "ctrl" | "alt" | "shift" | "meta"> = {
+  ControlLeft: "ctrl",
+  ControlRight: "ctrl",
+  AltLeft: "alt",
+  AltRight: "alt",
+  ShiftLeft: "shift",
+  ShiftRight: "shift",
+  MetaLeft: "meta",
+  MetaRight: "meta",
+};
+
+/**
+ * Plays `[type, code]` events, with the modifier flags a real keyboard puts
+ * on each (`held` were already down before recording began, unseen), and
+ * returns the outcome of the last one.
+ */
+function playHeld(held: string[], events: ["down" | "up", string][]): RecorderOutcome | undefined {
+  const down = new Set(held);
   let state = INITIAL_RECORDER;
   let outcome: RecorderOutcome | undefined;
   for (const [type, code] of events) {
-    const step = recorderStep(state, { type, code });
+    if (type === "down") down.add(code);
+    else down.delete(code);
+    const has = (flag: string) => [...down].some((c) => FLAG_OF[c] === flag);
+    const step = recorderStep(state, {
+      type,
+      code,
+      flags: { ctrl: has("ctrl"), alt: has("alt"), shift: has("shift"), meta: has("meta") },
+    });
     state = step.state;
     outcome = step.outcome;
   }
   return outcome;
 }
+
+const play = (...events: ["down" | "up", string][]) => playHeld([], events);
 
 describe("recorderStep", () => {
   it("records a modifier pressed and released alone, with its side", () => {
@@ -91,10 +116,68 @@ describe("recorderStep", () => {
     expect(play(["down", "MetaRight"], ["down", "Escape"])).toEqual({ kind: "cancelled" });
   });
 
-  it("starts afresh after a refusal", () => {
-    const first = recorderStep(INITIAL_RECORDER, { type: "down", code: "KeyA" });
-    expect(first.outcome?.kind).toBe("refused");
-    expect(first.state).toEqual(INITIAL_RECORDER);
+  it("counts a modifier held before recording began", () => {
+    expect(playHeld(["ShiftLeft"], [["down", "F5"]])).toEqual({
+      kind: "recorded",
+      spec: "Shift+F5",
+    });
+    expect(playHeld(["MetaRight", "ShiftLeft"], [["down", "KeyK"]])).toEqual({
+      kind: "recorded",
+      spec: "Shift+Cmd+K",
+    });
+  });
+
+  it("keeps the held modifiers across a refused key", () => {
+    // Ctrl is still down when K comes after the refused Caps Lock.
+    expect(
+      play(["down", "ControlLeft"], ["down", "CapsLock"], ["up", "CapsLock"], ["down", "KeyK"]),
+    ).toEqual({ kind: "recorded", spec: "Ctrl+K" });
+    expect(
+      play(["down", "ShiftRight"], ["down", "CapsLock"], ["up", "CapsLock"], ["down", "F5"]),
+    ).toEqual({ kind: "recorded", spec: "Shift+F5" });
+    // A plain K is still refused: Shift alone doesn't make it a hotkey.
+    expect(
+      play(["down", "ShiftRight"], ["down", "CapsLock"], ["up", "CapsLock"], ["down", "KeyK"])
+        ?.kind,
+    ).toBe("refused");
+  });
+
+  it("records nothing when the modifiers are let go after a refused key", () => {
+    expect(
+      play(["down", "MetaRight"], ["down", "CapsLock"], ["up", "CapsLock"], ["up", "MetaRight"]),
+    ).toBeUndefined();
+    // ...and the next modifier alone is a fresh choice.
+    let state = INITIAL_RECORDER;
+    for (const [type, code] of [
+      ["down", "MetaRight"],
+      ["down", "CapsLock"],
+      ["up", "MetaRight"],
+      ["down", "AltRight"],
+      ["up", "AltRight"],
+    ] as const) {
+      const step = recorderStep(state, { type, code });
+      state = step.state;
+      if (code === "AltRight" && type === "up") {
+        expect(step.outcome).toEqual({ kind: "recorded", spec: "RightAlt" });
+      }
+    }
+  });
+
+  it("drops a modifier the flags say was let go unseen", () => {
+    // Command was released in another window: its keyup never came.
+    let state = recorderStep(INITIAL_RECORDER, {
+      type: "down",
+      code: "MetaLeft",
+      flags: { ctrl: false, alt: false, shift: false, meta: true },
+    }).state;
+    const step = recorderStep(state, {
+      type: "down",
+      code: "F5",
+      flags: { ctrl: false, alt: false, shift: false, meta: false },
+    });
+    expect(step.outcome).toEqual({ kind: "recorded", spec: "F5" });
+    state = step.state;
+    expect(state).toEqual(INITIAL_RECORDER);
   });
 
   it("ignores the release of a key it never saw go down", () => {

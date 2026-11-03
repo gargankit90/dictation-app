@@ -19,6 +19,8 @@
     "allow-cancel-local-model-download",
     "allow-delete-local-model",
     "allow-set-share-usage-events",
+    "allow-set-hotkey",
+    "allow-set-hotkey-recording",
     "allow-run-checks",
     "allow-test-connection",
     "allow-build-report",

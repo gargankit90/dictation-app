@@ -12,7 +12,7 @@ import { HotkeyRecorder } from "./HotkeyRecorder";
 import { BROKEN, messageOf, testKey } from "./keyTest";
 import type { Notice } from "./keyTest";
 import { PROVIDERS, providerInfo } from "./providers";
-import { saveHotkey } from "./saveHotkey";
+import { saveHotkey, setHotkeyRecording } from "./saveHotkey";
 import "./settings.css";
 import { validateKey } from "./validation";
 
@@ -565,6 +565,7 @@ export function Onboarding({ onFinished }: Props) {
             <HotkeyRecorder
               value={settings?.hotkey ?? "RightAlt"}
               disabled={settings === null}
+              onRecording={setHotkeyRecording}
               onChange={async (spec) => {
                 const result = await saveHotkey(spec);
                 if (result.settings !== null) setSettings(result.settings);

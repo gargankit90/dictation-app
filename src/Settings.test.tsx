@@ -6,6 +6,7 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { KeyTestError, Provider, Settings_Serialize } from "./bindings";
 import { Settings } from "./Settings";
+import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
 const KEY = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
 const OTHER_KEY = "gsk_dummy_ANOTHER_FAKE_KEY_9876543210";
@@ -38,6 +39,8 @@ class Backend {
   holdTest: Promise<void> | null = null;
   /** Holds `set_share_usage_events` until released. */
   holdShare: Promise<void> | null = null;
+  /** Holds `set_hotkey` until released, to test the form while a key is saved. */
+  holdSetHotkey: Promise<void> | null = null;
   /** Holds `set_api_key` until released, to test the form while a save runs. */
   holdSetKey: Promise<void> | null = null;
   /**
@@ -58,10 +61,18 @@ class Backend {
         return this.settings;
       case "save_settings":
         // Like the app: Save never changes the sharing choice.
+        // And never the hotkey, which only `set_hotkey` changes.
         this.settings = {
           ...(args.settings as Settings_Serialize),
           share_usage_events: this.settings.share_usage_events,
+          hotkey: this.settings.hotkey,
         };
+        return null;
+      case "set_hotkey":
+        if (this.holdSetHotkey) await this.holdSetHotkey;
+        this.settings = { ...this.settings, hotkey: args.spec as string };
+        return null;
+      case "set_hotkey_recording":
         return null;
       case "set_share_usage_events":
         this.settings = { ...this.settings, share_usage_events: args.share as boolean };
@@ -103,6 +114,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  releaseAllKeys();
   cleanup();
   clearMocks();
 });
@@ -413,8 +425,10 @@ describe("criterion 2: settings save and reload", () => {
     expect((await screen.findByRole("status")).textContent).toBe("Settings saved.");
     const order = backend.calls
       .map((call) => call.command)
-      .filter((command) => ["set_api_key", "save_settings"].includes(command));
-    expect(order).toEqual(["set_api_key", "save_settings"]);
+      .filter((command) => ["set_api_key", "save_settings", "set_hotkey"].includes(command));
+    // The typed dictation key goes through its own writer, after the rest.
+    expect(order).toEqual(["set_api_key", "save_settings", "set_hotkey"]);
+    expect(backend.named("set_hotkey")[0]?.args).toEqual({ spec: "Ctrl+Shift+Space" });
     expect(backend.named("set_api_key")[0]?.args).toEqual({ provider: "openai", key: ` ${KEY} ` });
     expect(backend.named("save_settings")[0]?.args).toEqual({
       settings: {
@@ -422,7 +436,7 @@ describe("criterion 2: settings save and reload", () => {
         provider: "openai",
         model: "whisper-1",
         language: "de",
-        hotkey: "Ctrl+Shift+Space",
+        hotkey: "RightAlt",
         launch_at_login: false,
         transcription: "cloud",
         local_model: "parakeet-unified-en-0.6b-q4_k_m",
@@ -478,7 +492,7 @@ describe("criterion 2: settings save and reload", () => {
     const handle = backend.handle;
     mockIPC(async (command, payload) => {
       const result = await handle(command, payload);
-      if (command === "save_settings") {
+      if (command === "set_hotkey") {
         backend.settings = { ...backend.settings, hotkey: "Ctrl+Shift+Space" };
       }
       return result;
@@ -495,8 +509,8 @@ describe("criterion 2: settings save and reload", () => {
     await open();
     expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌥");
     click("Record a different key");
-    act(() => void fireEvent.keyDown(window, { code: "MetaRight" }));
-    act(() => void fireEvent.keyUp(window, { code: "MetaRight" }));
+    keyDown("MetaRight");
+    keyUp("MetaRight");
     await screen.findByText("Dictation key saved.");
     expect(backend.settings.hotkey).toBe("RightCmd");
     expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌘");
@@ -506,11 +520,93 @@ describe("criterion 2: settings save and reload", () => {
   it("keeps the old key and says why when the app can't switch to the recorded one", async () => {
     await open();
     click("Record a different key");
-    backend.failing.set("save_settings", "Couldn't switch the hotkey to F6. RightAlt still works.");
-    act(() => void fireEvent.keyDown(window, { code: "F6" }));
+    backend.failing.set("set_hotkey", "Couldn't switch the hotkey to F6. RightAlt still works.");
+    keyDown("F6");
     expect((await screen.findByRole("alert")).textContent).toContain("RightAlt still works");
     expect(backend.settings.hotkey).toBe("RightAlt");
     expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌥");
+  });
+
+  it("pauses the real hotkey while recording, and not a moment longer", async () => {
+    await open();
+    const flags = () =>
+      backend.named("set_hotkey_recording").map((call) => call.args.recording as boolean);
+    click("Record a different key");
+    await waitFor(() => {
+      expect(flags()).toEqual([true]);
+    });
+    keyDown("Escape");
+    await waitFor(() => {
+      expect(flags()).toEqual([true, false]);
+    });
+    // Choosing a key ends it too (the app also resumes when it sets the key).
+    click("Record a different key");
+    keyDown("F6");
+    await screen.findByText("Dictation key saved.");
+    expect(flags().at(-1)).toBe(false);
+  });
+
+  it("locks the form while a recorded key is being saved, and keeps both changes", async () => {
+    await open();
+    const hold = gate();
+    backend.holdSetHotkey = hold.closed;
+    type("Language", "de");
+    click("Record a different key");
+    keyDown("F6");
+    await waitFor(() => {
+      expect(backend.named("set_hotkey")).toHaveLength(1);
+    });
+    // The key isn't stored yet: Save can't start and take the old key back.
+    expect(locked(screen.getByRole("button", { name: "Saving…" }))).toBe(true);
+    expect(locked(screen.getByRole("button", { name: "Record a different key" }))).toBe(true);
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Saving…" }).closest("form") as HTMLElement,
+    );
+    await flush();
+    expect(backend.named("save_settings")).toHaveLength(0);
+
+    hold.open();
+    await screen.findByText("Dictation key saved.");
+    expect(backend.settings.hotkey).toBe("F6");
+    // Now Save works, and saves the language without touching the key.
+    click("Save");
+    await screen.findByText("Settings saved.");
+    expect(backend.settings.language).toBe("de");
+    expect(backend.settings.hotkey).toBe("F6");
+    expect(backend.named("set_hotkey")).toHaveLength(1);
+  });
+
+  it("can't start recording a key while a Save runs", async () => {
+    await open();
+    const hold = gate();
+    backend.holdSetKey = hold.closed;
+    type(/API key/, KEY);
+    click("Save");
+    await waitFor(() => {
+      expect(backend.named("set_api_key")).toHaveLength(1);
+    });
+    expect(locked(screen.getByRole("button", { name: "Record a different key" }))).toBe(true);
+    expect(locked(screen.getByRole("button", { name: "Reset to default" }))).toBe(true);
+    hold.open();
+    await screen.findByText("Settings saved.");
+    expect(backend.named("set_hotkey")).toHaveLength(0);
+  });
+
+  it("a Save made after the key was recorded doesn't take the old key back", async () => {
+    // The form was loaded with RightAlt; the key is recorded; Save sends the
+    // loaded RightAlt again, and the app (one writer of the key) ignores it.
+    await open();
+    click("Record a different key");
+    keyDown("MetaRight");
+    keyUp("MetaRight");
+    await screen.findByText("Dictation key saved.");
+    type("Language", "fr");
+    click("Save");
+    await screen.findByText("Settings saved.");
+    expect(backend.settings.hotkey).toBe("RightCmd");
+    expect(backend.settings.language).toBe("fr");
+    expect(backend.named("set_hotkey")).toHaveLength(1);
+    expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌘");
   });
 
   it("resets the dictation key to Right Option", async () => {
@@ -1110,16 +1206,17 @@ describe("T2: settings edges", () => {
     type("Or type it", "F6");
     type("Language", "de");
     backend.failing.set(
-      "save_settings",
-      "Couldn't switch the hotkey to F6 (hotkey unavailable: busy). RightAlt still works, and your other settings were saved.",
+      "set_hotkey",
+      "Couldn't switch the hotkey to F6 (hotkey unavailable: busy). RightAlt still works.",
     );
     click("Save");
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("RightAlt still works");
     expect(screen.queryByText("Settings saved.")).toBeNull();
+    expect(backend.settings.language).toBe("de"); // the rest was saved
     // What the user typed stays, so Save can be tried again.
     expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F6");
-    backend.failing.delete("save_settings");
+    backend.failing.delete("set_hotkey");
     click("Save");
     await screen.findByText("Settings saved.");
     expect(backend.settings.hotkey).toBe("F6");

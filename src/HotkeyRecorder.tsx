@@ -12,20 +12,32 @@ interface Props {
    */
   onChange: (spec: string) => Promise<string | null>;
   disabled?: boolean;
+  /**
+   * Told when recording starts (`true`, and again every `RENEW_MS` while it
+   * lasts) and ends (`false`), however it ends: the key chosen, Esc, Cancel,
+   * the window losing focus or hiding, or this component going away. The app
+   * uses it to keep the real hotkey from dictating meanwhile.
+   */
+  onRecording?: (recording: boolean) => void;
 }
+
+/** How often recording tells the app it still goes on (its pause lapses). */
+export const RENEW_MS = 10_000;
 
 /**
  * The dictation key as a keycap, with "Record a different key": the next key
  * or combination pressed while this window is focused becomes the key. It
  * listens to the page's own key events, so it needs no extra permission.
  */
-export function HotkeyRecorder({ value, onChange, disabled = false }: Props) {
+export function HotkeyRecorder({ value, onChange, disabled = false, onRecording }: Props) {
   const [recording, setRecording] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const change = useRef(onChange);
+  const tell = useRef(onRecording);
   useEffect(() => {
     change.current = onChange;
+    tell.current = onRecording;
   });
 
   async function apply(spec: string) {
@@ -45,7 +57,16 @@ export function HotkeyRecorder({ value, onChange, disabled = false }: Props) {
       event.preventDefault();
       event.stopPropagation();
       if (event.repeat) return;
-      const step = recorderStep(state, { type, code: event.code });
+      const step = recorderStep(state, {
+        type,
+        code: event.code,
+        flags: {
+          ctrl: event.ctrlKey,
+          alt: event.altKey,
+          shift: event.shiftKey,
+          meta: event.metaKey,
+        },
+      });
       state = step.state;
       const outcome = step.outcome;
       if (outcome === undefined) return;
@@ -62,10 +83,21 @@ export function HotkeyRecorder({ value, onChange, disabled = false }: Props) {
     const cancel = () => {
       setRecording(false);
     };
+    const hidden = () => {
+      if (document.visibilityState === "hidden") setRecording(false);
+    };
+    tell.current?.(true);
+    const renew = window.setInterval(() => {
+      tell.current?.(true);
+    }, RENEW_MS);
     window.addEventListener("keydown", down, true);
     window.addEventListener("keyup", up, true);
     window.addEventListener("blur", cancel);
+    document.addEventListener("visibilitychange", hidden);
     return () => {
+      window.clearInterval(renew);
+      tell.current?.(false);
+      document.removeEventListener("visibilitychange", hidden);
       window.removeEventListener("keydown", down, true);
       window.removeEventListener("keyup", up, true);
       window.removeEventListener("blur", cancel);
