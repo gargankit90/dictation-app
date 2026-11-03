@@ -5,17 +5,19 @@ are welcome.
 
 ## Build and test
 
-Once per clone, install the git hooks (see the README's Develop section), then:
+On a Mac, follow the README's
+[Build it on a Mac](README.md#build-it-on-a-mac) steps in order (Xcode Command
+Line Tools, Rust, Node 24, the gate tools, `npm ci`, the git setup and the dev
+certificate). Then:
 
 ```sh
-npm ci
 cargo build --workspace
 scripts/gate.sh            # the full quality gate; run it before you push
 ```
 
 `scripts/gate.sh` runs formatting, clippy, `cargo deny`, tests, coverage,
 TypeScript checks and the licence notice check. The tools it needs are listed
-in the README. Add unit tests with your change.
+in the README's steps. Add unit tests with your change.
 
 ## Pull requests
 
