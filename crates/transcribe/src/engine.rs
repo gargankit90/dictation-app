@@ -81,6 +81,18 @@ impl Engine {
         }
     }
 
+    /// Whether the engine is unavailable because the keychain read failed or
+    /// timed out: a later read may succeed, so it is worth rebuilding. Not
+    /// "no key saved", not a settings error, not "still reading" (startup's
+    /// own read is in flight and will replace it).
+    #[must_use]
+    pub fn keychain_failed(&self) -> bool {
+        matches!(
+            self,
+            Self::Unavailable(TranscribeError::KeychainUnavailable(_))
+        )
+    }
+
     /// A short name for logs; never the key.
     #[must_use]
     pub fn name(&self) -> &'static str {
@@ -112,12 +124,18 @@ impl Transcriber for Engine {
     }
 }
 
+/// Builds a fresh engine; may block on the keychain.
+pub type Rebuild = Arc<dyn Fn() -> Engine + Send + Sync>;
+
 /// A [`Transcriber`] whose engine can be swapped while the pipeline runs.
 /// Clones share the engine: give one to the pipeline and keep one to call
 /// [`update`](Self::update) when the settings or the key change.
 #[derive(Clone)]
 pub struct Transcribers {
     current: Arc<RwLock<Arc<Engine>>>,
+    /// Rebuilds the engine when a dictation finds it unavailable because the
+    /// keychain failed (see [`retry_with`](Self::retry_with)).
+    retry: Arc<RwLock<Option<Rebuild>>>,
     /// Serializes [`update`](Self::update), so two rebuilds that read the
     /// settings at different times can't finish in the wrong order.
     updating: Arc<Mutex<()>>,
@@ -129,6 +147,7 @@ impl Transcribers {
     pub fn new(engine: Engine) -> Self {
         Self {
             current: Arc::new(RwLock::new(Arc::new(engine))),
+            retry: Arc::new(RwLock::new(None)),
             updating: Arc::new(Mutex::new(())),
         }
     }
@@ -140,6 +159,56 @@ impl Transcribers {
         let _updating = self.updating.lock().unwrap_or_else(PoisonError::into_inner);
         let engine = Arc::new(build());
         *self.current.write().unwrap_or_else(PoisonError::into_inner) = engine;
+    }
+
+    /// Makes a dictation that finds the engine unavailable because the
+    /// keychain failed ([`Engine::keychain_failed`]) call `rebuild` once, off
+    /// the async runtime, and use the engine it returns. The keychain may
+    /// answer now (the user allowed access after the launch-time timeout).
+    pub fn retry_with(&self, rebuild: impl Fn() -> Engine + Send + Sync + 'static) {
+        *self.retry.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(rebuild));
+    }
+
+    /// As [`update`](Self::update), but only if the current engine is still
+    /// unavailable because of the keychain, checked once the update lock is
+    /// held: concurrent callers rebuild once, and a good engine is never
+    /// replaced. Returns the engine that is current afterwards.
+    pub fn update_if_keychain_failed(&self, build: impl FnOnce() -> Engine) -> Arc<Engine> {
+        let _updating = self.updating.lock().unwrap_or_else(PoisonError::into_inner);
+        if !self.snapshot().keychain_failed() {
+            return self.snapshot();
+        }
+        let engine = Arc::new(build());
+        *self.current.write().unwrap_or_else(PoisonError::into_inner) = Arc::clone(&engine);
+        engine
+    }
+
+    /// Whether the current engine is unavailable because the keychain failed.
+    #[must_use]
+    pub fn keychain_failed(&self) -> bool {
+        self.snapshot().keychain_failed()
+    }
+
+    /// The engine to dictate with: the current one, rebuilt first if the
+    /// keychain failed and a rebuild is set ([`retry_with`](Self::retry_with)).
+    async fn engine_for_dictation(&self) -> Arc<Engine> {
+        let engine = self.snapshot();
+        if !engine.keychain_failed() {
+            return engine;
+        }
+        let Some(rebuild) = self
+            .retry
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+        else {
+            return engine;
+        };
+        let this = self.clone();
+        // Blocking: the rebuild waits for the keychain (bounded by the caller).
+        tokio::task::spawn_blocking(move || this.update_if_keychain_failed(|| rebuild()))
+            .await
+            .unwrap_or(engine)
     }
 
     /// The current engine's [`name`](Engine::name).
@@ -155,13 +224,13 @@ impl Transcribers {
 
 impl Transcriber for Transcribers {
     async fn transcribe(&self, audio: &Audio) -> Result<String, TranscribeError> {
-        // Clone the Arc out first: the lock is never held across the await.
-        let engine = self.snapshot();
+        // The Arc is cloned out: the lock is never held across the await.
+        let engine = self.engine_for_dictation().await;
         engine.transcribe(audio).await
     }
 
     async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
-        let engine = self.snapshot();
+        let engine = self.engine_for_dictation().await;
         engine.transcribe_detailed(audio).await
     }
 }
