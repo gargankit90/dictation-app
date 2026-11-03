@@ -12,7 +12,7 @@ VM_FRONT_LOG="/Users/$VM_USER/e2e-front.txt"
 VM_FRONT_STOP="/Users/$VM_USER/e2e-front.stop"
 
 # The frontmost app's name, through LaunchServices (no Automation grant).
-frontmost_app() {
+overlay_frontmost_app() {
   vm "lsappinfo info -only name \"\$(lsappinfo front)\"" | sed -nE 's/.*"LSDisplayName"="([^"]*)".*/\1/p'
 }
 
@@ -64,7 +64,7 @@ e2e_overlay_focus() {
   expect "the overlay is still a non-activating panel after creation" \
     wait_for_log 'INFO .*overlay native window non_activating_panel=true .*is_panel=true can_become_key=false can_become_main=false non_activating=true backs_webview=true' 5
   textedit_fresh
-  expect "TextEdit is in front before the dictation" test "$(frontmost_app)" = TextEdit
+  expect "TextEdit is in front before the dictation" test "$(overlay_frontmost_app)" = TextEdit
 
   front_watch_start
   local before

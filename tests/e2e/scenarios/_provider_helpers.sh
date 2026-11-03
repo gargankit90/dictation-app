@@ -204,12 +204,25 @@ textedit_b64() {
     \$(t).dataUsingEncoding(\$.NSUTF8StringEncoding).base64EncodedStringWithOptions(0).js"
 }
 
-# textedit_set <base64 of UTF-8> : the front document's text becomes it.
-textedit_set() {
+# textedit_set_b64 <base64 of UTF-8>: the front document's text becomes it.
+# Not named textedit_set: e2e_hotkey_shortcuts.sh defines that name for plain
+# text, and run.sh sources every scenario file into one shell, so the later
+# definition silently won and this scenario seeded base64 (#185).
+textedit_set_b64() {
   vm_jxa "ObjC.import('Foundation');
     const data = \$.NSData.alloc.initWithBase64EncodedStringOptions('$1', 0);
     Application('TextEdit').documents[0].text = \$.NSString.alloc.initWithDataEncoding(data, \$.NSUTF8StringEncoding).js;
     'set'" >/dev/null
+}
+
+# textedit_seeded <base64>: the front document holds exactly that text, the
+# setup of a scenario. If not, says "setup: document not as expected", so a
+# failed seeding is never mistaken for a paste failure.
+textedit_seeded() {
+  textedit_is "$1" || {
+    log "  setup: document not as expected"
+    return 1
+  }
 }
 
 # textedit_is <base64> [document name]: the document holds exactly that text.
