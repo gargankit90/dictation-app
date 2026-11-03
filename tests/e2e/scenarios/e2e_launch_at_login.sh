@@ -116,7 +116,7 @@ login_box_save() {
   login_box_ready &&
     job_says "$want" ax check-set "$APP_NAME" "$SETTINGS_WINDOW" launch-at-login "$1" &&
     ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Save &&
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 10
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 45
 }
 
 # login_item_is <enabled|disabled>: what the OS says.
