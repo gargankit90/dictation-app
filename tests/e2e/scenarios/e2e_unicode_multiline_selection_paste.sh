@@ -62,7 +62,9 @@ unicode_setup() {
 # The end of the scenario, also when setup failed: nothing was pasted into a
 # wrong document, so no paste check runs.
 unicode_end() {
-  unicode_end
+  [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_unicode_multiline_selection_paste
+  collect_log e2e_unicode_multiline_selection_paste
+  key_scenario_end
 }
 
 e2e_unicode_multiline_selection_paste() {
