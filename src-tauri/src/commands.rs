@@ -797,7 +797,8 @@ mod tests {
                 "model",
                 "language",
                 "hotkey",
-                "launch_at_login"
+                "launch_at_login",
+                "share_usage_events"
             ]
         );
     }

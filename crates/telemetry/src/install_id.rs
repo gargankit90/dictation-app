@@ -67,10 +67,10 @@ pub fn load_or_create(dir: &Path) -> Option<String> {
 
 /// Deletes the stored ID; a missing file is fine.
 pub fn forget(dir: &Path) {
-    if let Err(error) = std::fs::remove_file(path(dir)) {
-        if error.kind() != ErrorKind::NotFound {
-            tracing::debug!(%error, "install ID not deleted");
-        }
+    if let Err(error) = std::fs::remove_file(path(dir))
+        && error.kind() != ErrorKind::NotFound
+    {
+        tracing::debug!(%error, "install ID not deleted");
     }
 }
 
