@@ -5,6 +5,7 @@
 
 pub mod audio_math;
 pub mod coordinator;
+pub mod diagnostics;
 pub mod error;
 pub mod events;
 pub mod hotkey_spec;
