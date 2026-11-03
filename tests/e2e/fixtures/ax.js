@@ -33,6 +33,7 @@
 //                                    checks only that it holds as many
 //                                    characters; prints "typed"
 //   press <app> <window> <button>    presses a button
+//   radio-press <app> <window> <label>  presses a radio button by its label
 //   check-get <app> <window> <box>   "checked" or "unchecked" (a checkbox,
 //                                    matched like a field)
 //   check-set <app> <window> <box> <on|off>  presses the checkbox if it
@@ -361,6 +362,18 @@ function isChecked(box) {
   return value !== undefined && Number(ObjC.unwrap(value)) === 1;
 }
 
+function findRadio(window, title) {
+  const want = title.toLowerCase();
+  const found = walk(window, (element) => {
+    if (text(element, "AXRole") !== "AXRadioButton") return false;
+    const names = [text(element, "AXTitle"), text(element, "AXDescription")];
+    for (const kid of children(element)) names.push(text(kid, "AXValue"));
+    return names.some((name) => name.trim().toLowerCase() === want);
+  });
+  if (found === undefined) fail("no radio button " + JSON.stringify(title));
+  return found;
+}
+
 function findField(window, field) {
   const found = walk(window, (element) => matchesField(element, field));
   if (found === undefined) fail("no text field " + JSON.stringify(field));
@@ -562,6 +575,11 @@ function run(argv) {
       const err = press(findButton(findWindow(appEl, rest[0]), rest[1]), 5.0);
       if (err !== 0) fail("pressing " + rest[1] + " failed (AX error " + err + ")");
       return "pressed " + rest[1];
+    }
+    case "radio-press": {
+      const err = press(findRadio(findWindow(appEl, rest[0]), rest[1]), 5.0);
+      if (err !== 0) fail("pressing radio " + rest[1] + " failed (AX error " + err + ")");
+      return "pressed radio " + rest[1];
     }
     case "check-get":
       return isChecked(findCheckbox(findWindow(appEl, rest[0]), rest[1])) ? "checked" : "unchecked";
