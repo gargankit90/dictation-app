@@ -4,10 +4,18 @@ Hold a key, speak, let go, and your words are typed into whatever app is in
 front. Thank you for trying it. This page takes you from the DMG to your first
 dictation, and says what to send us when something goes wrong.
 
+What is new in each version is in the [changelog](../CHANGELOG.md).
+
 You need an **Apple Silicon Mac (M1 or newer; Intel Macs are not supported)**
-with **macOS 13 (Ventura) or newer**, an internet connection (your speech goes
-to Groq or OpenAI to be turned into text) and an API key for one of them. Groq
-has a free tier and is the one this guide uses; OpenAI works the same way.
+with **macOS 13 (Ventura) or newer**, and one of two ways to turn speech into
+text:
+
+- **Your own key** (this guide's steps): an internet connection and an API key
+  for Groq or OpenAI. Your speech goes to that provider. Groq has a free tier
+  and is the one this guide uses; OpenAI works the same way.
+- **On this Mac**: in Settings, pick **On this Mac** under Transcription and
+  download a model once (Parakeet for English, about 480 MB; Qwen3-ASR for
+  Hindi and other languages, about 590 MB). Your speech then stays on the Mac.
 
 ## 1. Install
 
@@ -189,8 +197,17 @@ public issue; see [SECURITY.md](../SECURITY.md).
 
 ## Known limits
 
+The same list is in the [changelog](../CHANGELOG.md).
+
 - Apple Silicon Macs only, macOS 13 or newer. Windows comes later.
 - Not notarised, hence the step in section 2.
-- Speech goes to your chosen provider's servers (Groq or OpenAI) while the alpha uses the cloud. Don't dictate
-  anything you would not send to a cloud service.
+- Fully offline use of **On this Mac** is not yet checked on a Mac with no
+  network.
+- A crash inside the on-device engine is not reported (it could contain what
+  you said): if the app quits on its own, tell us in a bug report
+  ([#226](https://github.com/gargankit90/dictation-app/issues/226)).
+- With **Your own key**, speech goes to your chosen provider's servers (Groq
+  or OpenAI). Don't dictate anything you would not send to a cloud service.
+- Anonymous usage and error events are on by default; turn them off in
+  Settings > Privacy. What is sent: [privacy.md](privacy.md).
 - Recordings stop after 5 minutes.
