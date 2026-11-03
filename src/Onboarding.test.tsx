@@ -41,6 +41,8 @@ class Backend {
     language: null,
     hotkey: "RightAlt",
     launch_at_login: false,
+    transcription: "cloud",
+    local_model: "parakeet-unified-en-0.6b-q4_k_m",
     share_usage_events: true,
   };
   /** What `test_api_key` answers: `null` for success. */
@@ -61,7 +63,8 @@ class Backend {
     const done: Record<Step, boolean> = {
       microphone: this.microphone === "granted",
       accessibility: this.accessibility === "granted",
-      key: this.keys[this.settings.provider],
+      // L1: the on-device engine needs no key (the app counts it as saved).
+      key: this.settings.transcription === "local" || this.keys[this.settings.provider],
       try: true,
     };
     return STEPS.slice(0, STEPS.indexOf(step)).every((before) => done[before]);
@@ -445,6 +448,18 @@ describe("the key step", () => {
     expect(backend.named("save_settings")).toHaveLength(1);
     expect(backend.settings.provider).toBe("openai");
     expect(backend.keys.openai).toBe(true);
+    expect(backend.step).toBe("try");
+  });
+
+  it("says no key is needed with the on-device engine, and moves on (L1)", async () => {
+    backend.settings = { ...backend.settings, transcription: "local" };
+    render(<Onboarding onFinished={() => undefined} />);
+    await heading("No key needed");
+    expect(screen.queryByLabelText("Groq API key")).toBeNull();
+    fireEvent.click(button("Continue"));
+    await heading("Try it");
+    expect(backend.named("test_api_key")).toEqual([]);
+    expect(backend.named("set_api_key")).toEqual([]);
     expect(backend.step).toBe("try");
   });
 

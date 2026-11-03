@@ -24,6 +24,10 @@ hound.workspace = true
 tauri.workspace = true
 tracing.workspace = true
 
+# statvfs, for free disk space (`disk`).
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # Turns the overlay window into a non-activating panel (M5.1).
 tauri-nspanel.workspace = true

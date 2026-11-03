@@ -48,7 +48,7 @@ links one install's events together. Turning sharing off deletes it.
 | `app_opened` | The app starts | `version` (for example `0.1.0`), `macos_major` (for example `15`), `arch` (`apple_silicon`, `intel`, `other`) |
 | `onboarding_step_reached` | You get to an onboarding step | `step` (`microphone`, `accessibility`, `key`, `try`) |
 | `onboarding_completed` | You finish onboarding | `step` (`try`) |
-| `engine_selected` | You pick a provider or save its key | `kind` (`cloud`; `local` arrives with local models), `provider` (`groq`, `openai`) |
+| `engine_selected` | You pick a provider or save its key, or switch between On this Mac and Your own key | `kind` (`cloud`, `local`), `provider` (`groq`, `openai`; cloud only; which local model is never sent) |
 | `dictation_finished` | A dictation was pasted | `engine_kind` (`cloud`, `local`), `duration_bucket` (`under2s`, `from2_to5s`, `from5_to15s`, `from15_to60s`, `over60s`), `latency_bucket` (`under500ms`, `from500_to1000ms`, `from1_to2s`, `from2_to5s`, `over5s`) |
 | `dictation_failed` | A dictation failed | `error_type` (`transcription`, `empty_transcript`, `insert`, `secure_input`, `microphone_permission`, `accessibility_permission`, `hotkey`) |
 | `setting_changed` | You save a changed setting | `setting` (`provider`, `model`, `language`, `hotkey`, `launch_at_login`, `share_usage_events`). Turning sharing off sends nothing, not even this. |

@@ -57,6 +57,18 @@ specta-typescript = "0.0.13"
 tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
 httpdate = "1.0.3"
 wiremock = "0.6.5"
+# On-device speech-to-text (L1): transcribe.cpp's Rust binding, MIT. Builds
+# ggml from source with CMake and a C++ compiler. Pinned: the crate is 0.x.
+# Backends are chosen per target in crates/transcribe (Metal on macOS).
+# The native library refuses to load unless transcribe-cpp-sys has the same
+# base version, and transcribe-cpp asks for it with a caret: keep the two
+# equal in Cargo.lock (`cargo update -p transcribe-cpp-sys --precise <v>`).
+transcribe-cpp = { version = "=0.4.1", default-features = false }
+# SHA-256 of downloaded models (L1). MIT OR Apache-2.0; already in the tree.
+sha2 = "0.10.9"
+# statvfs for the free-space check before a model download (L1). MIT OR
+# Apache-2.0; already in the tree.
+libc = "0.2.191"
 proptest = "1.12.0"
 handy-keys = "0.3.4"
 handy-recorder = "=0.1.0"
@@ -98,3 +110,8 @@ dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
 panic = "deny"
+
+# Hashing a downloaded model (L1, ~0.5 GB) takes about 25 s unoptimised;
+# debug builds (tests, e2e) check it at first use, so optimise the hash.
+[profile.dev.package.sha2]
+opt-level = 3

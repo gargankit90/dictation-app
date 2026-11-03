@@ -45,6 +45,15 @@ pub enum TranscribeError {
     /// (requests go only to the configured provider). Holds the HTTP status.
     #[error("the provider answered with a redirect (HTTP {0}), which isn't followed")]
     Redirected(u16),
+    /// The on-device engine is selected but its model isn't downloaded (or
+    /// the catalogue no longer has the saved one), so there is nothing to
+    /// run (L1).
+    #[error("the on-device model isn't downloaded")]
+    ModelMissing,
+    /// The on-device model is being checked and loaded (seconds, after a
+    /// switch of model); dictation works again once it is (L1).
+    #[error("the on-device model is still loading")]
+    ModelLoading,
     /// The provider or engine returned an error or a response we can't read.
     /// Same rule as [`Network`](Self::Network): a short summary such as
     /// "the provider failed (HTTP 503)", never the reply body.
@@ -73,6 +82,8 @@ impl fmt::Debug for TranscribeError {
                 .finish(),
             // Holds only the HTTP status, never the Location header or a body.
             Self::Redirected(status) => f.debug_tuple("Redirected").field(status).finish(),
+            Self::ModelMissing => f.write_str("ModelMissing"),
+            Self::ModelLoading => f.write_str("ModelLoading"),
             Self::Engine(text) => f
                 .debug_tuple("Engine")
                 .field(&redact::summary(text))
@@ -111,12 +122,18 @@ impl TranscribeError {
             Self::Redirected(_) => "The provider answered with a redirect, which the app \
                  doesn't follow. Check the provider selected in Settings."
                 .to_owned(),
+            Self::ModelMissing => {
+                "The on-device model isn't downloaded. Download the model in Settings.".to_owned()
+            }
+            Self::ModelLoading => {
+                "The on-device model is still loading. Try again in a moment.".to_owned()
+            }
             Self::Engine(detail) => format!("Something went wrong: {}.", redact::summary(detail)),
         }
     }
 }
 
-/// A speech-to-text engine (Groq, OpenAI, a mock, later local models).
+/// A speech-to-text engine (Groq, OpenAI, a mock, a local model).
 ///
 /// Threading: `&self`, so one engine can serve overlapping calls. The future
 /// is `Send` and runs on the pipeline's tokio runtime; it must not block the
@@ -196,6 +213,14 @@ mod tests {
             (
                 TranscribeError::Redirected(302),
                 "The provider answered with a redirect, which the app doesn't follow. Check the provider selected in Settings.",
+            ),
+            (
+                TranscribeError::ModelMissing,
+                "The on-device model isn't downloaded. Download the model in Settings.",
+            ),
+            (
+                TranscribeError::ModelLoading,
+                "The on-device model is still loading. Try again in a moment.",
             ),
             (
                 TranscribeError::Engine("the provider failed (HTTP 503)".into()),

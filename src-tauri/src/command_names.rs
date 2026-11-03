@@ -18,5 +18,9 @@ pub const COMMAND_NAMES: &[&str] = &[
     "set_onboarding_step",
     "finish_onboarding",
     "relaunch_app",
+    "list_local_models",
+    "download_local_model",
+    "cancel_local_model_download",
+    "delete_local_model",
     "set_share_usage_events",
 ];

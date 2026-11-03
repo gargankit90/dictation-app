@@ -62,6 +62,14 @@ export const commands = {
 	 *  Accessibility grant macOS doesn't hand to the running app, #50).
 	 */
 	relaunchApp: () => typedError<null, string>(__TAURI_INVOKE("relaunch_app")),
+	/**  Every on-device model with its status and download progress. */
+	listLocalModels: () => typedError<LocalModelInfo_Serialize[], string>(__TAURI_INVOKE("list_local_models")),
+	/**  Starts downloading model `id`; poll [`list_local_models`] for progress. */
+	downloadLocalModel: (id: string) => typedError<null, string>(__TAURI_INVOKE("download_local_model", { id })),
+	/**  Cancels model `id`'s download; what was fetched is kept. */
+	cancelLocalModelDownload: (id: string) => typedError<null, string>(__TAURI_INVOKE("cancel_local_model_download", { id })),
+	/**  Deletes model `id` from this Mac and rebuilds the engine. */
+	deleteLocalModel: (id: string) => typedError<null, string>(__TAURI_INVOKE("delete_local_model", { id })),
 	/**
 	 *  Turns sharing anonymous usage events on or off, and nothing else. Off
 	 *  stops sending at once, before the file is written: queued events and
@@ -100,6 +108,60 @@ export type KeyTestKind =
 "server" | 
 /**  The saved key couldn't be read from the keychain. */
 "keychain";
+
+/**  One catalogue model, for the picker. */
+export type LocalModelInfo = LocalModelInfo_Serialize | LocalModelInfo_Deserialize;
+
+/**  One catalogue model, for the picker. */
+export type LocalModelInfo_Deserialize = {
+	/**  Its id, saved as `local_model`. */
+	id: string,
+	/**  The name shown. */
+	name: string,
+	/**  Its languages in words ("English only"). */
+	languages: string,
+	/**  The download's size in bytes (a number: sizes fit a double exactly). */
+	size_bytes: number | null,
+	/**  Bytes on disk so far (the size when ready, 0 when missing). */
+	downloaded_bytes: number | null,
+	/**  Where it is. */
+	state: ModelState,
+	/**  Why the last download failed, in plain words, if it did. */
+	error?: string | null,
+	/**  Whether it is the catalogue's default. */
+	default: boolean,
+};
+
+/**  One catalogue model, for the picker. */
+export type LocalModelInfo_Serialize = {
+	/**  Its id, saved as `local_model`. */
+	id: string,
+	/**  The name shown. */
+	name: string,
+	/**  Its languages in words ("English only"). */
+	languages: string,
+	/**  The download's size in bytes (a number: sizes fit a double exactly). */
+	size_bytes: number | null,
+	/**  Bytes on disk so far (the size when ready, 0 when missing). */
+	downloaded_bytes: number | null,
+	/**  Where it is. */
+	state: ModelState,
+	/**  Why the last download failed, in plain words, if it did. */
+	error: string | null,
+	/**  Whether it is the catalogue's default. */
+	default: boolean,
+};
+
+/**  Where a model is, as Settings shows it. */
+export type ModelState = 
+/**  Not on this Mac. */
+"missing" | 
+/**  A download stopped part way; downloading again continues it. */
+"partial" | 
+/**  Downloading now. */
+"downloading" | 
+/**  Downloaded and verified. */
+"ready";
 
 /**  What the settings window needs to show onboarding. */
 export type OnboardingStatus = {
@@ -156,6 +218,14 @@ export type Settings_Deserialize = {
 	 *  own state, which the user can change in System Settings.
 	 */
 	launch_at_login?: boolean,
+	/**  Cloud provider or on-device model (L1). */
+	transcription?: Transcription,
+	/**
+	 *  The on-device model's id, used when `transcription` is
+	 *  [`Transcription::Local`]. An id the catalogue no longer has still
+	 *  loads; the engine then says to pick a model in Settings.
+	 */
+	local_model?: string,
 	/**
 	 *  Whether anonymous usage events are shared (A1, `docs/privacy.md`).
 	 *  On by default; a file without it loads with `true`.
@@ -184,6 +254,14 @@ export type Settings_Serialize = {
 	 *  own state, which the user can change in System Settings.
 	 */
 	launch_at_login: boolean,
+	/**  Cloud provider or on-device model (L1). */
+	transcription: Transcription,
+	/**
+	 *  The on-device model's id, used when `transcription` is
+	 *  [`Transcription::Local`]. An id the catalogue no longer has still
+	 *  loads; the engine then says to pick a model in Settings.
+	 */
+	local_model: string,
 	/**
 	 *  Whether anonymous usage events are shared (A1, `docs/privacy.md`).
 	 *  On by default; a file without it loads with `true`.
@@ -201,6 +279,13 @@ export type Step =
 "key" | 
 /**  Try a dictation into a text field in the onboarding window. */
 "try";
+
+/**  Where speech becomes text (L1). */
+export type Transcription = 
+/**  A cloud provider with the user's own API key ([`Settings::provider`]). */
+"cloud" | 
+/**  A downloaded model on this Mac ([`Settings::local_model`]); no key. */
+"local";
 
 /**  What the settings window shows. */
 export type View = 

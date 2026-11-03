@@ -13,8 +13,10 @@
 //! - **v2** (current): `engine` is renamed `provider`, `whisper_model` is
 //!   renamed `model`, and "detect" is `null` instead of `""`. M5.3 added
 //!   `launch_at_login` (default `false`) without a version bump: a file
-//!   without it loads with the default. A1 added `share_usage_events`
-//!   (default `true`) the same way.
+//!   without it loads with the default. L1 added `transcription`
+//!   (`"cloud"` or `"local"`, default `"cloud"`) and `local_model` (an id
+//!   from [`crate::local_models::CATALOGUE`]) the same way.
+//!   A1 added `share_usage_events` (default `true`) the same way.
 //!
 //! Fields this version doesn't know (from a newer build, or a hand edit) are
 //! ignored, and missing ones take their defaults, so an old or partial file
@@ -28,6 +30,7 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::hotkey_spec::HotkeySpec;
+use crate::local_models;
 
 /// The schema version this build reads and writes.
 pub const CURRENT_VERSION: u32 = 2;
@@ -81,6 +84,18 @@ impl fmt::Display for Provider {
     }
 }
 
+/// Where speech becomes text (L1).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "lowercase")]
+pub enum Transcription {
+    /// A cloud provider with the user's own API key ([`Settings::provider`]).
+    #[default]
+    Cloud,
+    /// A downloaded model on this Mac ([`Settings::local_model`]); no key.
+    Local,
+}
+
 /// What the user can set. Never holds the API key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -101,6 +116,12 @@ pub struct Settings {
     /// the last value applied; what the settings screen shows is the OS's
     /// own state, which the user can change in System Settings.
     pub launch_at_login: bool,
+    /// Cloud provider or on-device model (L1).
+    pub transcription: Transcription,
+    /// The on-device model's id, used when `transcription` is
+    /// [`Transcription::Local`]. An id the catalogue no longer has still
+    /// loads; the engine then says to pick a model in Settings.
+    pub local_model: String,
     /// Whether anonymous usage events are shared (A1, `docs/privacy.md`).
     /// On by default; a file without it loads with `true`.
     pub share_usage_events: bool,
@@ -116,6 +137,8 @@ impl Default for Settings {
             language: None,
             hotkey: HotkeySpec::default().to_string(),
             launch_at_login: false,
+            transcription: Transcription::default(),
+            local_model: local_models::DEFAULT_MODEL.to_owned(),
             share_usage_events: true,
         }
     }
@@ -150,8 +173,8 @@ impl Settings {
     ///
     /// [`SettingsError::Invalid`] for the first field that's wrong:
     /// `version` other than [`CURRENT_VERSION`], an empty, over-long or
-    /// whitespace-holding `model`, a `language` that isn't 2–3 lowercase
-    /// letters, or a `hotkey` that doesn't parse.
+    /// whitespace-holding `model` or `local_model`, a `language` that isn't
+    /// 2–3 lowercase letters, or a `hotkey` that doesn't parse.
     pub fn validate(&self) -> Result<(), SettingsError> {
         if self.version != CURRENT_VERSION {
             return Err(invalid(
@@ -159,22 +182,8 @@ impl Settings {
                 format!("expected {CURRENT_VERSION}, got {}", self.version),
             ));
         }
-        if self.model.is_empty() {
-            return Err(invalid("model", "it is empty".to_owned()));
-        }
-        if self.model.chars().count() > MAX_MODEL_LEN {
-            return Err(invalid(
-                "model",
-                format!("longer than {MAX_MODEL_LEN} characters"),
-            ));
-        }
-        if self
-            .model
-            .chars()
-            .any(|c| c.is_whitespace() || c.is_control())
-        {
-            return Err(invalid("model", "it contains spaces".to_owned()));
-        }
+        check_model_name("model", &self.model)?;
+        check_model_name("local_model", &self.local_model)?;
         if let Some(language) = &self.language {
             let letters = (2..=3).contains(&language.len())
                 && language.chars().all(|c| c.is_ascii_lowercase());
@@ -190,6 +199,23 @@ impl Settings {
         }
         Ok(())
     }
+}
+
+/// A model name or id: not empty, not over-long, no spaces.
+fn check_model_name(field: &'static str, name: &str) -> Result<(), SettingsError> {
+    if name.is_empty() {
+        return Err(invalid(field, "it is empty".to_owned()));
+    }
+    if name.chars().count() > MAX_MODEL_LEN {
+        return Err(invalid(
+            field,
+            format!("longer than {MAX_MODEL_LEN} characters"),
+        ));
+    }
+    if name.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(invalid(field, "it contains spaces".to_owned()));
+    }
+    Ok(())
 }
 
 fn invalid(field: &'static str, reason: String) -> SettingsError {
@@ -310,8 +336,7 @@ mod tests {
                 model: "whisper-1".into(),
                 language: None,
                 hotkey: "Ctrl+Space".into(),
-                launch_at_login: false,
-                share_usage_events: true,
+                ..Settings::default()
             }
         );
         // A language stays a language; no version at all is v1 too.
@@ -350,6 +375,54 @@ mod tests {
             from_json(r#"{"launch_at_login": "yes"}"#),
             Err(SettingsError::Malformed(_))
         ));
+    }
+
+    #[test]
+    fn l1_criterion_4_transcription_defaults_to_cloud_with_the_default_model() {
+        let settings = Settings::default();
+        assert_eq!(settings.transcription, Transcription::Cloud);
+        assert_eq!(settings.local_model, local_models::DEFAULT_MODEL);
+        // A file from before L1 has neither field.
+        let old = from_json(r#"{"version": 2, "provider": "openai", "model": "whisper-1"}"#);
+        let old = old.unwrap();
+        assert_eq!(old.transcription, Transcription::Cloud);
+        assert_eq!(old.local_model, local_models::DEFAULT_MODEL);
+    }
+
+    #[test]
+    fn l1_criterion_4_the_local_choice_round_trips() {
+        let local = Settings {
+            transcription: Transcription::Local,
+            local_model: "qwen3-asr-0.6b-q4_k_m".into(),
+            ..Settings::default()
+        };
+        let json = to_json(&local).unwrap();
+        assert!(json.contains(r#""transcription": "local""#), "{json}");
+        assert!(json.contains(r#""local_model": "qwen3-asr-0.6b-q4_k_m""#));
+        assert_eq!(from_json(&json).unwrap(), local);
+        // An id a later catalogue dropped still loads.
+        let gone = from_json(r#"{"version": 2, "local_model": "retired-model"}"#).unwrap();
+        assert_eq!(gone.local_model, "retired-model");
+        assert!(matches!(
+            from_json(r#"{"transcription": "onnx"}"#),
+            Err(SettingsError::Malformed(_))
+        ));
+        for bad in ["", "two words"] {
+            let settings = Settings {
+                local_model: bad.into(),
+                ..Settings::default()
+            };
+            assert!(
+                matches!(
+                    settings.validate(),
+                    Err(SettingsError::Invalid {
+                        field: "local_model",
+                        ..
+                    })
+                ),
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]

@@ -20,17 +20,29 @@
 //! was started before the last save is not trusted for the rebuild after it.
 //! A locked keychain therefore costs one parked thread, not one per save.
 //!
+//! On-device transcription (L1) needs no key: with `transcription: local`
+//! the engine is the saved model, loaded by [`LocalModels`] from the models
+//! folder. The loaded model is kept (warm) across rebuilds while it stays
+//! selected, so saving an unrelated setting doesn't load it again; switching
+//! to the cloud, or to another model, releases it. A model that isn't
+//! downloaded is [`TranscribeError::ModelMissing`], whose message says to
+//! download it in Settings.
+//!
 //! `--transcriber mock` pins the mock engine: [`LiveEngine::fixed`] never
 //! rebuilds, so saving settings in a test run can't swap in a real provider.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use dictation_core::settings::{Provider, Settings};
+use dictation_core::local_models;
+use dictation_core::settings::{Provider, Settings, Transcription};
 use dictation_pipeline::config::{Config, ConfigError};
 use dictation_ports::{Secret, SecretError, SecretStore, TranscribeError};
-use dictation_transcribe::engine::{Engine, Transcribers};
+use dictation_transcribe::engine::{Engine, Transcribers, local_language};
+use dictation_transcribe::local::{CppModel, LocalTranscriber, SpeechModel};
+use dictation_transcribe::models::{DownloadError, ModelStore};
 
 use crate::key_writes::KeyWrites;
 
@@ -61,6 +73,151 @@ pub struct LiveEngine {
     reads: KeyReads,
     /// The one keychain write allowed in flight, shared by every clone (T3).
     writes: KeyWrites,
+    /// The on-device models, if this build has a models folder (L1).
+    local: Option<LocalModels>,
+}
+
+/// Loads a model file; [`CppModel::load`] in the app, a fake in tests.
+pub type Loader = Arc<dyn Fn(&Path) -> Result<Box<dyn SpeechModel>, TranscribeError> + Send + Sync>;
+
+/// The on-device models (L1): the folder they are stored in, how one is
+/// loaded, and the one kept loaded while it is selected. Clones share it.
+#[derive(Clone)]
+pub struct LocalModels {
+    store: ModelStore,
+    loader: Loader,
+    check: Check,
+    warm: Arc<Mutex<Option<Warm>>>,
+}
+
+/// Checks a downloaded model before it is loaded:
+/// [`ModelStore::verified_path`] in the app.
+type Check = Arc<
+    dyn Fn(&ModelStore, &local_models::LocalModel) -> Result<Option<PathBuf>, DownloadError>
+        + Send
+        + Sync,
+>;
+
+/// The loaded model, and what it was loaded from.
+struct Warm {
+    id: &'static str,
+    path: PathBuf,
+    engine: LocalTranscriber,
+}
+
+impl LocalModels {
+    /// Models in `store`, loaded with transcribe.cpp.
+    #[must_use]
+    pub fn new(store: ModelStore) -> Self {
+        Self::with_loader(
+            store,
+            Arc::new(|path: &Path| {
+                CppModel::load(path).map(|model| Box::new(model) as Box<dyn SpeechModel>)
+            }),
+        )
+    }
+
+    /// Models in `store`, loaded with `loader` (tests pass a fake).
+    #[must_use]
+    pub fn with_loader(store: ModelStore, loader: Loader) -> Self {
+        Self {
+            store,
+            loader,
+            check: Arc::new(|store: &ModelStore, model: &local_models::LocalModel| {
+                store.verified_path(model)
+            }),
+            warm: Arc::default(),
+        }
+    }
+
+    /// As [`with_loader`](Self::with_loader), but any file of the catalogue
+    /// size counts as verified, so tests can use sparse stand-ins.
+    #[cfg(test)]
+    #[must_use]
+    pub fn trusting(store: ModelStore, loader: Loader) -> Self {
+        Self {
+            check: Arc::new(|store: &ModelStore, model: &local_models::LocalModel| {
+                Ok(store.ready_path(model))
+            }),
+            ..Self::with_loader(store, loader)
+        }
+    }
+
+    /// The models folder.
+    #[must_use]
+    pub fn store(&self) -> &ModelStore {
+        &self.store
+    }
+
+    /// The engine for the catalogue model `id`, with the saved `language`
+    /// if the model speaks it. Reuses the loaded model when it is the same
+    /// file. Otherwise (seconds; call it from a blocking thread) it first
+    /// makes "the model is loading" current through `stage`, so neither the
+    /// app nor this cache holds the old model any more, then checks the
+    /// file's SHA-256 ([`ModelStore::verified_path`]) and loads it.
+    pub fn engine(&self, id: &str, language: Option<&str>, stage: &dyn Fn(Engine)) -> Engine {
+        let ready = local_models::find(id)
+            .and_then(|model| self.store.ready_path(model).map(|path| (model, path)));
+        let Some((model, path)) = ready else {
+            self.release();
+            return Engine::Unavailable(TranscribeError::ModelMissing);
+        };
+        let language = local_language(model, language);
+        let mut warm = lock(&self.warm);
+        if let Some(loaded) = &*warm
+            && loaded.id == model.id
+            && loaded.path == path
+        {
+            return Engine::Local(loaded.engine.with_language(language));
+        }
+        // Free the old model before loading the next: two at once could
+        // need gigabytes. The current engine is replaced first, then the
+        // cache's handle goes.
+        stage(Engine::Unavailable(TranscribeError::ModelLoading));
+        *warm = None;
+        let path = match (self.check)(&self.store, model) {
+            Ok(Some(path)) => path,
+            Ok(None) | Err(DownloadError::Checksum) => {
+                // Damaged (and deleted) or gone: Settings offers Download.
+                return Engine::Unavailable(TranscribeError::ModelMissing);
+            }
+            Err(error) => {
+                tracing::warn!(model = model.id, %error, "could not check the on-device model");
+                return Engine::Unavailable(TranscribeError::Engine(format!(
+                    "couldn't read the on-device model: {error}"
+                )));
+            }
+        };
+        let started = Instant::now();
+        match (self.loader)(&path) {
+            Ok(loaded) => {
+                tracing::info!(model = model.id, elapsed = ?started.elapsed(), "on-device model loaded");
+                let engine = LocalTranscriber::new(loaded, language);
+                *warm = Some(Warm {
+                    id: model.id,
+                    path,
+                    engine: engine.clone(),
+                });
+                Engine::Local(engine)
+            }
+            Err(error) => {
+                tracing::warn!(model = model.id, %error, "could not load the on-device model");
+                Engine::Unavailable(error)
+            }
+        }
+    }
+
+    /// Lets go of the loaded model. It is freed once the engine that runs it
+    /// is replaced and any dictation still using it has finished.
+    pub fn release(&self) {
+        *lock(&self.warm) = None;
+    }
+
+    /// Whether a model is loaded, and which.
+    #[must_use]
+    pub fn loaded(&self) -> Option<&'static str> {
+        lock(&self.warm).as_ref().map(|warm| warm.id)
+    }
 }
 
 impl LiveEngine {
@@ -73,7 +230,22 @@ impl LiveEngine {
             key_timeout: KEY_READ_TIMEOUT,
             reads: KeyReads::default(),
             writes: KeyWrites::default(),
+            local: None,
         }
+    }
+
+    /// Dictates with on-device models from `local` when the settings ask
+    /// for one (L1).
+    #[must_use]
+    pub fn with_local(mut self, local: LocalModels) -> Self {
+        self.local = Some(local);
+        self
+    }
+
+    /// The on-device models, for the model commands.
+    #[must_use]
+    pub fn local(&self) -> Option<&LocalModels> {
+        self.local.as_ref()
     }
 
     /// The engine never changes (`--transcriber mock`).
@@ -85,6 +257,7 @@ impl LiveEngine {
             key_timeout: KEY_READ_TIMEOUT,
             reads: KeyReads::default(),
             writes: KeyWrites::default(),
+            local: None,
         }
     }
 
@@ -160,19 +333,32 @@ impl LiveEngine {
         };
         // Not a clone of `self`: it holds the transcribers, which would hold
         // this closure.
-        let (base_url, reads, key_timeout) =
-            (self.base_url.clone(), self.reads.clone(), self.key_timeout);
+        let (base_url, reads, key_timeout, local) = (
+            self.base_url.clone(),
+            self.reads.clone(),
+            self.key_timeout,
+            self.local.clone(),
+        );
         transcribers.retry_with(move || {
-            engine_from_config(&config, base_url.as_deref(), &reads, key_timeout)
+            engine_for(
+                &config,
+                base_url.as_deref(),
+                &reads,
+                key_timeout,
+                local.as_ref(),
+                &|_| {},
+            )
         });
     }
 
     fn build<S: SecretStore + 'static>(&self, config: &Arc<Config<S>>) -> Engine {
-        engine_from_config(
+        engine_for(
             config,
             self.base_url.as_deref(),
             &self.reads,
             self.key_timeout,
+            self.local.as_ref(),
+            &|_| {},
         )
     }
 
@@ -227,7 +413,16 @@ impl LiveEngine {
         let Some(transcribers) = &self.transcribers else {
             return;
         };
-        transcribers.update(|| self.build(config));
+        transcribers.update_staged(|stage| {
+            engine_for(
+                config,
+                self.base_url.as_deref(),
+                &self.reads,
+                self.key_timeout,
+                self.local.as_ref(),
+                stage,
+            )
+        });
         tracing::info!(engine = transcribers.name(), "engine rebuilt");
     }
 
@@ -262,6 +457,21 @@ pub fn engine_from_config<S: SecretStore + 'static>(
     reads: &KeyReads,
     key_timeout: Duration,
 ) -> Engine {
+    engine_for(config, base_url, reads, key_timeout, None, &|_| {})
+}
+
+/// [`engine_from_config`] with the on-device models (L1): with
+/// `transcription: local` the engine is the saved model and the keychain
+/// isn't read; with the cloud, a loaded model is released. `stage` makes an
+/// engine current before this returns (see [`LocalModels::engine`]).
+pub fn engine_for<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    base_url: Option<&str>,
+    reads: &KeyReads,
+    key_timeout: Duration,
+    local: Option<&LocalModels>,
+    stage: &dyn Fn(Engine),
+) -> Engine {
     let settings = match config.settings() {
         Ok(settings) => settings,
         Err(error) => {
@@ -271,6 +481,22 @@ pub fn engine_from_config<S: SecretStore + 'static>(
             )));
         }
     };
+    if settings.transcription == Transcription::Local {
+        tracing::info!(
+            model = %settings.local_model,
+            language = ?settings.language,
+            "engine settings: on this Mac"
+        );
+        return match local {
+            Some(local) => local.engine(&settings.local_model, settings.language.as_deref(), stage),
+            None => Engine::Unavailable(TranscribeError::Engine(
+                "on-device transcription isn't available in this build".to_owned(),
+            )),
+        };
+    }
+    if let Some(local) = local {
+        local.release();
+    }
     let key = reads.read(config, settings.provider, key_timeout);
     if let Err(error) = &key {
         // The text never holds a key.
@@ -753,6 +979,7 @@ mod tests {
             key_timeout: WAIT,
             reads: rig.live.reads.clone(),
             writes: rig.live.writes.clone(),
+            local: None,
         };
         changed(&rig.config, &dead, |c| c.set_api_key(Provider::Groq, KEY)).unwrap();
         assert_eq!(
@@ -1723,5 +1950,300 @@ mod tests {
         a_fresh_pipeline_pastes(&setup, &mut provider).await;
         assert_eq!(provider.requests(), 2);
         drop(setup.dir);
+    }
+
+    /// L1: the on-device engine, with a fake model behind the real
+    /// LocalModels, store and pipeline.
+    mod local {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use dictation_core::settings::Transcription;
+        use dictation_transcribe::local::SpeechModel;
+        use dictation_transcribe::models::ModelStore;
+
+        use super::*;
+
+        const SAID: &str = "typed on this Mac";
+
+        struct Says;
+
+        impl SpeechModel for Says {
+            fn run(&mut self, _: &[f32], _: Option<&str>) -> Result<String, String> {
+                Ok(SAID.to_owned())
+            }
+        }
+
+        /// LocalModels over `dir`, counting loads.
+        fn models(dir: &Path, loads: &Arc<AtomicUsize>, fail: bool) -> LocalModels {
+            let store = ModelStore::new(dir.to_owned(), Arc::new(|_| Ok(u64::MAX))).unwrap();
+            let loads = Arc::clone(loads);
+            LocalModels::trusting(
+                store,
+                Arc::new(move |_: &Path| {
+                    loads.fetch_add(1, Ordering::SeqCst);
+                    if fail {
+                        Err(TranscribeError::Engine(
+                            "couldn't load the on-device model: bad file".into(),
+                        ))
+                    } else {
+                        Ok(Box::new(Says) as Box<dyn SpeechModel>)
+                    }
+                }),
+            )
+        }
+
+        /// Puts a file of the catalogue size where the default model goes
+        /// (sparse, so it costs no disk).
+        fn download_default(dir: &Path) {
+            let model =
+                dictation_core::local_models::find(dictation_core::local_models::DEFAULT_MODEL)
+                    .unwrap();
+            std::fs::create_dir_all(dir).unwrap();
+            let file = std::fs::File::create(dir.join(model.file_name)).unwrap();
+            file.set_len(model.size_bytes).unwrap();
+        }
+
+        fn choose(rig: &Rig, transcription: Transcription, language: Option<&str>) {
+            let settings = Settings {
+                transcription,
+                language: language.map(str::to_owned),
+                ..Settings::default()
+            };
+            changed(&rig.config, &rig.live, |c| c.save_settings(&settings)).unwrap();
+        }
+
+        #[tokio::test]
+        async fn criterion_4_a_missing_model_says_to_download_it_and_needs_no_key() {
+            let mut rig = Rig::start(200).await;
+            let loads = Arc::new(AtomicUsize::new(0));
+            rig.live =
+                rig.live
+                    .clone()
+                    .with_local(models(&rig.dir.0.join("models"), &loads, false));
+            choose(&rig, Transcription::Local, None);
+            assert_eq!(
+                rig.dictate().await,
+                failed("The on-device model isn't downloaded. Download the model in Settings.")
+            );
+            assert!(rig.inserter.inserted().is_empty());
+            assert_eq!(rig.requests().await, 0);
+            assert_eq!(loads.load(Ordering::SeqCst), 0);
+            rig.finish().await;
+        }
+
+        #[tokio::test]
+        async fn criterion_5_6_dictation_pastes_and_the_model_stays_loaded_until_switched_away() {
+            let mut rig = Rig::start(200).await;
+            let loads = Arc::new(AtomicUsize::new(0));
+            let dir = rig.dir.0.join("models");
+            download_default(&dir);
+            let local = models(&dir, &loads, false);
+            rig.live = rig.live.clone().with_local(local.clone());
+
+            choose(&rig, Transcription::Local, None);
+            assert_eq!(rig.dictate().await, pasted());
+            assert_eq!(rig.inserter.inserted(), [SAID]);
+            // No key, no request: nothing left the machine.
+            assert_eq!(rig.requests().await, 0);
+            assert_eq!(
+                local.loaded(),
+                Some(dictation_core::local_models::DEFAULT_MODEL)
+            );
+
+            // An unrelated save keeps the loaded model.
+            choose(&rig, Transcription::Local, Some("en"));
+            assert_eq!(rig.dictate().await, pasted());
+            assert_eq!(loads.load(Ordering::SeqCst), 1);
+
+            // The cloud releases it; coming back loads it again.
+            choose(&rig, Transcription::Cloud, None);
+            assert_eq!(local.loaded(), None);
+            assert_eq!(rig.dictate().await, failed("Add your API key in Settings."));
+            choose(&rig, Transcription::Local, None);
+            assert_eq!(rig.dictate().await, pasted());
+            assert_eq!(loads.load(Ordering::SeqCst), 2);
+            rig.finish().await;
+        }
+
+        #[tokio::test]
+        async fn a_model_that_fails_to_load_is_reported_at_dictation() {
+            let mut rig = Rig::start(200).await;
+            let loads = Arc::new(AtomicUsize::new(0));
+            let dir = rig.dir.0.join("models");
+            download_default(&dir);
+            let local = models(&dir, &loads, true);
+            rig.live = rig.live.clone().with_local(local.clone());
+            choose(&rig, Transcription::Local, None);
+            assert_eq!(
+                rig.dictate().await,
+                failed("Something went wrong: couldn't load the on-device model: bad file.")
+            );
+            assert_eq!(local.loaded(), None);
+            rig.finish().await;
+        }
+
+        #[test]
+        fn an_unknown_model_id_is_missing_and_releases_the_loaded_one() {
+            let dir = TempDir::new("unknown-model");
+            download_default(&dir.0);
+            let loads = Arc::new(AtomicUsize::new(0));
+            let local = models(&dir.0, &loads, false);
+            let engine = local.engine(
+                dictation_core::local_models::DEFAULT_MODEL,
+                Some("hi"),
+                &|_| {},
+            );
+            let Engine::Local(engine) = engine else {
+                panic!("not local");
+            };
+            // Parakeet is English only: Hindi isn't passed on.
+            assert_eq!(engine.language(), None);
+            assert!(local.loaded().is_some());
+            assert!(matches!(
+                local.engine("retired-model", None, &|_| {}),
+                Engine::Unavailable(TranscribeError::ModelMissing)
+            ));
+            assert_eq!(local.loaded(), None);
+            assert_eq!(local.store().dir(), dir.0.as_path());
+        }
+
+        /// A model that records when it is dropped.
+        struct Probe {
+            name: String,
+            events: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl SpeechModel for Probe {
+            fn run(&mut self, _: &[f32], _: Option<&str>) -> Result<String, String> {
+                Ok(self.name.clone())
+            }
+        }
+
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                self.events
+                    .lock()
+                    .unwrap()
+                    .push(format!("drop {}", self.name));
+            }
+        }
+
+        fn describe(engine: &Engine) -> String {
+            match engine {
+                Engine::Unavailable(error) => format!("{error:?}"),
+                other => other.name().to_owned(),
+            }
+        }
+
+        fn put(dir: &Path, id: &str) {
+            let model = dictation_core::local_models::find(id).unwrap();
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::File::create(dir.join(model.file_name))
+                .unwrap()
+                .set_len(model.size_bytes)
+                .unwrap();
+        }
+
+        /// Review round 1, major 3: with no dictation running, the old model
+        /// is gone before the next one loads, and dictation meanwhile says
+        /// the model is loading.
+        #[test]
+        fn switching_models_frees_the_old_one_before_loading_the_next() {
+            let dir = TempDir::new("switch-models");
+            let models_dir = dir.0.join("models");
+            put(&models_dir, "parakeet-unified-en-0.6b-q4_k_m");
+            put(&models_dir, "qwen3-asr-0.6b-q4_k_m");
+            let config = Arc::new(Config::new(dir.0.join("config"), MemSecretStore::new()));
+            let transcribers = Transcribers::new(starting());
+            let events: Arc<Mutex<Vec<String>>> = Arc::default();
+            let (watch, log) = (transcribers.clone(), Arc::clone(&events));
+            let loader: Loader = Arc::new(move |path: &Path| {
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                let current = describe(&watch.current());
+                log.lock()
+                    .unwrap()
+                    .push(format!("load {name} while {current}"));
+                Ok(Box::new(Probe {
+                    name,
+                    events: Arc::clone(&log),
+                }) as Box<dyn SpeechModel>)
+            });
+            let store = ModelStore::new(models_dir, Arc::new(|_| Ok(u64::MAX))).unwrap();
+            let live = LiveEngine::follow(transcribers.clone())
+                .with_local(LocalModels::trusting(store, loader));
+            let pick = |id: &str| {
+                let settings = Settings {
+                    transcription: Transcription::Local,
+                    local_model: id.to_owned(),
+                    ..Settings::default()
+                };
+                changed(&config, &live, |c| c.save_settings(&settings)).unwrap();
+            };
+
+            pick("parakeet-unified-en-0.6b-q4_k_m");
+            pick("qwen3-asr-0.6b-q4_k_m");
+            assert_eq!(
+                *events.lock().unwrap(),
+                [
+                    "load parakeet-unified-en-0.6b-Q4_K_M.gguf while ModelLoading",
+                    "drop parakeet-unified-en-0.6b-Q4_K_M.gguf",
+                    "load Qwen3-ASR-0.6B-Q4_K_M.gguf while ModelLoading",
+                ]
+            );
+            assert_eq!(transcribers.name(), "local");
+            assert_eq!(
+                TranscribeError::ModelLoading.user_message(),
+                "The on-device model is still loading. Try again in a moment."
+            );
+        }
+
+        /// Review round 1, major 1, at the engine: a file of the right size
+        /// whose bytes aren't the model's is never loaded, and is removed so
+        /// Settings offers Download again.
+        #[test]
+        fn a_damaged_model_file_is_never_loaded() {
+            let dir = TempDir::new("damaged-model");
+            put(&dir.0, dictation_core::local_models::DEFAULT_MODEL);
+            let loads = Arc::new(AtomicUsize::new(0));
+            let counted = Arc::clone(&loads);
+            let store = ModelStore::new(dir.0.clone(), Arc::new(|_| Ok(u64::MAX))).unwrap();
+            let local = LocalModels::with_loader(
+                store,
+                Arc::new(move |_: &Path| {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    Ok(Box::new(Says) as Box<dyn SpeechModel>)
+                }),
+            );
+            let engine = local.engine(dictation_core::local_models::DEFAULT_MODEL, None, &|_| {});
+            assert!(
+                matches!(engine, Engine::Unavailable(TranscribeError::ModelMissing)),
+                "{}",
+                describe(&engine)
+            );
+            assert_eq!(loads.load(Ordering::SeqCst), 0);
+            let model =
+                dictation_core::local_models::find(dictation_core::local_models::DEFAULT_MODEL)
+                    .unwrap();
+            assert_eq!(
+                local.store().status(model),
+                dictation_transcribe::models::ModelStatus::Missing
+            );
+        }
+
+        #[test]
+        fn without_local_models_the_local_choice_is_unavailable() {
+            let dir = TempDir::new("no-local");
+            let config = Arc::new(Config::new(dir.0.join("config"), MemSecretStore::new()));
+            let settings = Settings {
+                transcription: Transcription::Local,
+                ..Settings::default()
+            };
+            config.save_settings(&settings).unwrap();
+            let engine = engine_from_config(&config, None, &KeyReads::default(), WAIT);
+            assert!(matches!(
+                engine,
+                Engine::Unavailable(TranscribeError::Engine(_))
+            ));
+        }
     }
 }
