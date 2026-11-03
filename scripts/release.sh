@@ -27,16 +27,20 @@
 # verifies the .sig against the public key in tauri.conf.json (minisign
 # Ed25519 with OpenSSL 3+) and that it is bound to <version>.
 #
-# --publish additionally needs a clean tree with tag v<version> on HEAD, and
-# then uploads everything with `gh release create v<version>` to the public
-# repository gargankit90/dictation-app-releases (the updater's endpoint is
-# its releases/latest/download/latest.json). Without --publish nothing leaves
-# this Mac. No CI publishing, no tokens: gh uses the owner's own login.
+# --publish additionally needs a clean tree whose HEAD is on origin's default
+# branch (merged through a PR), and a tag v<version> that exists neither here
+# nor on origin: tags are immutable in this repository (a ruleset blocks
+# moving or deleting them), so a failed publish needs a new version. It then
+# uploads everything with `gh release create v<version> --target <the built
+# commit>` to gargankit90/dictation-app, which creates the tag on that commit
+# (the updater's endpoint is releases/latest/download/latest.json there).
+# Without --publish nothing leaves this Mac. No CI publishing, no tokens: gh
+# uses the owner's own login.
 set -euo pipefail
 # Never trace: a traced line would print the key.
 set +x
 
-RELEASES_REPO=gargankit90/dictation-app-releases
+RELEASES_REPO=gargankit90/dictation-app
 KEY_SERVICE=dictation-app-updater-key
 PASSWORD_SERVICE=dictation-app-updater-password
 IDENTITY="dictation-app Dev"
@@ -99,10 +103,18 @@ cargo_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
 pubkey=$(jq -r '.plugins.updater.pubkey // ""' "$conf")
 [ -n "$pubkey" ] || die "$conf has no plugins.updater.pubkey"
 
+built_commit=""
 if [ "$publish" = 1 ]; then
   [ -z "$(git status --porcelain)" ] || die "--publish needs a clean tree (commit or remove the changes)"
-  grep -qxF "v$version" <<<"$(git tag --points-at HEAD)" ||
-    die "--publish needs tag v$version on HEAD (git tag v$version, after the version PR is merged)"
+  git fetch --quiet origin || die "could not fetch origin to check the commit and tag"
+  default_ref=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  [ -n "$default_ref" ] || default_ref=origin/main
+  built_commit=$(git rev-parse HEAD)
+  git merge-base --is-ancestor "$built_commit" "$default_ref" 2>/dev/null ||
+    die "--publish needs HEAD ($built_commit) on $default_ref (merge the version PR, then git switch to the merged commit)"
+  tag_error="tag v$version already exists; tags are immutable here (a ruleset blocks moving or deleting them), so a failed or repeated publish needs a new version, not a re-tag"
+  [ -z "$(git tag --list "v$version")" ] || die "$tag_error"
+  [ -z "$(git ls-remote --tags origin "refs/tags/v$version")" ] || die "$tag_error"
   command -v gh >/dev/null || die "gh is not installed"
   gh auth status >/dev/null 2>&1 || die "gh is not logged in (gh auth login)"
 fi
@@ -293,8 +305,11 @@ if [ "$publish" = 0 ]; then
   exit 0
 fi
 
-say "publishing v$version to $RELEASES_REPO"
-gh release create "v$version" --repo "$RELEASES_REPO" \
+# The build must still be of the checked commit.
+[ "$(git rev-parse HEAD)" = "$built_commit" ] && [ -z "$(git status --porcelain)" ] ||
+  die "the tree or HEAD changed during the build; nothing was published"
+say "publishing v$version ($built_commit) to $RELEASES_REPO"
+gh release create "v$version" --repo "$RELEASES_REPO" --target "$built_commit" \
   --title "$APP $version" --notes "$notes" \
   "$out/$base.dmg" "$out/$base.app.tar.gz" "$out/$base.app.tar.gz.sig" \
   "$out/latest.json" "$out/README.md" "$out/THIRD-PARTY-LICENSES.txt" "$out/SHA256SUMS"
