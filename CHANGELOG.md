@@ -1,0 +1,81 @@
+# Changelog
+
+All notable changes to dictation-app are listed here, newest first. The format
+follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The section
+for a version is the text of its GitHub release and of the "Update available"
+window (`scripts/release.sh` copies it, so keep each section plain text for
+testers: short lines, no HTML). The `[date set at release]` is filled in when
+the release is cut.
+
+## [Unreleased]
+
+## [0.1.0] — [date set at release]
+
+The first release for testers. Hold a key, speak, let go, and your words are
+typed into the app you are using.
+
+### What you can do
+
+- **Dictate into any app.** Hold the right Option key (you can change the key
+  in Settings), speak, and let go. The text appears where your cursor was. A
+  small overlay shows when it is recording and when it is working. Password
+  fields are skipped on purpose.
+- **Transcribe on your Mac.** Pick "On this Mac" in Settings and download a
+  model once. After that, your speech is turned into text on the Mac and not
+  sent anywhere. Two models are offered: Parakeet (English, the default, about
+  480 MB) and Qwen3-ASR (about 30 languages, including Hindi, about 590 MB).
+- **Or use your own key.** Pick "Your own key", choose Groq or OpenAI and
+  paste a key. Your speech goes to that provider to be transcribed. The key is
+  kept in your macOS keychain, tested before it is saved, and never shown
+  again.
+- **Set it up in four steps.** A first-run window asks for the microphone and
+  Accessibility permissions, your key (or "No key needed" with an on-device
+  model) and a first test dictation.
+- **Change things in Settings.** Hotkey, language, launch at login, the
+  transcription choice and the usage-sharing switch.
+- **Find out what went wrong.** Errors show a short code and what to do next.
+  **Troubleshoot** (menu-bar icon, or Settings > Help) checks the microphone,
+  Accessibility, the hotkey and the engine, and can test the connection to your
+  provider. **Report a problem** shows you the exact text of a report, which
+  you can save, copy or open as a GitHub issue. The app never sends the report
+  itself.
+- **Stay up to date.** The app asks at start-up whether there is a newer
+  version, and **Check for updates…** in the menu-bar icon does it any time.
+  Nothing is installed until you click **Install and restart**, and every
+  update is signed.
+
+### Privacy
+
+- Anonymous usage and error events are **on by default**. Turn them off in
+  Settings > Privacy > "Share usage and error events"; off takes effect at
+  once. Events carry no audio, no text you dictated, no API keys, no app names
+  and no file paths. Everything that can be sent is listed in
+  [docs/privacy.md](docs/privacy.md).
+- Dictated text is not written to the log, and audio stays in memory.
+
+### Requirements
+
+- An Apple Silicon Mac (M1 or newer). Intel Macs are not supported.
+- macOS 13 (Ventura) or newer.
+- For the "Your own key" choice: an internet connection and a Groq or OpenAI
+  API key. For "On this Mac": enough disk space for the model you pick.
+
+### Known limitations
+
+- **Not yet notarized.** macOS blocks the first launch with "Apple cannot
+  check it for malicious software". Open it once with the steps in section 2
+  of the [tester guide](docs/TESTERS.md#2-open-it-for-the-first-time-clear-the-quarantine-flag).
+  Updates do not ask again.
+- **Fully offline use is not yet checked.** On-device transcription is built
+  to need no network once the model is downloaded, but we have not yet
+  verified it on a Mac that is offline.
+- **Crashes inside the on-device engine are not reported.** A crash report of
+  that kind could contain what you said, so the app does not capture it
+  ([#226](https://github.com/gargankit90/dictation-app/issues/226)). If the
+  app quits on its own, tell us in a bug report. Crashes in the rest of the
+  app and failed dictations are reported when sharing is on.
+- Recordings stop after 5 minutes.
+- Mac only. Windows comes later.
+
+[Unreleased]: https://github.com/gargankit90/dictation-app/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/gargankit90/dictation-app/releases/tag/v0.1.0
