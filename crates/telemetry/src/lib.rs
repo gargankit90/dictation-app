@@ -18,6 +18,7 @@
 //!   queue and deletes the install ID at once; turning it on again makes a
 //!   new ID.
 
+pub mod errors;
 pub mod install_id;
 mod version_marker;
 
@@ -32,6 +33,7 @@ use rustls_platform_verifier::BuilderVerifierExt;
 use serde_json::{Value, json};
 use tokio::sync::{Notify, watch};
 
+pub use errors::SentryReporter;
 pub use version_marker::updated_from;
 
 /// PostHog Cloud US's ingestion host.
@@ -121,7 +123,11 @@ impl PostHogTelemetry {
     #[must_use]
     pub fn start(config: Config, enabled: bool, runtime: &tokio::runtime::Handle) -> Arc<Self> {
         let live = config.api_key.is_some();
-        let client = if live { build_client(&config) } else { None };
+        let client = if live {
+            build_client(config.timeout)
+        } else {
+            None
+        };
         let this = Arc::new(Self {
             config,
             client,
@@ -295,7 +301,7 @@ async fn send_loop(this: Weak<PostHogTelemetry>) {
 
 /// A client with rustls + ring and the OS trust store, as the transcribers
 /// use. `None` if the TLS setup fails: nothing is sent then.
-fn build_client(config: &Config) -> Option<Client> {
+fn build_client(timeout: Duration) -> Option<Client> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let tls = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
@@ -305,7 +311,7 @@ fn build_client(config: &Config) -> Option<Client> {
         .with_no_client_auth();
     Client::builder()
         .tls_backend_preconfigured(tls)
-        .timeout(config.timeout)
+        .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .ok()
