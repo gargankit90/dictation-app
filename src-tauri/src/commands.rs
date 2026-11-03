@@ -605,6 +605,10 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         set_onboarding_step,
         finish_onboarding,
         relaunch_app,
+        crate::models::list_local_models,
+        crate::models::download_local_model,
+        crate::models::cancel_local_model_download,
+        crate::models::delete_local_model,
     ])
 }
 
@@ -679,7 +683,7 @@ mod tests {
     }
 
     #[test]
-    fn criterion_2_the_bindings_have_exactly_the_ten_commands() {
+    fn criterion_2_the_bindings_have_exactly_the_fourteen_commands() {
         let bindings = std::fs::read_to_string(committed()).unwrap();
         for command in [
             "getSettings",
@@ -692,6 +696,10 @@ mod tests {
             "setOnboardingStep",
             "finishOnboarding",
             "relaunchApp",
+            "listLocalModels",
+            "downloadLocalModel",
+            "cancelLocalModelDownload",
+            "deleteLocalModel",
         ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
@@ -700,7 +708,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 10,
+            commands, 14,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -787,7 +795,28 @@ mod tests {
                 "model",
                 "language",
                 "hotkey",
-                "launch_at_login"
+                "launch_at_login",
+                "transcription",
+                "local_model"
+            ]
+        );
+        // L1: the model list carries no key either.
+        let model = bindings
+            .split("export type LocalModelInfo_Serialize = {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n};").next())
+            .unwrap();
+        assert_eq!(
+            field_names(model),
+            [
+                "id",
+                "name",
+                "languages",
+                "size_bytes",
+                "downloaded_bytes",
+                "state",
+                "error",
+                "default"
             ]
         );
     }
@@ -2144,6 +2173,7 @@ mod capability_tests {
             dictation_platform::fakes::FakeLaunchAtLogin::new(),
         )));
         app.manage(LiveEngine::fixed());
+        app.manage(crate::models::ModelDownloads::default());
         app.manage(super::ActiveHotkey(super::tests::hotkey::listening().0));
         app.manage(std::sync::Arc::new(crate::onboarding::Onboarding::new()));
         app.manage(crate::onboarding::OsPermissions(std::sync::Arc::new(
@@ -2264,6 +2294,7 @@ mod capability_tests {
             "key": 0,
             "permission": "camera",
             "step": "done",
+            "id": 0,
         })
     }
 
@@ -2277,7 +2308,7 @@ mod capability_tests {
     /// `main_capability_denies_native_tray_and_menu_mutation`, on Tauri's
     /// resolver; this is the same ACL at run time.)
     #[test]
-    fn the_settings_window_may_invoke_all_ten_app_commands() {
+    fn the_settings_window_may_invoke_all_fourteen_app_commands() {
         let fixture = app_with_windows(&[MAIN, OVERLAY]);
         let (main, overlay) = (&fixture.windows[0], &fixture.windows[1]);
         for command in COMMAND_NAMES {
@@ -2285,7 +2316,9 @@ mod capability_tests {
                 // No keychain, network or OS prompt: the onboarding ones
                 // run on fakes (granted permissions, no shell).
                 "get_settings" | "save_settings" | "get_onboarding" | "finish_onboarding"
-                | "relaunch_app" => invoke(main, command, args(command)).map(|_| ()),
+                | "relaunch_app" | "list_local_models" => {
+                    invoke(main, command, args(command)).map(|_| ())
+                }
                 _ => match invoke(main, command, unusable_args()) {
                     Err(error) if error.to_string().contains("invalid args") => Ok(()),
                     other => other.map(|_| ()),
@@ -2300,7 +2333,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 10);
+        assert_eq!(COMMAND_NAMES.len(), 14);
     }
 
     #[test]

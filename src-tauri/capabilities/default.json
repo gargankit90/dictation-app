@@ -13,6 +13,10 @@
     "allow-request-permission",
     "allow-set-onboarding-step",
     "allow-finish-onboarding",
-    "allow-relaunch-app"
+    "allow-relaunch-app",
+    "allow-list-local-models",
+    "allow-download-local-model",
+    "allow-cancel-local-model-download",
+    "allow-delete-local-model"
   ]
 }

@@ -52,6 +52,7 @@ pub mod engine;
 mod flags;
 mod key_writes;
 mod logging;
+pub mod models;
 pub mod onboarding;
 mod overlay;
 mod updater;
@@ -374,6 +375,23 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         }
     };
     let live = with_provider_url(live, &launch, choice);
+    // On-device models (L1) live in Application Support/<app>/models.
+    let models_dir = app
+        .path()
+        .app_data_dir()
+        .context("no data directory")?
+        .join("models");
+    let live = match dictation_transcribe::models::ModelStore::new(
+        models_dir,
+        Arc::new(dictation_platform::disk::available_space),
+    ) {
+        Ok(store) => live.with_local(engine::LocalModels::new(store)),
+        Err(error) => {
+            tracing::error!(%error, "on-device models are unavailable");
+            live
+        }
+    };
+    app.manage(models::ModelDownloads::default());
     tracing::info!(
         transcriber = choice.name(),
         engine = transcribers.name(),
