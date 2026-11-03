@@ -49,6 +49,24 @@ public half is in the repo. Losing the key means no tester can update again
 (each would install a new DMG by hand); leaking it lets someone push code to
 every tester. It is never a CI secret: releases are built on the owner's Mac.
 
+## The telemetry keys (owner, once)
+
+A release carries the PostHog project key and the Sentry DSN, read by
+`scripts/release.sh` from the login Keychain (generic passwords) and handed to
+that one build as `DICTATION_POSTHOG_KEY` and `DICTATION_SENTRY_DSN`. Add them
+once (the `-w` with no value asks for the value, so it isn't in your shell
+history):
+
+```sh
+security add-generic-password -s dictation-app-posthog-key -a "$USER" -w
+security add-generic-password -s dictation-app-sentry-dsn -a "$USER" -w
+```
+
+If an item is missing, the script prints a warning saying so and builds
+without it: that build sends no analytics (PostHog) or no error reports
+(Sentry), and the release still succeeds. The values are never printed, logged
+or written to a file. See `docs/privacy.md` for the project settings to turn on.
+
 ## Making a release
 
 1. In a PR, bump `version` in `src-tauri/tauri.conf.json`, `package.json` and

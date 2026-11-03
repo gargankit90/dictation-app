@@ -16,7 +16,7 @@ adapter. Tauri is a thin layer on top.
 | `crates/ports` | `dictation-ports` | traits: `HotkeySource`, `AudioSource`, `Transcriber`, `TextInserter`, `Clipboard`, `SecretStore`, `Permissions`, `Clock` | `core` |
 | `crates/platform` | `dictation-platform` | OS adapters; fakes behind feature `testing` | `core`, `ports` |
 | `crates/transcribe` | `dictation-transcribe` | `Transcriber` implementations: OpenAI-compatible (Groq/OpenAI), mock; later local | `core`, `ports` |
-| `crates/telemetry` | `dictation-telemetry` | PostHog adapter for the `Telemetry` port, and the install ID | `ports` |
+| `crates/telemetry` | `dictation-telemetry` | PostHog adapter for the `Telemetry` port, Sentry adapter for `ErrorReporter`, and the install ID | `ports` |
 | `crates/app` | `dictation-pipeline` | async pipeline that runs the coordinator against the ports; no Tauri types | `core`, `ports` |
 | `src-tauri` | `dictation-app` | Tauri commands, events, tray, windows, plugins, CLI flags | everything above |
 | `src/` | | React UI | Tauri commands/events only |
@@ -106,6 +106,13 @@ adapter. Tauri is a thin layer on top.
   `crates/ports/src/telemetry.rs`, an entry in `docs/privacy.md` and the
   "What's sent" list, and the privacy test in
   `crates/app/tests/usage_privacy.rs` must still pass.
+- Error reports (A2) share A1's switch. They go only to Sentry (US) through
+  the `ErrorReporter` port (adapter `crates/telemetry/src/errors.rs`), and an
+  event is built from an allow-list: release, environment, the E1 error code
+  and A1 error type, and for a panic crate-relative frames. Never a message.
+  No native crash dumps (they hold raw memory). A build without
+  `DICTATION_SENTRY_DSN` sends nothing. Any new field needs an entry in
+  `docs/privacy.md` and the "What's sent" list.
 - Skip pasting when a password field (Secure Input) is focused.
 - New network calls go only to the configured transcription provider, the
   update server and the usage-events host above.
