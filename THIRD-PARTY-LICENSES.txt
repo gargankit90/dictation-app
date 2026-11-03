@@ -85,6 +85,27 @@ tauri-specta 2.0.0-rc.26, specta 2.0.0-rc.26, specta-typescript 0.0.13
 @tauri-apps/api 2 (https://github.com/tauri-apps/tauri)
   The invoke function the generated bindings call. Apache-2.0 OR MIT.
 
+transcribe.cpp 0.4.1: transcribe-cpp and transcribe-cpp-sys
+(https://github.com/handy-computer/transcribe.cpp)
+  On-device speech-to-text (crates/transcribe/src/local.rs). Used as a
+  dependency; no code copied. The crate builds the C/C++ library from
+  source, which vendors ggml (MIT, Copyright (c) 2023-2026 The ggml
+  authors), miniz (MIT) and Silero VAD (MIT); their licence texts are in
+  the crate's THIRD-PARTY-LICENSES.md.
+  MIT License, Copyright (c) 2026 The transcribe.cpp authors
+
+Ideas only, no code: Handy (MIT), src-tauri/src/managers/model.rs and
+catalog.json at commit 9e57a0d, for a pinned, SHA-256-checked model
+catalogue with Range-resumed downloads into the app's data folder, and for
+running every model through transcribe-cpp.
+
+On-device models the app offers to download (not shipped with it; the user
+downloads them from Hugging Face, handy-computer/*-gguf, GGUF conversions
+by the transcribe.cpp authors):
+  Parakeet Unified EN 0.6B (NVIDIA, nvidia/parakeet-unified-en-0.6b),
+  CC-BY-4.0.
+  Qwen3-ASR 0.6B (Qwen, Qwen/Qwen3-ASR-0.6B), Apache-2.0.
+
 The code adapted from Handy (above) is used under this licence:
 
   MIT License
@@ -4774,6 +4795,36 @@ DEALINGS IN THE SOFTWARE.
 MIT License (MIT)
 
 Used by:
+  - transcribe-cpp-sys 0.4.1 (https://github.com/handy-computer/transcribe.cpp)
+
+Copyright 2013-2014 RAD Game Tools and Valve Software
+Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
+
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+
+================================================================================
+MIT License (MIT)
+
+Used by:
   - synstructure 0.14.0 (https://github.com/mystor/synstructure)
 
 Copyright 2016 Nika Layzell
@@ -5339,6 +5390,34 @@ SOFTWARE.
 MIT License (MIT)
 
 Used by:
+  - transcribe-cpp-sys 0.4.1 (https://github.com/handy-computer/transcribe.cpp)
+
+MIT License
+
+Copyright (c) 2020-present Silero Team
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+MIT License (MIT)
+
+Used by:
   - serialize-to-javascript-impl 0.1.2 (https://github.com/chippers/serialize-to-javascript)
   - serialize-to-javascript 0.1.2 (https://github.com/chippers/serialize-to-javascript)
 
@@ -5608,11 +5687,71 @@ SOFTWARE.
 MIT License (MIT)
 
 Used by:
+  - transcribe-cpp-sys 0.4.1 (https://github.com/handy-computer/transcribe.cpp)
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+MIT License (MIT)
+
+Used by:
   - visibility 0.1.1 (https://github.com/danielhenrymantilla/visibility.rs)
 
 MIT License
 
 Copyright (c) 2024 Daniel Henry-Mantilla
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+MIT License (MIT)
+
+Used by:
+  - transcribe-cpp-sys 0.4.1 (https://github.com/handy-computer/transcribe.cpp)
+  - transcribe-cpp-sys 0.4.1 (https://github.com/handy-computer/transcribe.cpp)
+  - transcribe-cpp 0.4.1 (https://github.com/handy-computer/transcribe.cpp)
+
+MIT License
+
+Copyright (c) 2026 The transcribe.cpp authors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
