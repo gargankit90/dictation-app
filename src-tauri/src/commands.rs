@@ -399,6 +399,11 @@ fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
                 "{name} answered with a redirect (HTTP {status}), which isn't followed, so the key couldn't be checked. Check the provider selected in Settings, then test the key again."
             ),
         ),
+        // Only the on-device engine reports it; a key test never runs one.
+        TranscribeError::ModelMissing => KeyTestError::new(
+            KeyTestKind::Server,
+            "The key couldn't be checked. Try again.".to_owned(),
+        ),
         TranscribeError::Engine(detail) => KeyTestError::new(
             KeyTestKind::Server,
             format!(
