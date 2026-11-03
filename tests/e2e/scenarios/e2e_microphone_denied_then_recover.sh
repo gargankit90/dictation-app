@@ -37,6 +37,9 @@
 
 MIC_BUNDLE_ID=com.dictationapp.desktop
 # DictationError::PermissionMissing(Microphone)'s text (crates/core).
+# What the overlay and tray show (the code table, ErrorCode::user_text).
+MIC_SHOWN="Microphone is off for dictation-app. Allow it in Privacy & Security, then relaunch."
+# What the log says (DictationError's Display).
 MIC_ERROR="Microphone is off. Allow it in Privacy & Security, Microphone, then relaunch from the menu bar."
 # The tray menu's item while the microphone is denied (src-tauri).
 MIC_RELAUNCH="Relaunch dictation-app"
@@ -238,9 +241,9 @@ e2e_microphone_denied_then_recover() {
   launch --press
   expect "a second press shows the actionable error" \
     wait_for_log_count "shown to the user error=$MIC_ERROR" 1 10
-  expect "the overlay renders it" overlay_shows "shown: $MIC_ERROR"
+  expect "the overlay renders it" overlay_shows "shown: $MIC_SHOWN mic_denied"
   screenshot e2e_microphone_denied_then_recover.error
-  expect "and the tray's tooltip has it" tray_shows "$TRAY_ERROR_TITLE" "$TRAY_TOOLTIP: $MIC_ERROR"
+  expect "and the tray's tooltip has it" tray_shows "$TRAY_ERROR_TITLE" "$TRAY_TOOLTIP: $MIC_SHOWN (mic_denied)"
   expect "the tray menu offers Relaunch" wait_for_log 'tray relaunch item offered=true' 5
   expect "macOS doesn't ask again" no_mic_prompt
   launch --release

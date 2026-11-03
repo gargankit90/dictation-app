@@ -43,6 +43,9 @@ VM_MOUSE="$VM_FIXTURES/mouse.js"
 AX_TYPE_KEYS="$VM_FIXTURES/type-keys.js"
 # DictationError::HotkeyFailed's text (crates/core) and the tray's title
 # for it (crates/app/src/tray.rs).
+# What the tray shows (the code table, ErrorCode::user_text).
+AX_HOTKEY_SHOWN="The hotkey isn't working. Allow Accessibility; it comes back by itself."
+# What the log says (DictationError's Display).
 AX_HOTKEY_ERROR="The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself."
 AX_HOTKEY_TITLE="Hotkey unavailable"
 AX_EVIDENCE=""
@@ -219,7 +222,7 @@ e2e_accessibility_revoked() {
   expect "it says the hotkey is off until Accessibility is allowed" \
     wait_for_log "shown to the user error=The dictation hotkey isn.t working" 10
   expect "the tray says $AX_HOTKEY_TITLE" \
-    tray_shows "$AX_HOTKEY_TITLE" "$TRAY_TOOLTIP: $AX_HOTKEY_ERROR" 10
+    tray_shows "$AX_HOTKEY_TITLE" "$TRAY_TOOLTIP: $AX_HOTKEY_SHOWN (hotkey_unregistered)" 10
   expect "the tray menu offers Relaunch" wait_for_log 'tray relaunch item offered=true' 10
   expect "typing still reaches TextEdit with the app running unallowed" typed_in_textedit still
 

@@ -25,7 +25,7 @@
 # The overlay's text for the provider's 401 (TranscribeError::BadKey's user
 # message in DictationError's "Transcription failed: …"). The "!" icon is
 # aria-hidden, so it isn't in the text.
-OVERLAY_BAD_KEY="shown: Transcription failed: The provider rejected your API key. Check it in Settings."
+OVERLAY_BAD_KEY="shown: The provider rejected your API key. Check or re-enter it in Settings. key_rejected"
 # The error's time on screen (crates/app/src/overlay.rs ERROR_VISIBLE_FOR),
 # and how far the log's show-to-hide gap may stray from it.
 OVERLAY_ERROR_MS=4000
