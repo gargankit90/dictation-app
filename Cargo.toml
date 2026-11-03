@@ -55,6 +55,12 @@ specta-typescript = "0.0.13"
 tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
 httpdate = "1.0.3"
 wiremock = "0.6.5"
+# On-device speech-to-text (L1): transcribe.cpp's Rust binding, MIT. Builds
+# ggml from source with CMake and a C++ compiler. Pinned: the crate is 0.x.
+# Backends are chosen per target in crates/transcribe (Metal on macOS).
+transcribe-cpp = { version = "=0.4.0", default-features = false }
+# SHA-256 of downloaded models (L1). MIT OR Apache-2.0; already in the tree.
+sha2 = "0.10.9"
 proptest = "1.12.0"
 handy-keys = "0.3.4"
 handy-recorder = "=0.1.0"

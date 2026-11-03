@@ -45,6 +45,43 @@ pub(crate) fn client(timeout: Duration, base_url: &str) -> Result<Client, Transc
         .map_err(|e| failed("HTTP client", &e))
 }
 
+/// The client model downloads use (L1): the same TLS setup, `stall` to
+/// connect and between reads (no limit on the whole download), and redirects
+/// followed only to `https` URLs, at most `max_redirects` times (Hugging
+/// Face answers with a redirect to its CDN). No API key is ever sent with
+/// it.
+///
+/// # Errors
+///
+/// [`TranscribeError::Engine`] if the TLS setup or the client can't be
+/// built.
+pub(crate) fn download_client(
+    stall: Duration,
+    max_redirects: usize,
+) -> Result<Client, TranscribeError> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let tls = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| failed("TLS versions", &e))?
+        .with_platform_verifier()
+        .map_err(|e| failed("TLS trust store", &e))?
+        .with_no_client_auth();
+    let policy = reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= max_redirects || attempt.url().scheme() != "https" {
+            attempt.error("refused redirect")
+        } else {
+            attempt.follow()
+        }
+    });
+    Client::builder()
+        .tls_backend_preconfigured(tls)
+        .connect_timeout(stall)
+        .read_timeout(stall)
+        .redirect(policy)
+        .build()
+        .map_err(|e| failed("HTTP client", &e))
+}
+
 /// Whether `url` is plain `http` to this machine (`localhost`, `127.0.0.0/8`
 /// or `[::1]`).
 fn is_loopback_http(url: &str) -> bool {

@@ -8,6 +8,10 @@
 //! which reaches the user, instead of the app failing to start or sending a
 //! request that can't work.
 //!
+//! The on-device engine (L1) is [`Engine::Local`]: the shell loads the model
+//! (`crate::local`) and keeps it, so a rebuild for an unrelated setting
+//! reuses the loaded model instead of reading the file again.
+//!
 //! [`Transcribers`] is the handle the pipeline owns: a [`Transcriber`] that
 //! forwards to whichever engine is current, so saving settings or a new key
 //! swaps the engine without restarting the pipeline. A transcription already
@@ -23,6 +27,9 @@ use dictation_core::settings::Settings;
 use dictation_core::text::Transcript;
 use dictation_ports::{Audio, Secret, SecretError, TranscribeError, Transcriber};
 
+use dictation_core::local_models::LocalModel;
+
+use crate::local::LocalTranscriber;
 use crate::mock::MockTranscriber;
 use crate::openai_compat::{Config, OpenAiCompat, Preset};
 
@@ -32,6 +39,8 @@ pub enum Engine {
     Mock(MockTranscriber),
     /// Groq or OpenAI.
     Remote(Box<OpenAiCompat>),
+    /// A downloaded model on this Mac (L1).
+    Local(LocalTranscriber),
     /// No engine can be built; every dictation fails with this error.
     Unavailable(TranscribeError),
 }
@@ -87,6 +96,7 @@ impl Engine {
         match self {
             Self::Mock(_) => "mock",
             Self::Remote(_) => "remote",
+            Self::Local(_) => "local",
             Self::Unavailable(_) => "unavailable",
         }
     }
@@ -97,6 +107,7 @@ impl Transcriber for Engine {
         match self {
             Self::Mock(engine) => engine.transcribe(audio).await,
             Self::Remote(engine) => engine.transcribe(audio).await,
+            Self::Local(engine) => engine.transcribe(audio).await,
             Self::Unavailable(error) => Err(error.clone()),
         }
     }
@@ -107,9 +118,20 @@ impl Transcriber for Engine {
         match self {
             Self::Mock(engine) => engine.transcribe_detailed(audio).await,
             Self::Remote(engine) => engine.transcribe_detailed(audio).await,
+            Self::Local(engine) => engine.transcribe_detailed(audio).await,
             Self::Unavailable(error) => Err(error.clone()),
         }
     }
+}
+
+/// The language hint for `model`: the saved language if the model speaks
+/// it, else `None` (its default). Parakeet is English only, so a saved
+/// `de` must not reach it.
+#[must_use]
+pub fn local_language(model: &LocalModel, language: Option<&str>) -> Option<String> {
+    language
+        .filter(|code| model.speaks(code))
+        .map(str::to_owned)
 }
 
 /// A [`Transcriber`] whose engine can be swapped while the pipeline runs.
@@ -142,6 +164,13 @@ impl Transcribers {
         *self.current.write().unwrap_or_else(PoisonError::into_inner) = engine;
     }
 
+    /// The current engine, for a rebuild that wants to reuse its loaded
+    /// local model.
+    #[must_use]
+    pub fn current(&self) -> Arc<Engine> {
+        self.snapshot()
+    }
+
     /// The current engine's [`name`](Engine::name).
     #[must_use]
     pub fn name(&self) -> &'static str {
@@ -171,5 +200,54 @@ impl std::fmt::Debug for Transcribers {
         f.debug_struct("Transcribers")
             .field("engine", &self.name())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dictation_core::local_models;
+
+    use super::*;
+    use crate::local::SpeechModel;
+
+    struct Says(&'static str);
+
+    impl SpeechModel for Says {
+        fn run(&mut self, _: &[f32], _: Option<&str>) -> Result<String, String> {
+            Ok(self.0.to_owned())
+        }
+    }
+
+    #[test]
+    fn only_a_language_the_model_speaks_is_passed_on() {
+        let parakeet = local_models::find("parakeet-unified-en-0.6b-q4_k_m").unwrap();
+        let qwen = local_models::find("qwen3-asr-0.6b-q4_k_m").unwrap();
+        assert_eq!(local_language(parakeet, Some("en")).as_deref(), Some("en"));
+        assert_eq!(local_language(parakeet, Some("hi")), None);
+        assert_eq!(local_language(qwen, Some("hi")).as_deref(), Some("hi"));
+        assert_eq!(local_language(qwen, None), None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn criterion_5_a_local_engine_dictates_through_transcribers() {
+        let local = LocalTranscriber::new(Box::new(Says("on device")), None);
+        let transcribers = Transcribers::new(Engine::Unavailable(TranscribeError::ModelMissing));
+        let audio = Audio {
+            sample_rate: 16_000,
+            samples: vec![0.0; 1_600],
+        };
+        assert_eq!(
+            transcribers.transcribe(&audio).await,
+            Err(TranscribeError::ModelMissing)
+        );
+        transcribers.update(|| Engine::Local(local.clone()));
+        assert_eq!(transcribers.name(), "local");
+        assert_eq!(transcribers.transcribe(&audio).await.unwrap(), "on device");
+        let detailed = transcribers.transcribe_detailed(&audio).await.unwrap();
+        assert_eq!(detailed, Transcript::from_text("on device".to_owned()));
+        let Engine::Local(current) = &*transcribers.current() else {
+            panic!("not local");
+        };
+        assert!(current.shares_model(&local));
     }
 }
