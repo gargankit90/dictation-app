@@ -435,6 +435,9 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         Arc::new(SystemPermissions::new()),
     ));
     app.manage(live.clone());
+    // A keychain that timed out at launch is tried again by the next
+    // dictation (#204).
+    live.retry_on_dictation(Arc::clone(&config));
     if let Err(error) = live.rebuild_in_background(Arc::clone(&config)) {
         tracing::error!(%error, "could not start reading the API key");
     }

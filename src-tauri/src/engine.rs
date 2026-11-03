@@ -298,7 +298,68 @@ impl LiveEngine {
         config: &Arc<Config<S>>,
         provider: Provider,
     ) -> Result<Option<Secret>, SecretError> {
-        self.reads.read(config, provider, self.key_timeout)
+        let key = self.reads.read(config, provider, self.key_timeout);
+        if matches!(key, Ok(Some(_))) {
+            // The keychain answers now: an engine that gave up on it at
+            // launch can be rebuilt (#204).
+            self.rebuild_if_keychain_failed(config);
+        }
+        key
+    }
+
+    /// Rebuilds the engine if it is unavailable because the keychain failed
+    /// or timed out, and does nothing otherwise (so no extra keychain read
+    /// when the engine is fine, no key is saved, or it is pinned). Blocks.
+    pub fn rebuild_if_keychain_failed<S: SecretStore + 'static>(&self, config: &Arc<Config<S>>) {
+        let Some(transcribers) = &self.transcribers else {
+            return;
+        };
+        if !transcribers.keychain_failed() {
+            return;
+        }
+        let engine = transcribers.update_if_keychain_failed(|| self.build(config));
+        tracing::info!(
+            engine = engine.name(),
+            "engine rebuilt after a keychain failure"
+        );
+    }
+
+    /// Makes a dictation that finds the engine unavailable because the
+    /// keychain failed rebuild it from `config` first (#204). Call once at
+    /// startup, after the config exists. A no-op for a pinned engine.
+    pub fn retry_on_dictation<S: SecretStore + 'static>(&self, config: Arc<Config<S>>) {
+        let Some(transcribers) = &self.transcribers else {
+            return;
+        };
+        // Not a clone of `self`: it holds the transcribers, which would hold
+        // this closure.
+        let (base_url, reads, key_timeout, local) = (
+            self.base_url.clone(),
+            self.reads.clone(),
+            self.key_timeout,
+            self.local.clone(),
+        );
+        transcribers.retry_with(move || {
+            engine_for(
+                &config,
+                base_url.as_deref(),
+                &reads,
+                key_timeout,
+                local.as_ref(),
+                &|_| {},
+            )
+        });
+    }
+
+    fn build<S: SecretStore + 'static>(&self, config: &Arc<Config<S>>) -> Engine {
+        engine_for(
+            config,
+            self.base_url.as_deref(),
+            &self.reads,
+            self.key_timeout,
+            self.local.as_ref(),
+            &|_| {},
+        )
     }
 
     /// Saves `key` as `provider`'s API key and rebuilds the engine from it
@@ -1118,6 +1179,163 @@ mod tests {
         assert!(reason.starts_with("Couldn't read your API key from the Keychain"));
         assert!(rig.inserter.inserted().is_empty());
         rig.finish().await;
+    }
+
+    // ---- a keychain failure at launch heals without a restart (B1, #204) ----
+
+    /// The launch of #204: the key is saved, the keychain doesn't answer in
+    /// time, so the engine is unavailable. Returns once the startup read has
+    /// given up; the keychain is still blocked.
+    async fn rig_after_keychain_timeout() -> Rig {
+        let mut rig = rig_at_startup().await;
+        rig.secrets.set_blocked(true);
+        rig.live = rig
+            .live
+            .clone()
+            .with_key_timeout(Duration::from_millis(200));
+        // After the timeout is set: the retry is bounded by the same one.
+        rig.live.retry_on_dictation(rig.config.clone());
+        rig.live
+            .rebuild_in_background(rig.config.clone())
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(
+            rig.live.transcribers.as_ref().unwrap().name(),
+            "unavailable"
+        );
+        rig
+    }
+
+    #[tokio::test]
+    async fn criterion_1_the_next_dictation_retries_after_a_keychain_timeout() {
+        let mut rig = rig_after_keychain_timeout().await;
+        // Still blocked: the retry is bounded, and the user sees the same error.
+        let reason = message(&rig.dictate().await);
+        assert!(
+            reason.starts_with("Couldn't read your API key from the Keychain"),
+            "{reason}"
+        );
+        assert!(rig.inserter.inserted().is_empty());
+
+        // Access allowed: the next dictation works, no restart, no save.
+        rig.secrets.set_blocked(false);
+        assert_eq!(rig.dictate().await, pasted());
+        assert_eq!(rig.inserter.inserted(), [TRANSCRIPT]);
+        rig.finish().await;
+    }
+
+    #[tokio::test]
+    async fn criterion_1_a_failing_read_is_retried_too() {
+        let mut rig = rig_at_startup().await;
+        rig.live.retry_on_dictation(rig.config.clone());
+        rig.secrets
+            .set_failing(Some("User interaction is not allowed."));
+        rig.live.rebuild(&rig.config);
+        let reason = message(&rig.dictate().await);
+        assert!(reason.starts_with("Couldn't read your API key from the Keychain"));
+
+        rig.secrets.set_failing(None);
+        assert_eq!(rig.dictate().await, pasted());
+        rig.finish().await;
+    }
+
+    #[tokio::test]
+    async fn criterion_2_a_successful_stored_key_read_rebuilds_the_engine() {
+        for via_key_saved in [false, true] {
+            let rig = rig_after_keychain_timeout().await;
+            rig.secrets.set_blocked(false);
+            let transcribers = rig.live.transcribers.clone().unwrap();
+            if via_key_saved {
+                assert!(crate::onboarding::key_saved(&rig.config, &rig.live));
+            } else {
+                // What the key test and has_api_key call.
+                let key = rig.live.read_key(&rig.config, Provider::Groq);
+                assert_eq!(key, Ok(Some(Secret::new(KEY))));
+            }
+            assert_eq!(transcribers.name(), "remote", "key_saved: {via_key_saved}");
+            rig.finish().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn criterion_3_no_extra_reads_when_the_engine_is_fine() {
+        let mut rig = Rig::start(200).await;
+        rig.live.retry_on_dictation(rig.config.clone());
+        rig.save_key(KEY);
+        let before = rig.secrets.get_calls();
+        assert_eq!(rig.dictate().await, pasted());
+        assert_eq!(rig.dictate().await, pasted());
+        rig.live.rebuild_if_keychain_failed(&rig.config);
+        assert_eq!(
+            rig.secrets.get_calls(),
+            before,
+            "a working engine reads nothing"
+        );
+        rig.finish().await;
+    }
+
+    #[tokio::test]
+    async fn criterion_3_no_extra_reads_when_no_key_is_saved() {
+        let mut rig = Rig::start(200).await;
+        rig.live.retry_on_dictation(rig.config.clone());
+        rig.live.rebuild(&rig.config);
+        let before = rig.secrets.get_calls();
+        for _ in 0..2 {
+            let reason = message(&rig.dictate().await);
+            assert!(!reason.contains("Keychain"), "{reason}");
+        }
+        rig.live.rebuild_if_keychain_failed(&rig.config);
+        assert_eq!(
+            rig.secrets.get_calls(),
+            before,
+            "no key is not a keychain failure"
+        );
+        rig.finish().await;
+    }
+
+    #[tokio::test]
+    async fn criterion_3_a_keychain_that_keeps_failing_costs_one_bounded_read_per_dictation() {
+        let mut rig = rig_after_keychain_timeout().await;
+        let before = rig.secrets.get_calls();
+        for _ in 0..3 {
+            let reason = message(&rig.dictate().await);
+            assert!(reason.starts_with("Couldn't read your API key from the Keychain"));
+        }
+        // The blocked read from launch is still the one in flight: the
+        // retries wait on it (each for its timeout) and start no thread.
+        assert_eq!(
+            rig.secrets.get_calls(),
+            before,
+            "retries shared the stuck read"
+        );
+        rig.secrets.set_blocked(false);
+        rig.finish().await;
+    }
+
+    #[tokio::test]
+    async fn criterion_3_a_failing_keychain_is_read_at_most_once_per_dictation() {
+        let mut rig = rig_at_startup().await;
+        rig.live.retry_on_dictation(rig.config.clone());
+        rig.secrets.set_failing(Some("locked"));
+        rig.live.rebuild(&rig.config);
+        let before = rig.secrets.get_calls();
+        for n in 1..=3 {
+            message(&rig.dictate().await);
+            assert_eq!(rig.secrets.get_calls() - before, n);
+        }
+        rig.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_pinned_engine_never_rebuilds() {
+        let live = LiveEngine::fixed();
+        let dir = TempDir::new("pinned");
+        let secrets = MemSecretStore::new();
+        let config = Arc::new(Config::new(dir.0.join("config"), secrets.clone()));
+        live.retry_on_dictation(config.clone());
+        live.rebuild_if_keychain_failed(&config);
+        assert_eq!(secrets.get_calls(), 0);
     }
 
     #[test]
