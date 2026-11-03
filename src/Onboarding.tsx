@@ -8,9 +8,11 @@ import type {
   Settings_Serialize,
   Step,
 } from "./bindings";
+import { HotkeyRecorder } from "./HotkeyRecorder";
 import { BROKEN, messageOf, testKey } from "./keyTest";
 import type { Notice } from "./keyTest";
 import { PROVIDERS, providerInfo } from "./providers";
+import { saveHotkey } from "./saveHotkey";
 import "./settings.css";
 import { validateKey } from "./validation";
 
@@ -32,6 +34,10 @@ export function hotkeyName(hotkey: string): string {
       return "the right Option key";
     case "LeftAlt":
       return "the left Option key";
+    case "RightCmd":
+      return "the right Command key";
+    case "LeftCmd":
+      return "the left Command key";
     default:
       return hotkey;
   }
@@ -554,6 +560,18 @@ export function Onboarding({ onFinished }: Props) {
               Key works ✓
             </p>
           )}
+          <div className="field">
+            <span className="label">Your dictation key</span>
+            <HotkeyRecorder
+              value={settings?.hotkey ?? "RightAlt"}
+              disabled={settings === null}
+              onChange={async (spec) => {
+                const result = await saveHotkey(spec);
+                if (result.settings !== null) setSettings(result.settings);
+                return result.error;
+              }}
+            />
+          </div>
           <label htmlFor="try-field">
             Hold {hotkeyName(settings?.hotkey ?? "RightAlt")} and say a few words. Let go, and the
             text appears here.

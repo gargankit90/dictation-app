@@ -352,6 +352,31 @@ mod tests {
         }
     }
 
+    /// What the Settings recorder writes (`src/hotkeyKeys.ts`) is the stored
+    /// form as it is, with no migration: each one parses and reads back the
+    /// same.
+    #[test]
+    fn parses_what_the_recorder_writes() {
+        for spec in [
+            "RightCmd",
+            "LeftCmd",
+            "RightAlt",
+            "LeftCtrl",
+            "RightShift",
+            "RightAlt+RightCmd",
+            "Ctrl+Shift+Space",
+            "Alt+Cmd+K",
+            "Cmd+7",
+            "Ctrl+Tab",
+            "F5",
+            "F20",
+            "Up",
+        ] {
+            let parsed = parse(spec).unwrap_or_else(|e| panic!("{spec}: {e}"));
+            assert_eq!(parsed.to_string(), spec, "{spec} is canonical");
+        }
+    }
+
     #[test]
     fn rejects_invalid_combinations() {
         use HotkeySpecError::*;

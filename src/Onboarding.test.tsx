@@ -502,9 +502,25 @@ describe("the try step", () => {
     expect(backend.named("finish_onboarding")).toHaveLength(1);
   });
 
+  it("shows the dictation key and records a different one", async () => {
+    render(<Onboarding onFinished={vi.fn()} />);
+    await heading("Try it");
+    await waitFor(() => {
+      expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌥");
+    });
+    fireEvent.click(button("Record a different key"));
+    act(() => void fireEvent.keyDown(window, { code: "MetaRight" }));
+    act(() => void fireEvent.keyUp(window, { code: "MetaRight" }));
+    await waitFor(() => {
+      expect(backend.settings.hotkey).toBe("RightCmd");
+    });
+    expect(await screen.findByLabelText(/Hold the right Command key/u)).toBeTruthy();
+  });
+
   it("names the hotkey", () => {
     expect(hotkeyName("RightAlt")).toBe("the right Option key");
     expect(hotkeyName("LeftAlt")).toBe("the left Option key");
+    expect(hotkeyName("RightCmd")).toBe("the right Command key");
     expect(hotkeyName("Ctrl+Shift+Space")).toBe("Ctrl+Shift+Space");
   });
 });

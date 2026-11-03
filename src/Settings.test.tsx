@@ -110,7 +110,7 @@ afterEach(() => {
 /** Renders the form once the saved settings have loaded. */
 async function open() {
   render(<Settings />);
-  await screen.findByLabelText("Hotkey");
+  await screen.findByLabelText("Or type it");
   await waitFor(() => {
     expect(screen.queryByText("Checking for a saved key…")).toBeNull();
   });
@@ -154,7 +154,7 @@ describe("loading", () => {
     await open();
 
     expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("openai");
-    expect(screen.getByLabelText<HTMLInputElement>("Hotkey").value).toBe("F5");
+    expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F5");
     expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("de");
     expect(screen.getByLabelText(/OpenAI API key/)).toBeTruthy();
   });
@@ -186,7 +186,7 @@ describe("loading", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("the settings file is malformed: bad");
-    expect(screen.queryByLabelText("Hotkey")).toBeNull();
+    expect(screen.queryByLabelText("Or type it")).toBeNull();
   });
 
   it("copes with the IPC itself failing", async () => {
@@ -203,7 +203,7 @@ describe("criterion 1: the form validates input", () => {
   it("refuses a bad language, hotkey and key without calling the app", async () => {
     await open();
     type("Language", "english");
-    type("Hotkey", "Ctrl+");
+    type("Or type it", "Ctrl+");
     type(/API key/, "two words");
     click("Save");
 
@@ -214,16 +214,16 @@ describe("criterion 1: the form validates input", () => {
     ]);
     expect(backend.named("set_api_key")).toEqual([]);
     expect(backend.named("save_settings")).toEqual([]);
-    expect(screen.getByLabelText("Hotkey").getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByLabelText("Or type it").getAttribute("aria-invalid")).toBe("true");
   });
 
   it("refuses an empty hotkey, and clears an error once the field is edited", async () => {
     await open();
-    type("Hotkey", "  ");
+    type("Or type it", "  ");
     click("Save");
     expect((await screen.findByRole("alert")).textContent).toMatch(/Enter a hotkey/);
 
-    type("Hotkey", "RightAlt");
+    type("Or type it", "RightAlt");
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -406,7 +406,7 @@ describe("criterion 2: settings save and reload", () => {
       expect(screen.getByLabelText(/OpenAI API key/)).toBeTruthy();
     });
     type(/API key/, ` ${KEY} `);
-    type("Hotkey", " Ctrl+Shift+Space ");
+    type("Or type it", " Ctrl+Shift+Space ");
     type("Language", " DE ");
     click("Save");
 
@@ -435,7 +435,7 @@ describe("criterion 2: settings save and reload", () => {
   it("a fresh window shows what was saved", async () => {
     await open();
     type("Provider", "openai");
-    type("Hotkey", "F6");
+    type("Or type it", "F6");
     type("Language", "es");
     click("Save");
     await screen.findByText("Settings saved.");
@@ -444,7 +444,7 @@ describe("criterion 2: settings save and reload", () => {
     await open();
 
     expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("openai");
-    expect(screen.getByLabelText<HTMLInputElement>("Hotkey").value).toBe("F6");
+    expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F6");
     expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("es");
   });
 
@@ -484,17 +484,48 @@ describe("criterion 2: settings save and reload", () => {
       return result;
     });
     await open();
-    type("Hotkey", "ctrl+shift+space");
+    type("Or type it", "ctrl+shift+space");
     click("Save");
     await screen.findByText("Settings saved.");
 
-    expect(screen.getByLabelText<HTMLInputElement>("Hotkey").value).toBe("Ctrl+Shift+Space");
+    expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("Ctrl+Shift+Space");
+  });
+
+  it("records the dictation key by pressing it, and saves it at once", async () => {
+    await open();
+    expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌥");
+    click("Record a different key");
+    act(() => void fireEvent.keyDown(window, { code: "MetaRight" }));
+    act(() => void fireEvent.keyUp(window, { code: "MetaRight" }));
+    await screen.findByText("Dictation key saved.");
+    expect(backend.settings.hotkey).toBe("RightCmd");
+    expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌘");
+    expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("RightCmd");
+  });
+
+  it("keeps the old key and says why when the app can't switch to the recorded one", async () => {
+    await open();
+    click("Record a different key");
+    backend.failing.set("save_settings", "Couldn't switch the hotkey to F6. RightAlt still works.");
+    act(() => void fireEvent.keyDown(window, { code: "F6" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("RightAlt still works");
+    expect(backend.settings.hotkey).toBe("RightAlt");
+    expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌥");
+  });
+
+  it("resets the dictation key to Right Option", async () => {
+    backend.settings = { ...backend.settings, hotkey: "Ctrl+Shift+Space" };
+    await open();
+    expect(screen.getByLabelText("Dictation key").textContent).toBe("⌃⇧Space");
+    click("Reset to default");
+    await screen.findByText("Dictation key saved.");
+    expect(backend.settings.hotkey).toBe("RightAlt");
   });
 
   it("shows the app's message when saving the settings fails", async () => {
     backend.failing.set("save_settings", "invalid hotkey: Escape can't be a hotkey");
     await open();
-    type("Hotkey", "Escape");
+    type("Or type it", "Escape");
     click("Save");
 
     expect((await screen.findByRole("alert")).textContent).toBe(
@@ -705,7 +736,7 @@ describe("review round 1", () => {
 
       expect(locked(screen.getByLabelText<HTMLSelectElement>("Provider"))).toBe(true);
       expect(locked(keyBox())).toBe(true);
-      expect(locked(screen.getByLabelText<HTMLInputElement>("Hotkey"))).toBe(true);
+      expect(locked(screen.getByLabelText<HTMLInputElement>("Or type it"))).toBe(true);
       expect(locked(screen.getByLabelText<HTMLInputElement>("Language"))).toBe(true);
       // Even an edit that gets through (a change event on a disabled control)
       // changes nothing.
@@ -944,11 +975,11 @@ describe("launch at login", () => {
   it("keeps a typed hotkey when the login item could not change", async () => {
     await open();
     fireEvent.click(box());
-    type("Hotkey", "F5");
+    type("Or type it", "F5");
     backend.failing.set("save_settings", "Couldn't change launch at login: no bundle");
     click("Save");
     await screen.findByText(/no bundle/);
-    expect(screen.getByLabelText<HTMLInputElement>("Hotkey").value).toBe("F5");
+    expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F5");
   });
 });
 
@@ -956,7 +987,7 @@ describe("launch at login", () => {
 // reply and an extra Enter do to the form.
 describe("T2: settings edges", () => {
   const form = () => {
-    const element = screen.getByLabelText("Hotkey").closest("form");
+    const element = screen.getByLabelText("Or type it").closest("form");
     if (element === null) throw new Error("no form");
     return element;
   };
@@ -994,7 +1025,7 @@ describe("T2: settings edges", () => {
     backend.settings = { ...backend.settings, model: "whisper-large-v3" };
     await open();
     type("Provider", "openai");
-    type("Hotkey", "  F6 ");
+    type("Or type it", "  F6 ");
     const handle = backend.handle;
     let rereads = 0;
     mockIPC(async (command, payload) => {
@@ -1007,7 +1038,7 @@ describe("T2: settings edges", () => {
     });
     click("Save");
     await screen.findByText("Settings saved.");
-    expect(screen.getByLabelText<HTMLInputElement>("Hotkey").value).toBe("F6");
+    expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F6");
     expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("openai");
     expect(screen.queryByText(/default model/)).toBeNull();
     type("Language", "fr");
@@ -1076,7 +1107,7 @@ describe("T2: settings edges", () => {
 
   it("a hotkey the app couldn't switch to is not reported as saved", async () => {
     await open();
-    type("Hotkey", "F6");
+    type("Or type it", "F6");
     type("Language", "de");
     backend.failing.set(
       "save_settings",
@@ -1087,7 +1118,7 @@ describe("T2: settings edges", () => {
     expect(alert.textContent).toContain("RightAlt still works");
     expect(screen.queryByText("Settings saved.")).toBeNull();
     // What the user typed stays, so Save can be tried again.
-    expect(screen.getByLabelText<HTMLInputElement>("Hotkey").value).toBe("F6");
+    expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F6");
     backend.failing.delete("save_settings");
     click("Save");
     await screen.findByText("Settings saved.");

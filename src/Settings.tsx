@@ -3,9 +3,11 @@ import type { SyntheticEvent } from "react";
 import { commands } from "./bindings";
 import type { Provider, Settings_Serialize, Transcription } from "./bindings";
 import { BROKEN, messageOf, testKey as runKeyTest } from "./keyTest";
+import { HotkeyRecorder } from "./HotkeyRecorder";
 import { LocalModels } from "./LocalModels";
 import type { Notice } from "./keyTest";
 import { PROVIDERS, providerInfo } from "./providers";
+import { saveHotkey } from "./saveHotkey";
 import "./settings.css";
 import { normalizeLanguage, validateHotkey, validateKey, validateLanguage } from "./validation";
 
@@ -189,6 +191,19 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
     if (run !== testRun.current) return;
     setTesting(false);
     setNotice(outcome);
+  }
+
+  /** Applies a recorded (or reset) key at once; returns a message if it can't. */
+  async function recordHotkey(spec: string): Promise<string | null> {
+    const result = await saveHotkey(spec);
+    if (result.settings !== null) {
+      setLoaded(result.settings);
+      // The form follows the key that listens, unless the save failed and
+      // the user has a typed value of their own.
+      if (result.error === null) setHotkey(result.settings.hotkey);
+    }
+    if (result.error === null) setNotice({ kind: "ok", text: "Dictation key saved." });
+    return result.error;
   }
 
   async function save(event: SyntheticEvent) {
@@ -473,7 +488,11 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
           )}
 
           <div className="field">
-            <label htmlFor="hotkey">Hotkey</label>
+            <span className="label" id="hotkey-label">
+              Dictation key
+            </span>
+            <HotkeyRecorder value={loaded.hotkey} disabled={saving} onChange={recordHotkey} />
+            <label htmlFor="hotkey">Or type it</label>
             <input
               id="hotkey"
               type="text"
@@ -489,8 +508,8 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
               }}
             />
             <p id="hotkey-hint" className="hint">
-              Hold it to talk. For example RightAlt (the right Option key) or Ctrl+Shift+Space. A
-              new hotkey works as soon as you save.
+              Hold it to talk. Typed, it looks like RightAlt or Ctrl+Shift+Space, and works as soon
+              as you save. A recorded key works at once.
             </p>
             <p id="hotkey-error" role={errors.hotkey ? "alert" : undefined} className="error">
               {errors.hotkey}
