@@ -30,9 +30,40 @@ pub fn reveal_folder(dir: &Path) -> io::Result<()> {
     Command::new(program).args(args).status().map(|_| ())
 }
 
+/// Opens `url` in the default browser.
+///
+/// # Errors
+///
+/// If the launcher can't run, or `url` isn't an `https` address (nothing
+/// else is ever opened this way).
+pub fn open_url(url: &str) -> io::Result<()> {
+    if !url.starts_with("https://") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "only https addresses are opened",
+        ));
+    }
+    let program = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "windows") {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    Command::new(program).arg(url).status().map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_https_addresses_are_opened() {
+        for url in ["file:///etc/passwd", "javascript:alert(1)", "/tmp/x", ""] {
+            let error = open_url(url).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{url}");
+        }
+    }
 
     #[test]
     fn the_folder_is_the_only_argument() {

@@ -551,6 +551,16 @@ async fn key_test<S: SecretStore + 'static>(
     result.map_err(|error| describe(provider, &error))
 }
 
+/// Tests the saved key of `provider` (Troubleshoot's "Test connection").
+pub(crate) async fn test_saved_key(
+    config: &Arc<Config<KeychainSecretStore>>,
+    live: &LiveEngine,
+    provider: Provider,
+    base_url: &str,
+) -> Result<(), KeyTestError> {
+    key_test(config, live, provider, None, base_url).await
+}
+
 /// Tests an API key with a short silent clip through `provider`'s
 /// transcription endpoint: the key typed in the form (`key`, used for this
 /// request only and not stored), or the saved one if `key` is `None`. The
@@ -696,6 +706,12 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::models::cancel_local_model_download,
         crate::models::delete_local_model,
         set_share_usage_events,
+        crate::diagnostics::run_checks,
+        crate::diagnostics::test_connection,
+        crate::diagnostics::build_report,
+        crate::diagnostics::save_report,
+        crate::diagnostics::open_issue,
+        crate::diagnostics::take_troubleshoot_request,
     ])
 }
 
@@ -770,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn criterion_2_the_bindings_have_exactly_the_fifteen_commands() {
+    fn criterion_2_the_bindings_have_exactly_these_commands() {
         let bindings = std::fs::read_to_string(committed()).unwrap();
         for command in [
             "getSettings",
@@ -788,6 +804,12 @@ mod tests {
             "cancelLocalModelDownload",
             "deleteLocalModel",
             "setShareUsageEvents",
+            "runChecks",
+            "testConnection",
+            "buildReport",
+            "saveReport",
+            "openIssue",
+            "takeTroubleshootRequest",
         ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
@@ -796,7 +818,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 15,
+            commands, 21,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -2358,6 +2380,7 @@ mod capability_tests {
         app.manage(super::ConfigDir(dir.clone()));
         app.manage(super::AppShell(std::sync::Arc::new(NoShell)));
         app.manage(crate::usage::Usage::disabled());
+        app.manage(crate::diagnostics::Diagnostics::default());
         let windows = labels
             .iter()
             .map(|label| {
@@ -2486,11 +2509,34 @@ mod capability_tests {
     /// `main_capability_denies_native_tray_and_menu_mutation`, on Tauri's
     /// resolver; this is the same ACL at run time.)
     #[test]
-    fn the_settings_window_may_invoke_all_fifteen_app_commands() {
+    fn the_settings_window_may_invoke_all_app_commands() {
         let fixture = app_with_windows(&[MAIN, OVERLAY]);
         let (main, overlay) = (&fixture.windows[0], &fixture.windows[1]);
+        // The on-device engine, so Troubleshoot and the report read no key
+        // from the keychain and contact nobody.
+        let local = dictation_core::settings::Settings {
+            transcription: dictation_core::settings::Transcription::Local,
+            ..dictation_core::settings::Settings::default()
+        };
+        invoke(
+            main,
+            "save_settings",
+            serde_json::json!({ "settings": local }),
+        )
+        .unwrap();
         for command in COMMAND_NAMES {
             let reached = match *command {
+                // E1: these have no arguments to be unusable. Saving and
+                // opening need a report on screen and a window, which the
+                // fixture has none of; an error that isn't the ACL's means
+                // the command ran.
+                "save_report" | "open_issue" => match invoke(main, command, args(command)) {
+                    Err(error) if !error.to_string().contains("not allowed") => Ok(()),
+                    other => other.map(|_| ()),
+                },
+                "run_checks" | "test_connection" | "build_report" | "take_troubleshoot_request" => {
+                    invoke(main, command, args(command)).map(|_| ())
+                }
                 // No keychain, network or OS prompt: the onboarding ones
                 // run on fakes (granted permissions, no shell).
                 "get_settings" | "save_settings" | "get_onboarding" | "finish_onboarding"
@@ -2511,7 +2557,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 15);
+        assert_eq!(COMMAND_NAMES.len(), 21);
     }
 
     #[test]

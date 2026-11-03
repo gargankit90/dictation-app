@@ -76,6 +76,34 @@ export const commands = {
 	 *  batches on their way are dropped and the install ID is deleted.
 	 */
 	setShareUsageEvents: (share: boolean) => typedError<null, string>(__TAURI_INVOKE("set_share_usage_events", { share })),
+	/**
+	 *  The live checks. Reads permissions and the key; records nothing and
+	 *  contacts nobody.
+	 */
+	runChecks: () => typedError<Check_Serialize[], string>(__TAURI_INVOKE("run_checks")),
+	/**
+	 *  Asks the selected provider whether it answers and accepts the saved key,
+	 *  with a short silent clip (the key test). Only when the user presses the
+	 *  button; never for the on-device engine.
+	 */
+	testConnection: () => typedError<ConnectionResult_Serialize, string>(__TAURI_INVOKE("test_connection")),
+	/**  Builds the report and remembers it as the one on screen. */
+	buildReport: () => typedError<string, string>(__TAURI_INVOKE("build_report")),
+	/**
+	 *  Asks where to save the report on screen and writes it there. `None` if
+	 *  the user cancelled. The text is the one [`build_report`] returned.
+	 */
+	saveReport: () => typedError<string | null, string>(__TAURI_INVOKE("save_report")),
+	/**
+	 *  Opens the browser at a new GitHub issue whose body is the report on
+	 *  screen. The user reads it there and submits it; the app sends nothing.
+	 */
+	openIssue: () => typedError<null, string>(__TAURI_INVOKE("open_issue")),
+	/**
+	 *  Whether the tray asked for Troubleshoot since the window last asked;
+	 *  asking clears it.
+	 */
+	takeTroubleshootRequest: () => typedError<boolean, string>(__TAURI_INVOKE("take_troubleshoot_request")),
 };
 
 /* Types */
@@ -85,6 +113,138 @@ export type AppPermission =
 "microphone" | 
 /**  Accessibility. */
 "accessibility";
+
+/**  One row of Troubleshoot. */
+export type Check = Check_Serialize | Check_Deserialize;
+
+/**  Which check a row is. */
+export type CheckId = 
+/**  The microphone permission. */
+"microphone" | 
+/**  The Accessibility permission. */
+"accessibility" | 
+/**  Whether the hotkey is registered. */
+"hotkey" | 
+/**
+ *  Whether the engine can transcribe: a key is readable, or the model
+ *  is on this Mac.
+ */
+"engine" | 
+/**  The last error that happened. */
+"last_error";
+
+/**  One row of Troubleshoot. */
+export type Check_Deserialize = {
+	/**  Which check. */
+	id: CheckId,
+	/**  Its name. */
+	label: string,
+	/**  ✓ or ✗. */
+	ok: boolean,
+	/**  One plain sentence: what is fine, or what is wrong and what to do. */
+	detail: string,
+	/**  The error code behind a ✗, if any. */
+	code?: ErrorCode | null,
+	/**  The button that fixes it, if one does. */
+	fix?: FixAction | null,
+	/**  That button's label. */
+	fix_label?: string | null,
+};
+
+/**  One row of Troubleshoot. */
+export type Check_Serialize = {
+	/**  Which check. */
+	id: CheckId,
+	/**  Its name. */
+	label: string,
+	/**  ✓ or ✗. */
+	ok: boolean,
+	/**  One plain sentence: what is fine, or what is wrong and what to do. */
+	detail: string,
+	/**  The error code behind a ✗, if any. */
+	code: ErrorCode | null,
+	/**  The button that fixes it, if one does. */
+	fix: FixAction | null,
+	/**  That button's label. */
+	fix_label: string | null,
+};
+
+/**  What "Test connection" found. */
+export type ConnectionResult = ConnectionResult_Serialize | ConnectionResult_Deserialize;
+
+/**  What "Test connection" found. */
+export type ConnectionResult_Deserialize = {
+	/**  Whether the provider answered and accepted the key. */
+	ok: boolean,
+	/**  The error code if not. */
+	code?: ErrorCode | null,
+	/**  One plain sentence. */
+	message: string,
+};
+
+/**  What "Test connection" found. */
+export type ConnectionResult_Serialize = {
+	/**  Whether the provider answered and accepted the key. */
+	ok: boolean,
+	/**  The error code if not. */
+	code: ErrorCode | null,
+	/**  One plain sentence. */
+	message: string,
+};
+
+/**
+ *  A stable name for a way dictation can fail. The `snake_case` text
+ *  ([`ErrorCode::as_str`]) is what the user sees and quotes in a report; do
+ *  not rename one.
+ */
+export type ErrorCode = 
+/**  The microphone permission is refused. */
+"mic_denied" | 
+/**  The microphone is allowed but failed to record. */
+"mic_failed" | 
+/**  The Accessibility permission is missing. */
+"accessibility_missing" | 
+/**  The global hotkey doesn't work. */
+"hotkey_unregistered" | 
+/**  No API key is saved. */
+"key_missing" | 
+/**  The provider rejected the API key. */
+"key_rejected" | 
+/**  The key can't be read from the Keychain. */
+"key_unreadable" | 
+/**  The provider couldn't be reached. */
+"network_unreachable" | 
+/**  The provider is limiting requests. */
+"provider_quota" | 
+/**  The provider answered with a redirect. */
+"provider_redirect" | 
+/**  The on-device model isn't downloaded. */
+"model_missing" | 
+/**  The on-device model is still loading. */
+"model_loading" | 
+/**  The on-device model couldn't be loaded. */
+"model_loading_failed" | 
+/**  The engine failed in some other way. */
+"engine_failed" | 
+/**  Nothing recognisable was said. */
+"no_speech" | 
+/**  The text couldn't be pasted. */
+"paste_failed" | 
+/**  A password field had focus. */
+"secure_input";
+
+/**  What the user can do about an error, in one click. */
+export type FixAction = 
+/**  Open System Settings at the Microphone page. */
+"open_microphone_settings" | 
+/**  Open System Settings at the Accessibility page. */
+"open_accessibility_settings" | 
+/**  Open this app's settings. */
+"open_settings" | 
+/**  Open the Troubleshoot window. */
+"open_troubleshoot" | 
+/**  Nothing to click: the next dictation is the retry. */
+"try_again";
 
 /**  Why a key test failed. Never contains the key. */
 export type KeyTestError = {

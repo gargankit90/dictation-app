@@ -48,6 +48,7 @@
 #[cfg(test)]
 mod command_names;
 pub mod commands;
+pub mod diagnostics;
 pub mod engine;
 mod flags;
 mod key_writes;
@@ -96,6 +97,7 @@ const SETTINGS_ID: &str = "settings";
 const REVEAL_LOG_ID: &str = "reveal-log";
 const ONBOARDING_ID: &str = "onboarding";
 const RELAUNCH_ID: &str = "relaunch";
+const TROUBLESHOOT_ID: &str = "troubleshoot";
 /// The tray's Relaunch item, offered while the microphone is denied (M5.7).
 const RELAUNCH_LABEL: &str = "Relaunch dictation-app";
 const TRAY_ID: &str = "main";
@@ -456,6 +458,9 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     let overlay = overlay::start(app.handle())
         .inspect_err(|error| tracing::error!(%error, "could not create the overlay"))
         .ok();
+    let diagnostics = diagnostics::Diagnostics::default();
+    diagnostics.attach(app.handle().clone());
+    app.manage(diagnostics.clone());
     tauri::async_runtime::spawn(show_ui_events(
         app.handle().clone(),
         ui_events,
@@ -463,6 +468,7 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         microphone_denied,
         usage,
         transcribers,
+        diagnostics,
     ));
     tracing::info!(hotkey = %hotkey_control.spec(), "ready");
     onboarding_at_launch(
@@ -575,6 +581,15 @@ fn show_onboarding(app: &AppHandle) {
     if let Err(error) = spawned {
         tracing::error!(%error, "could not open onboarding");
     }
+}
+
+/// Shows the window on its Troubleshoot view (E1): the page asks for it
+/// when the window is shown.
+fn show_troubleshoot(app: &AppHandle) {
+    if let Some(diagnostics) = app.try_state::<diagnostics::Diagnostics>() {
+        diagnostics.ask_for_troubleshoot();
+    }
+    show_settings(app);
 }
 
 /// Shows the settings form.
@@ -716,6 +731,7 @@ struct TrayMenu {
 enum TrayAction {
     Settings,
     Onboarding,
+    Troubleshoot,
     CheckForUpdates,
     RevealLog,
     Relaunch,
@@ -727,6 +743,7 @@ fn tray_action(id: &str) -> Option<TrayAction> {
     Some(match id {
         SETTINGS_ID => TrayAction::Settings,
         ONBOARDING_ID => TrayAction::Onboarding,
+        TROUBLESHOOT_ID => TrayAction::Troubleshoot,
         updater::CHECK_ID => TrayAction::CheckForUpdates,
         REVEAL_LOG_ID => TrayAction::RevealLog,
         RELAUNCH_ID => TrayAction::Relaunch,
@@ -738,6 +755,8 @@ fn tray_action(id: &str) -> Option<TrayAction> {
 fn build_tray(app: &App) -> tauri::Result<()> {
     let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, None::<&str>)?;
     let setup = MenuItem::with_id(app, ONBOARDING_ID, "Set up dictation…", true, None::<&str>)?;
+    let troubleshoot =
+        MenuItem::with_id(app, TROUBLESHOOT_ID, "Troubleshoot…", true, None::<&str>)?;
     let reveal = MenuItem::with_id(app, REVEAL_LOG_ID, "Reveal log", true, None::<&str>)?;
     let updates = MenuItem::with_id(
         app,
@@ -749,7 +768,10 @@ fn build_tray(app: &App) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit dictation-app", true, None::<&str>)?;
     // Not in the menu until the microphone is denied.
     let relaunch = MenuItem::with_id(app, RELAUNCH_ID, RELAUNCH_LABEL, true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&settings, &setup, &updates, &reveal, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[&settings, &setup, &troubleshoot, &updates, &reveal, &quit],
+    )?;
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip(TOOLTIP)
         .menu(&menu)
@@ -760,6 +782,7 @@ fn build_tray(app: &App) -> tauri::Result<()> {
             }
             Some(TrayAction::Settings) => show_settings(app),
             Some(TrayAction::Onboarding) => show_onboarding(app),
+            Some(TrayAction::Troubleshoot) => show_troubleshoot(app),
             Some(TrayAction::RevealLog) => reveal_log(app),
             Some(TrayAction::CheckForUpdates) => updater::check_from_tray(app),
             Some(TrayAction::Relaunch) => {
@@ -800,6 +823,7 @@ async fn show_ui_events(
     microphone_denied: bool,
     usage: usage::Usage,
     transcribers: Transcribers,
+    diagnostics: diagnostics::Diagnostics,
 ) {
     let mut tray = TrayStatus::new(microphone_denied);
     // Usage events from the same stream; only kinds and buckets leave it.
@@ -821,9 +845,17 @@ async fn show_ui_events(
         tracker.on_event(&event, started.elapsed());
         match &event {
             UiEvent::StateChanged(phase) => tracing::info!(?phase, "state changed"),
-            UiEvent::Error(error) => tracing::info!(%error, "shown to the user"),
+            UiEvent::Error(error) => {
+                // Only the code and the time are kept, for Troubleshoot and
+                // the report (E1).
+                diagnostics.record_error(error);
+                tracing::info!(%error, "shown to the user");
+            }
             // This line's text is what the e2e scenario waits for.
-            UiEvent::HotkeyRestored => tracing::info!("hotkey restored; shown to the user"),
+            UiEvent::HotkeyRestored => {
+                diagnostics.hotkey_restored();
+                tracing::info!("hotkey restored; shown to the user");
+            }
         }
         if let Some(view) = tray.on_event(&event) {
             show_in_tray(&app, &view);
