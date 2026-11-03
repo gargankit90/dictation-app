@@ -34,7 +34,7 @@ interface FieldErrors {
  * being typed; it is cleared after a save and never loaded back. The only
  * thing the app tells us about a stored key is whether one exists.
  */
-export function Settings() {
+export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {}) {
   // `null` until the saved settings load. Fields the form doesn't show
   // (version) are sent back as loaded.
   const [loaded, setLoaded] = useState<Settings_Serialize | null>(null);
@@ -583,6 +583,20 @@ export function Settings() {
               </p>
             </details>
           </div>
+
+          {onTroubleshoot === undefined ? null : (
+            <>
+              <h2>Help</h2>
+              <div className="field">
+                <button type="button" onClick={onTroubleshoot}>
+                  Troubleshoot…
+                </button>
+                <p className="hint">
+                  Check the microphone, Accessibility, hotkey and engine, and report a problem.
+                </p>
+              </div>
+            </>
+          )}
 
           <div className="row actions">
             <button type="submit" className="primary" disabled={saving || testing}>
