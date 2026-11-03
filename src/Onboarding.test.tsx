@@ -41,6 +41,7 @@ class Backend {
     language: null,
     hotkey: "RightAlt",
     launch_at_login: false,
+    share_usage_events: true,
   };
   /** What `test_api_key` answers: `null` for success. */
   testResult: KeyTestError | null = null;
