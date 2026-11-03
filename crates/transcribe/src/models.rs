@@ -12,18 +12,27 @@
 //! 3. reports [`Progress`] as bytes arrive;
 //! 4. checks the size and the SHA-256 of the whole part against the
 //!    catalogue, and only then renames it to its final name. A mismatch
-//!    deletes the part. So a file under the final name has always been
-//!    verified, and [`ModelStore::ready_path`] is what the engine loads.
+//!    deletes the part.
+//!
+//! A file under the final name can still change afterwards (disk damage, a
+//! restored backup), so it is hashed again before its first use in each run
+//! of the app: [`ModelStore::verified_path`] is what the engine loads. A
+//! successful check is remembered for that file while its size and
+//! modification time stay the same; a failed one deletes the file, so
+//! Settings offers Download again. A download of a model whose final file
+//! fails the check fetches it afresh.
 //!
 //! Errors are typed ([`DownloadError`]); none holds a URL query or a body.
 //! Redirects are followed only to `https` URLs (Hugging Face sends the file
 //! from its CDN), at most [`MAX_REDIRECTS`] times.
 
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
+use std::time::SystemTime;
 
 use dictation_core::local_models::LocalModel;
 use dictation_core::redact;
@@ -178,6 +187,27 @@ pub struct ModelStore {
     dir: PathBuf,
     client: Client,
     free_space: FreeSpace,
+    /// Final files whose SHA-256 was checked in this run, with what they
+    /// looked like then. Shared by clones.
+    verified: Arc<Mutex<HashMap<PathBuf, Stamp>>>,
+}
+
+/// What a file looked like when it was hashed: if either changes, it is
+/// hashed again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+impl Stamp {
+    fn of(path: &Path) -> Option<Self> {
+        let meta = std::fs::metadata(path).ok()?;
+        Some(Self {
+            len: meta.len(),
+            modified: meta.modified().ok(),
+        })
+    }
 }
 
 impl std::fmt::Debug for ModelStore {
@@ -202,6 +232,7 @@ impl ModelStore {
             dir,
             client,
             free_space,
+            verified: Arc::default(),
         })
     }
 
@@ -234,12 +265,52 @@ impl ModelStore {
         }
     }
 
-    /// The verified file to load, if `model` is downloaded.
+    /// The final file, if one of the catalogue size is there. Cheap (no
+    /// hashing), for showing the status; load only
+    /// [`verified_path`](Self::verified_path).
     #[must_use]
     pub fn ready_path(&self, model: &LocalModel) -> Option<PathBuf> {
         let path = self.final_path(model);
         let meta = std::fs::metadata(&path).ok()?;
         (meta.is_file() && meta.len() == model.size_bytes).then_some(path)
+    }
+
+    /// The final file to load, once its SHA-256 matches the catalogue: hashed
+    /// on the first call in this run (seconds for a model; call it from a
+    /// blocking thread), then remembered while the file is unchanged.
+    /// `Ok(None)` if it isn't downloaded.
+    ///
+    /// # Errors
+    ///
+    /// [`DownloadError::Checksum`] if the bytes changed since the download;
+    /// the file has been deleted then. [`DownloadError::Disk`] if it can't be
+    /// read or deleted.
+    pub fn verified_path(&self, model: &LocalModel) -> Result<Option<PathBuf>, DownloadError> {
+        let Some(path) = self.ready_path(model) else {
+            return Ok(None);
+        };
+        let before = Stamp::of(&path);
+        if before.is_some() && self.lock_verified().get(&path) == before.as_ref() {
+            return Ok(Some(path));
+        }
+        let hashed = sha256_file(&path).map_err(|e| disk(&e))?;
+        if hashed != model.sha256 {
+            self.lock_verified().remove(&path);
+            tracing::warn!(
+                model = model.id,
+                "an on-device model failed its checksum; deleted"
+            );
+            std::fs::remove_file(&path).map_err(|e| disk(&e))?;
+            return Err(DownloadError::Checksum);
+        }
+        if let Some(stamp) = before {
+            self.lock_verified().insert(path.clone(), stamp);
+        }
+        Ok(Some(path))
+    }
+
+    fn lock_verified(&self) -> std::sync::MutexGuard<'_, HashMap<PathBuf, Stamp>> {
+        self.verified.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Deletes `model`, downloaded or partial. Deleting what isn't there is
@@ -249,6 +320,7 @@ impl ModelStore {
     ///
     /// [`DownloadError::Disk`] if a file can't be removed.
     pub fn delete(&self, model: &LocalModel) -> Result<(), DownloadError> {
+        self.lock_verified().remove(&self.final_path(model));
         for path in [self.final_path(model), self.part_path(model)] {
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
@@ -260,7 +332,9 @@ impl ModelStore {
     }
 
     /// Downloads `model` from its catalogue URL; see the module docs.
-    /// Returns the verified file. A model already downloaded returns at once.
+    /// Returns the verified file. A model already downloaded is checked
+    /// ([`verified_path`](Self::verified_path)) and returned; if it fails the
+    /// check it is downloaded again.
     ///
     /// # Errors
     ///
@@ -288,8 +362,18 @@ impl ModelStore {
         cancel: &DownloadCancel,
         mut on_progress: impl FnMut(Progress) + Send,
     ) -> Result<PathBuf, DownloadError> {
-        if let Some(path) = self.ready_path(model) {
-            return Ok(path);
+        if self.ready_path(model).is_some() {
+            let store = self.clone();
+            let model_copy = *model;
+            let checked = tokio::task::spawn_blocking(move || store.verified_path(&model_copy))
+                .await
+                .map_err(|_| DownloadError::Disk("the checksum task crashed".to_owned()))?;
+            match checked {
+                Ok(Some(path)) => return Ok(path),
+                // Damaged and deleted, or gone meanwhile: download it again.
+                Ok(None) | Err(DownloadError::Checksum) => {}
+                Err(error) => return Err(error),
+            }
         }
         if cancel.is_cancelled() {
             return Err(DownloadError::Cancelled);
@@ -329,6 +413,9 @@ impl ModelStore {
         tokio::fs::rename(&part, &path)
             .await
             .map_err(|e| disk(&e))?;
+        if let Some(stamp) = Stamp::of(&path) {
+            self.lock_verified().insert(path.clone(), stamp);
+        }
         tracing::info!(model = model.id, "on-device model downloaded and verified");
         Ok(path)
     }

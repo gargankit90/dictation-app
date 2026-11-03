@@ -497,3 +497,82 @@ fn hashes_a_file() {
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     );
 }
+
+/// Review round 1, major 1: same size, different bytes.
+fn corrupt_in_place(path: &Path) {
+    let mut bytes = std::fs::read(path).unwrap();
+    bytes[1234] ^= 0xff;
+    // A later mtime, as a real change would have.
+    std::thread::sleep(Duration::from_millis(20));
+    std::fs::write(path, bytes).unwrap();
+}
+
+#[tokio::test]
+async fn criterion_3_a_damaged_final_file_of_the_right_size_is_downloaded_again() {
+    let bytes = content();
+    let model = model_for(&bytes);
+    let (server, ranges) = serve(bytes.clone(), false).await;
+    let dir = TempDir::new();
+    let store = store(&dir, plenty());
+    let path = store
+        .download_from(&model, &url(&server), &DownloadCancel::new(), |_| {})
+        .await
+        .unwrap();
+    corrupt_in_place(&path);
+    assert_eq!(
+        store.status(&model),
+        ModelStatus::Ready,
+        "size alone looks fine"
+    );
+
+    let again = store
+        .download_from(&model, &url(&server), &DownloadCancel::new(), |_| {})
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read(again).unwrap(),
+        bytes,
+        "the damaged file was kept"
+    );
+    assert_eq!(ranges.lock().unwrap().len(), 2, "it wasn't fetched again");
+}
+
+#[tokio::test]
+async fn criterion_3_a_damaged_final_file_is_never_handed_out_for_loading() {
+    let bytes = content();
+    let model = model_for(&bytes);
+    let (server, _) = serve(bytes.clone(), false).await;
+    let dir = TempDir::new();
+    let store = store(&dir, plenty());
+    let path = store
+        .download_from(&model, &url(&server), &DownloadCancel::new(), |_| {})
+        .await
+        .unwrap();
+    // Verified by the download, so no second hash is needed.
+    assert_eq!(store.verified_path(&model).unwrap(), Some(path.clone()));
+
+    corrupt_in_place(&path);
+    assert_eq!(store.verified_path(&model), Err(DownloadError::Checksum));
+    assert!(!path.exists(), "the damaged file stays");
+    assert_eq!(store.status(&model), ModelStatus::Missing);
+    assert_eq!(store.verified_path(&model), Ok(None));
+}
+
+#[test]
+fn an_existing_file_is_hashed_on_first_use_in_a_run() {
+    let bytes = content();
+    let model = model_for(&bytes);
+    let dir = TempDir::new();
+    std::fs::create_dir_all(&dir.0).unwrap();
+    let path = dir.0.join("test-model.gguf");
+    // A good file from an earlier run, and a bad one of the same size.
+    std::fs::write(&path, &bytes).unwrap();
+    let store = store(&dir, plenty());
+    assert_eq!(store.verified_path(&model).unwrap(), Some(path.clone()));
+    let mut bad = bytes.clone();
+    bad[0] ^= 1;
+    std::fs::write(&path, &bad).unwrap();
+    let fresh = ModelStore::new(dir.0.clone(), plenty()).unwrap();
+    assert_eq!(fresh.verified_path(&model), Err(DownloadError::Checksum));
+    assert!(!path.exists());
+}

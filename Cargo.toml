@@ -108,3 +108,8 @@ dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
 panic = "deny"
+
+# Hashing a downloaded model (L1, ~0.5 GB) takes about 25 s unoptimised;
+# debug builds (tests, e2e) check it at first use, so optimise the hash.
+[profile.dev.package.sha2]
+opt-level = 3
