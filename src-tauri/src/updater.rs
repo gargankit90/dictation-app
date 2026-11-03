@@ -182,14 +182,24 @@ pub fn package_url_problem(
         return Some("The update isn't offered over a secure connection, so it was refused.");
     }
     let same_place = endpoints.iter().any(|endpoint| {
-        let prefix = endpoint
-            .path()
-            .find("/releases/")
-            .map_or("/", |at| &endpoint.path()[..at + "/releases/".len()]);
+        // A GitHub releases endpoint allows packages only under its
+        // repository's `releases/download/`; any other endpoint (the local
+        // test harness) allows its own host.
+        let prefix = endpoint.path().find("/releases/").map_or_else(
+            || "/".to_owned(),
+            |at| format!("{}download/", &endpoint.path()[..at + "/releases/".len()]),
+        );
+        let path = package.path();
+        // Encoded slashes and backslashes could smuggle a different path
+        // past the prefix check; dot segments are already resolved by `Url`.
+        let lower = path.to_ascii_lowercase();
+        if lower.contains("%2f") || lower.contains("%5c") || path.split('/').any(|s| s == "..") {
+            return false;
+        }
         package.scheme() == endpoint.scheme()
             && package.host_str() == endpoint.host_str()
             && package.port_or_known_default() == endpoint.port_or_known_default()
-            && package.path().starts_with(prefix)
+            && path.starts_with(prefix.as_str())
     });
     if same_place {
         None
@@ -737,8 +747,9 @@ mod tests {
         Url::parse(text).unwrap()
     }
 
-    /// The owner's endpoint (M5.4): the public releases repository.
-    const ENDPOINT: &str = "https://github.com/gargankit90/dictation-app-releases/releases/latest/download/latest.json";
+    /// The owner's endpoint (R1): this repository's releases.
+    const ENDPOINT: &str =
+        "https://github.com/gargankit90/dictation-app/releases/latest/download/latest.json";
 
     /// The owner's minisign public key (M5.4, `docs/milestones/M5.4.md`).
     const OWNER_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2QzgwRjE3M0E5NkQ3OEYKUldTUDE1WTZGdy9JOWpxTlNIUjA4ampTb2pSdkFHdENZVjA4TEtBSkkwVW5zNHFTZkNmSURRWHAK";
@@ -783,38 +794,79 @@ mod tests {
     }
 
     #[test]
-    fn a_package_must_be_https_on_the_endpoints_host_and_releases_path() {
+    fn a_package_must_be_https_on_this_repos_release_downloads() {
         let endpoints = [url(ENDPOINT)];
-        let good = url(
-            "https://github.com/gargankit90/dictation-app-releases/releases/download/v0.2.0/dictation-app.app.tar.gz",
-        );
-        assert_eq!(package_url_problem(&good, &endpoints, false), None);
-        // The private source repository is not where packages come from.
-        let source_repo = url(
-            "https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/dictation-app.app.tar.gz",
-        );
-        assert!(package_url_problem(&source_repo, &endpoints, false).is_some());
-
-        let http = url(
-            "http://github.com/gargankit90/dictation-app-releases/releases/download/v1/a.tar.gz",
-        );
+        let ok = |text: &str| package_url_problem(&url(text), &endpoints, false).is_none();
+        assert!(ok(
+            "https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/dictation-app.app.tar.gz"
+        ));
+        // The archived releases-only repository was never used for a release.
+        assert!(!ok(
+            "https://github.com/gargankit90/dictation-app-releases/releases/download/v0.2.0/a.tar.gz"
+        ));
+        // Look-alike repositories and hosts.
+        assert!(!ok(
+            "https://github.com/gargankit90/dictation-app.evil/releases/download/v1/a.tar.gz"
+        ));
+        assert!(!ok(
+            "https://github.com/gargankit90/dictation-appx/releases/download/v1/a.tar.gz"
+        ));
+        assert!(!ok(
+            "https://github.com.evil.example/gargankit90/dictation-app/releases/download/v1/a"
+        ));
+        assert!(!ok(
+            "https://evil.example/gargankit90/dictation-app/releases/download/v1/a"
+        ));
+        assert!(!ok(
+            "https://github.com/someone/else/releases/download/v1/a.tar.gz"
+        ));
+        // Other paths in the right repository.
+        assert!(!ok(
+            "https://github.com/gargankit90/dictation-app/releases/latest/download/a.tar.gz"
+        ));
+        assert!(!ok(
+            "https://github.com/gargankit90/dictation-app/archive/main.tar.gz"
+        ));
+        // Path tricks.
+        assert!(!ok(
+            "https://github.com/gargankit90/dictation-app/releases/download/../../../evil/x/a.tar.gz"
+        ));
+        assert!(!ok(
+            "https://github.com/gargankit90/dictation-app/releases/download/%2e%2e/%2e%2e/evil/a"
+        ));
+        assert!(!ok(
+            "https://github.com/gargankit90/dictation-app/releases/download/v1%2F..%2F..%2Fa"
+        ));
+        assert!(!ok(
+            "https://github.com/gargankit90/dictation-app/releases/download/v1%5Ca"
+        ));
+        assert!(!ok(
+            "https://github.com/gargankit90/dictation-app%2Freleases/download/v1/a"
+        ));
+        // Not https, or another port.
+        let http = url("http://github.com/gargankit90/dictation-app/releases/download/v1/a.tar.gz");
         assert!(
             package_url_problem(&http, &endpoints, false)
                 .unwrap()
                 .contains("secure connection")
         );
-        let elsewhere =
-            url("https://evil.example/gargankit90/dictation-app-releases/releases/download/v1/a");
+        assert!(!ok(
+            "https://github.com:8443/gargankit90/dictation-app/releases/download/v1/a"
+        ));
         assert!(
-            package_url_problem(&elsewhere, &endpoints, false)
+            package_url_problem(&url("https://evil.example/a"), &endpoints, false)
                 .unwrap()
                 .contains("isn't hosted where")
         );
-        let other_repo = url("https://github.com/someone/else/releases/download/v1/a.tar.gz");
-        assert!(package_url_problem(&other_repo, &endpoints, false).is_some());
-        let lookalike = url("https://github.com.evil.example/gargankit90/dictation-app/releases/x");
-        assert!(package_url_problem(&lookalike, &endpoints, false).is_some());
-        assert!(package_url_problem(&good, &[], false).is_some());
+        assert!(package_url_problem(&url(ENDPOINT), &[], false).is_some());
+    }
+
+    #[test]
+    fn the_shipped_endpoint_is_this_repos_latest_json() {
+        assert_eq!(
+            ENDPOINT,
+            "https://github.com/gargankit90/dictation-app/releases/latest/download/latest.json"
+        );
     }
 
     #[test]
