@@ -86,9 +86,26 @@ gui_session_up() {
   vm 'launchctl print "gui/$(id -u)" >/dev/null 2>&1 && pgrep -x Dock >/dev/null'
 }
 
+# login_box_ready: waits up to 20 s for the "Launch at login" box to exist.
+# Settings' window is shown before its form: it renders "Loading…" until the
+# saved settings are read, and the box isn't there yet (after a reboot this
+# takes longest).
+login_box_ready() {
+  local i
+  for i in $(seq 1 20); do
+    if ax check-get "$APP_NAME" "$SETTINGS_WINDOW" launch-at-login >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  log "  the Launch at login box never appeared"
+  return 1
+}
+
 # login_box_shows <checked|unchecked>: Settings' "Launch at login" box.
 login_box_shows() {
-  job_says "$1" ax check-get "$APP_NAME" "$SETTINGS_WINDOW" launch-at-login
+  login_box_ready &&
+    job_says "$1" ax check-get "$APP_NAME" "$SETTINGS_WINDOW" launch-at-login
 }
 
 # login_box_save <on|off>: sets the box like a user and saves; "Settings
@@ -96,7 +113,8 @@ login_box_shows() {
 login_box_save() {
   local want=checked
   [ "$1" = on ] || want=unchecked
-  job_says "$want" ax check-set "$APP_NAME" "$SETTINGS_WINDOW" launch-at-login "$1" &&
+  login_box_ready &&
+    job_says "$want" ax check-set "$APP_NAME" "$SETTINGS_WINDOW" launch-at-login "$1" &&
     ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Save &&
     ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 10
 }
