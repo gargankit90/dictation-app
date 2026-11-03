@@ -12,6 +12,7 @@ pub mod hotkey_spec;
 pub mod local_models;
 pub mod onboarding;
 pub mod redact;
+pub mod report;
 pub mod retry;
 pub mod settings;
 pub mod text;
