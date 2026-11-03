@@ -30,7 +30,7 @@ use dictation_ports::{Event, Telemetry};
 use reqwest::Client;
 use rustls_platform_verifier::BuilderVerifierExt;
 use serde_json::{Value, json};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, watch};
 
 pub use version_marker::updated_from;
 
@@ -80,6 +80,16 @@ struct State {
     /// The install ID while sharing is on; `None` is off.
     id: Option<String>,
     queue: VecDeque<Value>,
+    /// Bumped every time sharing is turned off.
+    generation: u64,
+}
+
+/// Events taken off the queue, on their way out.
+struct Batch {
+    events: Vec<Value>,
+    generation: u64,
+    /// Changes when sharing is turned off.
+    cancelled: watch::Receiver<u64>,
 }
 
 /// The adapter. Share it as an `Arc`.
@@ -88,6 +98,8 @@ pub struct PostHogTelemetry {
     client: Option<Client>,
     state: Mutex<State>,
     wake: Notify,
+    /// Carries the opt-out generation, to stop requests under way.
+    cancel: watch::Sender<u64>,
 }
 
 impl PostHogTelemetry {
@@ -99,6 +111,7 @@ impl PostHogTelemetry {
             client: None,
             state: Mutex::new(State::default()),
             wake: Notify::new(),
+            cancel: watch::channel(0).0,
         })
     }
 
@@ -114,6 +127,7 @@ impl PostHogTelemetry {
             client,
             state: Mutex::new(State::default()),
             wake: Notify::new(),
+            cancel: watch::channel(0).0,
         });
         if live {
             this.set_enabled(enabled);
@@ -148,37 +162,74 @@ impl PostHogTelemetry {
         } else {
             state.id = None;
             state.queue.clear();
+            // Batches already taken off the queue stop here too.
+            state.generation += 1;
+            self.cancel.send_replace(state.generation);
             install_id::forget(&self.config.dir);
+        }
+    }
+
+    /// Takes the next batch off the queue, tagged with the opt-out
+    /// generation it was taken in.
+    fn take_batch(&self) -> Option<Batch> {
+        let mut state = self.lock();
+        let take = state.queue.len().min(self.config.batch_size.max(1));
+        if take == 0 {
+            return None;
+        }
+        Some(Batch {
+            events: state.queue.drain(..take).collect(),
+            generation: state.generation,
+            cancelled: self.cancel.subscribe(),
+        })
+    }
+
+    /// Sends `batch`, once. It is dropped instead if sharing was turned off
+    /// (even and back on) since it was taken, before the request starts or
+    /// while it is being made. Events a server already received can't be
+    /// recalled; everything else stops.
+    async fn send_batch(&self, batch: Batch) -> bool {
+        let (Some(key), Some(client)) = (&self.config.api_key, &self.client) else {
+            return false;
+        };
+        let Batch {
+            events,
+            generation,
+            mut cancelled,
+        } = batch;
+        if self.lock().generation != generation {
+            return false;
+        }
+        let body = json!({ "api_key": key, "batch": events }).to_string();
+        let request = client
+            .post(format!("{}/batch/", self.config.host.trim_end_matches('/')))
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .timeout(self.config.timeout)
+            .body(body)
+            .send();
+        tokio::select! {
+            response = request => {
+                response.is_ok_and(|response| response.status().is_success())
+            }
+            _ = cancelled.wait_for(|now| *now != generation) => false,
         }
     }
 
     /// Sends one batch of what is queued, once. Returns whether more is
     /// waiting to go. A failure drops the batch and the rest of the queue.
     async fn flush_once(&self) -> bool {
-        let (Some(key), Some(client)) = (&self.config.api_key, &self.client) else {
+        let Some(batch) = self.take_batch() else {
             return false;
         };
-        let batch: Vec<Value> = {
-            let mut state = self.lock();
-            let take = state.queue.len().min(self.config.batch_size.max(1));
-            state.queue.drain(..take).collect()
-        };
-        if batch.is_empty() {
-            return false;
-        }
-        let body = json!({ "api_key": key, "batch": batch }).to_string();
-        let sent = client
-            .post(format!("{}/batch/", self.config.host.trim_end_matches('/')))
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .timeout(self.config.timeout)
-            .body(body)
-            .send()
-            .await
-            .is_ok_and(|response| response.status().is_success());
+        let generation = batch.generation;
+        let sent = self.send_batch(batch).await;
         let mut state = self.lock();
         if !sent {
             tracing::debug!("usage events not sent; dropped");
-            state.queue.clear();
+            // Not a queue filled after an opt-out and a new opt-in.
+            if state.generation == generation {
+                state.queue.clear();
+            }
         }
         sent && !state.queue.is_empty()
     }
@@ -386,6 +437,84 @@ mod tests {
         assert_ne!(first, second, "a new ID after off and on");
         telemetry.record(failed());
         assert_eq!(telemetry.queued(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Round 1 blocker: a batch already taken off the queue must not go out
+    /// after sharing is turned off.
+    #[tokio::test]
+    async fn a_batch_taken_before_opt_out_is_not_sent_after_it() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let dir = temp("taken");
+        let telemetry = PostHogTelemetry::start(
+            config(&server, &dir),
+            true,
+            &tokio::runtime::Handle::current(),
+        );
+        telemetry.record(failed());
+        let batch = telemetry.take_batch().expect("one event queued");
+        telemetry.set_enabled(false);
+        assert!(!telemetry.send_batch(batch).await, "dropped, not sent");
+        assert!(bodies(&server).await.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Off and on again between taking and sending is still a new install:
+    /// the old ID's batch is dropped.
+    #[tokio::test]
+    async fn a_batch_taken_before_off_and_on_is_not_sent_with_the_old_id() {
+        let server = MockServer::start().await;
+        let dir = temp("offon");
+        let telemetry = PostHogTelemetry::start(
+            config(&server, &dir),
+            true,
+            &tokio::runtime::Handle::current(),
+        );
+        telemetry.record(failed());
+        let batch = telemetry.take_batch().expect("one event queued");
+        telemetry.set_enabled(false);
+        telemetry.set_enabled(true);
+        assert!(!telemetry.send_batch(batch).await);
+        assert!(bodies(&server).await.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A request still waiting on a server that never answers is abandoned
+    /// the moment sharing is turned off (not at the 10 s timeout).
+    #[tokio::test]
+    async fn opt_out_cancels_a_request_that_is_under_way() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(30)))
+            .mount(&server)
+            .await;
+        let dir = temp("inflight");
+        let mut config = config(&server, &dir);
+        config.timeout = Duration::from_secs(60);
+        let telemetry = PostHogTelemetry::start(config, true, &tokio::runtime::Handle::current());
+        telemetry.record(failed());
+        let batch = telemetry.take_batch().expect("one event queued");
+        let sending = {
+            let telemetry = Arc::clone(&telemetry);
+            tokio::spawn(async move { telemetry.send_batch(batch).await })
+        };
+        // Wait until the request is with the server.
+        for _ in 0..200 {
+            if !bodies(&server).await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        telemetry.set_enabled(false);
+        let sent = tokio::time::timeout(Duration::from_secs(5), sending)
+            .await
+            .expect("the send stopped at once")
+            .unwrap();
+        assert!(!sent);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
