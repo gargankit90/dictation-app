@@ -36,6 +36,7 @@ class Backend {
     launch_at_login: false,
     transcription: "cloud",
     local_model: PARAKEET,
+    share_usage_events: true,
   };
   models: LocalModelInfo_Serialize[] = [model(PARAKEET, {}), model(QWEN, {})];
   failing = new Map<string, string>();
