@@ -17,8 +17,8 @@ typed into the app you are using.
 ### What you can do
 
 - **Dictate into any app.** Hold the right Option key (you can change the key
-  in Settings), speak, and let go. The text appears where your cursor was. A
-  small overlay shows when it is recording and when it is working. Password
+  in Settings), speak, and let go. The text is typed into the app that has focus
+  when you let go. A small overlay shows when it is recording and when it is working. Password
   fields are skipped on purpose.
 - **Transcribe on your Mac.** Pick "On this Mac" in Settings and download a
   model once. After that, your speech is turned into text on the Mac and not
@@ -26,8 +26,9 @@ typed into the app you are using.
   480 MB) and Qwen3-ASR (about 30 languages, including Hindi, about 590 MB).
 - **Or use your own key.** Pick "Your own key", choose Groq or OpenAI and
   paste a key. Your speech goes to that provider to be transcribed. The key is
-  kept in your macOS keychain, tested before it is saved, and never shown
-  again.
+  kept in your macOS keychain and never shown again. The first-run window
+  tests it before it moves on; in Settings, **Test key** and **Save** are
+  separate buttons, so test it there before you rely on it.
 - **Set it up in four steps.** A first-run window asks for the microphone and
   Accessibility permissions, your key (or "No key needed" with an on-device
   model) and a first test dictation.
@@ -72,8 +73,9 @@ typed into the app you are using.
 - **Crashes inside the on-device engine are not reported.** A crash report of
   that kind could contain what you said, so the app does not capture it
   ([#226](https://github.com/gargankit90/dictation-app/issues/226)). If the
-  app quits on its own, tell us in a bug report. Crashes in the rest of the
-  app and failed dictations are reported when sharing is on.
+  app quits on its own, tell us in a bug report. When sharing is on (and the
+  build has error reporting), error reports cover only Rust panics and failed
+  dictations; other crashes are not reported.
 - Recordings stop after 5 minutes.
 - Mac only. Windows comes later.
 
