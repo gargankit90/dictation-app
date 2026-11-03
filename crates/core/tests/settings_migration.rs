@@ -102,6 +102,8 @@ fn expected(known: &Known) -> Settings {
         language: known.language.clone(),
         hotkey: known.hotkey.to_owned(),
         launch_at_login: false,
+        transcription: Default::default(),
+        local_model: dictation_core::local_models::DEFAULT_MODEL.to_owned(),
     }
 }
 
