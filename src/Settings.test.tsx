@@ -1124,8 +1124,8 @@ describe("T2: settings edges", () => {
   });
 });
 
-describe("share anonymous usage events", () => {
-  const box = () => screen.getByLabelText<HTMLInputElement>("Share anonymous usage events");
+describe("share usage and error events", () => {
+  const box = () => screen.getByLabelText<HTMLInputElement>("Share usage and error events");
 
   it("is on by default", async () => {
     await open();
@@ -1205,6 +1205,9 @@ describe("share anonymous usage events", () => {
     const list = screen.getByText("What's sent").closest("details");
     expect(list).not.toBeNull();
     expect(within(list as HTMLElement).getByText(/Which setting you changed/)).toBeTruthy();
+    expect(
+      within(list as HTMLElement).getByText(/Error reports, sent to Sentry \(US\)/),
+    ).toBeTruthy();
     expect(screen.getByText(/Never your voice, your text, your API keys/)).toBeTruthy();
   });
 });

@@ -315,7 +315,7 @@ fn write_sharing<S: SecretStore>(
     let _writing = settings_write();
     if !share {
         // First, so a slow disk can't keep events flowing.
-        usage.0.set_enabled(false);
+        usage.set_enabled(false);
     }
     let mut settings = config.settings()?;
     if settings.share_usage_events != share {

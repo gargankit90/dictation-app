@@ -55,6 +55,8 @@ VERSION=0.3.0
 KEY_PASSWORD=pw-$RANDOM-$RANDOM-throwaway
 "$tauri_cli" signer generate --ci -w "$work/test.key" -p "$KEY_PASSWORD" >/dev/null 2>&1
 "$tauri_cli" signer generate --ci -w "$work/other.key" -p "" >/dev/null 2>&1
+POSTHOG=phc_throwaway$RANDOM$RANDOM
+SENTRY=https://throwaway$RANDOM@o1.ingest.us.sentry.io/$RANDOM
 KEY=$(cat "$work/test.key")
 PUBKEY=$(cat "$work/test.key.pub")
 [ -n "$KEY" ] && [ -n "$PUBKEY" ] || fail "could not make a throwaway key pair"
@@ -72,6 +74,8 @@ case $1 in
     case $service in
       dictation-app-updater-key) [ -n "${FAKE_KEY_MISSING:-}" ] && exit 44; printf '%s\n' "$FAKE_KEY" ;;
       dictation-app-updater-password) printf '%s\n' "$FAKE_PASSWORD" ;;
+      dictation-app-posthog-key) [ -n "${FAKE_NO_TELEMETRY:-}" ] && exit 44; printf '%s\n' "$FAKE_POSTHOG" ;;
+      dictation-app-sentry-dsn) [ -n "${FAKE_NO_TELEMETRY:-}" ] && exit 44; printf '%s\n' "$FAKE_SENTRY" ;;
       *) exit 44 ;;
     esac
     ;;
@@ -108,8 +112,12 @@ cat >"$stubs/npm" <<'STUB'
 echo "npm $*" >>"$STUB_CALLS/npm"
 [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && echo key >>"$STUB_CALLS/npm-got-key"
 [ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ] && echo password >>"$STUB_CALLS/npm-got-password"
+printf '%s' "${DICTATION_POSTHOG_KEY-unset}" >"$STUB_CALLS/npm-posthog"
+printf '%s' "${DICTATION_SENTRY_DSN-unset}" >"$STUB_CALLS/npm-sentry"
 echo "    Building dictation-app"
 if [ -n "${FAKE_LEAK:-}" ]; then
+  echo "debug: posthog=${DICTATION_POSTHOG_KEY-}"
+  echo "debug: sentry=${DICTATION_SENTRY_DSN-}"
   echo "debug: key=$TAURI_SIGNING_PRIVATE_KEY"
   echo "debug: password=$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" >&2
 fi
@@ -175,6 +183,7 @@ run_release() {
     env PATH="$stubs:$PATH" STUB_CALLS="$calls" TAURI_CLI="$tauri_cli" \
       GH_CONFIG_DIR="$work/no-gh" GH_TOKEN="" GITHUB_TOKEN="" \
       FAKE_KEY="$KEY" FAKE_PASSWORD="$KEY_PASSWORD" \
+      FAKE_POSTHOG="$POSTHOG" FAKE_SENTRY="$SENTRY" \
       ${RELEASE_SHELL:-bash} scripts/release.sh "$@"
   ) >"$work/out.txt" 2>&1
 }
@@ -182,6 +191,8 @@ run_release() {
 no_secret_in_output() {
   ! grep -qF -- "$KEY" "$work/out.txt" || fail "$1: the key was printed"
   ! grep -qF -- "$KEY_PASSWORD" "$work/out.txt" || fail "$1: the password was printed"
+  ! grep -qF -- "$POSTHOG" "$work/out.txt" || fail "$1: the PostHog key was printed"
+  ! grep -qF -- "$SENTRY" "$work/out.txt" || fail "$1: the Sentry DSN was printed"
 }
 
 [ "$(env PATH="$stubs:$PATH" bash -c 'command -v gh')" = "$stubs/gh" ] || fail "the gh stub isn't first on PATH"
@@ -219,6 +230,24 @@ no_secret_in_output "leaking build"
 FAKE_LEAK=1 RELEASE_SHELL="bash -x" run_release "$VERSION" || fail "the traced dry run failed"
 no_secret_in_output "bash -x"
 pass "secrets printed by the build or a trace are never shown"
+
+# 2b. The telemetry keys from the Keychain reach the build, and only it.
+run_release "$VERSION" || fail "the dry run failed"
+[ "$(cat "$calls/npm-posthog")" = "$POSTHOG" ] || fail "the build didn't get the PostHog key"
+[ "$(cat "$calls/npm-sentry")" = "$SENTRY" ] || fail "the build didn't get the Sentry DSN"
+if grep -rqF -- "$POSTHOG" "$repo" || grep -rqF -- "$SENTRY" "$repo"; then
+  fail "a telemetry value was written to a file in the repository"
+fi
+# One from the caller's environment is dropped, not passed on.
+FAKE_NO_TELEMETRY=1 DICTATION_POSTHOG_KEY=from-caller DICTATION_SENTRY_DSN=from-caller \
+  run_release "$VERSION" || fail "a release without the telemetry items failed"
+grep -q 'WARNING: no Keychain item dictation-app-posthog-key' "$work/out.txt" || fail "no PostHog warning"
+grep -q 'WARNING: no Keychain item dictation-app-sentry-dsn' "$work/out.txt" || fail "no Sentry warning"
+[ "$(cat "$calls/npm-posthog")" = unset ] && [ "$(cat "$calls/npm-sentry")" = unset ] ||
+  fail "a build without the Keychain items still got telemetry values"
+[ -s "$out/latest.json" ] || fail "the release wasn't built without the telemetry items"
+no_secret_in_output "no telemetry items"
+pass "the telemetry keys reach only the build, a missing one warns and builds without it, and none is printed"
 
 # 3. A wrong signature is refused.
 FAKE_OTHER_KEY=$(cat "$work/other.key") run_release "$VERSION" && fail "a bundle signed with another key passed"

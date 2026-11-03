@@ -10,13 +10,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dictation_core::coordinator::Phase;
-use dictation_ports::{DurationBucket, EngineKind, ErrorType, Event, LatencyBucket, Telemetry};
+use dictation_ports::{
+    DurationBucket, EngineKind, ErrorReporter, ErrorType, Event, LatencyBucket, NoErrorReporter,
+    Telemetry,
+};
 
 use crate::pipeline::UiEvent;
 
 /// Observes a dictation's phases and records its outcome.
 pub struct UsageTracker {
     telemetry: Arc<dyn Telemetry>,
+    reporter: Arc<dyn ErrorReporter>,
     engine: EngineKind,
     recording_since: Option<Duration>,
     /// How long the recording was, once it ended.
@@ -33,12 +37,20 @@ impl UsageTracker {
     pub fn new(telemetry: Arc<dyn Telemetry>, engine: EngineKind) -> Self {
         Self {
             telemetry,
+            reporter: Arc::new(NoErrorReporter),
             engine,
             recording_since: None,
             recorded: None,
             transcribing_since: None,
             transcribed: None,
         }
+    }
+
+    /// Also reports each error to `reporter` (A2): its code and type only.
+    #[must_use]
+    pub fn with_reporter(mut self, reporter: Arc<dyn ErrorReporter>) -> Self {
+        self.reporter = reporter;
+        self
     }
 
     /// Sets the engine later dictations count under.
@@ -80,6 +92,7 @@ impl UsageTracker {
                 self.telemetry.record(Event::DictationFailed {
                     error_type: ErrorType::from(error),
                 });
+                self.reporter.report(error);
                 self.reset();
             }
             UiEvent::HotkeyRestored => {}
@@ -171,5 +184,18 @@ mod tests {
         phase(&mut t, Phase::Inserting, secs(5));
         phase(&mut t, Phase::Idle, secs(6));
         assert!(fake.events().is_empty());
+    }
+
+    #[test]
+    fn an_error_is_also_reported_with_its_code_only() {
+        use dictation_core::diagnostics::ErrorCode;
+        use dictation_platform::fakes::FakeErrorReporter;
+
+        let reporter = FakeErrorReporter::new();
+        let mut t = UsageTracker::new(Arc::new(FakeTelemetry::new()), EngineKind::Cloud)
+            .with_reporter(Arc::new(reporter.clone()));
+        t.on_event(&UiEvent::Error(DictationError::SecureInput), secs(1));
+        t.on_event(&UiEvent::StateChanged(Phase::Idle), secs(2));
+        assert_eq!(reporter.codes(), [ErrorCode::SecureInput]);
     }
 }

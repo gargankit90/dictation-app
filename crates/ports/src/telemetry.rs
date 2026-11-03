@@ -30,6 +30,24 @@ impl Telemetry for NoTelemetry {
     fn record(&self, _event: Event) {}
 }
 
+/// Reports errors to the crash and error service (A2).
+///
+/// What leaves is the E1 error code and the A1 error type, never the error's
+/// text. Like [`Telemetry`], it never blocks and never fails, and it is
+/// governed by the same sharing switch.
+pub trait ErrorReporter: Send + Sync {
+    /// Reports `error`, unless the user turned sharing off.
+    fn report(&self, error: &DictationError);
+}
+
+/// An [`ErrorReporter`] that reports nothing.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoErrorReporter;
+
+impl ErrorReporter for NoErrorReporter {
+    fn report(&self, _error: &DictationError) {}
+}
+
 /// The longest [`Version`] accepted.
 const MAX_VERSION_LEN: usize = 32;
 
