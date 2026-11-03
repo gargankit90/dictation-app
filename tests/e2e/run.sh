@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs the e2e scenarios against the built app inside the Lume VM. PRs don't
-# run it (the Tester does); the T6 job runs it on every push to main, through
-# tests/e2e/ci-run.sh. See tests/e2e/README.md.
+# run it (the Tester does); after each merge the Lead runs
+# scripts/e2e-main.sh, which calls tests/e2e/ci-run.sh. See tests/e2e/README.md.
 #
 #   tests/e2e/run.sh                     # build, reset the VM, run every scenario
 #   tests/e2e/run.sh e2e_startup         # just one scenario
