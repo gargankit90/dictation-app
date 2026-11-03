@@ -61,7 +61,22 @@ textedit_fresh() {
     vm_osascript 'tell application "TextEdit" to activate' >/dev/null
     sleep 0.5
   done
-  log "  TextEdit didn't come to the front"
+  log "  TextEdit didn't come to the front (frontmost: $(frontmost_app))"
+  return 1
+}
+
+# textedit_empty_in_front [seconds]: true once TextEdit is frontmost with an empty,
+# readable document (default 10 s). Else logs the frontmost app and fails, so
+# a paste that goes nowhere can be told from one that was never aimed right.
+textedit_empty_in_front() {
+  local timeout=${1:-10} i
+  for i in $(seq 1 "$timeout"); do
+    if [ "$(frontmost_app)" = TextEdit ] && textedit_is_empty 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  log "  TextEdit is not frontmost with an empty document (frontmost: $(frontmost_app))"
   return 1
 }
 

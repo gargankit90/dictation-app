@@ -147,6 +147,12 @@ jobs:
       # The vendored hotkey and CoreAudio crates are not workspace members, so
       # nothing above runs their patch tests (#77, #80, #88).
       - run: scripts/vendor-tests.sh
+      # The on-device engine (#219): transcribe-cpp builds its Metal backend
+      # only on macOS, so Linux CI never compiles it. rust-cache above keeps
+      # the C++ build between runs.
+      - run: cargo build -p dictation-transcribe --all-targets
+      - run: cargo clippy -p dictation-transcribe --all-targets -- -D warnings
+      - run: cargo nextest run -p dictation-transcribe --profile ci
 
       - name: Collect test evidence
         if: always()

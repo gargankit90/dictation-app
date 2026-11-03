@@ -233,7 +233,7 @@ reach the owner's Mac**: there is no self-hosted runner, and
   `pkg-config`), freeing disk space, and the pinned gate tools
   (`taiki-e/install-action`: cargo-about, cargo-deny, cargo-machete,
   cargo-nextest, cargo-llvm-cov, typos) with `Swatinem/rust-cache`. `macos`
-  builds, lints and tests `dictation-platform` on `macos-15` (Apple Silicon,
+  builds, lints and tests `dictation-platform` and `dictation-transcribe` (the Metal build of the on-device engine, #219) on `macos-15` (Apple Silicon,
   checked with `uname -m`), the `#[cfg(target_os = "macos")]` code Linux
   compiles out. `dmg.yml` builds the tester DMG on `macos-15`, signed ad hoc
   (`DMG_ADHOC=1`): there is no certificate and no secret in CI.
