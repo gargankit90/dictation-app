@@ -45,33 +45,39 @@ In order, on a clean Mac:
 # 1. Apple's command line tools (compiler, git)
 xcode-select --install
 
-# 2. Rust. rustup then installs the exact toolchain from rust-toolchain.toml
+# 2. Homebrew (https://brew.sh), then put it on your PATH (Apple Silicon)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
+# 3. Rust. rustup then installs the exact toolchain from rust-toolchain.toml
 #    the first time you build.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# 3. Node 24 (see .nvmrc), for example with Homebrew; nvm or fnm work too.
+# 4. Node 24 (see .nvmrc); nvm or fnm work too.
 brew install node@24
 echo 'export PATH="/opt/homebrew/opt/node@24/bin:$PATH"' >> ~/.zshrc
 
-# 4. The tools the quality gate and git hooks use. CI pins these versions.
+# 5. The tools the quality gate and git hooks use. CI pins exact versions;
+#    brew installs the latest, which is fine for local work.
 brew install lefthook cargo-deny cargo-nextest cargo-llvm-cov typos-cli jq
 cargo install cargo-machete --version 0.9.2 --locked
 cargo install cargo-about --version 0.9.3 --locked --features cli
 
-# 5. Clone and install
+# 6. Clone and install
 git clone https://github.com/gargankit90/dictation-app.git
 cd dictation-app
 npm ci
 scripts/install-hooks.sh   # once per clone: git hooks, incl. the push guard
 scripts/make-dev-cert.sh   # once per Mac: "dictation-app Dev" signing certificate
 
-# 6. Run it
+# 7. Run it
 npm run tauri dev
 ```
 
-Open a new terminal after step 3 so `cargo` and `node` are on your `PATH`
-(`node@24` is keg-only in Homebrew, hence the `PATH` line). The gate
-tools in step 4 are only needed to push (the pre-push hook runs the gate) and
+Open a new terminal after step 4 so `brew`, `cargo` and `node` are on your
+`PATH` (`node@24` is keg-only in Homebrew, hence its `PATH` line). The gate
+tools in step 5 are only needed to push (the pre-push hook runs the gate) and
 for `scripts/gate.sh`; `npm run tauri dev` does not need them.
 
 To build the signed `.app`, run
