@@ -14,21 +14,31 @@ use dictation_core::settings::{Provider, Settings, Transcription};
 use dictation_ports::{
     Arch, EngineChoice, EngineKind, Event, OnboardingStep, SettingName, Telemetry, Version,
 };
-use dictation_telemetry::{Config, PostHogTelemetry};
+use dictation_telemetry::{Config, PostHogTelemetry, SentryReporter, errors};
 use dictation_transcribe::engine::Engine;
 
 /// The PostHog project key this build was made with, if any.
 const BUILD_KEY: Option<&str> = option_env!("DICTATION_POSTHOG_KEY");
 
-/// The running adapter, as Tauri state.
+/// The Sentry DSN this build was made with, if any (A2).
+const BUILD_DSN: Option<&str> = option_env!("DICTATION_SENTRY_DSN");
+
+/// The running adapters, as Tauri state: PostHog events (`.0`) and Sentry
+/// error reports (`.1`), both governed by the one sharing switch.
 #[derive(Clone)]
-pub struct Usage(pub Arc<PostHogTelemetry>);
+pub struct Usage(pub Arc<PostHogTelemetry>, pub Arc<SentryReporter>);
 
 impl Usage {
-    /// An adapter that does nothing (tests).
+    /// Adapters that do nothing (tests).
     #[must_use]
     pub fn disabled() -> Self {
-        Self(PostHogTelemetry::disabled())
+        Self(PostHogTelemetry::disabled(), SentryReporter::disabled())
+    }
+
+    /// Turns both on or off: the one sharing switch.
+    pub fn set_enabled(&self, enabled: bool) {
+        self.0.set_enabled(enabled);
+        self.1.set_enabled(enabled);
     }
 
     /// Records `event`.
@@ -39,15 +49,28 @@ impl Usage {
 
 /// Starts the adapter for a launch. `scripted` launches (the e2e test
 /// hooks) send nothing, whatever the build key.
-pub fn start(data_dir: &Path, settings: &Settings, scripted: bool) -> Usage {
+pub fn start(data_dir: &Path, settings: &Settings, scripted: bool, version: &str) -> Usage {
     let key = if scripted { None } else { BUILD_KEY };
     let config = Config::new(key, data_dir);
     let handle = tauri::async_runtime::handle();
-    Usage(PostHogTelemetry::start(
-        config,
-        settings.share_usage_events,
-        &handle.inner().clone(),
-    ))
+    let runtime = handle.inner().clone();
+    let posthog = PostHogTelemetry::start(config, settings.share_usage_events, &runtime);
+    let dsn = if scripted { None } else { BUILD_DSN };
+    let errors = match Version::new(version) {
+        Some(release) if dsn.is_some() => {
+            let environment = if cfg!(debug_assertions) {
+                "development"
+            } else {
+                "production"
+            };
+            let config = errors::Config::new(dsn, &release, environment, macos_major(), data_dir);
+            let reporter = SentryReporter::start(config, settings.share_usage_events, &runtime);
+            reporter.install_panic_hook();
+            reporter
+        }
+        _ => SentryReporter::disabled(),
+    };
+    Usage(posthog, errors)
 }
 
 /// Records `app_opened`, and `update_installed` if the version changed
@@ -157,7 +180,7 @@ pub fn engine_kind(engine: &Engine) -> EngineKind {
 
 /// Sharing was turned on: a new install ID, and the choice is recorded.
 pub fn sharing_turned_on(usage: &Usage) {
-    usage.0.set_enabled(true);
+    usage.set_enabled(true);
     usage.record(Event::SettingChanged {
         setting: SettingName::ShareUsageEvents,
     });
@@ -168,9 +191,9 @@ pub fn sharing_turned_on(usage: &Usage) {
 /// a new install ID and records that it was.
 pub fn settings_saved(usage: &Usage, change: SettingsChange) {
     match change.sharing {
-        Some(false) => usage.0.set_enabled(false),
+        Some(false) => usage.set_enabled(false),
         Some(true) => {
-            usage.0.set_enabled(true);
+            usage.set_enabled(true);
             usage.record(Event::SettingChanged {
                 setting: SettingName::ShareUsageEvents,
             });

@@ -412,7 +412,12 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     );
     // Anonymous usage events (A1): on by default, a no-op without a build
     // key, and silent in scripted test launches.
-    let usage = usage::start(&data_dir, &config.settings().unwrap_or_default(), scripted);
+    let usage = usage::start(
+        &data_dir,
+        &config.settings().unwrap_or_default(),
+        scripted,
+        &version,
+    );
     usage::launched(usage.clone(), &data_dir, &version);
     app.manage(usage.clone());
     let recordings = data_dir.join("debug-recordings");
@@ -827,7 +832,8 @@ async fn show_ui_events(
 ) {
     let mut tray = TrayStatus::new(microphone_denied);
     // Usage events from the same stream; only kinds and buckets leave it.
-    let mut tracker = UsageTracker::new(usage.0.clone(), EngineKind::Cloud);
+    let mut tracker =
+        UsageTracker::new(usage.0.clone(), EngineKind::Cloud).with_reporter(usage.1.clone());
     let started = std::time::Instant::now();
     if microphone_denied {
         show_in_tray(&app, tray.view());
