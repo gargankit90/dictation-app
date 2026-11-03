@@ -9,10 +9,11 @@
   the guide) and give each worker its role file and milestone spec.
 - `.claude/settings.json` holds the git guard hook and deny rules. They load
   when a session starts; don't try to work around a block. Ask the Lead.
-- `gh pr merge` is blocked for Claude. The Code Reviewer (Antigravity) merges.
+- `gh pr merge` is blocked for Claude. The Code Reviewer (Codex) merges.
 - As Tester, follow `docs/agents/tester.md`; you run unattended, so stay
   inside its "may edit" list and time box.
-- The `cua-vm` MCP server drives the test VM. Use it only for tests, never the
+- The `cua-vm` MCP server drives `dictation-vm` (Developers) and `cua-vm-2`
+  drives `dictation-vm-2` (Testers). Use them only for tests, never the
   owner's screen.
 
 - GitHub rulesets `main-public` and `immutable-tags` enforce default-branch
