@@ -76,6 +76,8 @@ export function Onboarding({ onFinished }: Props) {
   const [keySaved, setKeySaved] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [testing, setTesting] = useState(false);
+  // The last Test and continue passed: the Try step says so.
+  const [keyWorks, setKeyWorks] = useState(false);
   // The test dictation lands here.
   const [tryText, setTryText] = useState("");
   const tryField = useRef<HTMLTextAreaElement>(null);
@@ -288,12 +290,14 @@ export function Onboarding({ onFinished }: Props) {
     setBusy(true);
     setTesting(true);
     setNotice(null);
+    setKeyWorks(false);
     try {
       const outcome = await testKey(provider, typed);
       if (outcome.kind === "error") {
         setNotice(outcome);
         return;
       }
+      setKeyWorks(true);
       // The provider first, so the key is never kept for a provider the
       // app doesn't use.
       if (provider !== settings.provider) {
@@ -535,6 +539,11 @@ export function Onboarding({ onFinished }: Props) {
       {status.step === "try" && (
         <section className="field">
           <h2>Try it</h2>
+          {keyWorks && (
+            <p role="status" className="notice ok">
+              Key works ✓
+            </p>
+          )}
           <label htmlFor="try-field">
             Hold {hotkeyName(settings?.hotkey ?? "RightAlt")} and say a few words. Let go, and the
             text appears here.
