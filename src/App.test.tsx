@@ -27,6 +27,7 @@ describe("App", () => {
           language: null,
           hotkey: "RightAlt",
           launch_at_login: false,
+          share_usage_events: true,
         };
       }
       return false; // has_api_key

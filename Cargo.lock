@@ -788,6 +788,7 @@ dependencies = [
  "dictation-pipeline",
  "dictation-platform",
  "dictation-ports",
+ "dictation-telemetry",
  "dictation-transcribe",
  "reqwest",
  "serde",
@@ -826,6 +827,7 @@ dependencies = [
  "dictation-platform",
  "dictation-ports",
  "hound",
+ "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -862,7 +864,25 @@ name = "dictation-ports"
 version = "0.1.0"
 dependencies = [
  "dictation-core",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "dictation-telemetry"
+version = "0.1.0"
+dependencies = [
+ "dictation-core",
+ "dictation-ports",
+ "getrandom 0.3.4",
+ "reqwest",
+ "rustls",
+ "rustls-platform-verifier",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "wiremock",
 ]
 
 [[package]]

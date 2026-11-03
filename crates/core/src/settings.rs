@@ -16,6 +16,7 @@
 //!   without it loads with the default. L1 added `transcription`
 //!   (`"cloud"` or `"local"`, default `"cloud"`) and `local_model` (an id
 //!   from [`crate::local_models::CATALOGUE`]) the same way.
+//!   A1 added `share_usage_events` (default `true`) the same way.
 //!
 //! Fields this version doesn't know (from a newer build, or a hand edit) are
 //! ignored, and missing ones take their defaults, so an old or partial file
@@ -121,6 +122,9 @@ pub struct Settings {
     /// [`Transcription::Local`]. An id the catalogue no longer has still
     /// loads; the engine then says to pick a model in Settings.
     pub local_model: String,
+    /// Whether anonymous usage events are shared (A1, `docs/privacy.md`).
+    /// On by default; a file without it loads with `true`.
+    pub share_usage_events: bool,
 }
 
 impl Default for Settings {
@@ -135,6 +139,7 @@ impl Default for Settings {
             launch_at_login: false,
             transcription: Transcription::default(),
             local_model: local_models::DEFAULT_MODEL.to_owned(),
+            share_usage_events: true,
         }
     }
 }
@@ -340,6 +345,18 @@ mod tests {
         assert_eq!(settings.model, "whisper-large-v3");
         assert_eq!(settings.language.as_deref(), Some("fr"));
         assert_eq!(settings.hotkey, "RightAlt");
+    }
+
+    #[test]
+    fn sharing_usage_events_defaults_to_on_and_round_trips() {
+        assert!(Settings::default().share_usage_events);
+        let old = from_json(r#"{"version": 2, "provider": "groq"}"#).unwrap();
+        assert!(old.share_usage_events, "a file without it shares");
+        let off = Settings {
+            share_usage_events: false,
+            ..Settings::default()
+        };
+        assert_eq!(from_json(&to_json(&off).unwrap()).unwrap(), off);
     }
 
     #[test]

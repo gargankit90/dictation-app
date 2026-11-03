@@ -43,6 +43,7 @@ mod insert;
 mod launch;
 mod permissions;
 mod secrets;
+mod telemetry;
 mod transcribe;
 
 pub use audio::{Audio, AudioError, AudioSource};
@@ -58,4 +59,8 @@ pub use insert::{InsertError, TextInserter};
 pub use launch::{LaunchAtLogin, LaunchAtLoginError, LaunchAtLoginState};
 pub use permissions::{PermissionError, PermissionStatus, Permissions};
 pub use secrets::{Secret, SecretError, SecretStore};
+pub use telemetry::{
+    Arch, DurationBucket, EngineChoice, EngineKind, ErrorType, Event, LatencyBucket, NoTelemetry,
+    OnboardingStep, SettingName, Telemetry, Version,
+};
 pub use transcribe::{TranscribeError, Transcriber};

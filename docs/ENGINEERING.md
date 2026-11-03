@@ -16,6 +16,7 @@ adapter. Tauri is a thin layer on top.
 | `crates/ports` | `dictation-ports` | traits: `HotkeySource`, `AudioSource`, `Transcriber`, `TextInserter`, `Clipboard`, `SecretStore`, `Permissions`, `Clock` | `core` |
 | `crates/platform` | `dictation-platform` | OS adapters; fakes behind feature `testing` | `core`, `ports` |
 | `crates/transcribe` | `dictation-transcribe` | `Transcriber` implementations: OpenAI-compatible (Groq/OpenAI), mock; later local | `core`, `ports` |
+| `crates/telemetry` | `dictation-telemetry` | PostHog adapter for the `Telemetry` port, and the install ID | `ports` |
 | `crates/app` | `dictation-pipeline` | async pipeline that runs the coordinator against the ports; no Tauri types | `core`, `ports` |
 | `src-tauri` | `dictation-app` | Tauri commands, events, tray, windows, plugins, CLI flags | everything above |
 | `src/` | | React UI | Tauri commands/events only |
@@ -91,9 +92,23 @@ adapter. Tauri is a thin layer on top.
 - API keys only in the OS keychain (`keyring`). Never in settings files, logs,
   the repo, test fixtures, PR comments or reports.
 - Audio stays in memory; written to disk only in debug mode.
-- No analytics or telemetry.
+- Anonymous usage events (A1) are **on by default**, with an off switch in
+  Settings → Privacy that stops sending at once, clears the queue and deletes
+  the install ID. They go only to PostHog Cloud US, sent from Rust through
+  the `Telemetry` port (`crates/ports`, adapter `crates/telemetry`), never
+  from the webview. Events are a closed enum of enums, buckets and version
+  numbers. **Never sent:** audio, transcripts, typed or pasted text, API
+  keys, app names, bundle IDs or window titles, file paths, hostnames,
+  usernames, IP addresses (we send no `$ip`; the PostHog project must also
+  be set to discard IPs). The identity is a random install ID (not from
+  hardware) with person profiles off. A build without `DICTATION_POSTHOG_KEY`
+  sends nothing. A new event or property needs a variant in
+  `crates/ports/src/telemetry.rs`, an entry in `docs/privacy.md` and the
+  "What's sent" list, and the privacy test in
+  `crates/app/tests/usage_privacy.rs` must still pass.
 - Skip pasting when a password field (Secure Input) is focused.
-- New network calls go only to the configured transcription provider.
+- New network calls go only to the configured transcription provider, the
+  update server and the usage-events host above.
 
 ## Code reuse and licences
 

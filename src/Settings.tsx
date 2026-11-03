@@ -277,6 +277,26 @@ export function Settings() {
     }
   }
 
+  /**
+   * Turns sharing usage events on or off at once, without the Save button:
+   * "off" has to stop sending now. It has a command of its own that changes
+   * only this choice, and Save never changes it, so no Save can undo it.
+   */
+  async function setSharing(share: boolean) {
+    if (loaded === null) return;
+    setNotice(null);
+    try {
+      const result = await commands.setShareUsageEvents(share);
+      if (result.status === "error") {
+        setNotice({ kind: "error", text: messageOf(result.error) });
+        return;
+      }
+      setLoaded((now) => (now === null ? now : { ...now, share_usage_events: share }));
+    } catch {
+      setNotice({ kind: "error", text: BROKEN });
+    }
+  }
+
   if (loadError !== null) {
     return (
       <main className="settings">
@@ -522,6 +542,46 @@ export function Settings() {
               Starts dictation-app in the menu bar when you log in. Takes effect when you save. You
               can also change it in System Settings, General, Login Items.
             </p>
+          </div>
+
+          <h2>Privacy</h2>
+          <div className="field">
+            <label className="check" htmlFor="share-usage-events">
+              <input
+                id="share-usage-events"
+                type="checkbox"
+                checked={loaded.share_usage_events}
+                aria-describedby="share-usage-events-hint"
+                onChange={(event) => {
+                  void setSharing(event.target.checked);
+                }}
+              />
+              Share anonymous usage events
+            </label>
+            <p id="share-usage-events-hint" className="hint">
+              Helps us see what works and what breaks. Never your voice, your text, your API keys or
+              the apps you use. Takes effect at once; turning it off also clears what was waiting to
+              be sent.
+            </p>
+            <details>
+              <summary>What&apos;s sent</summary>
+              <ul className="hint">
+                <li>That the app was opened, with its version, your macOS version and chip.</li>
+                <li>Which onboarding steps you reached, and that you finished.</li>
+                <li>Which speech engine you chose (for example Groq or OpenAI).</li>
+                <li>
+                  That a dictation worked, with its length and speed in rough ranges (not the
+                  words).
+                </li>
+                <li>That a dictation failed, and the kind of failure (not the message).</li>
+                <li>Which setting you changed (not the new value).</li>
+                <li>That the app updated, from which version to which.</li>
+              </ul>
+              <p className="hint">
+                Each event carries a random ID made on this Mac, not tied to you or your computer.
+                Turning sharing off deletes it.
+              </p>
+            </details>
           </div>
 
           <div className="row actions">

@@ -43,6 +43,7 @@ class Backend {
     launch_at_login: false,
     transcription: "cloud",
     local_model: "parakeet-unified-en-0.6b-q4_k_m",
+    share_usage_events: true,
   };
   /** What `test_api_key` answers: `null` for success. */
   testResult: KeyTestError | null = null;

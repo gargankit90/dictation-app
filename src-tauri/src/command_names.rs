@@ -22,4 +22,5 @@ pub const COMMAND_NAMES: &[&str] = &[
     "download_local_model",
     "cancel_local_model_download",
     "delete_local_model",
+    "set_share_usage_events",
 ];

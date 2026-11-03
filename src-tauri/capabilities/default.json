@@ -17,6 +17,7 @@
     "allow-list-local-models",
     "allow-download-local-model",
     "allow-cancel-local-model-download",
-    "allow-delete-local-model"
+    "allow-delete-local-model",
+    "allow-set-share-usage-events"
   ]
 }
