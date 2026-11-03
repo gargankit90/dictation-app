@@ -64,6 +64,9 @@ wiremock = "0.6.5"
 transcribe-cpp = { version = "=0.4.1", default-features = false }
 # SHA-256 of downloaded models (L1). MIT OR Apache-2.0; already in the tree.
 sha2 = "0.10.9"
+# statvfs for the free-space check before a model download (L1). MIT OR
+# Apache-2.0; already in the tree.
+libc = "0.2.191"
 proptest = "1.12.0"
 handy-keys = "0.3.4"
 handy-recorder = "=0.1.0"
