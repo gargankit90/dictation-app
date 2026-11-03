@@ -326,6 +326,18 @@ describe("the key step", () => {
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Add your API key");
   });
 
+  it("confirms the saved key works when nothing is typed", async () => {
+    backend.keys.groq = true;
+    render(<Onboarding onFinished={() => undefined} />);
+    await keyStepReady();
+    fireEvent.click(button("Test and continue"));
+    await heading("Try it");
+    expect(await screen.findByText("Key works ✓")).toBeTruthy();
+    expect(backend.named("test_api_key")).toEqual([
+      { command: "test_api_key", args: { provider: "groq", key: null } },
+    ]);
+  });
+
   it("asks for a key before testing when none is saved or typed", async () => {
     render(<Onboarding onFinished={() => undefined} />);
     await keyStepReady();
@@ -341,6 +353,7 @@ describe("the key step", () => {
     fireEvent.click(button("Test and continue"));
 
     await heading("Try it");
+    expect((await screen.findByText("Key works ✓")).getAttribute("role")).toBe("status");
     expect(backend.named("set_api_key")).toEqual([
       { command: "set_api_key", args: { provider: "groq", key: KEY } },
     ]);
