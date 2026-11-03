@@ -150,8 +150,11 @@ record of approval.
   follow-ups (labels: `tech-debt`, `owner`, `guard`, `spec`, `ci`,
   `process`, `manual-check`).
 
-These rules are enforced locally because GitHub Free can't protect branches
-on a private repo:
+The repository is public. GitHub rulesets enforce protection server-side for
+all accounts, including the owner (bypass: never): `main-public` requires a
+PR and prevents force pushes and deletion of the default branch;
+`immutable-tags` prevents tag updates, deletion and force pushes. The hard
+rules above still apply to every agent. Local checks add defence in depth:
 
 - git's pre-push hook, installed by `scripts/install-hooks.sh` together
   with a copy of `scripts/guard-push.sh` next to it, runs that copy on every
@@ -162,8 +165,11 @@ on a private repo:
   whenever `scripts/guard-push.sh` changes. Not lefthook: lefthook skips
   pre-push jobs when it sees no changed files.
 - Claude Code loads `.claude/settings.json`. Its `PreToolUse` hook
-  (`.claude/hooks/guard-git.sh`) blocks force pushes, pushes to `main`,
-  skipping hooks, `gh pr merge` and edits to the guards.
+  (`.claude/hooks/guard-git.sh`) keeps role checks (the Code Reviewer merges),
+  hook bypass checks, guard-edit checks (only the owner changes guards), and
+  destructive repository settings checks. It does not inspect push commands
+  or git aliases. Edit/Write deny rules protect guard files. Existing static
+  push deny rules remain in settings.json pending the owner's decision.
 - Antigravity runs with Manual permissions, so the owner approves its
   commands.
 
