@@ -37,12 +37,13 @@ crates/core        dictation-core        pure logic, no I/O, no OS, no Tauri, no
 crates/ports       dictation-ports       traits only
 crates/platform    dictation-platform    OS adapters + fakes (feature "testing")
 crates/transcribe  dictation-transcribe  speech-to-text engines
+crates/telemetry   dictation-telemetry   PostHog adapter for the Telemetry port
 crates/app         dictation-pipeline    runs the coordinator against the ports; no Tauri types
 src-tauri          dictation-app         thin Tauri shell
 src                React UI
 ```
 
-- Dependencies point inward: `src-tauri → app → ports ← platform/transcribe`;
+- Dependencies point inward: `src-tauri → app → ports ← platform/transcribe/telemetry`;
   `core` depends on nothing in the workspace.
 - `#[cfg(target_os)]` only in `platform`.
 - `unsafe` only in `platform`, each block with a `// SAFETY:` comment.
@@ -127,7 +128,11 @@ record of approval.
   repo, a log, a test fixture, a PR comment or a report. `GROQ_API_KEY` enters
   the VM only for the opt-in real-API e2e test.
 - **Privacy:** never log API keys or transcripts at info level; audio stays in
-  memory unless debug mode is on; analytics stay off.
+  memory unless debug mode is on. Anonymous usage analytics are on by
+  default with an off switch (`docs/privacy.md`): send only the closed
+  `Event` enum in `crates/ports`, from Rust, never audio, transcripts, typed
+  text, keys, app names, paths, hostnames, usernames or IPs, and never put a
+  real PostHog key in the repo (`DICTATION_POSTHOG_KEY` at build time).
 - **Licences:** adapt code only from MIT/Apache repos (Handy, OpenWhispr,
   FreeFlow, Muesli, transcribe.cpp, FluidAudio) and credit them in `NOTICE`.
   FluidVoice and VoiceInk are GPLv3: read for ideas, never copy.

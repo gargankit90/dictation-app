@@ -34,8 +34,9 @@ those checks is **major**; anything else about the guards is **minor**.
       to users, in fixtures, or anywhere in the repo.
 - [ ] Keys only through `SecretStore`/keychain; the UI can't read a key back.
 - [ ] Audio stays in memory unless debug mode is on.
-- [ ] No new network destinations beyond the transcription provider; no
-      analytics.
+- [ ] No new network destinations beyond the transcription provider, the
+      updater and PostHog; no new usage event or property unless it is in
+      `docs/privacy.md` and holds only enums, buckets or versions.
 - [ ] Tauri capabilities grant each window only what it needs; CSP unchanged
       or stricter.
 - [ ] Clipboard writes carry the transient/concealed markers; restore only if
