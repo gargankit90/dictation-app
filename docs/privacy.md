@@ -1,18 +1,50 @@
-# Privacy: anonymous usage events
+# Privacy: usage events and error reports
 
-dictation-app can share anonymous usage events so we can see what works and
-what breaks. This page lists everything it sends. The list is enforced in code:
-events are a closed enum (`crates/ports/src/telemetry.rs`), so a field not
-listed here cannot be sent.
+dictation-app can share anonymous usage events and error reports so we can see
+what works and what breaks. This page lists everything it sends. The list is
+enforced in code: events are a closed enum (`crates/ports/src/telemetry.rs`),
+and error reports are built field by field from an allow-list
+(`crates/telemetry/src/errors.rs`), so a field not listed here cannot be sent.
 
-- **On by default.** Turn it off in Settings → Privacy → "Share anonymous
-  usage events". Off takes effect at once: nothing more is sent, events still
-  waiting are deleted, and the install ID is deleted. Turning it on again
-  makes a new ID.
+- **On by default.** Turn it off in Settings → Privacy → "Share usage and
+  error events". One switch covers both. Off takes effect at once: nothing
+  more is sent, events and reports still waiting are deleted, requests under
+  way are dropped, and the install ID is deleted. Turning it on again makes a
+  new ID.
 - **Where it goes.** PostHog Cloud US (`https://us.i.posthog.com`), sent by
   the app itself, never by the webview.
 - **A build without a PostHog key sends nothing.** Development builds, CI and
   forks have no key (`DICTATION_POSTHOG_KEY` is read at build time).
+
+## Error reports (Sentry)
+
+When the app panics (a crash in our own code) or a dictation fails, it can
+send a report to Sentry in the US region (`*.ingest.us.sentry.io`), from the
+app itself, never the webview. A build without `DICTATION_SENTRY_DSN` (dev
+builds, CI, forks) sends nothing. A report holds only:
+
+| Field | Value |
+| --- | --- |
+| `release` | the app version, for example `0.3.0` |
+| `environment` | `production` or `development` |
+| tag `error_code` | the error code (for example `mic_denied`), for a failed dictation |
+| tag `error_type` | the kind of failure, as in `dictation_failed` above |
+| tag `arch`, `macos_major` | the chip and the macOS major version |
+| exception type | `panic`, or the error code |
+| for a panic | the source location (for example `crates/app/src/x.rs:10`) and the stack: function names and file names relative to the crate, with line numbers |
+
+Never in a report: the panic's or the error's message, breadcrumbs, a user, an
+IP address (the app sets none; the Sentry project should also have "Prevent
+storing of IP addresses" on), the computer's host name or name, environment
+variables, a file path beyond the crate-relative one, local variables, or
+memory. The report is built from the fields above only; nothing else is
+copied in. A panic report is written to a small file in the app's data folder
+and sent at the next launch (so a crash that ends the app is still reported);
+turning sharing off deletes it. At most 30 reports are sent per run.
+
+**Native crashes (a segfault in the on-device engine) are not reported.** A
+crash dump holds raw memory, which could include what you dictated, and cannot
+be cleaned. If that changes it will be listed here first.
 
 ## Never sent
 
@@ -110,3 +142,12 @@ stay governed by that switch alone.
 3. Give the release build the project API key (`phc_…`) as the environment
    variable `DICTATION_POSTHOG_KEY`. It is not secret in the sense of an API
    key (it can only write events) but keep it out of the repo.
+   `scripts/release.sh` reads it from the Keychain (`docs/releasing.md`).
+
+## For the owner: Sentry set-up
+
+1. Create a Sentry project (platform "Rust", US region, free Developer plan).
+2. In Project settings → Security & Privacy, turn on "Prevent Storing of IP
+   Addresses" and "Data Scrubber".
+3. Give the release build the project's DSN as `DICTATION_SENTRY_DSN`;
+   `scripts/release.sh` reads it from the Keychain (`docs/releasing.md`).

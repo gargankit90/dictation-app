@@ -43,6 +43,11 @@ set +x
 RELEASES_REPO=gargankit90/dictation-app
 KEY_SERVICE=dictation-app-updater-key
 PASSWORD_SERVICE=dictation-app-updater-password
+# Optional telemetry (A1, A2): the PostHog project key and the Sentry DSN, also
+# generic passwords in the login Keychain. A missing one only means the build
+# sends nothing of that kind.
+POSTHOG_SERVICE=dictation-app-posthog-key
+SENTRY_SERVICE=dictation-app-sentry-dsn
 IDENTITY="dictation-app Dev"
 APP=dictation-app
 
@@ -232,6 +237,8 @@ redact() {
   while IFS= read -r line || [ -n "$line" ]; do
     [ -z "$secret_key" ] || line=${line//"$secret_key"/[redacted]}
     [ -z "$secret_password" ] || line=${line//"$secret_password"/[redacted]}
+    [ -z "$posthog_key" ] || line=${line//"$posthog_key"/[redacted]}
+    [ -z "$sentry_dsn" ] || line=${line//"$sentry_dsn"/[redacted]}
     printf '%s\n' "$line"
   done
 }
@@ -246,6 +253,21 @@ secret_password=$(security find-generic-password -s "$PASSWORD_SERVICE" -w 2>/de
   die "no Keychain item with service $PASSWORD_SERVICE"
 [ -n "$secret_key" ] || die "the Keychain item $KEY_SERVICE is empty"
 
+# The telemetry items are optional: a missing one is a loud warning, not a
+# failure. The values are never printed, only whether they were found.
+posthog_key=$(security find-generic-password -s "$POSTHOG_SERVICE" -w 2>/dev/null) || posthog_key=""
+sentry_dsn=$(security find-generic-password -s "$SENTRY_SERVICE" -w 2>/dev/null) || sentry_dsn=""
+if [ -n "$posthog_key" ]; then
+  say "usage analytics: found $POSTHOG_SERVICE in the Keychain"
+else
+  say "WARNING: no Keychain item $POSTHOG_SERVICE, so this build sends NO usage analytics (docs/releasing.md says how to add it)"
+fi
+if [ -n "$sentry_dsn" ]; then
+  say "error reports: found $SENTRY_SERVICE in the Keychain"
+else
+  say "WARNING: no Keychain item $SENTRY_SERVICE, so this build sends NO error reports (docs/releasing.md says how to add it)"
+fi
+
 bundle=target/release/bundle
 out=target/release-out/v$version
 # Nothing from an earlier run is left to be mistaken for this one's.
@@ -254,11 +276,19 @@ rm -rf "$bundle/macos" "$bundle/dmg" "$out"
 # Automation permission (an ssh session); CI=true skips that styling.
 say "building $APP $version (release, signed \"$IDENTITY\"); this takes a few minutes"
 build_status=0
-CI=true TAURI_SIGNING_PRIVATE_KEY="$secret_key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$secret_password" \
-  npm run tauri build -- --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}' \
-  </dev/null 2>&1 | redact || build_status=$?
+# A subshell, so the telemetry values reach only this build; whatever the
+# caller exported under these names is dropped first.
+(
+  unset DICTATION_POSTHOG_KEY DICTATION_SENTRY_DSN
+  if [ -n "$posthog_key" ]; then export DICTATION_POSTHOG_KEY="$posthog_key"; fi
+  if [ -n "$sentry_dsn" ]; then export DICTATION_SENTRY_DSN="$sentry_dsn"; fi
+  CI=true TAURI_SIGNING_PRIVATE_KEY="$secret_key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$secret_password" \
+    npm run tauri build -- --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}'
+) </dev/null 2>&1 | redact || build_status=$?
 secret_key=""
 secret_password=""
+posthog_key=""
+sentry_dsn=""
 [ "$build_status" = 0 ] || die "the build failed (exit $build_status)"
 
 # --- Check what was built ----------------------------------------------------

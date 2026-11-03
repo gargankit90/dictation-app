@@ -5,6 +5,7 @@
 mod clipboard;
 mod clock;
 mod cursor;
+mod error_reporter;
 mod hotkey;
 mod inserter;
 mod launch;
@@ -20,6 +21,7 @@ pub use crate::audio::FileAudioSource;
 pub use clipboard::MemClipboard;
 pub use clock::FakeClock;
 pub use cursor::FakeTextBeforeCursor;
+pub use error_reporter::FakeErrorReporter;
 pub use hotkey::FakeHotkey;
 pub use inserter::FakeInserter;
 pub use launch::FakeLaunchAtLogin;
