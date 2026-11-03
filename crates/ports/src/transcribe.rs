@@ -50,6 +50,10 @@ pub enum TranscribeError {
     /// run (L1).
     #[error("the on-device model isn't downloaded")]
     ModelMissing,
+    /// The on-device model is being checked and loaded (seconds, after a
+    /// switch of model); dictation works again once it is (L1).
+    #[error("the on-device model is still loading")]
+    ModelLoading,
     /// The provider or engine returned an error or a response we can't read.
     /// Same rule as [`Network`](Self::Network): a short summary such as
     /// "the provider failed (HTTP 503)", never the reply body.
@@ -79,6 +83,7 @@ impl fmt::Debug for TranscribeError {
             // Holds only the HTTP status, never the Location header or a body.
             Self::Redirected(status) => f.debug_tuple("Redirected").field(status).finish(),
             Self::ModelMissing => f.write_str("ModelMissing"),
+            Self::ModelLoading => f.write_str("ModelLoading"),
             Self::Engine(text) => f
                 .debug_tuple("Engine")
                 .field(&redact::summary(text))
@@ -119,6 +124,9 @@ impl TranscribeError {
                 .to_owned(),
             Self::ModelMissing => {
                 "The on-device model isn't downloaded. Download the model in Settings.".to_owned()
+            }
+            Self::ModelLoading => {
+                "The on-device model is still loading. Try again in a moment.".to_owned()
             }
             Self::Engine(detail) => format!("Something went wrong: {}.", redact::summary(detail)),
         }
@@ -209,6 +217,10 @@ mod tests {
             (
                 TranscribeError::ModelMissing,
                 "The on-device model isn't downloaded. Download the model in Settings.",
+            ),
+            (
+                TranscribeError::ModelLoading,
+                "The on-device model is still loading. Try again in a moment.",
             ),
             (
                 TranscribeError::Engine("the provider failed (HTTP 503)".into()),

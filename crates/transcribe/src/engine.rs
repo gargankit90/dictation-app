@@ -164,6 +164,30 @@ impl Transcribers {
         *self.current.write().unwrap_or_else(PoisonError::into_inner) = engine;
     }
 
+    /// Like [`update`](Self::update), but `build` may make an engine current
+    /// before it returns, through the function it is given: the local
+    /// engine puts "the model is loading" in place of the old model before
+    /// loading the next, so the old one is freed first (two models at once
+    /// can need gigabytes). Dictations already running keep the engine they
+    /// started with.
+    pub fn update_staged(&self, build: impl FnOnce(&dyn Fn(Engine)) -> Engine) {
+        let _updating = self.updating.lock().unwrap_or_else(PoisonError::into_inner);
+        let stage = |engine: Engine| {
+            let previous = std::mem::replace(
+                &mut *self.current.write().unwrap_or_else(PoisonError::into_inner),
+                Arc::new(engine),
+            );
+            // Dropped here, outside the lock.
+            drop(previous);
+        };
+        let engine = Arc::new(build(&stage));
+        let previous = std::mem::replace(
+            &mut *self.current.write().unwrap_or_else(PoisonError::into_inner),
+            engine,
+        );
+        drop(previous);
+    }
+
     /// The current engine, for a rebuild that wants to reuse its loaded
     /// local model.
     #[must_use]
@@ -216,6 +240,24 @@ mod tests {
         fn run(&mut self, _: &[f32], _: Option<&str>) -> Result<String, String> {
             Ok(self.0.to_owned())
         }
+    }
+
+    #[test]
+    fn a_staged_update_is_current_before_the_build_returns() {
+        let transcribers = Transcribers::new(Engine::Local(LocalTranscriber::new(
+            Box::new(Says("old")),
+            None,
+        )));
+        let watch = transcribers.clone();
+        transcribers.update_staged(|stage| {
+            stage(Engine::Unavailable(TranscribeError::ModelLoading));
+            assert!(matches!(
+                &*watch.current(),
+                Engine::Unavailable(TranscribeError::ModelLoading)
+            ));
+            Engine::Mock(MockTranscriber::default())
+        });
+        assert_eq!(transcribers.name(), "mock");
     }
 
     #[test]

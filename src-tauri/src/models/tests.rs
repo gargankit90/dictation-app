@@ -40,7 +40,7 @@ impl SpeechModel for Silent {
 
 fn live(dir: &Path) -> LiveEngine {
     let store = ModelStore::new(dir.to_owned(), Arc::new(|_| Ok(u64::MAX))).unwrap();
-    let local = LocalModels::with_loader(
+    let local = LocalModels::trusting(
         store,
         Arc::new(|_: &Path| Ok(Box::new(Silent) as Box<dyn SpeechModel>)),
     );
@@ -84,7 +84,7 @@ fn criterion_4_lists_the_catalogue_with_statuses() {
     // Deleting removes both and lets go of the loaded model.
     let local = live.local().unwrap();
     assert!(matches!(
-        local.engine(DEFAULT, None),
+        local.engine(DEFAULT, None, &|_| {}),
         dictation_transcribe::engine::Engine::Local(_)
     ));
     assert_eq!(local.loaded(), Some(DEFAULT));

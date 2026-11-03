@@ -400,7 +400,7 @@ fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
             ),
         ),
         // Only the on-device engine reports it; a key test never runs one.
-        TranscribeError::ModelMissing => KeyTestError::new(
+        TranscribeError::ModelMissing | TranscribeError::ModelLoading => KeyTestError::new(
             KeyTestKind::Server,
             "The key couldn't be checked. Try again.".to_owned(),
         ),
