@@ -31,13 +31,12 @@ wrong, report it; don't fix it.
 5. Check the gate and coverage passed (CI on the PR, or
    `lefthook run pre-push-gate`). Coverage: `core` and `transcribe` ≥ 85%,
    `app` ≥ 70%.
-6. E2E (from M1.5): copy the built `.app` into the VM and run it there, never
-   on the owner's screen. Restore the golden snapshot first:
-   `lume delete dictation-vm && lume clone dictation-vm-golden dictation-vm`,
-   then `lume run dictation-vm --no-display`. Get the IP with
-   `lume get dictation-vm`, copy with
-   `scp -i ~/.ssh/dictation_vm_ed25519 -r <app> lume@<ip>:/Applications/`,
-   and drive the VM through the `cua-vm` MCP server.
+6. E2E: run the app in the Tester VM, never on the owner's screen and never
+   in `dictation-vm` (the Developers' VM). Use the runner, which builds,
+   resets the VM and holds its lock:
+   `E2E_VM=dictation-vm-2 tests/e2e/run.sh [scenario...]`. For manual GUI
+   checks, drive the VM through the `cua-vm-2` MCP server only. Details:
+   `tests/e2e/README.md`.
 7. Write `test-reports/<id>-run<k>.md` (template below) and commit it to the
    PR branch.
 8. Post a PR comment: first line `Tester: PASS` or `Tester: FAIL`, then a
@@ -46,7 +45,7 @@ wrong, report it; don't fix it.
 9. Open a `tech-debt` issue for each minor you find, and link it.
 10. Report back to the coordinator.
 
-The Code Reviewer merges, not you (`gh pr merge` is blocked for Claude Code).
+The Code Reviewer (Codex) merges, not you (`gh pr merge` is blocked for Claude Code).
 On a re-check after fixes, test only what changed.
 
 ## Test report template

@@ -32,9 +32,8 @@ or the guards (`scripts/guard-push.sh`, `scripts/pre-push`,
 2. Branch from an up-to-date `main`: `git switch -c m<id>-<slug> origin/main`.
 3. Work in small Conventional Commits. Unit tests go in the same commit as the
    code or the one before (red, then green). Each commit passes pre-commit.
-4. Before pushing, run the full gate (`lefthook run pre-push-gate` from M0.3;
-   until then the commands in `AGENTS.md`). Fix every finding; never suppress
-   one without a reason in a comment.
+4. Before pushing, run the full gate (`scripts/gate.sh`). Fix every finding;
+   never suppress one without a reason in a comment.
 5. Push the branch: `git push -u origin m<id>-<slug>`. Never push to `main`,
    never force push. If you need to rewrite history, ask the coordinator.
 6. Open the PR with `gh pr create --base main --head m<id>-<slug>` and the

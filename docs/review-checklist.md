@@ -9,11 +9,11 @@ one as OK or with finding numbers. Severity guide:
   unexplained suppression, an error path that loses or hides errors.
 - **minor**: naming, comments, small simplifications.
 
-`.claude/hooks/guard-git.sh` is a best-effort pattern list in front of the
-real guard, git's pre-push hook with `guard-push.sh`. A way around
-`guard-git.sh` is **major** only if the pre-push hook doesn't stop the same
-action (e.g. disabling hooks, or merging or deleting refs through `gh`,
-which never runs the hook); otherwise it's **minor**.
+Push rules (no push to `main`, no force push, no branch deletion, no tag
+moves) are enforced by the GitHub rulesets (see `AGENTS.md`) and by git's
+pre-push guard. `.claude/hooks/guard-git.sh` only checks merging, hook
+bypass, guard edits and destructive repository settings. A way around one of
+those checks is **major**; anything else about the guards is **minor**.
 
 ## 1. Scope
 
@@ -63,7 +63,7 @@ which never runs the hook); otherwise it's **minor**.
 ## 6. Licences and reuse
 
 - [ ] Nothing copied from FluidVoice or VoiceInk (GPLv3). Compare suspicious
-      code against those repos in `~/Documents/Dictation App/`.
+      code against the reference repos cloned next to this repo (see `AGENTS.md`).
 - [ ] Code adapted from MIT/Apache repos is credited in `NOTICE` and at the
       code.
 - [ ] New dependencies have permissive licences (`cargo deny` passes).

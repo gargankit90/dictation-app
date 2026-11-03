@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The VM e2e suite on every push to main (T6, #104): what the CI job runs. A
-# thin wrapper around run.sh and its locks.
+# The VM e2e suite for one commit of main: what scripts/e2e-main.sh runs on
+# the owner's Mac after each merge. A thin wrapper around run.sh and its locks.
 #
 #   tests/e2e/ci-run.sh
 #

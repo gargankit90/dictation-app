@@ -7,8 +7,8 @@ agreement and a commit to this file.
 ## Architecture: ports and adapters
 
 All logic lives in plain Rust crates with no OS or Tauri dependency. OS
-features sit behind traits with a Mac adapter, a Windows adapter and a fake.
-Tauri is a thin layer on top.
+features sit behind traits with a Mac adapter, a fake and, planned, a Windows
+adapter. Tauri is a thin layer on top.
 
 | Crate | Package | Holds | May depend on |
 | --- | --- | --- | --- |
@@ -237,8 +237,6 @@ reach the owner's Mac**: there is no self-hosted runner, and
   then a free VM through `run.sh`'s lock) and keeps the evidence under
   `target/e2e-main-evidence/<sha12>-<time>/`: a few KB on a pass, everything
   on a failure (#174). Details: `tests/e2e/README.md`.
-- **Hosted CI needs a public repository** (or billing); while the repository
-  is private and billing is blocked, hosted jobs do not start.
 
 ## Git
 
@@ -248,7 +246,7 @@ reach the owner's Mac**: there is no self-hosted runner, and
   `test(core): …`, `fix(platform): …`, `docs: …`, `chore: …`.
 - Hooks: `scripts/install-hooks.sh` installs them. pre-commit (lefthook) runs
   fast checks on staged files; pre-push runs `scripts/pre-push`: the push
-  guard, then the full gate (from M0.3). Never skip them.
+  guard, then the full gate. Never skip them.
 - PRs merge with a merge commit, by the Code Reviewer, after `Tester: PASS`,
   `Reviewer: APPROVED` and the Lead's manual checks. Each merged milestone is
   tagged `m<id>`.
