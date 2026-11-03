@@ -33,6 +33,11 @@ use crate::engine::LiveEngine;
 use crate::models::{ModelDownloads, ModelState};
 use crate::onboarding::OsPermissions;
 
+/// What opens the browser and the file manager. Managed Tauri state: the
+/// real one in the app, a recording fake in tests (F1).
+#[derive(Clone)]
+pub struct AppOpener(pub Arc<dyn dictation_ports::Opener>);
+
 /// What the app remembers for Troubleshoot and the report. Managed Tauri
 /// state; clones share it.
 #[derive(Clone, Default)]
@@ -605,12 +610,16 @@ pub async fn save_report(diagnostics: State<'_, Diagnostics>) -> Result<Option<S
 /// screen. The user reads it there and submits it; the app sends nothing.
 #[tauri::command]
 #[specta::specta]
-pub async fn open_issue(diagnostics: State<'_, Diagnostics>) -> Result<(), String> {
+pub async fn open_issue(
+    diagnostics: State<'_, Diagnostics>,
+    opener: State<'_, AppOpener>,
+) -> Result<(), String> {
     let text = lock(&diagnostics.0.shown_report)
         .clone()
         .ok_or_else(|| "There is no report to open yet.".to_owned())?;
     let url = report::issue_url(&text);
-    tauri::async_runtime::spawn_blocking(move || dictation_platform::reveal::open_url(&url))
+    let opener = opener.0.clone();
+    tauri::async_runtime::spawn_blocking(move || opener.open_url(&url))
         .await
         .map_err(|_| "the browser task crashed".to_owned())?
         .map_err(|error| {

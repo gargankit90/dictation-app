@@ -18,13 +18,53 @@ fn command_line(dir: &Path) -> (&'static str, Vec<OsString>) {
     (program, vec![dir.as_os_str().to_owned()])
 }
 
+/// The environment variable that turns off host side effects (F1): the real
+/// launcher and the real keychain refuse to run. The gate and nextest set it,
+/// so a test that forgets the fake can't open a browser or Finder, or ask for
+/// the owner's Keychain items.
+pub const NO_LAUNCH_VAR: &str = "DICTATION_NO_LAUNCH";
+
+/// Whether host side effects are off: in this crate's own tests, or when
+/// [`NO_LAUNCH_VAR`] is set.
+#[must_use]
+pub(crate) fn launching_disabled() -> bool {
+    cfg!(test) || std::env::var_os(NO_LAUNCH_VAR).is_some()
+}
+
+fn launch_allowed() -> io::Result<()> {
+    if launching_disabled() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "launching programs is disabled in tests (DICTATION_NO_LAUNCH)",
+        ));
+    }
+    Ok(())
+}
+
+/// The real [`Opener`](dictation_ports::Opener): `open`, `explorer` or
+/// `xdg-open`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemOpener;
+
+impl dictation_ports::Opener for SystemOpener {
+    fn open_url(&self, url: &str) -> Result<(), String> {
+        open_url(url).map_err(|error| error.to_string())
+    }
+
+    fn reveal_folder(&self, dir: &Path) -> Result<(), String> {
+        reveal_folder(dir).map_err(|error| error.to_string())
+    }
+}
+
 /// Opens `dir` in the file manager.
 ///
 /// # Errors
 ///
-/// If the file manager's launcher can't run. Its exit code is not checked:
-/// Windows' `explorer` exits with 1 even when it works.
+/// If the file manager's launcher can't run, or launching is disabled
+/// ([`NO_LAUNCH_VAR`]). Its exit code is not checked: Windows' `explorer`
+/// exits with 1 even when it works.
 pub fn reveal_folder(dir: &Path) -> io::Result<()> {
+    launch_allowed()?;
     let (program, args) = command_line(dir);
     // Waits for the launcher (it returns at once), so no zombie is left.
     Command::new(program).args(args).status().map(|_| ())
@@ -43,13 +83,8 @@ pub fn open_url(url: &str) -> io::Result<()> {
             "only https addresses are opened",
         ));
     }
-    let program = if cfg!(target_os = "macos") {
-        "open"
-    } else if cfg!(target_os = "windows") {
-        "explorer"
-    } else {
-        "xdg-open"
-    };
+    launch_allowed()?;
+    let (program, _) = command_line(Path::new(""));
     Command::new(program).arg(url).status().map(|_| ())
 }
 
@@ -63,6 +98,14 @@ mod tests {
             let error = open_url(url).unwrap_err();
             assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{url}");
         }
+    }
+
+    #[test]
+    fn nothing_is_launched_under_test() {
+        let url = open_url("https://example.com").unwrap_err();
+        assert_eq!(url.kind(), io::ErrorKind::PermissionDenied);
+        let dir = reveal_folder(Path::new("/tmp")).unwrap_err();
+        assert_eq!(dir.kind(), io::ErrorKind::PermissionDenied);
     }
 
     #[test]

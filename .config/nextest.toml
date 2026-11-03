@@ -19,3 +19,11 @@ fail-fast = false
 
 [profile.ci.junit]
 path = "junit.xml"
+
+# F1: tests never launch a browser or Finder, or read the real Keychain. The
+# real launcher and keychain store refuse when this is set.
+[profile.default.env]
+DICTATION_NO_LAUNCH = "1"
+
+[profile.ci.env]
+DICTATION_NO_LAUNCH = "1"

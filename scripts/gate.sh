@@ -6,6 +6,10 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+# F1: no test launches a browser or Finder, or reads the real Keychain; the
+# real launcher and keychain store refuse while this is set.
+export DICTATION_NO_LAUNCH=1
+
 step() {
   printf '\n==> %s\n' "$*"
   "$@"

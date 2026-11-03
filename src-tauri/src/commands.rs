@@ -2343,6 +2343,8 @@ mod capability_tests {
         windows: Vec<WebviewWindow<MockRuntime>>,
         _app: App<MockRuntime>,
         scratch: Scratch,
+        /// What `open_issue` would have opened.
+        opener: dictation_platform::fakes::FakeOpener,
     }
 
     /// The app on Tauri's mock runtime with this build's ACL and the real
@@ -2364,8 +2366,13 @@ mod capability_tests {
         app.manage(AppConfig(std::sync::Arc::new(
             dictation_pipeline::config::Config::new(
                 &dir,
-                dictation_platform::secrets::KeychainSecretStore::new(),
+                // F1: never the owner's real Keychain.
+                dictation_platform::secrets::KeychainSecretStore::disabled(),
             ),
+        )));
+        let opener = dictation_platform::fakes::FakeOpener::new();
+        app.manage(crate::diagnostics::AppOpener(std::sync::Arc::new(
+            opener.clone(),
         )));
         app.manage(crate::commands::LoginItem(std::sync::Arc::new(
             dictation_platform::fakes::FakeLaunchAtLogin::new(),
@@ -2393,6 +2400,7 @@ mod capability_tests {
             windows,
             _app: app,
             scratch,
+            opener,
         }
     }
 
@@ -2558,6 +2566,12 @@ mod capability_tests {
             );
         }
         assert_eq!(COMMAND_NAMES.len(), 21);
+        // F1: open_issue reached the fake, not a browser. (It may have found
+        // no report to open, in which case nothing was recorded.)
+        for url in fixture.opener.urls() {
+            assert!(url.starts_with("https://github.com/"), "{url}");
+        }
+        assert!(fixture.opener.folders().is_empty());
     }
 
     #[test]
