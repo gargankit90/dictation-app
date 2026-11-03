@@ -32,11 +32,13 @@ UNICODE_SUFFIX_2=' please keep this too.\nLast line stays.\n'
 
 # unicode_doc <text> <caret: characters from the start> [selected
 # characters]: a fresh document holding <text>, the caret (or a selection)
-# placed with real keys: to the start, right, then shift+right.
+# placed with real keys: to the start, right, then shift+right. The document
+# is read back before any key moves the caret, and must be exactly <text>.
 unicode_doc() {
   local moves=(cmd+up) want
   textedit_fresh || return 1
-  textedit_set "$(esc_b64 "$1")" || return 1
+  textedit_set_b64 "$(esc_b64 "$1")" || return 1
+  textedit_seeded "$(esc_b64 "$1")" || return 1
   [ "$2" = 0 ] || moves+=("right*$2")
   [ "${3:-0}" = 0 ] || moves+=("shift+right*$3")
   want="pressed $((1 + $2 + ${3:-0}))"
@@ -48,6 +50,19 @@ unicode_doc() {
 unicode_dictate() {
   provider_reply "$(esc_b64 "$1")"
   dictate_once 1
+}
+
+# unicode_setup <what> <unicode_doc args...>: the document is made and read
+# back; false (after "setup: document not as expected") if not.
+unicode_setup() {
+  expect "$1" unicode_doc "${@:2}"
+  [ "$SCENARIO_FAILED" = 0 ]
+}
+
+# The end of the scenario, also when setup failed: nothing was pasted into a
+# wrong document, so no paste check runs.
+unicode_end() {
+  unicode_end
 }
 
 e2e_unicode_multiline_selection_paste() {
@@ -62,8 +77,8 @@ e2e_unicode_multiline_selection_paste() {
   set_clipboard "$PROVIDER_SENTINEL"
 
   # At a caret.
-  expect "a document with the caret inside its text" \
-    unicode_doc "$UNICODE_PREFIX_1$UNICODE_SUFFIX_1" "$(esc_chars "$UNICODE_PREFIX_1")"
+  unicode_setup "a document with the caret inside its text" \
+    "$UNICODE_PREFIX_1$UNICODE_SUFFIX_1" "$(esc_chars "$UNICODE_PREFIX_1")" || { unicode_end; return; }
   mark=$(phase_mark)
   expect "a dictation of the first text ends Idle" unicode_dictate "$UNICODE_RAW_1"
   expect "it was pasted" test "$(phases_since "$mark")" = "Recording Transcribing Inserting Idle"
@@ -72,9 +87,9 @@ e2e_unicode_multiline_selection_paste() {
   expect "the clipboard is the user's again" test "$(clipboard)" = "$PROVIDER_SENTINEL"
 
   # Over a selection.
-  expect "a document with a range selected" \
-    unicode_doc "$UNICODE_PREFIX_2$UNICODE_SELECTED_2$UNICODE_SUFFIX_2" \
-    "$(esc_chars "$UNICODE_PREFIX_2")" "$(esc_chars "$UNICODE_SELECTED_2")"
+  unicode_setup "a document with a range selected" \
+    "$UNICODE_PREFIX_2$UNICODE_SELECTED_2$UNICODE_SUFFIX_2" \
+    "$(esc_chars "$UNICODE_PREFIX_2")" "$(esc_chars "$UNICODE_SELECTED_2")" || { unicode_end; return; }
   mark=$(phase_mark)
   expect "a dictation of the second text ends Idle" unicode_dictate "$UNICODE_RAW_2"
   expect "it was pasted" test "$(phases_since "$mark")" = "Recording Transcribing Inserting Idle"
@@ -83,15 +98,13 @@ e2e_unicode_multiline_selection_paste() {
   expect "the clipboard is the user's again" test "$(clipboard)" = "$PROVIDER_SENTINEL"
 
   # Once more, in a fresh document: one paste, not a replay of the last two.
-  expect "a fresh document with the caret inside its text" \
-    unicode_doc "$UNICODE_PREFIX_1$UNICODE_SUFFIX_1" "$(esc_chars "$UNICODE_PREFIX_1")"
+  unicode_setup "a fresh document with the caret inside its text" \
+    "$UNICODE_PREFIX_1$UNICODE_SUFFIX_1" "$(esc_chars "$UNICODE_PREFIX_1")" || { unicode_end; return; }
   expect "the first text again ends Idle" unicode_dictate "$UNICODE_RAW_1"
   expect "it went in exactly once" \
     textedit_is "$(esc_b64 "$UNICODE_PREFIX_1$UNICODE_CLEAN_1$UNICODE_SUFFIX_1")"
   expect "the clipboard is the user's again" test "$(clipboard)" = "$PROVIDER_SENTINEL"
   expect "three requests in all" provider_requests_are 3
 
-  [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_unicode_multiline_selection_paste
-  collect_log e2e_unicode_multiline_selection_paste
-  key_scenario_end
+  unicode_end
 }
