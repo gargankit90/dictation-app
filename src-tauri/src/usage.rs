@@ -133,6 +133,14 @@ pub fn engine_selected(provider: Provider) -> Event {
     }
 }
 
+/// Sharing was turned on: a new install ID, and the choice is recorded.
+pub fn sharing_turned_on(usage: &Usage) {
+    usage.0.set_enabled(true);
+    usage.record(Event::SettingChanged {
+        setting: SettingName::ShareUsageEvents,
+    });
+}
+
 /// Applies a save's change. Turning sharing off first stops everything and
 /// records nothing (not even that it was turned off); turning it on starts
 /// a new install ID and records that it was.

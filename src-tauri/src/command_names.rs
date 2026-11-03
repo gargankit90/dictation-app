@@ -18,4 +18,5 @@ pub const COMMAND_NAMES: &[&str] = &[
     "set_onboarding_step",
     "finish_onboarding",
     "relaunch_app",
+    "set_share_usage_events",
 ];

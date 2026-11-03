@@ -19,6 +19,11 @@ export const commands = {
 	 *  Validates and saves the settings, applies the launch-at-login choice to
 	 *  the OS and switches to the saved hotkey. An error means something didn't
 	 *  take effect; its text says what was saved and what wasn't.
+	 * 
+	 *  The "share anonymous usage events" field of `settings` is ignored: the
+	 *  stored choice stays, whatever the form held when it was loaded. Only
+	 *  [`set_share_usage_events`] changes it, so a Save can never undo a newer
+	 *  opt-out (A1 review, round 1).
 	 */
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, string>(__TAURI_INVOKE("save_settings", { settings })),
 	/**  Stores `key` as `provider`'s API key in the keychain. Write-only. */
@@ -57,6 +62,12 @@ export const commands = {
 	 *  Accessibility grant macOS doesn't hand to the running app, #50).
 	 */
 	relaunchApp: () => typedError<null, string>(__TAURI_INVOKE("relaunch_app")),
+	/**
+	 *  Turns sharing anonymous usage events on or off, and nothing else. Off
+	 *  stops sending at once, before the file is written: queued events and
+	 *  batches on their way are dropped and the install ID is deleted.
+	 */
+	setShareUsageEvents: (share: boolean) => typedError<null, string>(__TAURI_INVOKE("set_share_usage_events", { share })),
 };
 
 /* Types */

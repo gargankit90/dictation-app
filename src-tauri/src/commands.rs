@@ -228,9 +228,25 @@ fn save_with<S: SecretStore + 'static>(
     })
 }
 
+/// Held while the settings file is read and written by a command, so a save
+/// of the form and a change of the sharing choice never interleave their
+/// read and their write.
+static SETTINGS_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn settings_write() -> std::sync::MutexGuard<'static, ()> {
+    SETTINGS_WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Validates and saves the settings, applies the launch-at-login choice to
 /// the OS and switches to the saved hotkey. An error means something didn't
 /// take effect; its text says what was saved and what wasn't.
+///
+/// The "share anonymous usage events" field of `settings` is ignored: the
+/// stored choice stays, whatever the form held when it was loaded. Only
+/// [`set_share_usage_events`] changes it, so a Save can never undo a newer
+/// opt-out (A1 review, round 1).
 #[tauri::command]
 #[specta::specta]
 pub async fn save_settings(
@@ -244,17 +260,72 @@ pub async fn save_settings(
     let live = engine.inner().clone();
     let login = Arc::clone(&login.0);
     let hotkey = hotkey.0.clone();
-    let after = settings.clone();
-    let (before, saved) = on_config(&state, move |config| {
-        let before = config.settings().ok();
-        save_with_login(config, &live, &*login, &hotkey, settings).map(|saved| (before, saved))
+    let (change, saved) = on_config(&state, move |config| {
+        save_keeping_sharing(config, &live, &*login, &hotkey, settings)
     })
     .await?;
     // Usage events: names of what changed, never values (A1).
-    if let Some(before) = before {
-        usage::settings_saved(&usage, usage::settings_change(&before, &after));
+    if let Some(change) = change {
+        usage::settings_saved(&usage, change);
     }
     saved.problem().map_or(Ok(()), Err)
+}
+
+/// [`save_with_login`] with the stored sharing choice kept, and the usage
+/// change it made, if the stored settings could be read first.
+fn save_keeping_sharing<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    live: &LiveEngine,
+    login: &dyn LaunchAtLogin,
+    hotkey: &HotkeyControl,
+    mut settings: Settings,
+) -> Result<(Option<usage::SettingsChange>, Saved), SaveFailed> {
+    let _writing = settings_write();
+    let before = config.settings().ok();
+    if let Some(before) = &before {
+        settings.share_usage_events = before.share_usage_events;
+    }
+    let after = settings.clone();
+    let saved = save_with_login(config, live, login, hotkey, settings)?;
+    Ok((
+        before.map(|before| usage::settings_change(&before, &after)),
+        saved,
+    ))
+}
+
+/// Turns sharing anonymous usage events on or off, and nothing else. Off
+/// stops sending at once, before the file is written: queued events and
+/// batches on their way are dropped and the install ID is deleted.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_share_usage_events(
+    state: State<'_, AppConfig>,
+    usage: State<'_, Usage>,
+    share: bool,
+) -> Result<(), String> {
+    let usage = usage.inner().clone();
+    on_config(&state, move |config| write_sharing(config, &usage, share)).await
+}
+
+fn write_sharing<S: SecretStore>(
+    config: &Config<S>,
+    usage: &Usage,
+    share: bool,
+) -> Result<(), ConfigError> {
+    let _writing = settings_write();
+    if !share {
+        // First, so a slow disk can't keep events flowing.
+        usage.0.set_enabled(false);
+    }
+    let mut settings = config.settings()?;
+    if settings.share_usage_events != share {
+        settings.share_usage_events = share;
+        config.save_settings(&settings)?;
+        if share {
+            usage::sharing_turned_on(usage);
+        }
+    }
+    Ok(())
 }
 
 /// Stores `key` as `provider`'s API key in the keychain. Write-only.
@@ -615,6 +686,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         set_onboarding_step,
         finish_onboarding,
         relaunch_app,
+        set_share_usage_events,
     ])
 }
 
@@ -702,6 +774,7 @@ mod tests {
             "setOnboardingStep",
             "finishOnboarding",
             "relaunchApp",
+            "setShareUsageEvents",
         ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
@@ -710,7 +783,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 10,
+            commands, 11,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -801,6 +874,93 @@ mod tests {
                 "share_usage_events"
             ]
         );
+    }
+
+    /// A1 review, round 1: the sharing choice has one writer.
+    mod sharing {
+        use dictation_platform::fakes::{FakeLaunchAtLogin, MemSecretStore};
+
+        use super::super::*;
+        use super::hotkey::listening;
+
+        fn config(tag: &str) -> (Arc<Config<MemSecretStore>>, std::path::PathBuf) {
+            let dir = std::env::temp_dir().join(format!(
+                "dictation-sharing-test-{tag}-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            (Arc::new(Config::new(&dir, MemSecretStore::new())), dir)
+        }
+
+        fn stored(config: &Config<MemSecretStore>) -> bool {
+            config.settings().unwrap().share_usage_events
+        }
+
+        #[test]
+        fn the_command_changes_only_the_sharing_choice() {
+            let (config, dir) = config("only");
+            config
+                .save_settings(&Settings {
+                    language: Some("de".into()),
+                    ..Settings::default()
+                })
+                .unwrap();
+            let usage = Usage::disabled();
+            write_sharing(&config, &usage, false).unwrap();
+            let after = config.settings().unwrap();
+            assert!(!after.share_usage_events);
+            assert_eq!(after.language.as_deref(), Some("de"));
+            write_sharing(&config, &usage, true).unwrap();
+            assert!(stored(&config));
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// The form was loaded while sharing was on and Save is pressed
+        /// after the opt-out: its stale `true` must not win.
+        #[test]
+        fn a_save_with_a_stale_sharing_value_keeps_the_opt_out() {
+            let (config, dir) = config("stale");
+            write_sharing(&config, &Usage::disabled(), false).unwrap();
+            let (hotkey, _keys) = listening();
+            let stale = Settings {
+                share_usage_events: true,
+                language: Some("fr".into()),
+                ..Settings::default()
+            };
+            let (change, _) = save_keeping_sharing(
+                &config,
+                &LiveEngine::fixed(),
+                &FakeLaunchAtLogin::new(),
+                &hotkey,
+                stale,
+            )
+            .unwrap();
+            let saved = config.settings().unwrap();
+            assert!(!saved.share_usage_events, "the opt-out was undone");
+            assert_eq!(saved.language.as_deref(), Some("fr"), "the rest saved");
+            assert_eq!(change.unwrap().sharing, None, "no re-enabling");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        #[test]
+        fn a_save_cannot_turn_sharing_on_either() {
+            let (config, dir) = config("on");
+            let (hotkey, _keys) = listening();
+            let off = Settings {
+                share_usage_events: false,
+                ..Settings::default()
+            };
+            save_keeping_sharing(
+                &config,
+                &LiveEngine::fixed(),
+                &FakeLaunchAtLogin::new(),
+                &hotkey,
+                off,
+            )
+            .unwrap();
+            assert!(stored(&config), "the stored choice (on) stays");
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     mod launch_at_login {
@@ -2250,6 +2410,7 @@ mod capability_tests {
             "has_api_key" | "test_api_key" => serde_json::json!({ "provider": "groq" }),
             "request_permission" => serde_json::json!({ "permission": "microphone" }),
             "set_onboarding_step" => serde_json::json!({ "step": "microphone" }),
+            "set_share_usage_events" => serde_json::json!({ "share": true }),
             _ => serde_json::json!({}),
         }
     }
@@ -2312,7 +2473,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 10);
+        assert_eq!(COMMAND_NAMES.len(), 11);
     }
 
     #[test]
