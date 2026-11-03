@@ -130,7 +130,7 @@ pre-commit (lefthook) runs the fast checks on staged files: `cargo fmt
 | `tests/e2e/` | The VM end-to-end suite. Run by the maintainer, see its README. |
 | `third_party/` | Patched forks of `handy-keys` and `coreaudio-rs`; each has a `PATCHES.md` saying what changed and why. |
 | `docs/` | Engineering notes (`ENGINEERING.md`), the tester guide, release notes, agent role files. |
-| `docs/milestones/`, `test-reports/`, `reviews/` | The agents' paper trail: each milestone's spec, test reports and code reviews. Moving to `docs/history/` soon. |
+| `docs/history/` | The agents' paper trail: every milestone spec, Tester run and Code Review round. Start with its README. |
 
 ## Contributing and security
 

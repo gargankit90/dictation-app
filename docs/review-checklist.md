@@ -17,7 +17,7 @@ those checks is **major**; anything else about the guards is **minor**.
 
 ## 1. Scope
 
-- [ ] The PR does what `docs/milestones/<id>.md` asks, and nothing outside its
+- [ ] The PR does what `docs/history/milestones/<id>.md` asks, and nothing outside its
       scope.
 - [ ] Every acceptance criterion in the PR notes maps to code and a test.
 

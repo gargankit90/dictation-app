@@ -751,7 +751,7 @@ mod tests {
     const ENDPOINT: &str =
         "https://github.com/gargankit90/dictation-app/releases/latest/download/latest.json";
 
-    /// The owner's minisign public key (M5.4, `docs/milestones/M5.4.md`).
+    /// The owner's minisign public key (M5.4, `docs/history/milestones/M5.4.md`).
     const OWNER_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2QzgwRjE3M0E5NkQ3OEYKUldTUDE1WTZGdy9JOWpxTlNIUjA4ampTb2pSdkFHdENZVjA4TEtBSkkwVW5zNHFTZkNmSURRWHAK";
 
     #[test]

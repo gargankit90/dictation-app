@@ -28,7 +28,7 @@ transcription first (Groq/OpenAI, testers bring their own key); local models
 later.
 
 How it is built: `docs/ENGINEERING.md`. What to build next:
-`docs/milestones/<id>.md`.
+`docs/history/milestones/<id>.md`.
 
 ## Layout and dependency rules
 
@@ -67,7 +67,7 @@ scripts/gate.sh                        # the whole gate, stops at the first fail
 
 ## Workflow: every change goes through a pull request
 
-1. The Lead writes `docs/milestones/<id>.md` with numbered acceptance
+1. The Lead writes `docs/history/milestones/<id>.md` with numbered acceptance
    criteria tagged `[auto]` or `[manual]`.
 2. **Developer** works on branch `m<id>-<slug>` in its own worktree, makes
    small Conventional Commits, runs the gate, pushes, and opens a PR to `main`
@@ -76,11 +76,11 @@ scripts/gate.sh                        # the whole gate, stops at the first fail
    in parallel, each time-boxed to 30–45 minutes (report what you have when
    time is up):
    - **Tester** checks each acceptance criterion and runs e2e tests, writes
-     `test-reports/<id>-run<k>.md`, and posts a PR comment starting
+     `docs/history/test-reports/<id>-run<k>.md`, and posts a PR comment starting
      `Tester: PASS` or `Tester: FAIL`. CI and lefthook already run the gate;
      write a custom test harness only when a criterion needs one.
    - **Code Reviewer** reviews the diff with `docs/review-checklist.md`,
-     comments inline, writes `reviews/<id>-round<k>.md`, and posts a PR
+     comments inline, writes `docs/history/reviews/<id>-round<k>.md`, and posts a PR
      comment starting `Reviewer: APPROVED` or `Reviewer: CHANGES REQUESTED`.
 4. On a fail or changes requested, the Developer fixes **all** blocker and
    major findings from both in one round and pushes, then the Tester and

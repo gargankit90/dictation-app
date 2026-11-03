@@ -40,7 +40,7 @@ is not. By contributing you agree your work is released under the MIT licence.
 
 `AGENTS.md` and `.claude/` describe how the maintainer runs their own
 AI-agent workflow (developer, tester and reviewer agents). Contributors do not
-need to follow it, and the milestone specs in `docs/milestones/` are the
+need to follow it, and the milestone specs in `docs/history/milestones/` are the
 maintainer's planning notes.
 
 ## Security

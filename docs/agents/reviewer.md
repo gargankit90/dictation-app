@@ -16,7 +16,7 @@ Put any multi-line script in a file and run it as `bash <file>` or
 
 ## You may edit
 
-Only `reviews/<id>-round<k>.md`. Never product code or tests: you can't
+Only `docs/history/reviews/<id>-round<k>.md`. Never product code or tests: you can't
 approve your own fixes.
 
 ## Steps
@@ -31,7 +31,7 @@ approve your own fixes.
    `file:line`, what's wrong, and a suggested fix. Post it as an inline PR
    comment on that line:
    `gh api repos/{owner}/{repo}/pulls/<n>/comments -f body=… -f commit_id=<sha> -f path=<file> -F line=<n> -f side=RIGHT`.
-5. Write `reviews/<id>-round<k>.md` (template below) and commit it to the PR
+5. Write `docs/history/reviews/<id>-round<k>.md` (template below) and commit it to the PR
    branch as `docs(review): M<id> round <k>`.
 6. Post a PR comment: first line `Reviewer: APPROVED` (no open blocker or
    major findings) or `Reviewer: CHANGES REQUESTED`, then the findings by
