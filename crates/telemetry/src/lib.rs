@@ -248,3 +248,223 @@ fn build_client(config: &Config) -> Option<Client> {
         .build()
         .ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use dictation_ports::{ErrorType, SettingName};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+
+    const KEY: &str = "phc_test_not_a_real_key";
+
+    fn temp(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("dictation-ph-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn config(server: &MockServer, dir: &PathBuf) -> Config {
+        let mut config = Config::new(Some(KEY), dir);
+        config.host = server.uri();
+        config.flush_interval = Duration::from_secs(3600);
+        config
+    }
+
+    fn failed() -> Event {
+        Event::DictationFailed {
+            error_type: ErrorType::Transcription,
+        }
+    }
+
+    async fn bodies(server: &MockServer) -> Vec<Value> {
+        let requests = server.received_requests().await.unwrap_or_default();
+        requests
+            .iter()
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn the_default_host_is_posthog_us() {
+        assert_eq!(POSTHOG_HOST, "https://us.i.posthog.com");
+        assert_eq!(Config::new(Some("k"), "x").host, POSTHOG_HOST);
+    }
+
+    #[tokio::test]
+    async fn without_a_key_nothing_is_queued_sent_or_written() {
+        let dir = temp("nokey");
+        for key in [None, Some(""), Some("  ")] {
+            let telemetry = PostHogTelemetry::start(
+                Config::new(key, &dir),
+                true,
+                &tokio::runtime::Handle::current(),
+            );
+            telemetry.record(failed());
+            assert!(!telemetry.is_enabled());
+            assert_eq!(telemetry.queued(), 0);
+            telemetry.flush().await;
+        }
+        assert!(!dir.exists(), "no install ID without a key");
+    }
+
+    #[tokio::test]
+    async fn events_go_out_as_one_anonymous_batch() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/batch/"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = temp("batch");
+        let telemetry = PostHogTelemetry::start(
+            config(&server, &dir),
+            true,
+            &tokio::runtime::Handle::current(),
+        );
+        telemetry.record(failed());
+        telemetry.record(Event::SettingChanged {
+            setting: SettingName::Hotkey,
+        });
+        assert_eq!(telemetry.queued(), 2);
+        telemetry.flush().await;
+        assert_eq!(telemetry.queued(), 0);
+
+        let sent = bodies(&server).await;
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0]["api_key"], KEY);
+        let batch = sent[0]["batch"].as_array().unwrap();
+        assert_eq!(batch.len(), 2);
+        let id = install_id::load_or_create(&dir).unwrap();
+        for item in batch {
+            assert_eq!(item["distinct_id"], id.as_str());
+            let properties = item["properties"].as_object().unwrap();
+            assert_eq!(properties["$process_person_profile"], false);
+            assert_eq!(properties["$geoip_disable"], true);
+            assert!(!properties.contains_key("$ip"));
+            assert!(!properties.contains_key("$set"));
+        }
+        assert_eq!(batch[0]["event"], "dictation_failed");
+        assert_eq!(batch[0]["properties"]["error_type"], "transcription");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn turning_it_off_clears_the_queue_and_the_id_and_sends_nothing() {
+        let server = MockServer::start().await;
+        let dir = temp("off");
+        let telemetry = PostHogTelemetry::start(
+            config(&server, &dir),
+            true,
+            &tokio::runtime::Handle::current(),
+        );
+        let first = install_id::load_or_create(&dir).unwrap();
+        telemetry.record(failed());
+        telemetry.set_enabled(false);
+        assert_eq!(telemetry.queued(), 0);
+        assert!(!telemetry.is_enabled());
+        assert!(!dir.join(install_id::FILE).exists());
+        telemetry.record(failed());
+        telemetry.flush().await;
+        assert!(bodies(&server).await.is_empty());
+
+        telemetry.set_enabled(true);
+        let second = install_id::load_or_create(&dir).unwrap();
+        assert_ne!(first, second, "a new ID after off and on");
+        telemetry.record(failed());
+        assert_eq!(telemetry.queued(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_saved_off_choice_sends_and_stores_nothing() {
+        let server = MockServer::start().await;
+        let dir = temp("savedoff");
+        let telemetry = PostHogTelemetry::start(
+            config(&server, &dir),
+            false,
+            &tokio::runtime::Handle::current(),
+        );
+        telemetry.record(failed());
+        assert_eq!(telemetry.queued(), 0);
+        assert!(!dir.join(install_id::FILE).exists());
+    }
+
+    #[tokio::test]
+    async fn a_failed_send_drops_everything_and_is_not_retried() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(1..=2)
+            .mount(&server)
+            .await;
+        let dir = temp("fail");
+        let mut config = config(&server, &dir);
+        config.batch_size = 1;
+        let telemetry = PostHogTelemetry::start(config, true, &tokio::runtime::Handle::current());
+        for _ in 0..5 {
+            telemetry.record(failed());
+        }
+        telemetry.flush().await;
+        assert_eq!(telemetry.queued(), 0, "the rest was dropped, not retried");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let requests = bodies(&server).await.len();
+        assert!(
+            (1..=2).contains(&requests),
+            "{requests} requests for 5 events, no retries"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_host_drops_silently() {
+        let dir = temp("down");
+        let mut config = Config::new(Some(KEY), &dir);
+        config.host = "http://127.0.0.1:1".into();
+        config.timeout = Duration::from_millis(500);
+        let telemetry = PostHogTelemetry::start(config, true, &tokio::runtime::Handle::current());
+        telemetry.record(failed());
+        telemetry.flush().await;
+        assert_eq!(telemetry.queued(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn the_queue_is_bounded() {
+        let server = MockServer::start().await;
+        let dir = temp("bound");
+        let mut config = config(&server, &dir);
+        config.queue_cap = 3;
+        let telemetry = PostHogTelemetry::start(config, true, &tokio::runtime::Handle::current());
+        for _ in 0..50 {
+            telemetry.record(failed());
+        }
+        assert_eq!(telemetry.queued(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn the_background_task_sends_a_full_batch_without_being_asked() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let dir = temp("task");
+        let mut config = config(&server, &dir);
+        config.batch_size = 2;
+        let telemetry = PostHogTelemetry::start(config, true, &tokio::runtime::Handle::current());
+        telemetry.record(failed());
+        telemetry.record(failed());
+        for _ in 0..100 {
+            if !bodies(&server).await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(bodies(&server).await.len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
