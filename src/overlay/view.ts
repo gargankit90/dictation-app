@@ -8,7 +8,7 @@ export type OverlayView =
   | { state: "hidden" }
   | { state: "recording" }
   | { state: "transcribing" }
-  | { state: "error"; message: string };
+  | { state: "error"; message: string; code?: string };
 
 /** The one event the overlay listens to (sent only to the overlay window). */
 export const OVERLAY_EVENT = "overlay-view";
@@ -44,7 +44,13 @@ export function parseView(payload: unknown): OverlayView {
       return { state: "transcribing" };
     case "error":
       return "message" in payload && typeof payload.message === "string"
-        ? { state: "error", message: payload.message }
+        ? {
+            state: "error",
+            message: payload.message,
+            ...("code" in payload && typeof payload.code === "string"
+              ? { code: payload.code }
+              : {}),
+          }
         : HIDDEN;
     default:
       return HIDDEN;

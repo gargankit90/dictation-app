@@ -8,6 +8,7 @@
 //! the tray icon's title, tooltip and menu.
 
 use dictation_core::coordinator::Phase;
+use dictation_core::diagnostics::ErrorCode;
 use dictation_core::error::{DictationError, Permission};
 
 use crate::pipeline::UiEvent;
@@ -32,6 +33,8 @@ pub struct TrayView {
     pub title: Option<String>,
     /// The detail for the tooltip, after the app's name, or none.
     pub detail: Option<String>,
+    /// The error's stable code, shown in the tooltip after the detail (E1).
+    pub code: Option<ErrorCode>,
     /// Whether the menu offers Relaunch: the microphone is denied, and a
     /// grant made in System Settings reaches the app only after a relaunch
     /// (`docs/ENGINEERING.md`); or the hotkey doesn't work, most often
@@ -45,7 +48,7 @@ pub struct TrayView {
 #[derive(Debug, Default)]
 pub struct TrayStatus {
     /// The dictation error showing, if any (not the hotkey's).
-    error: Option<String>,
+    error: Option<(String, ErrorCode)>,
     /// Whether the hotkey doesn't work.
     hotkey_down: bool,
     /// Whether the microphone is denied, as far as this run of the app
@@ -97,7 +100,7 @@ impl TrayStatus {
                 if *error == DictationError::PermissionMissing(Permission::Microphone) {
                     self.microphone_denied = true;
                 }
-                self.error = Some(error.to_string());
+                self.error = Some((error.to_string(), ErrorCode::of(error)));
             }
             UiEvent::HotkeyRestored => self.hotkey_down = false,
             UiEvent::StateChanged(Phase::Recording) => {
@@ -108,14 +111,16 @@ impl TrayStatus {
         }
         let relaunch = self.microphone_denied || self.hotkey_down;
         let view = match (&self.error, self.hotkey_down) {
-            (Some(error), _) => TrayView {
+            (Some((error, code)), _) => TrayView {
                 title: Some(DICTATION_FAILED.to_owned()),
                 detail: Some(error.clone()),
+                code: Some(*code),
                 relaunch,
             },
             (None, true) => TrayView {
                 title: Some(HOTKEY_UNAVAILABLE.to_owned()),
                 detail: Some(DictationError::HotkeyFailed.to_string()),
+                code: Some(ErrorCode::HotkeyUnregistered),
                 relaunch,
             },
             (None, false) => TrayView {
@@ -150,6 +155,18 @@ mod tests {
         for title in [DICTATION_FAILED, HOTKEY_UNAVAILABLE] {
             assert!(title.chars().count() <= MAX_TITLE_CHARS, "{title}");
         }
+    }
+
+    #[test]
+    fn the_tray_carries_the_error_code() {
+        let mut tray = TrayStatus::default();
+        let shown = tray.on_event(&microphone_denied()).unwrap();
+        assert_eq!(shown.code, Some(ErrorCode::MicDenied));
+        let shown = tray.on_event(&UiEvent::Error(DictationError::HotkeyFailed));
+        assert_eq!(
+            shown.and_then(|view| view.code),
+            Some(ErrorCode::HotkeyUnregistered)
+        );
     }
 
     #[test]
@@ -221,6 +238,7 @@ mod tests {
             Some(TrayView {
                 title: Some(HOTKEY_UNAVAILABLE.to_owned()),
                 detail: Some(DictationError::HotkeyFailed.to_string()),
+                code: Some(ErrorCode::HotkeyUnregistered),
                 relaunch: true,
             })
         );
@@ -306,6 +324,7 @@ mod tests {
             Some(TrayView {
                 title: Some(DICTATION_FAILED.to_owned()),
                 detail: Some(no_key_text()),
+                code: Some(ErrorCode::KeyMissing),
                 // The hotkey is still down (#173).
                 relaunch: true,
             })
@@ -327,6 +346,7 @@ mod tests {
             Some(TrayView {
                 title: Some(DICTATION_FAILED.to_owned()),
                 detail: Some(no_key_text()),
+                code: Some(ErrorCode::KeyMissing),
                 relaunch: false,
             })
         );

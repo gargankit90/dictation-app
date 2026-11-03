@@ -833,10 +833,13 @@ async fn show_ui_events(
 
 /// The tray's tooltip for `view`: the app's name, then the detail if any.
 fn tray_tooltip(view: &TrayView) -> String {
-    view.detail.as_ref().map_or_else(
-        || TOOLTIP.to_owned(),
-        |detail| format!("{TOOLTIP}: {detail}"),
-    )
+    let Some(detail) = &view.detail else {
+        return TOOLTIP.to_owned();
+    };
+    match view.code {
+        Some(code) => format!("{TOOLTIP}: {detail} ({code})"),
+        None => format!("{TOOLTIP}: {detail}"),
+    }
 }
 
 /// Puts `view` in the tray's title (next to the icon), tooltip and menu.

@@ -39,6 +39,11 @@ describe("criterion_m5_1_1 OverlayContent", () => {
     expect(status.dataset.state).toBe("transcribing");
   });
 
+  it("shows the error's stable code under its message", () => {
+    render(<OverlayContent view={{ state: "error", message: MESSAGE, code: "mic_denied" }} />);
+    expect(screen.getByRole("alert").textContent).toContain("mic_denied");
+  });
+
   it("shows an error with its message", () => {
     render(<OverlayContent view={{ state: "error", message: MESSAGE }} />);
     const alert = screen.getByRole("alert");
@@ -133,6 +138,10 @@ describe("parseView", () => {
     [
       { state: "error", message: MESSAGE },
       { state: "error", message: MESSAGE },
+    ],
+    [
+      { state: "error", message: MESSAGE, code: "mic_denied" },
+      { state: "error", message: MESSAGE, code: "mic_denied" },
     ],
     [{ state: "hidden" }, { state: "hidden" }],
     // Anything unexpected hides the overlay rather than showing junk.

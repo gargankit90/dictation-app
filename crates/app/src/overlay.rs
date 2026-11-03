@@ -14,6 +14,7 @@
 use std::time::Duration;
 
 use dictation_core::coordinator::Phase;
+use dictation_core::diagnostics::ErrorCode;
 use dictation_core::error::DictationError;
 use tokio::time::Instant;
 
@@ -37,6 +38,8 @@ pub enum OverlayView {
     Error {
         /// The error's `Display` text.
         message: String,
+        /// Its stable code, shown under the message (E1).
+        code: ErrorCode,
     },
 }
 
@@ -91,6 +94,7 @@ impl OverlayModel {
                 // timer.
                 self.view = OverlayView::Error {
                     message: error.to_string(),
+                    code: ErrorCode::of(error),
                 };
                 self.hotkey_error = matches!(error, DictationError::HotkeyFailed);
                 return Some(Change {
@@ -200,6 +204,7 @@ mod tests {
     fn error_view() -> OverlayView {
         OverlayView::Error {
             message: DictationError::EmptyTranscript.to_string(),
+            code: ErrorCode::NoSpeech,
         }
     }
 
@@ -262,7 +267,7 @@ mod tests {
                 reason: format!("401 Unauthorized for key {key}"),
             }))
             .expect("an error is a change");
-        let OverlayView::Error { message } = change.view else {
+        let OverlayView::Error { message, .. } = change.view else {
             panic!("expected an error view");
         };
         assert!(!message.contains(key), "{message}");
@@ -305,6 +310,7 @@ mod tests {
     fn hotkey_error_view() -> OverlayView {
         OverlayView::Error {
             message: DictationError::HotkeyFailed.to_string(),
+            code: ErrorCode::HotkeyUnregistered,
         }
     }
 

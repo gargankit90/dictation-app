@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dictation_core::coordinator::Phase;
+use dictation_core::diagnostics::ErrorCode;
 use dictation_core::error::DictationError;
 use dictation_pipeline::overlay::{
     ERROR_VISIBLE_FOR, OverlayModel, OverlaySurface, OverlayView, run,
@@ -47,6 +48,7 @@ fn failed() -> UiEvent {
 fn failed_view() -> OverlayView {
     OverlayView::Error {
         message: DictationError::EmptyTranscript.to_string(),
+        code: ErrorCode::NoSpeech,
     }
 }
 
