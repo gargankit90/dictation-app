@@ -70,12 +70,17 @@ or written to a file. See `docs/privacy.md` for the project settings to turn on.
 ## Making a release
 
 1. In a PR, bump `version` in `src-tauri/tauri.conf.json`, `package.json` and
-   `Cargo.toml` (the script refuses a version they don't all have). Merge it.
+   `Cargo.toml` (the script refuses a version they don't all have), and make
+   sure `CHANGELOG.md` has a `## [x.y.z] — <date>` section for it, with the
+   `[date set at release]` replaced. That section's text (not its heading) is
+   the GitHub release's notes and the "Update available" text; the script
+   refuses a version with no section before it builds or reads the Keychain.
+   `--notes "<text>"` overrides it. Merge the PR.
 2. On the owner's Mac, on that merged `main` commit (`git switch --detach
    origin/main`), with a clean tree:
 
    ```sh
-   scripts/release.sh 0.2.0 --notes "What's new, in a line or two."   # dry run
+   scripts/release.sh 0.2.0   # dry run
    ```
 
    It builds the release signed `dictation-app Dev`, reads the two Keychain
@@ -91,7 +96,7 @@ or written to a file. See `docs/privacy.md` for the project settings to turn on.
 3. To publish, run it again with `--publish`. Do not create the tag yourself:
 
    ```sh
-   scripts/release.sh 0.2.0 --notes "…" --publish
+   scripts/release.sh 0.2.0 --publish
    ```
 
    It refuses without a clean tree, with a `HEAD` that is not on origin's
