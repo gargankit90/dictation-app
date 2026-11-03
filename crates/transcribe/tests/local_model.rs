@@ -6,6 +6,8 @@
 //! text is checked too; otherwise one second of silence must transcribe
 //! without an error.
 
+#![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+
 use std::path::PathBuf;
 
 use dictation_ports::{Audio, Transcriber};
