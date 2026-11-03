@@ -229,8 +229,15 @@ pub fn readiness(
 /// Whether the provider in the settings has a key saved. A keychain that
 /// can't answer (locked, timed out) counts as no key: onboarding then asks
 /// for one, and saving it again does no harm.
+///
+/// With the on-device engine (L1) no key is needed, so the step counts as
+/// done and the keychain isn't read.
 pub fn key_saved<S: SecretStore + 'static>(config: &Arc<Config<S>>, live: &LiveEngine) -> bool {
-    let provider = config.settings().unwrap_or_default().provider;
+    let settings = config.settings().unwrap_or_default();
+    if settings.transcription == dictation_core::settings::Transcription::Local {
+        return true;
+    }
+    let provider = settings.provider;
     match live.read_key(config, provider) {
         Ok(key) => key.is_some(),
         Err(error) => {
@@ -483,6 +490,21 @@ mod tests {
         config
             .set_api_key(dictation_core::settings::Provider::Groq, "gsk_made_up_key")
             .unwrap();
+        assert!(key_saved(&config, &live));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn l1_the_on_device_engine_needs_no_key() {
+        let dir = temp("local-key");
+        let config = Arc::new(Config::new(&dir, MemSecretStore::new()));
+        let live = LiveEngine::fixed();
+        assert!(!key_saved(&config, &live));
+        let settings = dictation_core::settings::Settings {
+            transcription: dictation_core::settings::Transcription::Local,
+            ..dictation_core::settings::Settings::default()
+        };
+        config.save_settings(&settings).unwrap();
         assert!(key_saved(&config, &live));
         let _ = std::fs::remove_dir_all(&dir);
     }

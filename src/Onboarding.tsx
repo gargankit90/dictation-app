@@ -452,7 +452,17 @@ export function Onboarding({ onFinished }: Props) {
         </section>
       )}
 
-      {status.step === "key" && (
+      {status.step === "key" && settings?.transcription === "local" && (
+        <section>
+          <h2>No key needed</h2>
+          <p>
+            Dictation runs on this Mac with the model chosen in Settings, so there is no API key to
+            add. If the model isn&apos;t downloaded yet, download it in Settings.
+          </p>
+        </section>
+      )}
+
+      {status.step === "key" && settings?.transcription !== "local" && (
         <section>
           <h2>Add your API key</h2>
           {settingsError !== null ? (
@@ -572,7 +582,16 @@ export function Onboarding({ onFinished }: Props) {
             Back
           </button>
         )}
-        {status.step === "key" ? (
+        {status.step === "key" && settings?.transcription === "local" ? (
+          <button
+            type="button"
+            className="primary"
+            disabled={busy}
+            onClick={() => void goTo("try")}
+          >
+            Continue
+          </button>
+        ) : status.step === "key" ? (
           <button
             type="button"
             className="primary"

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SyntheticEvent } from "react";
 import { commands } from "./bindings";
-import type { Provider, Settings_Serialize } from "./bindings";
+import type { Provider, Settings_Serialize, Transcription } from "./bindings";
 import { BROKEN, messageOf, testKey as runKeyTest } from "./keyTest";
+import { LocalModels } from "./LocalModels";
 import type { Notice } from "./keyTest";
 import { PROVIDERS, providerInfo } from "./providers";
 import "./settings.css";
@@ -39,6 +40,8 @@ export function Settings() {
   const [loaded, setLoaded] = useState<Settings_Serialize | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [provider, setProvider] = useState<Provider>("groq");
+  const [transcription, setTranscription] = useState<Transcription>("cloud");
+  const [localModel, setLocalModel] = useState("");
   const [language, setLanguage] = useState("");
   const [hotkey, setHotkey] = useState("");
   // What the OS says about the login item, as the app last reported it.
@@ -91,6 +94,8 @@ export function Settings() {
         }
         setLoaded(result.data);
         setProvider(result.data.provider);
+        setTranscription(result.data.transcription);
+        setLocalModel(result.data.local_model);
         setLanguage(result.data.language ?? "");
         setHotkey(result.data.hotkey);
         setLaunchAtLogin(result.data.launch_at_login);
@@ -231,6 +236,8 @@ export function Settings() {
         language: normalizeLanguage(language),
         hotkey: hotkey.trim(),
         launch_at_login: launch,
+        transcription,
+        local_model: localModel,
       };
       const saved = await commands.saveSettings(toSave);
       if (saved.status === "error") {
@@ -255,6 +262,8 @@ export function Settings() {
       const stored = reread.status === "ok" ? reread.data : toSave;
       setLoaded(stored);
       setProvider(stored.provider);
+      setTranscription(stored.transcription);
+      setLocalModel(stored.local_model);
       setLanguage(stored.language ?? "");
       setHotkey(stored.hotkey);
       setLaunchAtLogin(stored.launch_at_login);
@@ -292,91 +301,156 @@ export function Settings() {
       <h1>Settings</h1>
       <form onSubmit={(event) => void save(event)} noValidate>
         <fieldset disabled={saving}>
-          <div className="field">
-            <label htmlFor="provider">Provider</label>
-            <select
-              id="provider"
-              value={provider}
-              onChange={(event) => {
-                changeProvider(event.target.value as Provider);
-              }}
-            >
-              {PROVIDERS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
+          <fieldset className="field choice">
+            <legend>Transcription</legend>
+            <label className="check">
+              <input
+                type="radio"
+                name="transcription"
+                value="local"
+                checked={transcription === "local"}
+                onChange={() => {
+                  if (saving) return;
+                  setTranscription("local");
+                  setNotice(null);
+                }}
+              />
+              On this Mac
+            </label>
+            <label className="check">
+              <input
+                type="radio"
+                name="transcription"
+                value="cloud"
+                checked={transcription === "cloud"}
+                onChange={() => {
+                  if (saving) return;
+                  setTranscription("cloud");
+                  setNotice(null);
+                }}
+              />
+              Your own key
+            </label>
             <p className="hint">
-              Speech is sent to this service to be turned into text.
-              {changesModel &&
-                ` Saving switches to ${info.name}'s default model, ${info.defaultModel}.`}
+              {transcription === "local"
+                ? "Speech is turned into text on this Mac with a model you download once. No key needed, and nothing is sent anywhere."
+                : "Speech is sent to Groq or OpenAI with your own API key."}{" "}
+              Takes effect when you save.
             </p>
-          </div>
+          </fieldset>
 
-          <div className="field">
-            <label htmlFor="api-key">{info.name} API key</label>
-            <input
-              id="api-key"
-              type="password"
-              value={keyInput}
-              autoComplete="off"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              placeholder={
-                keyStatus.state === "saved" ? "Paste a new key to replace it" : "Paste your key"
-              }
-              aria-invalid={errors.key !== undefined}
-              aria-describedby="api-key-status api-key-error"
-              onChange={(event) => {
-                changeKey(event.target.value);
-              }}
-            />
-            <p id="api-key-status" className="hint">
-              {keyStatus.state === "saved" ? (
-                <strong className="saved">Key saved</strong>
-              ) : keyStatus.state === "none" ? (
-                "No key saved yet."
-              ) : keyStatus.state === "checking" ? (
-                "Checking for a saved key…"
-              ) : (
-                <span role="alert" className="error">
-                  Couldn&apos;t check for a saved key: {keyStatus.message}
-                </span>
-              )}{" "}
-              The key is kept in the system keychain and is never shown again.
-            </p>
-            <p id="api-key-error" role={errors.key ? "alert" : undefined} className="error">
-              {errors.key}
-            </p>
-            <div className="row">
-              <button type="button" disabled={testing || saving} onClick={() => void testKey()}>
-                {testing ? "Testing…" : "Test key"}
-              </button>
-              <span className="hint">
-                Tests the key in the box (without saving it), or the saved key if the box is empty.
-              </span>
-              {keyStatus.state === "error" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void checkKeySaved(provider);
-                  }}
+          {transcription === "local" && (
+            <div className="field">
+              <LocalModels
+                selected={localModel}
+                onSelect={(id) => {
+                  if (saving) return;
+                  setLocalModel(id);
+                  setNotice(null);
+                }}
+                disabled={saving}
+              />
+              {notice !== null && (
+                <p
+                  role={notice.kind === "error" ? "alert" : "status"}
+                  className={`notice ${notice.kind}`}
                 >
-                  Retry
-                </button>
+                  {notice.text}
+                </p>
               )}
             </div>
-            {notice !== null && (
-              <p
-                role={notice.kind === "error" ? "alert" : "status"}
-                className={`notice ${notice.kind}`}
-              >
-                {notice.text}
-              </p>
-            )}
-          </div>
+          )}
+
+          {transcription === "cloud" && (
+            <>
+              <div className="field">
+                <label htmlFor="provider">Provider</label>
+                <select
+                  id="provider"
+                  value={provider}
+                  onChange={(event) => {
+                    changeProvider(event.target.value as Provider);
+                  }}
+                >
+                  {PROVIDERS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="hint">
+                  Speech is sent to this service to be turned into text.
+                  {changesModel &&
+                    ` Saving switches to ${info.name}'s default model, ${info.defaultModel}.`}
+                </p>
+              </div>
+
+              <div className="field">
+                <label htmlFor="api-key">{info.name} API key</label>
+                <input
+                  id="api-key"
+                  type="password"
+                  value={keyInput}
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder={
+                    keyStatus.state === "saved" ? "Paste a new key to replace it" : "Paste your key"
+                  }
+                  aria-invalid={errors.key !== undefined}
+                  aria-describedby="api-key-status api-key-error"
+                  onChange={(event) => {
+                    changeKey(event.target.value);
+                  }}
+                />
+                <p id="api-key-status" className="hint">
+                  {keyStatus.state === "saved" ? (
+                    <strong className="saved">Key saved</strong>
+                  ) : keyStatus.state === "none" ? (
+                    "No key saved yet."
+                  ) : keyStatus.state === "checking" ? (
+                    "Checking for a saved key…"
+                  ) : (
+                    <span role="alert" className="error">
+                      Couldn&apos;t check for a saved key: {keyStatus.message}
+                    </span>
+                  )}{" "}
+                  The key is kept in the system keychain and is never shown again.
+                </p>
+                <p id="api-key-error" role={errors.key ? "alert" : undefined} className="error">
+                  {errors.key}
+                </p>
+                <div className="row">
+                  <button type="button" disabled={testing || saving} onClick={() => void testKey()}>
+                    {testing ? "Testing…" : "Test key"}
+                  </button>
+                  <span className="hint">
+                    Tests the key in the box (without saving it), or the saved key if the box is
+                    empty.
+                  </span>
+                  {keyStatus.state === "error" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void checkKeySaved(provider);
+                      }}
+                    >
+                      Retry
+                    </button>
+                  )}
+                </div>
+                {notice !== null && (
+                  <p
+                    role={notice.kind === "error" ? "alert" : "status"}
+                    className={`notice ${notice.kind}`}
+                  >
+                    {notice.text}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
 
           <div className="field">
             <label htmlFor="hotkey">Hotkey</label>

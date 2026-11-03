@@ -24,6 +24,8 @@ class Backend {
     language: null,
     hotkey: "RightAlt",
     launch_at_login: false,
+    transcription: "cloud",
+    local_model: "parakeet-unified-en-0.6b-q4_k_m",
   };
   keys: Record<Provider, boolean> = { groq: false, openai: false };
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
@@ -410,6 +412,8 @@ describe("criterion 2: settings save and reload", () => {
         language: "de",
         hotkey: "Ctrl+Shift+Space",
         launch_at_login: false,
+        transcription: "cloud",
+        local_model: "parakeet-unified-en-0.6b-q4_k_m",
       },
     });
     expect(screen.getByText("Key saved")).toBeTruthy();

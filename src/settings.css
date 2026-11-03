@@ -163,3 +163,24 @@ button:disabled {
   margin-top: 6px;
   resize: vertical;
 }
+
+/* L1: the engine choice and the on-device model picker. */
+fieldset.choice {
+  border: none;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+
+.local-models ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.local-models li {
+  margin-bottom: 0.75rem;
+}
+
+.local-models progress {
+  width: 100%;
+}
