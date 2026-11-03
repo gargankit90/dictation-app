@@ -270,22 +270,16 @@ export function Settings() {
 
   /**
    * Turns sharing usage events on or off at once, without the Save button:
-   * "off" has to stop sending now. It saves the stored settings with only
-   * this field changed, so edits not yet saved in the form are neither saved
-   * nor lost.
+   * "off" has to stop sending now. It has a command of its own that changes
+   * only this choice, and Save never changes it, so no Save can undo it.
    */
   async function setSharing(share: boolean) {
-    if (saving || loaded === null) return;
+    if (loaded === null) return;
     setNotice(null);
     try {
-      const current = await commands.getSettings();
-      if (current.status === "error") {
-        setNotice({ kind: "error", text: messageOf(current.error) });
-        return;
-      }
-      const saved = await commands.saveSettings({ ...current.data, share_usage_events: share });
-      if (saved.status === "error") {
-        setNotice({ kind: "error", text: messageOf(saved.error) });
+      const result = await commands.setShareUsageEvents(share);
+      if (result.status === "error") {
+        setNotice({ kind: "error", text: messageOf(result.error) });
         return;
       }
       setLoaded((now) => (now === null ? now : { ...now, share_usage_events: share }));
