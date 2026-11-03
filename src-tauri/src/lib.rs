@@ -985,7 +985,14 @@ mod tray_tests {
                 _ => DICTATION_FAILED,
             };
             assert_eq!(title, expected, "{error}");
-            assert_eq!(tray_tooltip(&view), format!("dictation-app: {error}"));
+            // E1: the tooltip ends with the error's stable code.
+            assert_eq!(
+                tray_tooltip(&view),
+                format!(
+                    "dictation-app: {error} ({})",
+                    dictation_core::diagnostics::ErrorCode::of(&error)
+                )
+            );
         }
     }
 
@@ -999,6 +1006,7 @@ mod tray_tests {
         assert_eq!(tray_action(SETTINGS_ID), Some(TrayAction::Settings));
         assert_eq!(tray_action(ONBOARDING_ID), Some(TrayAction::Onboarding));
         assert_eq!(tray_action(REVEAL_LOG_ID), Some(TrayAction::RevealLog));
+        assert_eq!(tray_action(TROUBLESHOOT_ID), Some(TrayAction::Troubleshoot));
         assert_eq!(
             tray_action(updater::CHECK_ID),
             Some(TrayAction::CheckForUpdates)
