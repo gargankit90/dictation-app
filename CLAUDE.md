@@ -14,3 +14,12 @@
   inside its "may edit" list and time box.
 - The `cua-vm` MCP server drives the test VM. Use it only for tests, never the
   owner's screen.
+
+- GitHub rulesets `main-public` and `immutable-tags` enforce default-branch
+  and tag protection server-side for every account, with no bypass. Never
+  push to the default branch, force push or skip hooks.
+- The unchanged pre-push guard adds defence in depth and runs the gate.
+  Claude's command hook keeps only role, hook bypass, guard edit and
+  destructive settings checks; it does not inspect push commands or git
+  aliases. Static push deny rules in settings.json remain for the owner to
+  decide separately. Only the owner changes guards.
