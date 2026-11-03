@@ -122,19 +122,23 @@ const fn row(
     }
 }
 
+/// The longest [`ErrorCode::user_text`], in characters: the overlay shows two
+/// lines of about 55 characters.
+pub const USER_TEXT_MAX_CHARS: usize = 105;
+
 /// The table: every code once. A code missing here fails
 /// `every_code_has_one_row_in_order`.
 const TABLE: [CodeInfo; 17] = [
     row(
         ErrorCode::MicDenied,
         "Microphone is off for dictation-app.",
-        "Allow it in Privacy & Security, then relaunch from the menu bar.",
+        "Allow it in Privacy & Security, then relaunch.",
         FixAction::OpenMicrophoneSettings,
     ),
     row(
         ErrorCode::MicFailed,
         "The microphone didn't work.",
-        "Check that a microphone is connected, then try again.",
+        "Check that one is connected, then try again.",
         FixAction::TryAgain,
     ),
     row(
@@ -145,50 +149,50 @@ const TABLE: [CodeInfo; 17] = [
     ),
     row(
         ErrorCode::HotkeyUnregistered,
-        "The dictation hotkey isn't working.",
-        "Allow dictation-app under Accessibility; it comes back by itself.",
+        "The hotkey isn't working.",
+        "Allow Accessibility; it comes back by itself.",
         FixAction::OpenAccessibilitySettings,
     ),
     row(
         ErrorCode::KeyMissing,
         "No API key is saved.",
-        "Add your key in Settings, or use a model on this Mac.",
+        "Add one in Settings, or use a model on this Mac.",
         FixAction::OpenSettings,
     ),
     row(
         ErrorCode::KeyRejected,
         "The provider rejected your API key.",
-        "Check or re-enter the key in Settings.",
+        "Check or re-enter it in Settings.",
         FixAction::OpenSettings,
     ),
     row(
         ErrorCode::KeyUnreadable,
-        "Your API key couldn't be read from the Keychain.",
-        "Unlock the Keychain or allow access, or enter the key again in Settings.",
+        "Couldn't read your key from the Keychain.",
+        "Unlock it, or enter the key again in Settings.",
         FixAction::OpenSettings,
     ),
     row(
         ErrorCode::NetworkUnreachable,
         "The provider couldn't be reached.",
-        "Check your internet connection and try again, or use a model on this Mac.",
+        "Check your internet, or use a model on this Mac.",
         FixAction::TryAgain,
     ),
     row(
         ErrorCode::ProviderQuota,
         "The provider is limiting requests.",
-        "Wait a minute and try again, or check your provider account.",
+        "Wait a minute and try again.",
         FixAction::TryAgain,
     ),
     row(
         ErrorCode::ProviderRedirect,
-        "The provider answered with a redirect.",
-        "Check the provider selected in Settings.",
+        "The provider sent a redirect.",
+        "Check the provider in Settings.",
         FixAction::OpenSettings,
     ),
     row(
         ErrorCode::ModelMissing,
         "The on-device model isn't downloaded.",
-        "Download a model in Settings.",
+        "Download one in Settings.",
         FixAction::OpenSettings,
     ),
     row(
@@ -281,6 +285,15 @@ impl ErrorCode {
         // The variants, `ALL` and `TABLE` are in the same order (a test
         // pins it), so the discriminant is the row.
         &TABLE[self as usize]
+    }
+
+    /// What the overlay and the tray show for this code: the table's
+    /// message and next step in one short text (at most
+    /// [`USER_TEXT_MAX_CHARS`] characters, so it fits the overlay).
+    #[must_use]
+    pub fn user_text(self) -> String {
+        let info = self.info();
+        format!("{} {}", info.message, info.next_step)
     }
 
     /// The code of an error the user saw.
@@ -464,7 +477,7 @@ mod tests {
             assert!(info.next_step.ends_with('.'), "{code}: {}", info.next_step);
             assert_eq!(info.action_label, info.action.label(), "{code}");
             assert!(
-                info.message.chars().count() + info.next_step.chars().count() < 160,
+                code.user_text().chars().count() <= USER_TEXT_MAX_CHARS,
                 "{code} is too long for the overlay and tray"
             );
         }

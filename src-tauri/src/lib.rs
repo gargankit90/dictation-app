@@ -986,13 +986,10 @@ mod tray_tests {
             };
             assert_eq!(title, expected, "{error}");
             // E1: the tooltip ends with the error's stable code.
-            assert_eq!(
-                tray_tooltip(&view),
-                format!(
-                    "dictation-app: {error} ({})",
-                    dictation_core::diagnostics::ErrorCode::of(&error)
-                )
-            );
+            assert_eq!(tray_tooltip(&view), {
+                let code = dictation_core::diagnostics::ErrorCode::of(&error);
+                format!("dictation-app: {} ({code})", code.user_text())
+            });
         }
     }
 

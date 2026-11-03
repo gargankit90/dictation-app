@@ -22,7 +22,8 @@ use dictation_core::report::{self, Access, EngineInfo, ReportInput};
 use dictation_core::settings::{Settings, Transcription};
 use dictation_pipeline::config::Config;
 use dictation_platform::secrets::KeychainSecretStore;
-use dictation_ports::PermissionStatus;
+use dictation_ports::{PermissionStatus, TranscribeError};
+use dictation_transcribe::engine::Engine;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt as _;
@@ -145,17 +146,88 @@ pub enum EngineState {
     /// A cloud provider.
     Cloud(KeyState),
     /// A model on this Mac.
-    Local(ModelState),
+    Local(LocalState),
+}
+
+/// How far the on-device engine is, from the live engine and the download
+/// status together. A file on disk alone is not "ready" (E1 round 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalState {
+    /// The model is loaded: the engine can transcribe.
+    Loaded,
+    /// The engine is loading it now.
+    Loading,
+    /// It is on disk, but the engine has not loaded it (yet).
+    NotLoaded,
+    /// The engine tried and could not load it.
+    LoadFailed,
+    /// It is downloading.
+    Downloading,
+    /// It is not (fully) on this Mac.
+    Missing,
+}
+
+/// What the live engine says about the on-device model, without asking it
+/// to do anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineView {
+    /// A local engine with its model loaded.
+    Loaded,
+    /// The model is still loading.
+    Loading,
+    /// The engine could not build (the loader or the file check failed).
+    Failed,
+    /// The model is not downloaded.
+    Missing,
+    /// Anything else (a cloud engine not yet rebuilt, the starting engine).
+    Other,
+}
+
+impl EngineView {
+    /// The view of the engine now current.
+    #[must_use]
+    pub fn of(engine: &Engine) -> Self {
+        match engine {
+            Engine::Local(_) => Self::Loaded,
+            Engine::Unavailable(TranscribeError::ModelLoading) => Self::Loading,
+            Engine::Unavailable(TranscribeError::Engine(_)) => Self::Failed,
+            Engine::Unavailable(TranscribeError::ModelMissing) => Self::Missing,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// The on-device engine's state from the live engine's `view` and the
+/// download status of the selected model.
+#[must_use]
+pub fn local_state(view: EngineView, download: ModelState) -> LocalState {
+    if download == ModelState::Downloading {
+        return LocalState::Downloading;
+    }
+    match view {
+        EngineView::Loaded => LocalState::Loaded,
+        EngineView::Loading => LocalState::Loading,
+        EngineView::Failed => LocalState::LoadFailed,
+        EngineView::Missing => LocalState::Missing,
+        EngineView::Other if download == ModelState::Ready => LocalState::NotLoaded,
+        EngineView::Other => LocalState::Missing,
+    }
 }
 
 impl EngineState {
     /// The code of what is missing, or `None` if the engine is ready.
     fn problem(&self) -> Option<ErrorCode> {
         match self {
-            Self::Cloud(KeyState::Saved) | Self::Local(ModelState::Ready) => None,
+            Self::Cloud(KeyState::Saved) | Self::Local(LocalState::Loaded) => None,
             Self::Cloud(KeyState::Missing) => Some(ErrorCode::KeyMissing),
             Self::Cloud(KeyState::Unreadable) => Some(ErrorCode::KeyUnreadable),
-            Self::Local(_) => Some(ErrorCode::ModelMissing),
+            Self::Local(LocalState::Loading | LocalState::NotLoaded) => {
+                Some(ErrorCode::ModelLoading)
+            }
+            Self::Local(LocalState::LoadFailed) => Some(ErrorCode::ModelLoadingFailed),
+            Self::Local(LocalState::Downloading | LocalState::Missing) => {
+                Some(ErrorCode::ModelMissing)
+            }
         }
     }
 }
@@ -339,12 +411,15 @@ async fn engine_state(
 ) -> EngineState {
     match settings.transcription {
         Transcription::Local => {
-            let state = downloads
+            let download = downloads
                 .list(live)
                 .into_iter()
                 .find(|model| model.id == settings.local_model)
                 .map_or(ModelState::Missing, |model| model.state);
-            EngineState::Local(state)
+            let view = live
+                .current_engine()
+                .map_or(EngineView::Other, |engine| EngineView::of(&engine));
+            EngineState::Local(local_state(view, download))
         }
         Transcription::Cloud => {
             let (config, live, provider) = (Arc::clone(config), live.clone(), settings.provider);
@@ -628,16 +703,24 @@ mod tests {
                 ErrorCode::KeyUnreadable,
             ),
             (
-                EngineState::Local(ModelState::Missing),
+                EngineState::Local(LocalState::Missing),
                 ErrorCode::ModelMissing,
             ),
             (
-                EngineState::Local(ModelState::Partial),
+                EngineState::Local(LocalState::Downloading),
                 ErrorCode::ModelMissing,
             ),
             (
-                EngineState::Local(ModelState::Downloading),
-                ErrorCode::ModelMissing,
+                EngineState::Local(LocalState::Loading),
+                ErrorCode::ModelLoading,
+            ),
+            (
+                EngineState::Local(LocalState::NotLoaded),
+                ErrorCode::ModelLoading,
+            ),
+            (
+                EngineState::Local(LocalState::LoadFailed),
+                ErrorCode::ModelLoadingFailed,
             ),
         ];
         for (engine, code) in cases {
@@ -647,11 +730,86 @@ mod tests {
             let row = by_id(&rows, CheckId::Engine);
             assert!(!row.ok, "{engine:?}");
             assert_eq!(row.code, Some(code), "{engine:?}");
-            assert_eq!(row.fix, Some(FixAction::OpenSettings));
         }
         let mut data = input();
-        data.engine = EngineState::Local(ModelState::Ready);
+        data.engine = EngineState::Local(LocalState::Loaded);
         assert!(by_id(&checks(&data), CheckId::Engine).ok);
+    }
+
+    /// E1 round 1: a model file that is on disk but will not load is not
+    /// "Ready", in the check or in the report.
+    #[test]
+    fn a_present_model_that_fails_to_load_is_not_ready() {
+        let failed = Engine::Unavailable(TranscribeError::Engine(
+            "couldn't load the on-device model: out of memory".into(),
+        ));
+        let state = local_state(EngineView::of(&failed), ModelState::Ready);
+        assert_eq!(state, LocalState::LoadFailed);
+        let mut data = input();
+        data.engine = EngineState::Local(state);
+        let rows = checks(&data);
+        let row = by_id(&rows, CheckId::Engine);
+        assert!(!row.ok);
+        assert_eq!(row.code, Some(ErrorCode::ModelLoadingFailed));
+        assert_eq!(row.fix, Some(FixAction::OpenSettings));
+        assert!(row.detail.contains("another model"), "{}", row.detail);
+        assert!(data.engine.problem().is_some());
+    }
+
+    #[test]
+    fn a_model_that_is_loading_is_not_ready_yet() {
+        let loading = Engine::Unavailable(TranscribeError::ModelLoading);
+        assert_eq!(
+            local_state(EngineView::of(&loading), ModelState::Ready),
+            LocalState::Loading
+        );
+        // Present on disk, engine not built for it yet.
+        assert_eq!(
+            local_state(EngineView::Other, ModelState::Ready),
+            LocalState::NotLoaded
+        );
+        assert_eq!(
+            local_state(EngineView::Other, ModelState::Partial),
+            LocalState::Missing
+        );
+        assert_eq!(
+            local_state(EngineView::Loaded, ModelState::Downloading),
+            LocalState::Downloading
+        );
+        assert_eq!(
+            local_state(EngineView::Loaded, ModelState::Ready),
+            LocalState::Loaded
+        );
+        let missing = Engine::Unavailable(TranscribeError::ModelMissing);
+        assert_eq!(
+            local_state(EngineView::of(&missing), ModelState::Ready),
+            LocalState::Missing
+        );
+    }
+
+    /// The report says `engine_ready: no` for a model that cannot load.
+    #[test]
+    fn the_report_says_no_for_a_model_that_cannot_load() {
+        let settings = Settings {
+            transcription: Transcription::Local,
+            ..Settings::default()
+        };
+        let env = Environment {
+            app_version: "0.1.0".into(),
+            macos_version: "15.1".into(),
+            arch: "aarch64".into(),
+        };
+        let ready = EngineState::Local(LocalState::LoadFailed)
+            .problem()
+            .is_none();
+        let text = report_text(
+            &env,
+            &settings,
+            (PermissionStatus::Granted, PermissionStatus::Granted),
+            Some(ready),
+            &[],
+        );
+        assert!(text.contains("engine_ready: no"), "{text}");
     }
 
     #[test]

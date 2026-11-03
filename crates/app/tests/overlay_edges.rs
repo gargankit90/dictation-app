@@ -47,7 +47,7 @@ fn failed() -> UiEvent {
 
 fn failed_view() -> OverlayView {
     OverlayView::Error {
-        message: DictationError::EmptyTranscript.to_string(),
+        message: ErrorCode::NoSpeech.user_text(),
         code: ErrorCode::NoSpeech,
     }
 }

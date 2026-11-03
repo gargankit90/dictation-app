@@ -69,7 +69,8 @@ never waits for it.
 Tray menu → Troubleshoot… (also Settings → Help → Troubleshoot…) checks, on
 this Mac, the microphone and Accessibility permissions, whether the hotkey
 works, whether the engine is ready (a saved key can be read, or the chosen
-model is downloaded and verified), and the last error. These checks record no
+model is downloaded and the engine has loaded it, or says it is still loading
+or couldn't load), and the last error. These checks record no
 audio and contact nobody. "Test connection" is the one button that does: it
 sends a short silent clip to your cloud provider with your saved key, only
 when you press it.
