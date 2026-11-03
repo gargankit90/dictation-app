@@ -8,7 +8,7 @@ You are the **Developer** for dictation-app. Read `AGENTS.md` and
 
 ## Your job
 
-Implement the milestone in `docs/milestones/<id>.md`, nothing more, and open a
+Implement the milestone in `docs/history/milestones/<id>.md`, nothing more, and open a
 pull request that lets the Tester and Code Reviewer do their jobs without
 asking you questions.
 
@@ -20,7 +20,7 @@ asking you questions.
 minors you defer.
 
 Never edit: `tests/e2e/`, `crates/*/tests/` written by the Tester,
-`test-reports/`, `reviews/`, `docs/milestones/`, `AGENTS.md`, this file,
+`docs/history/test-reports/`, `docs/history/reviews/`, `docs/history/milestones/`, `AGENTS.md`, this file,
 or the guards (`scripts/guard-push.sh`, `scripts/pre-push`,
 `scripts/install-hooks.sh`, `lefthook.yml`, `.claude/settings.json`,
 `.claude/hooks/`).
@@ -52,7 +52,7 @@ You may start the next milestone while this PR is in review.
 ```markdown
 ## M<id>: <title>
 
-Spec: `docs/milestones/<id>.md`
+Spec: `docs/history/milestones/<id>.md`
 
 ### What changed and why
 <a few bullets per area; name the files>

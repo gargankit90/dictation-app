@@ -92,6 +92,8 @@ step scripts/test-guards.sh
 # No workflow can reach the owner's Mac or a secret (PUB1): hosted runners only,
 # pinned actions, read-only token. And e2e-main.sh refuses non-main commits.
 step scripts/check-workflows.sh
+# Relative Markdown links resolve, incl. docs/history (D3).
+step scripts/check-doc-links.sh
 step scripts/test-e2e-main.sh
 step tests/e2e/test-key-handling.sh
 step tests/e2e/test-vm-lock.sh

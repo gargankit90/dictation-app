@@ -463,7 +463,7 @@ for `osascript` to control TextEdit (M4.3).
 
   The synthetic flags still work without it, but the paste then fails. Granting
   Accessibility in a VM shows a password sheet that refuses synthetic keys
-  (see `test-reports/M1.4-run2-vm.md`), so it was granted through the VM's
+  (see `docs/history/test-reports/M1.4-run2-vm.md`), so it was granted through the VM's
   own display, not the host screen.
   A scenario that must change it (`e2e_accessibility_revoked`) types the
   password into that sheet through the VM's VNC server with
