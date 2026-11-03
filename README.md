@@ -7,7 +7,9 @@ focus.
 `aarch64`; no Intel build). Speech is transcribed in the cloud with your own
 Groq or OpenAI API key. Windows and local (on-device) models are planned.
 
-<!-- demo GIF goes here: docs/media/demo.gif (hold the hotkey, speak, text appears) -->
+![Holding Right Option in TextEdit: the overlay shows Recording, then Transcribing, then the spoken sentence appears.](docs/media/demo.gif)
+
+_Recorded in a macOS VM: a real Right Option hold, speech by macOS `say` fed to the app as audio, transcribed by Groq Whisper._
 
 ## Try it
 
