@@ -59,6 +59,12 @@ e2e_error_bad_key() {
   # expect only records the failure; say what was in front when it did.
   if [ "${SCENARIO_FAILED:-0}" = 1 ]; then
     log "  frontmost app after the paste: $(frontmost_app)"
+    log "  phases logged after the restart: $(logged_phases | paste -sd ' ' -)"
+    # The restart's own log (fresh_app_state cleared the earlier one), so a
+    # lost paste can be traced to what the paste adapter did (#203).
+    collect_log e2e_error_bad_key_mock
+    log "  tray after the paste: $(tray_info 2>&1 | paste -sd ' ' -)"
+    log "  mock run's insert lines: $(app_log | grep -iE 'insert|paste|clipboard|fail' | tail -5 | paste -sd '|' -)"
   fi
   phases=$(logged_phases | paste -sd ' ' -)
   expect "the mock run goes through Inserting" \
