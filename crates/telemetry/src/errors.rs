@@ -469,7 +469,9 @@ fn clean_function(name: &str) -> String {
 /// Sentry frames (oldest first) from the text of a
 /// [`std::backtrace::Backtrace`]: function names and crate-relative files.
 fn parse_backtrace(text: &str) -> Vec<Value> {
-    let mut frames: Vec<(String, Option<(String, Option<u32>)>)> = Vec::new();
+    /// A function and, once its `at` line is read, its file and line.
+    type Raw = (String, Option<(String, Option<u32>)>);
+    let mut frames: Vec<Raw> = Vec::new();
     for line in text.lines() {
         let line = line.trim();
         if let Some(at) = line.strip_prefix("at ") {
@@ -479,10 +481,11 @@ fn parse_backtrace(text: &str) -> Vec<Value> {
             if let (Some(row), Some(file), Some(last)) = (row, file, frames.last_mut()) {
                 last.1 = Some((crate_relative(file), row.parse().ok()));
             }
-        } else if let Some((index, function)) = line.split_once(": ") {
-            if !index.is_empty() && index.chars().all(|c| c.is_ascii_digit()) {
-                frames.push((clean_function(function), None));
-            }
+        } else if let Some((index, function)) = line.split_once(": ")
+            && !index.is_empty()
+            && index.chars().all(|c| c.is_ascii_digit())
+        {
+            frames.push((clean_function(function), None));
         }
     }
     frames
