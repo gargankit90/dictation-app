@@ -49,9 +49,17 @@ e2e_error_bad_key() {
   # landed on a fresh VM, and 3 of 3 landed with TextEdit put in front
   # again after the launch). A second launch (--press) doesn't do this.
   groq_textedit_new
+  # #203: it failed once at the check below after this restart. Wait until
+  # TextEdit is frontmost with an empty document before the press, and log
+  # the frontmost app if it never is.
+  expect "TextEdit is frontmost with an empty document" textedit_ready
   expect "a dictation with the mock ends Idle" groq_dictate 2
   expect "the mock's text is in TextEdit" \
     sh -c "printf '%s' \"\$1\" | grep -q 'This is a test dictation'" _ "$(groq_textedit_text)"
+  # expect only records the failure; say what was in front when it did.
+  if [ "${SCENARIO_FAILED:-0}" = 1 ]; then
+    log "  frontmost app after the paste: $(frontmost_app)"
+  fi
   phases=$(logged_phases | paste -sd ' ' -)
   expect "the mock run goes through Inserting" \
     test "$phases" = "Recording Transcribing Inserting Idle"
