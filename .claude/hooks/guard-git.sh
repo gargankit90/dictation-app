@@ -50,7 +50,7 @@ def inspect(text, depth=0):
         block("shell syntax cannot be checked")
     segment = []
     for word in words + [";"]:
-        if word in (";", "&&", "||", "|", "&", "(", ")", "\n"):
+        if word and all(char in ";&|()\n" for char in word):
             check(segment, depth)
             segment = []
         else:
@@ -185,5 +185,8 @@ def check(args, depth):
                         block("patch editing guards")
 
 
-inspect(command)
+try:
+    inspect(command)
+except (OSError, ValueError):
+    block("command or patch input cannot be checked")
 PY

@@ -397,6 +397,7 @@ blocked 'tee scripts/pre-push < /tmp/x'
 blocked 'ln -sf /tmp/x .claude/hooks/guard-git.sh'
 blocked 'mv /tmp/x lefthook.yml'
 blocked 'gh pr -R o/r merge 2'
+blocked $'git status;\ngh pr merge 2'
 allowed 'gh pr comment 2 --body "merge"'
 allowed 'gh pr comment 2 --body "push to main; hooks; merges; patch 2"'
 # Block messages must name the actual role policy.
