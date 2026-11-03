@@ -52,7 +52,7 @@ e2e_error_bad_key() {
   # #203: it failed once at the check below after this restart. Wait until
   # TextEdit is frontmost with an empty document before the press, and log
   # the frontmost app if it never is.
-  expect "TextEdit is frontmost with an empty document" textedit_ready
+  expect "TextEdit is frontmost with an empty document" textedit_empty_in_front
   expect "a dictation with the mock ends Idle" groq_dictate 2
   expect "the mock's text is in TextEdit" \
     sh -c "printf '%s' \"\$1\" | grep -q 'This is a test dictation'" _ "$(groq_textedit_text)"

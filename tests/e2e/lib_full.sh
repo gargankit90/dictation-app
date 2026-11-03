@@ -65,16 +65,10 @@ textedit_fresh() {
   return 1
 }
 
-# The name of the frontmost app, for the log when a paste check fails (#203).
-frontmost_app() {
-  vm_osascript 'tell application "System Events" to get name of first process whose frontmost is true' 2>/dev/null ||
-    echo "unknown"
-}
-
-# textedit_ready [seconds]: true once TextEdit is frontmost with an empty,
+# textedit_empty_in_front [seconds]: true once TextEdit is frontmost with an empty,
 # readable document (default 10 s). Else logs the frontmost app and fails, so
 # a paste that goes nowhere can be told from one that was never aimed right.
-textedit_ready() {
+textedit_empty_in_front() {
   local timeout=${1:-10} i
   for i in $(seq 1 "$timeout"); do
     if [ "$(frontmost_app)" = TextEdit ] && textedit_is_empty 2>/dev/null; then
