@@ -109,7 +109,8 @@ change anything you set above:
 1. Click into any text field (Notes, Slack, a browser, a document).
 2. **Hold the right Option key**, speak, and let go. A small overlay shows
    that it is recording and then that it is working.
-3. The text is typed into the app that has focus, a moment later.
+3. A moment later, the text is typed into whichever app has focus when it is
+   pasted.
 
 Change the key with the **Hotkey** box in Settings. Password fields are
 skipped on purpose: nothing is pasted there.

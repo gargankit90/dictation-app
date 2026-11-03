@@ -17,9 +17,9 @@ typed into the app you are using.
 ### What you can do
 
 - **Dictate into any app.** Hold the right Option key (you can change the key
-  in Settings), speak, and let go. The text is typed into the app that has focus
-  when you let go. A small overlay shows when it is recording and when it is working. Password
-  fields are skipped on purpose.
+  in Settings), speak, and let go. A moment later the text is typed into
+  whichever app has focus when it is pasted. A small overlay shows when it is
+  recording and when it is working. Password fields are skipped on purpose.
 - **Transcribe on your Mac.** Pick "On this Mac" in Settings and download a
   model once. After that, your speech is turned into text on the Mac and not
   sent anywhere. Two models are offered: Parakeet (English, the default, about
