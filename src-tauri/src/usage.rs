@@ -10,9 +10,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dictation_core::onboarding::Step;
-use dictation_core::settings::{Provider, Settings};
-use dictation_ports::{Arch, EngineChoice, Event, OnboardingStep, SettingName, Telemetry, Version};
+use dictation_core::settings::{Provider, Settings, Transcription};
+use dictation_ports::{
+    Arch, EngineChoice, EngineKind, Event, OnboardingStep, SettingName, Telemetry, Version,
+};
 use dictation_telemetry::{Config, PostHogTelemetry};
+use dictation_transcribe::engine::Engine;
 
 /// The PostHog project key this build was made with, if any.
 const BUILD_KEY: Option<&str> = option_env!("DICTATION_POSTHOG_KEY");
@@ -115,8 +118,16 @@ pub fn settings_change(before: &Settings, after: &Settings) -> SettingsChange {
     if before.launch_at_login != after.launch_at_login {
         changed(SettingName::LaunchAtLogin);
     }
-    if before.provider != after.provider {
-        events.push(engine_selected(after.provider));
+    // The engine: on-device or cloud (L1), or another cloud provider.
+    let engine_changed = before.transcription != after.transcription
+        || (after.transcription == Transcription::Cloud && before.provider != after.provider);
+    if engine_changed {
+        events.push(Event::EngineSelected {
+            engine: match after.transcription {
+                Transcription::Local => EngineChoice::Local,
+                Transcription::Cloud => EngineChoice::Cloud(after.provider),
+            },
+        });
     }
     SettingsChange {
         events,
@@ -130,6 +141,17 @@ pub fn settings_change(before: &Settings, after: &Settings) -> SettingsChange {
 pub fn engine_selected(provider: Provider) -> Event {
     Event::EngineSelected {
         engine: EngineChoice::Cloud(provider),
+    }
+}
+
+/// Where `engine` transcribes, for `dictation_finished` (L1): on this
+/// computer for the local engine, else in the cloud (an engine that can't
+/// run never finishes a dictation).
+#[must_use]
+pub fn engine_kind(engine: &Engine) -> EngineKind {
+    match engine {
+        Engine::Local(_) => EngineKind::Local,
+        _ => EngineKind::Cloud,
     }
 }
 
@@ -219,6 +241,47 @@ mod tests {
         );
         assert_eq!(change.sharing, None);
         assert!(settings_change(&before, &before).events.is_empty());
+    }
+
+    #[test]
+    fn l1_switching_to_and_from_the_on_device_engine_is_engine_selected() {
+        let cloud = Settings::default();
+        let local = Settings {
+            transcription: Transcription::Local,
+            local_model: "qwen3-asr-0.6b-q4_k_m".into(),
+            ..Settings::default()
+        };
+        assert_eq!(
+            settings_change(&cloud, &local).events,
+            [Event::EngineSelected {
+                engine: EngineChoice::Local
+            }]
+        );
+        assert_eq!(
+            settings_change(&local, &cloud).events,
+            [engine_selected(Provider::Groq)]
+        );
+        // Another local model is not an engine change, and its id isn't sent.
+        let other = Settings {
+            local_model: "parakeet-unified-en-0.6b-q4_k_m".into(),
+            ..local.clone()
+        };
+        assert!(settings_change(&local, &other).events.is_empty());
+    }
+
+    #[test]
+    fn l1_dictations_count_under_the_engine_that_ran_them() {
+        use dictation_transcribe::local::{LocalTranscriber, SpeechModel};
+        struct Silent;
+        impl SpeechModel for Silent {
+            fn run(&mut self, _: &[f32], _: Option<&str>) -> Result<String, String> {
+                Ok(String::new())
+            }
+        }
+        let local = Engine::Local(LocalTranscriber::new(Box::new(Silent), None));
+        assert_eq!(engine_kind(&local), EngineKind::Local);
+        let mock = Engine::Mock(dictation_transcribe::mock::MockTranscriber::default());
+        assert_eq!(engine_kind(&mock), EngineKind::Cloud);
     }
 
     #[test]

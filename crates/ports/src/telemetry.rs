@@ -94,13 +94,14 @@ pub enum EngineKind {
     Cloud,
 }
 
-/// The engine the user picked. A local variant, with its model id from a
-/// fixed list, arrives with the local models.
+/// The engine the user picked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", content = "provider", rename_all = "snake_case")]
 pub enum EngineChoice {
     /// A cloud provider.
     Cloud(Provider),
+    /// A model on this computer (L1). Only the kind is sent, not which model.
+    Local,
 }
 
 impl EngineChoice {
@@ -109,6 +110,7 @@ impl EngineChoice {
     pub fn kind(self) -> EngineKind {
         match self {
             Self::Cloud(_) => EngineKind::Cloud,
+            Self::Local => EngineKind::Local,
         }
     }
 }
@@ -359,6 +361,12 @@ mod tests {
                     engine: EngineChoice::Cloud(Provider::OpenAi),
                 },
                 json!({"event":"engine_selected","properties":{"kind":"cloud","provider":"openai"}}),
+            ),
+            (
+                Event::EngineSelected {
+                    engine: EngineChoice::Local,
+                },
+                json!({"event":"engine_selected","properties":{"kind":"local"}}),
             ),
             (
                 Event::DictationFinished {

@@ -420,7 +420,7 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     let ports = Ports {
         hotkey,
         audio,
-        transcriber: transcribers,
+        transcriber: transcribers.clone(),
         inserter: SystemInserter::new(),
         permissions,
         clock: SystemClock::new(),
@@ -462,6 +462,7 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         overlay,
         microphone_denied,
         usage,
+        transcribers,
     ));
     tracing::info!(hotkey = %hotkey_control.spec(), "ready");
     onboarding_at_launch(
@@ -798,6 +799,7 @@ async fn show_ui_events(
     overlay: Option<UiSender>,
     microphone_denied: bool,
     usage: usage::Usage,
+    transcribers: Transcribers,
 ) {
     let mut tray = TrayStatus::new(microphone_denied);
     // Usage events from the same stream; only kinds and buckets leave it.
@@ -811,6 +813,10 @@ async fn show_ui_events(
             // Bounded and never blocks (#112): a stalled overlay can't hold
             // up the tray or grow the queue.
             overlay.send(event.clone());
+        }
+        // Each dictation counts under the engine current when it starts (L1).
+        if event == UiEvent::StateChanged(dictation_core::coordinator::Phase::Recording) {
+            tracker.set_engine(usage::engine_kind(&transcribers.current()));
         }
         tracker.on_event(&event, started.elapsed());
         match &event {
