@@ -201,3 +201,60 @@ async fn criterion_3_a_running_download_shows_progress_starts_once_and_cancels_q
     // Cancelling what isn't running is fine.
     downloads.cancel(DEFAULT);
 }
+
+/// Review round 1, major 2: with room for either model but not both, the
+/// second download is refused before it sends a request or writes a byte.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_one_model_downloads_at_a_time() {
+    const QWEN: &str = "qwen3-asr-0.6b-q4_k_m";
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(vec![1u8; 1000])
+                .set_delay(Duration::from_secs(30)),
+        )
+        .mount(&server)
+        .await;
+    let dir = TempDir::new("one-at-a-time");
+    // Enough for Qwen (the larger) plus headroom, not for both.
+    let free = 589_560_480 + dictation_transcribe::models::SPACE_HEADROOM + 1;
+    let store = ModelStore::new(dir.0.clone(), Arc::new(move |_| Ok(free))).unwrap();
+    let live = LiveEngine::fixed().with_local(LocalModels::trusting(
+        store,
+        Arc::new(|_: &Path| Ok(Box::new(Silent) as Box<dyn SpeechModel>)),
+    ));
+    let downloads = ModelDownloads::default();
+    let (tx, rx) = oneshot::channel();
+    downloads
+        .start(&live, DEFAULT, Some(server.uri()), move |result| {
+            let _ = tx.send(result);
+        })
+        .unwrap();
+    // Wait for the first request, so the second would really overlap.
+    for _ in 0..100 {
+        if !server.received_requests().await.unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let refused = downloads.start(&live, QWEN, Some(server.uri()), |_| {
+        panic!("a second download started")
+    });
+    assert_eq!(refused, Err(ONE_AT_A_TIME.to_owned()));
+    assert!(!downloads.is_running(QWEN));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert!(!dir.0.join("Qwen3-ASR-0.6B-Q4_K_M.gguf.part").exists());
+
+    // Once the first is cancelled, the other may start.
+    downloads.cancel(DEFAULT);
+    let _ = tokio::time::timeout(Duration::from_secs(10), rx)
+        .await
+        .unwrap();
+    downloads
+        .start(&live, QWEN, Some(server.uri()), |_| {})
+        .unwrap();
+    assert!(downloads.is_running(QWEN));
+    downloads.cancel(QWEN);
+}

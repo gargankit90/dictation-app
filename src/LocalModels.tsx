@@ -140,7 +140,7 @@ export function LocalModels({ selected, onSelect, disabled }: Props) {
               {(model.state === "missing" || model.state === "partial") && (
                 <button
                   type="button"
-                  disabled={disabled}
+                  disabled={disabled || downloading}
                   onClick={() => void act(() => commands.downloadLocalModel(model.id))}
                 >
                   {model.state === "partial" ? "Resume download" : "Download"}
@@ -167,6 +167,7 @@ export function LocalModels({ selected, onSelect, disabled }: Props) {
           </li>
         ))}
       </ul>
+      {downloading && <p className="hint">One model downloads at a time.</p>}
       {error !== null && (
         <p role="alert" className="error">
           {error}

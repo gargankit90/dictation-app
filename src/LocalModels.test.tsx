@@ -177,6 +177,24 @@ describe("the model picker", () => {
     expect(backend.named("list_local_models").length).toBe(polls);
   });
 
+  it("downloads one model at a time", async () => {
+    backend.set(PARAKEET, { state: "downloading", downloaded_bytes: 1_000_000 });
+    await open();
+    await screen.findByText("One model downloads at a time.");
+    const download = within(item(/Qwen/)).getByRole<HTMLButtonElement>("button", {
+      name: "Download",
+    });
+    expect(download.disabled).toBe(true);
+    backend.set(PARAKEET, { state: "ready", downloaded_bytes: 477_274_496 });
+    await waitFor(
+      () => {
+        expect(download.disabled).toBe(false);
+      },
+      { timeout: 3000 },
+    );
+    expect(screen.queryByText("One model downloads at a time.")).toBeNull();
+  });
+
   it("cancels and deletes", async () => {
     backend.set(PARAKEET, { state: "downloading", downloaded_bytes: 1_000_000 });
     await open();

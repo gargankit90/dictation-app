@@ -82,6 +82,10 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Why a second model can't start downloading.
+pub const ONE_AT_A_TIME: &str =
+    "Another model is downloading. Wait for it to finish, or cancel it, then try again.";
+
 fn find(id: &str) -> Result<&'static LocalModel, String> {
     local_models::find(id).ok_or_else(|| format!("there is no on-device model {id:?}"))
 }
@@ -130,9 +134,13 @@ impl ModelDownloads {
     /// downloading. When it finishes, `done` runs (the app rebuilds the
     /// engine there).
     ///
+    /// One model downloads at a time: each download checks the free space
+    /// for itself alone, so two at once could together fill the disk.
+    ///
     /// # Errors
     ///
-    /// An unknown id, or a build without on-device models.
+    /// An unknown id, a build without on-device models, or another model
+    /// downloading.
     pub fn start(
         &self,
         live: &LiveEngine,
@@ -147,6 +155,9 @@ impl ModelDownloads {
             let mut downloads = lock(&self.inner);
             if downloads.running.contains_key(model.id) {
                 return Ok(());
+            }
+            if !downloads.running.is_empty() {
+                return Err(ONE_AT_A_TIME.to_owned());
             }
             downloads.failed.remove(model.id);
             downloads.running.insert(
