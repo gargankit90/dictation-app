@@ -110,6 +110,33 @@ if ROOT="$ROOT" WT_BASE="$WT_BASE" bash -euo pipefail <<'SEC3'; then
     esac
   }
 
+  # Only this synthetic repository uses this runner. The application gate
+  # and real hook files remain unchanged; CI need not install global lefthook.
+  mkdir -p "$WT_BASE/bin"
+  cat > "$WT_BASE/bin/lefthook" <<'RUNNER'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$*" in
+  install)
+    hooks_dir="$(git rev-parse --git-common-dir)/hooks"
+    mkdir -p "$hooks_dir"
+    cat > "$hooks_dir/pre-commit" <<'HOOK'
+#!/usr/bin/env bash
+exec lefthook run pre-commit
+HOOK
+    chmod +x "$hooks_dir/pre-commit"
+    ;;
+  'run pre-commit') ;;
+  'run pre-push-gate')
+    echo SYNTHETIC_GATE_RAN >&2
+    [ ! -e .fixture-gate-fails ]
+    ;;
+  *) echo "unexpected fixture lefthook arguments: $*" >&2; exit 1 ;;
+esac
+RUNNER
+  chmod +x "$WT_BASE/bin/lefthook"
+  export PATH="$WT_BASE/bin:$PATH"
+
   cd "$WT_BASE/main-wt"
   git config user.email "tester@example.com"
   git config user.name "Tester"
@@ -143,27 +170,6 @@ YAML
   [ -x "$thooks/guard-push.sh" ]
   [ -x "$thooks/pre-push" ]
   cmp -s "$thooks/guard-push.sh" scripts/guard-push.sh
-
-  # Verify lefthook install / lefthook run leaves pre-push and guard-push.sh intact
-  if command -v lefthook >/dev/null 2>&1; then
-    cat > lefthook-local.yml <<'YAML'
-pre-commit:
-  jobs:
-    - name: noop
-      run: "true"
-pre-push-gate:
-  jobs:
-    - name: noop
-      run: "true"
-YAML
-    cp "$thooks/pre-push" "$WT_BASE/pre-push.snap"
-    cp "$thooks/guard-push.sh" "$WT_BASE/guard-push.snap"
-    lefthook run pre-push-gate >/dev/null
-    lefthook install >/dev/null
-    cmp -s "$thooks/pre-push" "$WT_BASE/pre-push.snap"
-    cmp -s "$thooks/guard-push.sh" "$WT_BASE/guard-push.snap"
-    rm -f lefthook-local.yml
-  fi
 
   # Linked worktree WITHOUT scripts/ (simulating pre-M0.2 branch)
   git worktree add -q --detach "$WT_BASE/m01-wt" origin/m0.1-sim
@@ -210,14 +216,23 @@ YAML
 
   out=$(git push origin m0.2-linked 2>&1)
   assert_rc_contains 0 0 "$out" "CHECKOUT_PRE_PUSH_RAN" "linked pre-push ran"
+  assert_rc_contains 0 0 "$out" "SYNTHETIC_GATE_RAN" "linked gate ran"
+
+  # The unchanged pre-push script must propagate a failing gate, too.
+  touch .fixture-gate-fails
+  rc=0; out_fail=$(git push --dry-run origin HEAD:refs/heads/gate-failure 2>&1) || rc=$?
+  assert_rc_contains "$rc" 1 "$out_fail" "SYNTHETIC_GATE_RAN" "linked gate failure refuses push"
+  rm .fixture-gate-fails
   assert_rc_contains 0 0 "$out" "pre-push: note:" "linked drift note"
 
   out_noop=$(git push origin m0.2-linked 2>&1)
   assert_not_contains "$out_noop" "CHECKOUT_PRE_PUSH_RAN" "linked no-op skip"
+  assert_not_contains "$out_noop" "SYNTHETIC_GATE_RAN" "linked no-op skips gate"
 
   rc=0; out_refuse=$(git push --dry-run origin HEAD:main 2>&1) || rc=$?
   assert_rc_contains "$rc" 1 "$out_refuse" "guard-push: refused: pushing to main" "linked main refuse"
   assert_not_contains "$out_refuse" "CHECKOUT_PRE_PUSH_RAN" "linked main early stop"
+  assert_not_contains "$out_refuse" "SYNTHETIC_GATE_RAN" "linked main refuses before gate"
 SEC3
   check "installed hooks + linked worktree push matrix" 0 0
 else
