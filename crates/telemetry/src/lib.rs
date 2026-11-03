@@ -91,6 +91,17 @@ pub struct PostHogTelemetry {
 }
 
 impl PostHogTelemetry {
+    /// An adapter with no key: records and sends nothing, writes nothing.
+    #[must_use]
+    pub fn disabled() -> Arc<Self> {
+        Arc::new(Self {
+            config: Config::new(None, ""),
+            client: None,
+            state: Mutex::new(State::default()),
+            wake: Notify::new(),
+        })
+    }
+
     /// Starts the adapter; `enabled` is the saved choice. With a key, it
     /// spawns the sending task on `runtime`. Without one, nothing runs and
     /// nothing is written.

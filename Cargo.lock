@@ -779,6 +779,7 @@ dependencies = [
  "dictation-pipeline",
  "dictation-platform",
  "dictation-ports",
+ "dictation-telemetry",
  "dictation-transcribe",
  "reqwest",
  "serde",

@@ -145,6 +145,11 @@ export type Settings_Deserialize = {
 	 *  own state, which the user can change in System Settings.
 	 */
 	launch_at_login?: boolean,
+	/**
+	 *  Whether anonymous usage events are shared (A1, `docs/privacy.md`).
+	 *  On by default; a file without it loads with `true`.
+	 */
+	share_usage_events?: boolean,
 };
 
 /**  What the user can set. Never holds the API key. */
@@ -168,6 +173,11 @@ export type Settings_Serialize = {
 	 *  own state, which the user can change in System Settings.
 	 */
 	launch_at_login: boolean,
+	/**
+	 *  Whether anonymous usage events are shared (A1, `docs/privacy.md`).
+	 *  On by default; a file without it loads with `true`.
+	 */
+	share_usage_events: boolean,
 };
 
 /**  One onboarding step, in order. */

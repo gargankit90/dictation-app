@@ -55,6 +55,7 @@ mod logging;
 pub mod onboarding;
 mod overlay;
 mod updater;
+pub mod usage;
 mod window;
 
 use std::path::Path;
@@ -70,6 +71,7 @@ use dictation_pipeline::test_hooks::Injector;
 use dictation_pipeline::test_hooks::{Breakable, HotkeyOutage, SyntheticHotkey};
 use dictation_pipeline::tray::{TrayStatus, TrayView};
 use dictation_pipeline::ui_events::{UiReceiver, UiSender};
+use dictation_pipeline::usage::UsageTracker;
 use dictation_platform::audio::{FileAudioSource, SystemMicrophone};
 use dictation_platform::clock::SystemClock;
 use dictation_platform::cursor::SystemTextBeforeCursor;
@@ -79,7 +81,9 @@ use dictation_platform::launch::SystemLaunchAtLogin;
 use dictation_platform::permissions::SystemPermissions;
 use dictation_platform::secrets::KeychainSecretStore;
 use dictation_platform::single_instance::{self, Instance, Launch, Message, Rejected};
-use dictation_ports::{AudioSource, Permission, PermissionError, PermissionStatus, Permissions};
+use dictation_ports::{
+    AudioSource, EngineKind, Permission, PermissionError, PermissionStatus, Permissions,
+};
 use dictation_transcribe::engine::{Engine, Transcribers};
 use dictation_transcribe::mock::MockTranscriber;
 use tauri::menu::{Menu, MenuItem};
@@ -380,11 +384,18 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         "engine"
     );
 
-    let recordings = app
-        .path()
-        .app_data_dir()
-        .context("no data directory")?
-        .join("debug-recordings");
+    let data_dir = app.path().app_data_dir().context("no data directory")?;
+    let scripted = onboarding::scripted_launch(
+        launch.audio_file.is_some(),
+        choice == flags::TranscriberChoice::Mock,
+        false,
+    );
+    // Anonymous usage events (A1): on by default, a no-op without a build
+    // key, and silent in scripted test launches.
+    let usage = usage::start(&data_dir, &config.settings().unwrap_or_default(), scripted);
+    usage::launched(usage.clone(), &data_dir, &version);
+    app.manage(usage.clone());
+    let recordings = data_dir.join("debug-recordings");
     let (audio, permissions) = shell_audio(&launch, &recordings);
     // Already refused at launch: the tray offers Relaunch before any press.
     let microphone_denied = permissions.check(Permission::Microphone) == PermissionStatus::Denied;
@@ -429,6 +440,7 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         ui_events,
         overlay,
         microphone_denied,
+        usage,
     ));
     tracing::info!(hotkey = %hotkey_control.spec(), "ready");
     onboarding_at_launch(
@@ -445,11 +457,6 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         },
     );
     // M5.4: a quiet update check; a dialog only if there is an update.
-    let scripted = onboarding::scripted_launch(
-        launch.audio_file.is_some(),
-        choice == flags::TranscriberChoice::Mock,
-        false,
-    );
     if updater::check_at_launch_wanted(scripted, launch.check_updates) {
         updater::check_at_launch(app.handle());
     }
@@ -769,8 +776,12 @@ async fn show_ui_events(
     mut events: UiReceiver,
     overlay: Option<UiSender>,
     microphone_denied: bool,
+    usage: usage::Usage,
 ) {
     let mut tray = TrayStatus::new(microphone_denied);
+    // Usage events from the same stream; only kinds and buckets leave it.
+    let mut tracker = UsageTracker::new(usage.0.clone(), EngineKind::Cloud);
+    let started = std::time::Instant::now();
     if microphone_denied {
         show_in_tray(&app, tray.view());
     }
@@ -780,6 +791,7 @@ async fn show_ui_events(
             // up the tray or grow the queue.
             overlay.send(event.clone());
         }
+        tracker.on_event(&event, started.elapsed());
         match &event {
             UiEvent::StateChanged(phase) => tracing::info!(?phase, "state changed"),
             UiEvent::Error(error) => tracing::info!(%error, "shown to the user"),
@@ -843,6 +855,9 @@ fn shut_down(app: &AppHandle) {
             tauri::async_runtime::block_on(pipeline.shutdown());
             tracing::info!("stopped");
         }
+    }
+    if let Some(usage) = app.try_state::<usage::Usage>() {
+        usage::flush_on_quit(&usage, std::time::Duration::from_secs(2));
     }
     // Last, and explicitly: Tauri exits the process without running
     // destructors, which would leave the socket behind (harmless, but the

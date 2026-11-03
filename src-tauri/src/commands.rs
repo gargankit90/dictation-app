@@ -39,6 +39,7 @@ use tauri::State;
 
 use crate::engine::{self, LiveEngine};
 use crate::onboarding::{self, AppPermission, Onboarding, OnboardingStatus, OsPermissions};
+use crate::usage::{self, Usage};
 
 /// Where the bindings go, relative to `src-tauri/`.
 pub const BINDINGS_PATH: &str = "../src/bindings.ts";
@@ -237,15 +238,22 @@ pub async fn save_settings(
     engine: State<'_, LiveEngine>,
     login: State<'_, LoginItem>,
     hotkey: State<'_, ActiveHotkey>,
+    usage: State<'_, Usage>,
     settings: Settings,
 ) -> Result<(), String> {
     let live = engine.inner().clone();
     let login = Arc::clone(&login.0);
     let hotkey = hotkey.0.clone();
-    let saved = on_config(&state, move |config| {
-        save_with_login(config, &live, &*login, &hotkey, settings)
+    let after = settings.clone();
+    let (before, saved) = on_config(&state, move |config| {
+        let before = config.settings().ok();
+        save_with_login(config, &live, &*login, &hotkey, settings).map(|saved| (before, saved))
     })
     .await?;
+    // Usage events: names of what changed, never values (A1).
+    if let Some(before) = before {
+        usage::settings_saved(&usage, usage::settings_change(&before, &after));
+    }
     saved.problem().map_or(Ok(()), Err)
 }
 
@@ -257,10 +265,13 @@ pub async fn save_settings(
 pub async fn set_api_key(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
+    usage: State<'_, Usage>,
     provider: Provider,
     key: String,
 ) -> Result<(), String> {
-    save_key(&state.0, engine.inner(), provider, key).await
+    save_key(&state.0, engine.inner(), provider, key).await?;
+    usage.record(usage::engine_selected(provider));
+    Ok(())
 }
 
 /// Writes the key through the engine's bounded writes (T3, #113): a keychain
@@ -525,6 +536,7 @@ pub async fn set_onboarding_step(
     engine: State<'_, LiveEngine>,
     onboarding: State<'_, Arc<Onboarding>>,
     permissions: State<'_, OsPermissions>,
+    usage: State<'_, Usage>,
     step: Step,
 ) -> Result<OnboardingStatus, String> {
     let (config, live, os) = (
@@ -542,6 +554,7 @@ pub async fn set_onboarding_step(
     onboarding
         .go_to(step, readiness)
         .map_err(|not_yet| not_yet.to_string())?;
+    usage::onboarding_step(&usage, step);
     Ok(onboarding.status(&*permissions.0))
 }
 
@@ -551,8 +564,10 @@ pub async fn set_onboarding_step(
 pub async fn finish_onboarding(
     shell: State<'_, AppShell>,
     onboarding: State<'_, Arc<Onboarding>>,
+    usage: State<'_, Usage>,
 ) -> Result<(), String> {
     onboarding.close();
+    usage::onboarding_completed(&usage);
     tracing::info!("onboarding finished");
     shell.0.hide_window();
     Ok(())
@@ -2146,6 +2161,7 @@ mod capability_tests {
         )));
         app.manage(super::ConfigDir(dir.clone()));
         app.manage(super::AppShell(std::sync::Arc::new(NoShell)));
+        app.manage(crate::usage::Usage::disabled());
         let windows = labels
             .iter()
             .map(|label| {
