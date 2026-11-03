@@ -24,6 +24,7 @@ class Backend {
     language: null,
     hotkey: "RightAlt",
     launch_at_login: false,
+    share_usage_events: true,
   };
   keys: Record<Provider, boolean> = { groq: false, openai: false };
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
@@ -33,6 +34,8 @@ class Backend {
   calls: Call[] = [];
   /** Holds `test_api_key` until called, to test a reply that arrives late. */
   holdTest: Promise<void> | null = null;
+  /** Holds `set_share_usage_events` until released. */
+  holdShare: Promise<void> | null = null;
   /** Holds `set_api_key` until released, to test the form while a save runs. */
   holdSetKey: Promise<void> | null = null;
   /**
@@ -52,7 +55,16 @@ class Backend {
       case "get_settings":
         return this.settings;
       case "save_settings":
-        this.settings = args.settings as Settings_Serialize;
+        // Like the app: Save never changes the sharing choice.
+        this.settings = {
+          ...(args.settings as Settings_Serialize),
+          share_usage_events: this.settings.share_usage_events,
+        };
+        return null;
+      case "set_share_usage_events":
+        this.settings = { ...this.settings, share_usage_events: args.share as boolean };
+        // The write is done; the reply is what waits.
+        if (this.holdShare) await this.holdShare;
         return null;
       case "set_api_key":
         if (this.holdSetKey) await this.holdSetKey;
@@ -410,6 +422,7 @@ describe("criterion 2: settings save and reload", () => {
         language: "de",
         hotkey: "Ctrl+Shift+Space",
         launch_at_login: false,
+        share_usage_events: true,
       },
     });
     expect(screen.getByText("Key saved")).toBeTruthy();
@@ -1104,5 +1117,90 @@ describe("T2: settings edges", () => {
     test.open();
     await screen.findByRole("status");
     expect(backend.settings.language).toBeNull();
+  });
+});
+
+describe("share anonymous usage events", () => {
+  const box = () => screen.getByLabelText<HTMLInputElement>("Share anonymous usage events");
+
+  it("is on by default", async () => {
+    await open();
+    expect(box().checked).toBe(true);
+  });
+
+  it("turning it off uses its own command at once, without the Save button", async () => {
+    await open();
+    fireEvent.click(box());
+    await waitFor(() => {
+      expect(backend.named("set_share_usage_events")).toHaveLength(1);
+    });
+    expect(backend.named("set_share_usage_events")[0]?.args.share).toBe(false);
+    expect(backend.named("save_settings")).toHaveLength(0);
+    expect(backend.settings.share_usage_events).toBe(false);
+    await waitFor(() => {
+      expect(box().checked).toBe(false);
+    });
+  });
+
+  it("turning it on again sends true", async () => {
+    backend.settings = { ...backend.settings, share_usage_events: false };
+    await open();
+    expect(box().checked).toBe(false);
+    fireEvent.click(box());
+    await waitFor(() => {
+      expect(backend.settings.share_usage_events).toBe(true);
+    });
+    await waitFor(() => {
+      expect(box().checked).toBe(true);
+    });
+  });
+
+  it("stays as it was and says why when the command fails", async () => {
+    await open();
+    backend.failing.set("set_share_usage_events", "The settings file is read-only.");
+    fireEvent.click(box());
+    expect((await screen.findByRole("alert")).textContent).toContain("read-only");
+    expect(box().checked).toBe(true);
+  });
+
+  it("a Save pressed while the opt-out is pending does not undo it", async () => {
+    await open();
+    let release: (() => void) | undefined;
+    backend.holdShare = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fireEvent.click(box());
+    await waitFor(() => {
+      expect(backend.named("set_share_usage_events")).toHaveLength(1);
+    });
+    // The form still holds the sharing value it was loaded with.
+    click("Save");
+    await screen.findByText("Settings saved.");
+    release?.();
+    await waitFor(() => {
+      expect(box().checked).toBe(false);
+    });
+    expect(backend.settings.share_usage_events).toBe(false);
+    expect(backend.named("save_settings")).toHaveLength(1);
+  });
+
+  it("a later Save keeps the choice", async () => {
+    await open();
+    fireEvent.click(box());
+    await waitFor(() => {
+      expect(box().checked).toBe(false);
+    });
+    click("Save");
+    await screen.findByText("Settings saved.");
+    expect(backend.settings.share_usage_events).toBe(false);
+    expect(box().checked).toBe(false);
+  });
+
+  it("lists what is sent in plain words, and what never is", async () => {
+    await open();
+    const list = screen.getByText("What's sent").closest("details");
+    expect(list).not.toBeNull();
+    expect(within(list as HTMLElement).getByText(/Which setting you changed/)).toBeTruthy();
+    expect(screen.getByText(/Never your voice, your text, your API keys/)).toBeTruthy();
   });
 });

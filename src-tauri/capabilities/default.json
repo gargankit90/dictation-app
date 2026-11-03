@@ -13,6 +13,7 @@
     "allow-request-permission",
     "allow-set-onboarding-step",
     "allow-finish-onboarding",
-    "allow-relaunch-app"
+    "allow-relaunch-app",
+    "allow-set-share-usage-events"
   ]
 }

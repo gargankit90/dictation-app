@@ -102,6 +102,7 @@ fn expected(known: &Known) -> Settings {
         language: known.language.clone(),
         hotkey: known.hotkey.to_owned(),
         launch_at_login: false,
+        share_usage_events: true,
     }
 }
 

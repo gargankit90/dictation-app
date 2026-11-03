@@ -13,7 +13,8 @@
 //! - **v2** (current): `engine` is renamed `provider`, `whisper_model` is
 //!   renamed `model`, and "detect" is `null` instead of `""`. M5.3 added
 //!   `launch_at_login` (default `false`) without a version bump: a file
-//!   without it loads with the default.
+//!   without it loads with the default. A1 added `share_usage_events`
+//!   (default `true`) the same way.
 //!
 //! Fields this version doesn't know (from a newer build, or a hand edit) are
 //! ignored, and missing ones take their defaults, so an old or partial file
@@ -100,6 +101,9 @@ pub struct Settings {
     /// the last value applied; what the settings screen shows is the OS's
     /// own state, which the user can change in System Settings.
     pub launch_at_login: bool,
+    /// Whether anonymous usage events are shared (A1, `docs/privacy.md`).
+    /// On by default; a file without it loads with `true`.
+    pub share_usage_events: bool,
 }
 
 impl Default for Settings {
@@ -112,6 +116,7 @@ impl Default for Settings {
             language: None,
             hotkey: HotkeySpec::default().to_string(),
             launch_at_login: false,
+            share_usage_events: true,
         }
     }
 }
@@ -306,6 +311,7 @@ mod tests {
                 language: None,
                 hotkey: "Ctrl+Space".into(),
                 launch_at_login: false,
+                share_usage_events: true,
             }
         );
         // A language stays a language; no version at all is v1 too.
@@ -314,6 +320,18 @@ mod tests {
         assert_eq!(settings.model, "whisper-large-v3");
         assert_eq!(settings.language.as_deref(), Some("fr"));
         assert_eq!(settings.hotkey, "RightAlt");
+    }
+
+    #[test]
+    fn sharing_usage_events_defaults_to_on_and_round_trips() {
+        assert!(Settings::default().share_usage_events);
+        let old = from_json(r#"{"version": 2, "provider": "groq"}"#).unwrap();
+        assert!(old.share_usage_events, "a file without it shares");
+        let off = Settings {
+            share_usage_events: false,
+            ..Settings::default()
+        };
+        assert_eq!(from_json(&to_json(&off).unwrap()).unwrap(), off);
     }
 
     #[test]

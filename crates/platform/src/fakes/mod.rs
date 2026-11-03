@@ -10,6 +10,7 @@ mod inserter;
 mod launch;
 mod permissions;
 mod secrets;
+mod telemetry;
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -24,6 +25,7 @@ pub use inserter::FakeInserter;
 pub use launch::FakeLaunchAtLogin;
 pub use permissions::FakePermissions;
 pub use secrets::MemSecretStore;
+pub use telemetry::FakeTelemetry;
 
 /// Locks `mutex`, ignoring poisoning: a panicking test thread shouldn't make
 /// every later call on a shared fake panic too.
