@@ -64,6 +64,43 @@ once a minute and when you quit, with one attempt and a 10 second timeout. If
 that fails, the queued events are dropped. Nothing is retried and dictation
 never waits for it.
 
+## Troubleshoot and "Report a problem" (separate from analytics)
+
+Tray menu → Troubleshoot… (also Settings → Help → Troubleshoot…) checks, on
+this Mac, the microphone and Accessibility permissions, whether the hotkey
+works, whether the engine is ready (a saved key can be read, or the chosen
+model is downloaded and verified), and the last error. These checks record no
+audio and contact nobody. "Test connection" is the one button that does: it
+sends a short silent clip to your cloud provider with your saved key, only
+when you press it.
+
+"Report a problem" builds a short text report from a fixed list of fields
+(`crates/core/src/report.rs`; there is no slot for anything else):
+
+- the app version, macOS version and chip
+- whether the microphone and Accessibility permissions are granted
+- your hotkey, as the setting writes it
+- the engine: cloud with the provider's name, or on this Mac with the model id
+- whether the engine is ready
+- whether anonymous usage events are on
+- the last ten error codes (for example `mic_denied`) with the time of each
+
+It never holds audio, transcripts, anything you typed or copied, API keys, app
+names or window titles, file paths, your user name, log lines, or what a
+provider answered. A text field that isn't plain (a path, a key, odd
+characters) shows `unknown` instead. Error codes are kept in memory only
+(the last ten since the app started); the error text itself isn't kept.
+
+The app shows you the exact text first. Then you choose: **Save report…** (a
+file you pick), **Copy**, or **Open a GitHub issue** (opens your browser at a
+new issue on this project with the report as its body, which you read and
+submit yourself). The app uploads nothing and never sends a report by itself.
+
+This is separate from the analytics switch above. Turning analytics off
+doesn't stop you making a report, and turning it on never sends one. The
+errors that analytics sends (`dictation_failed`, only the kind of failure)
+stay governed by that switch alone.
+
 ## For the owner: PostHog set-up
 
 1. Create a PostHog **Cloud US** project.
