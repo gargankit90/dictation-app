@@ -238,7 +238,8 @@ impl SentryReporter {
         } else {
             state.generation += 1;
             self.cancel.send_replace(state.generation);
-            drop(state);
+            // Still under the lock: a panic report commits its file under
+            // the same lock, so none can land after this delete.
             let _ = std::fs::remove_file(self.pending_path());
         }
     }
@@ -294,9 +295,28 @@ impl SentryReporter {
     /// message is not an input: it can't be sent. Called from the panic
     /// hook, so it only writes a small file.
     pub fn record_panic(&self, location: Option<(&str, u32)>, backtrace: &str) {
-        if self.config.dsn.is_none() || !self.lock().enabled {
+        self.record_panic_with(location, backtrace, || {});
+    }
+
+    /// [`Self::record_panic`], running `between` after the first check of
+    /// the switch and before the file is committed (a test seam for an
+    /// opt-out landing in that gap).
+    fn record_panic_with(
+        &self,
+        location: Option<(&str, u32)>,
+        backtrace: &str,
+        between: impl FnOnce(),
+    ) {
+        if self.config.dsn.is_none() {
             return;
         }
+        let generation = {
+            let state = self.lock();
+            if !state.enabled {
+                return;
+            }
+            state.generation
+        };
         let value = match location {
             Some((file, line)) => format!("panicked at {}:{line}", crate_relative(file)),
             None => "panicked".to_owned(),
@@ -309,11 +329,20 @@ impl SentryReporter {
             None,
         );
         let body = envelope(&event);
+        between();
+        // Commit under the lock, only if sharing is still on and was not
+        // turned off (even and on again) since the check above.
+        // `set_enabled` deletes the file under the same lock.
+        let state = self.lock();
+        if !state.enabled || state.generation != generation {
+            return;
+        }
         let path = self.pending_path();
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
         let _ = std::fs::write(path, body);
+        drop(state);
     }
 
     /// Installs a panic hook that calls [`Self::record_panic`] and then the

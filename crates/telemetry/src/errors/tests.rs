@@ -294,3 +294,37 @@ async fn reports_are_capped_per_run() {
     let sent = server.received_requests().await.unwrap_or_default().len();
     assert!(sent <= MAX_PER_RUN, "{sent}");
 }
+
+#[tokio::test]
+async fn a_panic_racing_an_opt_out_leaves_no_report_to_send_later() {
+    let server = ok_server().await;
+    let dir = temp("race");
+    let reporter = reporter(Some(&server), &dir, true);
+    // The opt-out lands after the panic's first check and before its write.
+    reporter.record_panic_with(Some(("crates/app/src/x.rs", 1)), "", || {
+        reporter.set_enabled(false);
+    });
+    assert!(
+        !dir.join(PENDING_FILE).exists(),
+        "a discarded report was written after the opt-out"
+    );
+    // An opt-out and an opt-in inside the gap is a newer generation too.
+    reporter.set_enabled(true);
+    reporter.record_panic_with(Some(("crates/app/src/x.rs", 1)), "", || {
+        reporter.set_enabled(false);
+        reporter.set_enabled(true);
+    });
+    assert!(!dir.join(PENDING_FILE).exists());
+    reporter.set_enabled(false);
+    reporter.set_enabled(true);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty(),
+        "a discarded report was uploaded"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
