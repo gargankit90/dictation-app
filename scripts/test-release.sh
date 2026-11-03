@@ -15,9 +15,11 @@
 #     to a file in the repository;
 #   - a bundle signed with another key, for another version, or changed after
 #     it was signed, is refused;
-#   - --publish is refused without a clean tree or without tag v<version>
-#     on HEAD, before the Keychain is read; with both, it calls
-#     `gh release create v<version> --repo gargankit90/dictation-app-releases`;
+#   - --publish is refused without a clean tree, with HEAD not on origin's
+#     default branch, or with tag v<version> already here or on origin
+#     (tags are immutable), before the Keychain is read; otherwise it calls
+#     `gh release create v<version> --repo gargankit90/dictation-app
+#     --target <HEAD>`;
 #   - a version that isn't the one in tauri.conf.json, or a missing Keychain
 #     item, is refused.
 set -euo pipefail
@@ -138,7 +140,7 @@ printf '#!/usr/bin/env bash\nexit 0\n' >"$repo/scripts/check-licences.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$repo/scripts/check-dmg.sh"
 chmod +x "$repo/scripts"/*.sh
 jq -n --arg v "$VERSION" --arg k "$PUBKEY" \
-  '{version: $v, plugins: {updater: {pubkey: $k, endpoints: ["https://github.com/gargankit90/dictation-app-releases/releases/latest/download/latest.json"]}}}' \
+  '{version: $v, plugins: {updater: {pubkey: $k, endpoints: ["https://github.com/gargankit90/dictation-app/releases/latest/download/latest.json"]}}}' \
   >"$repo/src-tauri/tauri.conf.json"
 jq -n --arg v "$VERSION" '{name: "dictation-app", version: $v}' >"$repo/package.json"
 printf '[workspace.package]\nversion = "%s"\n' "$VERSION" >"$repo/Cargo.toml"
@@ -155,6 +157,12 @@ printf 'target/\n' >"$repo/.gitignore"
   }
   git -c user.name=t -c user.email=t@example.invalid add -A
   git -c user.name=t -c user.email=t@example.invalid commit -qm init
+  # A local bare "origin" with the commit on its default branch (never GitHub).
+  git branch -M main
+  git init -q --bare "$work/origin.git"
+  git remote add origin "$work/origin.git"
+  git push -q origin main
+  git remote set-head origin main >/dev/null
 )
 
 # run_release <args...>: the script in the throwaway repository, with the
@@ -190,8 +198,8 @@ grep -q 'signature verifies against the public key' "$work/out.txt" || fail "no 
 [ "$(jq -r .version "$out/latest.json")" = "$VERSION" ] || fail "latest.json has the wrong version"
 [ "$(jq -r .notes "$out/latest.json")" = "Test notes." ] || fail "latest.json has the wrong notes"
 [ "$(jq -r '.platforms["darwin-aarch64"].url' "$out/latest.json")" = \
-  "https://github.com/gargankit90/dictation-app-releases/releases/download/v$VERSION/$base.app.tar.gz" ] ||
-  fail "latest.json's url isn't the releases repository's"
+  "https://github.com/gargankit90/dictation-app/releases/download/v$VERSION/$base.app.tar.gz" ] ||
+  fail "latest.json's url isn't this repository's"
 [ "$(jq -r '.platforms["darwin-aarch64"].signature' "$out/latest.json")" = "$(cat "$out/$base.app.tar.gz.sig")" ] ||
   fail "latest.json's signature isn't the .sig"
 [ -s "$calls/npm-got-key" ] && [ -s "$calls/npm-got-password" ] || fail "the build didn't get the key and password"
@@ -223,34 +231,50 @@ FAKE_TAMPER=1 run_release "$VERSION" && fail "a bundle changed after signing pas
 grep -q 'does not verify against the public key' "$work/out.txt" || fail "no message for a changed bundle"
 pass "a bundle signed with another key, for another version or changed after signing is refused"
 
-# 4. --publish needs a clean tree and the tag, checked before the Keychain.
+# 4. --publish needs a clean tree, a merged commit and a new tag, checked
+# before the Keychain.
+refused() { # refused <message regex> <label>
+  grep -q -- "$1" "$work/out.txt" || fail "no '$1' message ($2)"
+  [ ! -e "$calls/security" ] || ! grep -q find-generic-password "$calls/security" || fail "the Keychain was read for a refused publish ($2)"
+  [ ! -e "$calls/npm" ] && [ ! -e "$calls/gh" ] || fail "a refused publish built or called gh ($2)"
+}
 echo change >>"$repo/docs/TESTERS.md"
 run_release "$VERSION" --publish && fail "--publish passed on a dirty tree"
-grep -q 'needs a clean tree' "$work/out.txt" || fail "no 'clean tree' message"
-[ ! -e "$calls/security" ] || ! grep -q find-generic-password "$calls/security" || fail "the Keychain was read for a refused publish"
-[ ! -e "$calls/npm" ] && [ ! -e "$calls/gh" ] || fail "a refused publish built or called gh"
+refused 'needs a clean tree' "dirty tree"
 git -C "$repo" checkout -q -- docs/TESTERS.md
-run_release "$VERSION" --publish && fail "--publish passed without tag v$VERSION"
-grep -q "needs tag v$VERSION on HEAD" "$work/out.txt" || fail "no tag message"
-[ ! -e "$calls/npm" ] && [ ! -e "$calls/gh" ] || fail "a refused publish built or called gh"
-git -C "$repo" tag "v0.2.9"
-run_release "$VERSION" --publish && fail "--publish passed with another version's tag"
-# A tag that only matches v$VERSION as a regex (the dots) is not the tag.
-lookalike="v${VERSION//./x}"
-git -C "$repo" tag "$lookalike"
-run_release "$VERSION" --publish && fail "--publish passed with the lookalike tag $lookalike"
-grep -q "needs tag v$VERSION on HEAD" "$work/out.txt" || fail "no tag message for the lookalike tag"
-[ ! -e "$calls/npm" ] && [ ! -e "$calls/gh" ] || fail "a refused publish built or called gh"
-git -C "$repo" tag -d "$lookalike" >/dev/null
-pass "--publish is refused without a clean tree or tag v$VERSION"
 
+# A commit that isn't on origin's default branch.
+git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m unmerged
+run_release "$VERSION" --publish && fail "--publish passed with an unmerged commit"
+refused 'needs HEAD .* on origin/main' "unmerged commit"
+git -C "$repo" reset -q --hard HEAD~1
+
+# A tag that exists here, or only on origin, is refused: tags are immutable.
+tag_msg="tag v$VERSION already exists; tags are immutable here.*needs a new version"
 git -C "$repo" tag "v$VERSION"
-run_release "$VERSION" --publish || fail "--publish failed with a clean tree and the tag"
-grep -q "^gh release create v$VERSION --repo gargankit90/dictation-app-releases " "$calls/gh" ||
-  fail "gh wasn't asked to create v$VERSION in the releases repository: $(cat "$calls/gh" 2>/dev/null)"
+run_release "$VERSION" --publish && fail "--publish passed with a local tag v$VERSION"
+refused "$tag_msg" "local tag"
+git -C "$repo" tag --delete "v$VERSION" >/dev/null
+git -C "$repo" tag "v$VERSION"
+git -C "$repo" push -q origin "refs/tags/v$VERSION"
+git -C "$repo" tag --delete "v$VERSION" >/dev/null
+run_release "$VERSION" --publish && fail "--publish passed with a tag v$VERSION on origin"
+refused "$tag_msg" "remote tag"
+git -C "$work/origin.git" tag --delete "v$VERSION" >/dev/null
+git -C "$repo" tag --delete "v$VERSION" >/dev/null 2>&1 || true  # the script's fetch brought it back
+# Other versions' tags, and tags that match v$VERSION only as a regex, are no obstacle.
+git -C "$repo" tag "v0.2.9"
+git -C "$repo" tag "v${VERSION//./x}"
+pass "--publish is refused without a clean tree, off the default branch, or when tag v$VERSION exists"
+
+head=$(git -C "$repo" rev-parse HEAD)
+run_release "$VERSION" --publish || fail "--publish failed with a clean, merged tree and a new tag"
+grep -q "^gh release create v$VERSION --repo gargankit90/dictation-app --target $head " "$calls/gh" ||
+  fail "gh wasn't asked to create v$VERSION in this repository at $head: $(cat "$calls/gh" 2>/dev/null)"
+! grep -q 'dictation-app-releases' "$calls/gh" || fail "gh was pointed at the old repository"
 grep -q "$base.app.tar.gz.sig" "$calls/gh" && grep -q latest.json "$calls/gh" || fail "gh wasn't given the bundle files"
 no_secret_in_output "publish"
-pass "--publish with a clean tree and the tag hands the release to gh (a stub here)"
+pass "--publish on a merged, clean commit hands the release to gh at that commit (a stub here)"
 
 # 5. Other refusals.
 run_release 0.3.1 && fail "a version that isn't tauri.conf.json's passed"
