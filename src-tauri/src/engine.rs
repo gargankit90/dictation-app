@@ -242,6 +242,13 @@ impl LiveEngine {
         self
     }
 
+    /// The engine now current, if the engine follows the settings (E1:
+    /// Troubleshoot reads whether the on-device model loaded).
+    #[must_use]
+    pub fn current_engine(&self) -> Option<Arc<Engine>> {
+        self.transcribers.as_ref().map(Transcribers::current)
+    }
+
     /// The on-device models, for the model commands.
     #[must_use]
     pub fn local(&self) -> Option<&LocalModels> {

@@ -3,6 +3,7 @@ import { commands } from "./bindings";
 import type { View } from "./bindings";
 import { Onboarding } from "./Onboarding";
 import { Settings } from "./Settings";
+import { Troubleshoot } from "./Troubleshoot";
 
 /**
  * The app's one window (opened from the tray): the settings form, or the
@@ -12,6 +13,8 @@ import { Settings } from "./Settings";
 export function App() {
   // `null` until the app answers.
   const [view, setView] = useState<View | null>(null);
+  // Settings, or Troubleshoot (E1), which the tray can ask for.
+  const [page, setPage] = useState<"settings" | "troubleshoot">("settings");
 
   useEffect(() => {
     const state = { cancelled: false };
@@ -23,7 +26,18 @@ export function App() {
       } catch {
         // Settings, which works without onboarding.
       }
-      if (!state.cancelled) setView(next);
+      let troubleshoot = false;
+      if (next === "settings") {
+        try {
+          const asked = await commands.takeTroubleshootRequest();
+          troubleshoot = asked.status === "ok" && asked.data;
+        } catch {
+          // Settings.
+        }
+      }
+      if (state.cancelled) return;
+      setView(next);
+      if (troubleshoot) setPage("troubleshoot");
     };
     void ask();
     const onShow = () => {
@@ -48,5 +62,23 @@ export function App() {
       />
     );
   }
-  return <Settings />;
+  if (page === "troubleshoot") {
+    return (
+      <Troubleshoot
+        onBack={() => {
+          setPage("settings");
+        }}
+        onOpenSettings={() => {
+          setPage("settings");
+        }}
+      />
+    );
+  }
+  return (
+    <Settings
+      onTroubleshoot={() => {
+        setPage("troubleshoot");
+      }}
+    />
+  );
 }

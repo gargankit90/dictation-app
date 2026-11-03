@@ -232,6 +232,50 @@ mod tests {
         }
     }
 
+    /// E1: the error code of a transcription failure is read back from its
+    /// `user_message`, so every variant's message must land on its code.
+    #[test]
+    fn every_error_message_maps_to_its_error_code() {
+        use dictation_core::diagnostics::ErrorCode;
+        use dictation_core::error::DictationError;
+
+        let cases = [
+            (TranscribeError::MissingKey, ErrorCode::KeyMissing),
+            (TranscribeError::KeyPending, ErrorCode::KeyUnreadable),
+            (
+                TranscribeError::KeychainUnavailable("locked".into()),
+                ErrorCode::KeyUnreadable,
+            ),
+            (TranscribeError::InvalidKey, ErrorCode::KeyRejected),
+            (TranscribeError::RateLimited, ErrorCode::ProviderQuota),
+            (TranscribeError::Timeout, ErrorCode::NetworkUnreachable),
+            (
+                TranscribeError::Network("dns".into()),
+                ErrorCode::NetworkUnreachable,
+            ),
+            (
+                TranscribeError::Redirected(302),
+                ErrorCode::ProviderRedirect,
+            ),
+            (TranscribeError::ModelMissing, ErrorCode::ModelMissing),
+            (TranscribeError::ModelLoading, ErrorCode::ModelLoading),
+            (
+                TranscribeError::Engine("couldn't load the on-device model: bad file".into()),
+                ErrorCode::ModelLoadingFailed,
+            ),
+            (
+                TranscribeError::Engine("the provider failed (HTTP 503)".into()),
+                ErrorCode::EngineFailed,
+            ),
+        ];
+        for (error, code) in cases {
+            let shown = DictationError::TranscriptionFailed {
+                reason: error.user_message(),
+            };
+            assert_eq!(ErrorCode::of(&shown), code, "{error:?}");
+        }
+    }
+
     /// #41: whatever a provider or library puts in these strings, the text
     /// that reaches the info log (`Display`) and the user is one short line
     /// without a key.

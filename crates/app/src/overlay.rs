@@ -14,6 +14,7 @@
 use std::time::Duration;
 
 use dictation_core::coordinator::Phase;
+use dictation_core::diagnostics::ErrorCode;
 use dictation_core::error::DictationError;
 use tokio::time::Instant;
 
@@ -37,6 +38,8 @@ pub enum OverlayView {
     Error {
         /// The error's `Display` text.
         message: String,
+        /// Its stable code, shown under the message (E1).
+        code: ErrorCode,
     },
 }
 
@@ -89,8 +92,13 @@ impl OverlayModel {
             UiEvent::Error(error) => {
                 // Always a change, even with the same text: it restarts the
                 // timer.
+                // The code table's message and next step (E1), not the
+                // error's `Display` text: it is the same short text in the
+                // tray, and it never carries a reason.
+                let code = ErrorCode::of(error);
                 self.view = OverlayView::Error {
-                    message: error.to_string(),
+                    message: code.user_text(),
+                    code,
                 };
                 self.hotkey_error = matches!(error, DictationError::HotkeyFailed);
                 return Some(Change {
@@ -199,7 +207,8 @@ mod tests {
 
     fn error_view() -> OverlayView {
         OverlayView::Error {
-            message: DictationError::EmptyTranscript.to_string(),
+            message: ErrorCode::NoSpeech.user_text(),
+            code: ErrorCode::NoSpeech,
         }
     }
 
@@ -253,6 +262,49 @@ mod tests {
         assert_eq!(model.view(), &error_view());
     }
 
+    /// E1 round 1: the overlay shows the code table's message and next
+    /// step, not the old `Display` text.
+    #[test]
+    fn an_error_shows_the_tables_message_and_next_step() {
+        use dictation_core::error::Permission;
+        let load_failure = DictationError::TranscriptionFailed {
+            reason: "Something went wrong: couldn't load the on-device model: out of memory."
+                .into(),
+        };
+        let cases = [
+            (load_failure, "Pick or download another model in Settings."),
+            (
+                DictationError::InsertFailed {
+                    reason: "no focused app".into(),
+                },
+                "Check Accessibility, then dictate again.",
+            ),
+            (
+                DictationError::PermissionMissing(Permission::Accessibility),
+                "Allow it in Privacy & Security, Accessibility.",
+            ),
+            (
+                DictationError::PermissionMissing(Permission::Microphone),
+                "Allow it in Privacy & Security, then relaunch.",
+            ),
+            (
+                DictationError::EmptyTranscript,
+                "Speak closer to the microphone and try again.",
+            ),
+        ];
+        for (error, step) in cases {
+            let mut model = OverlayModel::default();
+            let change = model.on_event(&UiEvent::Error(error.clone())).unwrap();
+            let OverlayView::Error { message, code } = change.view else {
+                panic!("expected an error view");
+            };
+            assert!(message.ends_with(step), "{error:?}: {message}");
+            assert_eq!(message, code.user_text());
+            assert!(!message.contains("Something went wrong"), "{message}");
+            assert!(!message.contains("no focused app"), "{message}");
+        }
+    }
+
     #[test]
     fn an_error_message_never_carries_a_key() {
         let mut model = OverlayModel::default();
@@ -262,11 +314,11 @@ mod tests {
                 reason: format!("401 Unauthorized for key {key}"),
             }))
             .expect("an error is a change");
-        let OverlayView::Error { message } = change.view else {
+        let OverlayView::Error { message, .. } = change.view else {
             panic!("expected an error view");
         };
         assert!(!message.contains(key), "{message}");
-        assert!(message.contains("[key hidden]"), "{message}");
+        assert!(!message.contains("401"), "{message}");
     }
 
     #[test]
@@ -304,7 +356,8 @@ mod tests {
 
     fn hotkey_error_view() -> OverlayView {
         OverlayView::Error {
-            message: DictationError::HotkeyFailed.to_string(),
+            message: ErrorCode::HotkeyUnregistered.user_text(),
+            code: ErrorCode::HotkeyUnregistered,
         }
     }
 

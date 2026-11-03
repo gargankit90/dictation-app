@@ -69,7 +69,10 @@ export function OverlayContent({ view }: { view: OverlayView }) {
           <span className="overlay-icon" aria-hidden="true">
             !
           </span>
-          <span className="overlay-message">{view.message}</span>
+          <span className="overlay-text">
+            <span className="overlay-message">{view.message}</span>
+            {view.code === undefined ? null : <span className="overlay-code">{view.code}</span>}
+          </span>
         </div>
       );
   }

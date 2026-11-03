@@ -18,6 +18,12 @@
     "allow-download-local-model",
     "allow-cancel-local-model-download",
     "allow-delete-local-model",
-    "allow-set-share-usage-events"
+    "allow-set-share-usage-events",
+    "allow-run-checks",
+    "allow-test-connection",
+    "allow-build-report",
+    "allow-save-report",
+    "allow-open-issue",
+    "allow-take-troubleshoot-request"
   ]
 }

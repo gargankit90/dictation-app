@@ -10,6 +10,9 @@
 
 # The error of a dictation with no key (DictationError's text around
 # TranscribeError::MissingKey's user message).
+# What the tray shows (the code table, ErrorCode::user_text).
+TRAY_NO_KEY_SHOWN="No API key is saved. Add one in Settings, or use a model on this Mac."
+# What the log says (DictationError's Display).
 TRAY_NO_KEY_ERROR="Transcription failed: Add your API key in Settings."
 # The tray's title for any error (DICTATION_FAILED in crates/app/src/tray.rs).
 TRAY_ERROR_TITLE="⚠ Dictation failed"
@@ -47,7 +50,7 @@ tray_is_clear() {
 # The tray showing the no-key error: the short title, the message in the
 # tooltip.
 tray_shows_no_key_error() {
-  tray_shows "$TRAY_ERROR_TITLE" "$TRAY_TOOLTIP: $TRAY_NO_KEY_ERROR" "$@"
+  tray_shows "$TRAY_ERROR_TITLE" "$TRAY_TOOLTIP: $TRAY_NO_KEY_SHOWN (key_missing)" "$@"
 }
 
 e2e_tray_error_clears_on_next_recording() {

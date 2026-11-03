@@ -1,0 +1,28 @@
+Reviewer: CHANGES REQUESTED
+
+PR: #225 at fe890d5fe9ff1dce81fe1f8afb9ce74f7e957e3c. Round 1; no merge requested or performed.
+
+## Findings
+
+### Major 1 — The new next-step table is not used by the error surfaces
+
+`crates/app/src/overlay.rs:95` (also `crates/app/src/tray.rs:103`): the code is added, but the message is still `error.to_string()`. The table's `message` and `next_step` are only used by Troubleshoot. For a real local-model load failure, the overlay/tray say `Transcription failed: Something went wrong: couldn't load the on-device model: …` and `model_loading_failed`, without telling the user to choose another model. A paste failure likewise displays the adapter reason without the table's Accessibility recovery advice; Accessibility-missing and no-speech messages also omit the table's next step. This leaves users with the same unexplained failure E1 criterion 1 was intended to fix, despite the appropriate advice already existing in the table.
+
+Suggested fix: derive the user-facing message and next step from `ErrorCode::info()` for overlay and tray (and cover the relevant onboarding error presentation), rather than just appending a code to the old Display text. Add behavior tests that verify the actual surface payload contains the appropriate recovery step for model-load, paste and permission failures, not just a code. Keep the overlay's bounded layout readable.
+
+### Major 2 — A local engine that cannot load is diagnosed as Ready
+
+`src-tauri/src/diagnostics.rs:342` and `src-tauri/src/diagnostics.rs:155`: local readiness is taken from `ModelDownloads::list`, which uses `ModelStore::status` (`crates/transcribe/src/models.rs:256`). That status only checks whether the final file has the catalogue size; it does not establish that the model is verified or loaded. A valid downloaded model that fails to load (for example insufficient resources or loader failure, already represented by `src-tauri/src/engine.rs:2068`'s test) therefore gets a green `Transcription engine: Ready` and `engine_ready: yes` in the report. Before the user tries dictation, no last-error row even exposes the failure. The same false Ready is shown while the engine is loading. This contradicts criterion 2's present-and-loadable engine check and makes diagnosis misleading on the precise failure it must explain. `docs/privacy.md` also describes the model as verified when this check is only size-based.
+
+Suggested fix: read the existing live engine's loading/unavailable/loaded state as well as download status, without initiating a load or heavy verification from Troubleshoot. Represent loading and load failure explicitly, show their corresponding advice, and use the same readiness in reports. Add tests for a present model with a failed loader and for a load in progress, and align the documentation with the implemented check.
+
+## Checklist and evidence
+
+- **Scope:** reviewed E1 criteria 1–7, PR notes and the earlier design notes section B; findings 1–2 concern criteria 1–2. Manual VM criterion 7 remains with the Lead/Tester. The milestone file is present in the branch as the initial spec commit; no guard edits.
+- **Correctness:** traced tray routing, Settings entry, preview/save/copy/issue flow, error history bounds and connection-test mappings. Findings 1–2. Overlay CSS caps the message at two lines plus the code; actual macOS text fitting needs the VM check.
+- **Security/privacy:** error history retains only the enum and timestamp, not Display/Debug/reasons; report construction reads the documented settings/environment/permission fields and does not read clipboard, focused app, audio, transcript or raw provider body. Inspected planted-input and report-shape tests. Preview precedes export actions; save/open use the remembered preview; no automatic upload or provider call in the report/check flow. GitHub opening is an explicit action and includes the preview in the URL. Analytics code and switch remain separate. Permission fix actions reuse the proper Microphone/Accessibility System Settings routes. Capability additions are limited to the main window's new commands; CSP unchanged.
+- **Architecture:** no new crate dependencies, OS cfg or unsafe blocks. Local model metadata reads in the async check path are synchronous, small existing status reads; no model loading, recording or provider request is initiated by checks. Permission/keychain reads and save/browser work are dispatched to the blocking pool.
+- **Rust/TypeScript:** checked typed IPC, closed enums, error handling and UI cancellation of stale checks; no new production panic/unwrap or unexplained suppressions found. The string-to-code mapping is pinned by ports tests; its detailed codes refine the existing coarse telemetry categories rather than changing event payloads.
+- **Licences/reuse:** no dependency or copied third-party implementation changes found.
+- **Tests:** `cargo test -p dictation-core -p dictation-ports` passed (153 core and 22 ports unit tests, plus doctests). After `npm ci`, `npx vitest run src/Troubleshoot.test.tsx src/App.test.tsx src/overlay/Overlay.test.tsx` passed: 32 tests across 3 files. The initial UI invocation failed because dependencies had not been installed, then passed after installation. Reviewed shell diagnostics/privacy tests and developer's mutation-check evidence; did not modify product/tests or repeat the mutation. Full gate and VM e2e are not claimed by this review; CI checks were pending when inspected. Missing live readiness/surface-next-step behavior coverage is included in findings 1–2.
+- **Git/PR:** Conventional Commits and detailed PR notes present. No new minor findings, so no tech-debt issues created. Two majors, zero blockers, zero minors.
