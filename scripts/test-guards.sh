@@ -416,6 +416,73 @@ blocked 'gh pr -R o/r merge 2'
 blocked $'git status;\ngh pr merge 2'
 allowed 'gh pr comment 2 --body "merge"'
 allowed 'gh pr comment 2 --body "push to main; hooks; merges; patch 2"'
+# Round 1 B1: API option values never replace the endpoint.
+for option in '-H "Accept: application/vnd.github+json"' '--header="X-GitHub-Api-Version: 2022-11-28"' '--jq .sha' '-q .sha' '-t "{{.sha}}"' '--template={{.sha}}' '--hostname github.com' '-p foo' '--preview=foo' '--cache 1h' '-f note=value' '-F note=value' '--field note=value' '--raw-field=note=value'; do
+  for request in '-X PUT repos/o/r/pulls/186/merge' '-X POST repos/o/r/merges' '-X DELETE repos/o/r/rulesets/1' '-X PUT repos/o/r/rulesets/1' '-X PATCH repos/o/r/rulesets/1' '-X PATCH repos/o/r' '-X DELETE repos/o/r/git/refs/heads/work'; do
+    blocked "gh api $option $request"
+  done
+  allowed "gh api $option --method GET repos/o/r/rulesets/1"
+done
+blocked 'gh api --method PUT -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" /repos/o/r/pulls/186/merge -f merge_method=merge'
+blocked 'gh api -X PUT "repos/o/r/pulls/186/merge?x=1#fragment"'
+blocked 'gh api -X DELETE "repos/o/r/rulesets/1?x=1"'
+blocked 'gh api -X PUT ignored repos/o/r/pulls/186/merge'
+allowed 'gh api -f note=value --method=get -H "Accept: application/json" repos/o/r/rulesets/1'
+allowed 'gh api --method GET -f query=mergePullRequest graphql'
+# --input is a value option, not an endpoint, even for REST requests.
+printf '{}' > "$tmp/request.json"
+blocked "gh api --input $tmp/request.json -X PUT repos/o/r/pulls/186/merge"
+allowed "gh api --input=$tmp/request.json -X GET repos/o/r/rulesets/1"
+
+# Round 1 M1: unwrap commands without treating quoted message data as code.
+for wrapper in 'timeout 300' 'timeout -s TERM -k 5 300' 'nohup' 'xargs' 'xargs -n 1 -I {}' 'env' 'env -u DEBUG' 'command' 'exec' 'nice' 'nice -n 5' 'time' 'time -p' 'sudo' 'sudo -u root' 'caffeinate -t 300' 'stdbuf -oL'; do
+  blocked "$wrapper gh pr merge 186 --merge"
+  blocked "$wrapper gh api -H 'Accept: application/json' -X PUT repos/o/r/pulls/186/merge"
+  allowed "$wrapper gh pr view 186 --json mergeable"
+done
+for shell in 'sh -c' 'bash -c' 'bash -lc' 'bash -ec' 'bash -xc' 'zsh -c' 'zsh -lc' 'eval'; do
+  blocked "$shell 'gh pr merge 186 --merge'"
+  blocked "$shell 'gh api -X POST repos/o/r/merges'"
+  allowed "$shell 'gh pr view 186 --json mergeable'"
+done
+blocked 'echo 186 | xargs gh pr merge --merge'
+blocked 'echo "$(timeout 300 gh api -X PUT repos/o/r/pulls/1/merge)"'
+blocked 'echo `nohup gh pr merge 186`'
+allowed 'git commit -m "timeout 300 gh pr merge; core.hooksPath; mergePullRequest; hooks; merges"'
+allowed 'echo "gh api --method PUT -H headers repos/o/r/pulls/1/merge"'
+
+# Round 1 M2: only GraphQL mutation payloads trigger the role/settings block.
+for mutation in mergePullRequest enablePullRequestAutoMerge enqueuePullRequest mergeBranch createCommitOnBranch createRef deleteRef updateRef updateRefs updateRepository deleteBranchProtectionRule createBranchProtectionRule deleteRepositoryRuleset updateRepositoryRuleset createRepositoryRuleset; do
+  blocked "gh api graphql -f 'query=mutation { $mutation(input:{}) { clientMutationId } }'"
+  printf '{"query":"mutation { %s(input:{}) { clientMutationId } }"}' "$mutation" > "$tmp/mutation.json"
+  blocked "gh api --input $tmp/mutation.json graphql"
+done
+printf '%s\n' '{"query":"query { repository(owner: \"o\", name: \"r\") { name } }"}' > "$tmp/query.json"
+printf 'mutation { deleteRef(input:{}) { clientMutationId } }' > "$tmp/query.graphql"
+blocked "gh api graphql -F query=@$tmp/query.graphql"
+allowed "gh api --input=$tmp/query.json graphql"
+allowed 'gh api graphql -f "query=query { repository { name } }"'
+allowed 'gh api graphql -f '\''query=query { search(query:"mergePullRequest mutation", type:ISSUE) { issueCount } }'\'''
+allowed 'gh pr comment 1 --body "mutation { mergePullRequest(input:{}) }"'
+
+# Round 1 M3: environment and all git config scopes still enforce hook policy.
+blocked 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git push --force origin work'
+blocked 'env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_1=CORE.HOOKSPATH GIT_CONFIG_VALUE_1=/dev/null git push origin work'
+blocked 'export GIT_CONFIG_KEY_0=core.hooksPath'
+blocked 'GIT_CONFIG_PARAMETERS="'\''core.hooksPath'\''='\''/dev/null'\''" git push origin +work'
+blocked 'export GIT_CONFIG_PARAMETERS="'\''core.hooksPath'\''='\''/dev/null'\''"'
+blocked 'git --config-env=core.hooksPath=HP push --force origin work'
+blocked 'git --config-env core.hooksPath=HP push origin work'
+blocked 'git push -c core.hooksPath=/dev/null origin work'
+blocked 'git -c core.hooksPath=/dev/null config --get user.name'
+for scope in '--global' '--system' '--worktree' '--file /tmp/git-config'; do
+  blocked "git config $scope core.hooksPath /dev/null"
+  allowed "git config $scope --get core.hooksPath"
+done
+allowed 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=Tester git status'
+allowed 'git --config-env=user.name=NAME status'
+allowed 'git commit -m "GIT_CONFIG_KEY_0=core.hooksPath; --config-env=core.hooksPath=HP"'
+
 # Block messages must name the actual role policy.
 message=$(jq -n '{tool_input:{command:"gh pr merge 1"}}' | "$hook" 2>&1) || :
 if [[ "$message" == *"Code Reviewer merges"* && "$message" == *"owner changes guards"* ]]; then code=0; else code=1; fi
