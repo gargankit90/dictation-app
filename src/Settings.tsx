@@ -556,12 +556,12 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
                   void setSharing(event.target.checked);
                 }}
               />
-              Share anonymous usage events
+              Share usage and error events
             </label>
             <p id="share-usage-events-hint" className="hint">
-              Helps us see what works and what breaks. Never your voice, your text, your API keys or
-              the apps you use. Takes effect at once; turning it off also clears what was waiting to
-              be sent.
+              Helps us see what works and what breaks, and fix crashes. Never your voice, your text,
+              your API keys or the apps you use. Takes effect at once; turning it off also clears
+              what was waiting to be sent or reported.
             </p>
             <details>
               <summary>What&apos;s sent</summary>
@@ -574,6 +574,13 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
                   words).
                 </li>
                 <li>That a dictation failed, and the kind of failure (not the message).</li>
+                <li>
+                  Error reports, sent to Sentry (US): when the app crashes (a panic) or a dictation
+                  fails, the error code (for example mic_denied), the app version, your macOS major
+                  version and chip, and for a crash the code locations and function names where it
+                  happened. Never the error message, your words, file paths, your user name or
+                  computer name.
+                </li>
                 <li>Which setting you changed (not the new value).</li>
                 <li>That the app updated, from which version to which.</li>
               </ul>
