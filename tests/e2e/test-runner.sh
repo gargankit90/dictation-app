@@ -450,6 +450,27 @@ run_case textedit_exact 'vm() { esc_b64 "a\nb\n"; }; textedit_is "$(esc_b64 "a\n
 check "TextEdit's text is compared exactly, a trailing newline too" \
   test "$(status_of textedit_exact)" = 0
 
+# #185: the Unicode scenario seeds its document and reads it back before any
+# key or paste. With the seeding broken (what the base64 text of a shadowed
+# textedit_set left in TextEdit) it stops at "setup: document not as
+# expected", not at a paste check.
+run_case seed_broken 'seed="a\nb"
+  vm() { cat >/dev/null; esc_b64 "$seed" | tr -d "\n" | base64 | tr -d "\n"; }
+  unicode_doc "$seed" 0'
+check "a document seeded wrong fails the setup" test "$(status_of seed_broken)" != 0
+check "and says: setup: document not as expected" has "setup: document not as expected" "$(err seed_broken)"
+check "and shows what TextEdit holds" has "TextEdit holds" "$(err seed_broken)"
+
+run_case seed_right 'seed="a\n\u{1F600} e\u{301}\t\u{5E9}"
+  vm() { cat >/dev/null; esc_b64 "$seed"; }
+  textedit_seeded "$(esc_b64 "$seed")"'
+check "a document seeded exactly passes the setup check" test "$(status_of seed_right)" = 0
+
+# Every scenario file is sourced into one shell, so a helper defined twice
+# lets the later file silently replace the earlier (#185: textedit_set).
+dups=$(grep -hoE '^[a-zA-Z_][a-zA-Z0-9_]*\(\) *\{' tests/e2e/lib*.sh tests/e2e/scenarios/*.sh | sed 's/() *{//' | sort | uniq -d | paste -sd ' ' -)
+check "no shell function is defined in two e2e files (found: ${dups:-none})" test -z "$dups"
+
 # #164: a run in miniature ends its fixtures however it ends, KEEP=1 or not,
 # and only KEEP=1 keeps its files. It has a longsleep, and a job holding a
 # /bin/sleep (no $tmp in its command line) that answers TERM by starting

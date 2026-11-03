@@ -12,7 +12,7 @@ unless the owner decides so.
 | DMG build, checks, checksums                           | `scripts/build-dmg.sh`, `scripts/check-dmg.sh`                               |
 | DMG on every packaging PR and on `main` (ad-hoc signed) | `.github/workflows/dmg.yml`, artifact `dictation-app-dmg`                   |
 | Third-party licence notice, bundled and checked        | `THIRD-PARTY-LICENSES.txt`, `scripts/gen-licences.sh`, `scripts/check-licences.sh` |
-| Tester guide (the releases repo's README)              | `docs/TESTERS.md`                                                            |
+| Tester guide (attached to each release as README.md)   | `docs/TESTERS.md`                                                            |
 | Release build, signature check, upload                 | `scripts/release.sh` (tests: `scripts/test-release.sh`, in the gate)         |
 | Updater (tray "Check for updates…")                    | `src-tauri/src/updater.rs`, `plugins.updater` in `src-tauri/tauri.conf.json` |
 | Manifest maker, throwaway-key updater test             | `scripts/make-latest-json.sh`, `scripts/updater-test.sh`                     |
@@ -21,8 +21,9 @@ The updater trusts one **minisign public key** from `tauri.conf.json`
 (`plugins.updater.pubkey`, the owner's, key id `F6C80F173A96D78F`) and refuses
 any download whose signature doesn't verify against it, or whose signed
 version differs from the announced one (`requireSignedVersion`). It fetches
-`https://github.com/gargankit90/dictation-app-releases/releases/latest/download/latest.json`
-(a public repository holding only release assets, no source), once at launch
+`https://github.com/gargankit90/dictation-app/releases/latest/download/latest.json`
+(this repository's own releases; the separate `gargankit90/dictation-app-releases`
+is archived and was never used for a release), once at launch
 (quietly: a dialog only when there is an update) and from the tray's
 **Check for updates…**.
 
@@ -52,7 +53,8 @@ every tester. It is never a CI secret: releases are built on the owner's Mac.
 
 1. In a PR, bump `version` in `src-tauri/tauri.conf.json`, `package.json` and
    `Cargo.toml` (the script refuses a version they don't all have). Merge it.
-2. On the owner's Mac, on that `main` commit, with a clean tree:
+2. On the owner's Mac, on that merged `main` commit (`git switch --detach
+   origin/main`), with a clean tree:
 
    ```sh
    scripts/release.sh 0.2.0 --notes "What's new, in a line or two."   # dry run
@@ -68,21 +70,26 @@ every tester. It is never a CI secret: releases are built on the owner's Mac.
    `THIRD-PARTY-LICENSES.txt` and `SHA256SUMS`. Nothing is uploaded. macOS may
    ask once to let `security` read the two Keychain items.
 
-3. To publish, tag that commit and run it again with `--publish`:
+3. To publish, run it again with `--publish`. Do not create the tag yourself:
 
    ```sh
-   git tag v0.2.0
    scripts/release.sh 0.2.0 --notes "…" --publish
    ```
 
-   It refuses without a clean tree and tag `v0.2.0` on `HEAD`, then runs
-   `gh release create v0.2.0 --repo gargankit90/dictation-app-releases` with
-   those files (the owner's own `gh` login; no new token). Installed apps find
-   the new `latest.json` at their next launch or **Check for updates…**.
-   Push the tag to this repository too (`git push origin v0.2.0`).
+   It refuses without a clean tree, with a `HEAD` that is not on origin's
+   default branch, or when tag `v0.2.0` already exists here or on origin. Then
+   it runs `gh release create v0.2.0 --repo gargankit90/dictation-app
+   --target <the commit it built>` with those files (the owner's own `gh`
+   login; no new token), which creates the tag on that commit. Installed apps
+   find the new `latest.json` at their next launch or **Check for updates…**.
 
-The releases repository's README is `docs/TESTERS.md`; update it there when
-the guide changes. Publishing the first real release is the owner's call.
+   **Tags are immutable here**: a ruleset blocks moving or deleting them. If
+   a publish fails after the tag was created, do not retry the same version:
+   bump to a new one (the script's error says so).
+
+`docs/TESTERS.md` is attached to each release as its README; update it there
+when the guide changes. Publishing the first real release (0.1.0) is the
+owner's call.
 
 ## Try the updater with a throwaway key (no owner secrets)
 

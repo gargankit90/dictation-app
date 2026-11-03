@@ -1,182 +1,278 @@
 #!/usr/bin/env bash
-# Claude Code PreToolUse hook for Bash. Blocks commands that push to main,
-# force push, skip git hooks, merge PRs, or tamper with the guards themselves.
-# Exit code 2 blocks the call and shows the message to the agent.
+# Role/hook/guard/settings policy only. GitHub and pre-push enforce push rules.
+# Never execute the command being inspected. Exit 2 makes PreToolUse refuse it.
 set -uo pipefail
+command -v python3 >/dev/null || { echo 'guard-git: python3 missing; ask the Lead.' >&2; exit 2; }
+input=$(cat) || exit 2
+python3 - "$input" <<'PY'
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import sys
 
-# Fail closed: a missing tool, empty input, input that isn't one JSON object,
-# or a command that isn't a string blocks the call.
-refuse() {
-  echo "guard-git: blocked: $1, so the command can't be checked. Ask the Lead." >&2
-  exit 2
-}
-for tool in jq awk grep sed tr; do
-  command -v "$tool" >/dev/null 2>&1 || refuse "$tool not found"
-done
-input=$(cat) || refuse "can't read the hook input"
-[ -n "$input" ] || refuse "empty hook input"
-cmd=$(jq -ers 'if length == 1 and (.[0] | type) == "object"
-  then .[0].tool_input.command // "" | if type == "string" then . else error("command is not a string") end
-  else error("input is not one JSON object") end' <<<"$input" 2>/dev/null) ||
-  refuse "unreadable hook input"
-# Join backslash-newline continuations, so a flag on the next line still counts.
-cont=$'\\\n'
-cmd=${cmd//"$cont"/ }
 
-block() {
-  echo "guard-git: blocked: $1. Developers open PRs; the Tester merges. Ask the Lead if this is really needed." >&2
-  exit 2
-}
+def block(reason):
+    print(f"guard-git: blocked: {reason}. The Code Reviewer merges; the owner changes guards. Ask the Lead.", file=sys.stderr)
+    sys.exit(2)
 
-# The checks run on $scan: $cmd with literal message values blanked to '', so
-# words in a commit message or PR comment don't trip them. Blanked: the value
-# of -m/--message (also -am, -nm) after git commit|tag|stash|notes|merge, and
-# of -b/--body/-t/--title after gh pr|issue create|comment|edit|review, if it
-# has no $, backtick or backslash. A redirect (< or >) ends a message flag, so
-# its target is never blanked. A newline inside quotes becomes a space, so a
-# quoted value can't split a command across lines. A command with $( ${ $' <<
-# or a backtick, an unclosed quote, or over 20000 characters is scanned as it
-# is, because the quote tracking below could get it wrong.
-scan=$(awk '
-function reset() { st = 0; kind = ""; sub1 = ""; sub2 = ""; skip = 0; flag = 0 }
-function msgcmd() {
-  if (kind == "git") return sub1 ~ /^(commit|tag|stash|notes|merge)$/
-  if (kind == "gh") return sub1 ~ /^(pr|issue)$/ && sub2 ~ /^(create|comment|edit|review)$/
-  return 0
-}
-function msgflag(x) {
-  if (kind == "git") return x == "--message" || x ~ /^-[a-zA-Z]*m$/
-  return x ~ /^(-b|--body|-t|--title)$/
-}
-function endword(   v, isval, name) {
-  if (w == "") return
-  v = w; isval = flag; flag = 0
-  if (isval && !wexp) v = "\047\047"
-  else if (!wexp && msgcmd() && kind == "git" && match(w, /^--message=/)) v = substr(w, 1, RLENGTH) "\047\047"
-  else if (!wexp && msgcmd() && kind == "gh" && match(w, /^--(body|title)=/)) v = substr(w, 1, RLENGTH) "\047\047"
-  if (st == 0) {
-    # Skip VAR=value and keywords to find the command name.
-    if (w !~ /^[A-Za-z_][A-Za-z0-9_]*=/ && w !~ /^(!|[{]|if|then|else|elif|do|while|until|time)$/) {
-      name = w; sub(/.*\//, "", name)
-      kind = (name == "git" || name == "gh") ? name : "other"
-      st = 1
+
+try:
+    payload = json.loads(sys.argv[1])
+    command = payload.get("tool_input", {}).get("command") or ""
+    if not isinstance(command, str):
+        raise ValueError("command is not a string")
+except (ValueError, AttributeError):
+    block("unreadable hook input")
+
+
+def protected(path):
+    path = path.lower().rstrip("/")
+    return bool(re.search(
+        r"(^|/)(guard-git\.sh|guard-push\.sh|install-hooks\.sh|pre-push|"
+        r"\.?lefthook(?:-local)?\.(?:ya?ml|json|toml))$|"
+        r"(^|/)\.claude/(?:hooks(?:/.*)?|settings(?:\.local)?\.json)$|"
+        r"(^|/)(?:settings(?:\.local)?\.json|\.claude|scripts|hooks)$|\.git/hooks(?:/.*)?$", path))
+
+
+def inspect(text, depth=0):
+    if depth > 12:
+        block("shell nesting cannot be checked")
+    # Inspect executable substitutions, even when embedded in a message value.
+    for match in re.finditer(r"\$\(([^()]*)\)|`([^`]*)`", text):
+        inspect(match.group(1) or match.group(2), depth + 1)
+    try:
+        lexer = shlex.shlex(text.replace("\\\n", ""), posix=True, punctuation_chars=";&|()<>\n")
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        words = list(lexer)
+    except ValueError:
+        block("shell syntax cannot be checked")
+    segment = []
+    for word in words + [";"]:
+        if word and all(char in ";&|()\n" for char in word):
+            check(segment, depth)
+            segment = []
+        else:
+            segment.append(word)
+
+
+def environment(value):
+    if re.match(r"(?i)^LEFTHOOK=(0|false)$|^LEFTHOOK_EXCLUDE=.+", value):
+        block("disabling hooks")
+    if re.match(r"GIT_CONFIG_(?:PARAMETERS|KEY_\d+)=", value) and "core.hookspath" in value.lower():
+        block("disabling hooks through git environment configuration")
+
+
+def unwrap(args, depth):
+    # Consume only executable prefixes: quoted arguments of ordinary commands
+    # remain data. Each wrapper has its own options that consume a value.
+    wrappers = {
+        "env": {"-u", "--unset", "-C", "--chdir"},
+        "sudo": {"-u", "--user", "-g", "--group", "-h", "--host", "-p", "--prompt", "-C", "-T"},
+        "command": set(), "exec": {"-a"}, "time": {"-f", "--format", "-o", "--output"},
+        "timeout": {"-s", "--signal", "-k", "--kill-after"},
+        "nohup": set(), "nice": {"-n", "--adjustment"},
+        "xargs": {"-I", "-n", "-P", "-L", "-s", "-d", "-E", "--replace", "--max-args", "--max-procs", "--max-lines", "--max-chars", "--delimiter", "--eof"},
+        "caffeinate": {"-t", "-w"}, "stdbuf": {"-i", "-o", "-e", "--input", "--output", "--error"},
     }
-  } else if (!isval) {
-    if (kind == "git" && sub1 == "") {
-      if (skip) skip = 0
-      else if (w ~ /^(-C|-c|--git-dir|--work-tree|--namespace)$/) skip = 1
-      else if (w !~ /^-/) sub1 = w
-    } else if (kind == "gh" && sub2 == "") {
-      if (skip) skip = 0
-      else if (w ~ /^(-R|--repo)$/) skip = 1
-      else if (w !~ /^-/) { if (sub1 == "") sub1 = w; else sub2 = w }
-    }
-    if (msgcmd() && msgflag(w)) flag = 1
-  }
-  out = out v; w = ""; wexp = 0
-}
-{ s = s (NR > 1 ? "\n" : "") $0 }
-END {
-  n = length(s)
-  if (n > 20000 || index(s, "$(") || index(s, "${") || index(s, "$\047") || index(s, "<<") || index(s, "`")) {
-    printf "%s", s; exit
-  }
-  reset()
-  for (i = 1; i <= n; i++) {
-    c = substr(s, i, 1)
-    if (q == 1) { w = w (c == "\n" ? " " : c); if (c == "\047") q = 0; continue }
-    if (q == 2) {
-      w = w (c == "\n" ? " " : c)
-      if (c == "\\") { i++; w = w substr(s, i, 1); wexp = 1 }
-      else if (c == "\"") q = 0
-      else if (c == "$") wexp = 1
-      continue
-    }
-    if (c == "\\") { i++; w = w c substr(s, i, 1); wexp = 1; continue }
-    if (c == "\047") { q = 1; w = w c; continue }
-    if (c == "\"") { q = 2; w = w c; continue }
-    if (c == "#" && w == "") { # comment: copy to the end of the line
-      j = index(substr(s, i), "\n"); if (j == 0) j = n - i + 2
-      out = out substr(s, i, j - 1); i += j - 2; continue
-    }
-    if (c == " " || c == "\t") { endword(); out = out c; continue }
-    if (index(";&|()<>\n", c)) {
-      endword(); out = out c
-      if (c == "<" || c == ">") flag = 0; else reset()
-      continue
-    }
-    if (c == "$") wexp = 1
-    w = w c
-  }
-  if (q) { printf "%s", s; exit }
-  endword()
-  printf "%s", out
-}' <<<"$cmd") || scan=$cmd
-[ -n "$scan" ] || scan=$cmd
+    while args:
+        value = args[0]
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", value):
+            environment(value)
+            args = args[1:]
+            continue
+        exe = os.path.basename(value).lstrip("\\")
+        if exe == "export":
+            for value in args[1:]:
+                environment(value)
+            return []
+        if exe == "!":
+            args = args[1:]
+            continue
+        if exe not in wrappers:
+            return args
+        args = args[1:]
+        while args and args[0].startswith("-"):
+            option = args.pop(0)
+            if option == "--":
+                break
+            if exe == "env" and option in ("-S", "--split-string") and args:
+                inspect(args.pop(0), depth + 1)
+            elif option in wrappers[exe] and args:
+                args.pop(0)
+        if exe == "timeout" and args:
+            args.pop(0)  # duration, after timeout options
+    return args
 
-# grep exits 1 for no match; anything else (missing, bad pattern) fails closed.
-match() { # grep-flags pattern text
-  grep -Eq"$1" -- "$2" <<<"$3"
-  local rc=$?
-  [ "$rc" -le 1 ] || refuse "grep failed ($rc)"
-  return "$rc"
-}
-has() { match '' "$1" "$scan"; }
-has_i() { match i "$1" "$scan"; }
 
-# git or gh as a command: also /usr/bin/git, \git, "git", (git, $(git and `git.
-git_cmd='(^|[^[:alnum:]_.-])git["'\'']?'
-gh_cmd='(^|[^[:alnum:]_.-])gh["'\'']?'
-# Options before a subcommand, each with an optional value: git -C <path>,
-# gh -R <repo>. A value may be quoted and contain spaces (-C "/a b/c",
-# -c user.name="A B", --git-dir='/x y/.git') or escaped ones (-C /a\ b).
-piece='("([^"\\]|\\.)*"|'\''[^'\'']*'\''|\\.|[^[:space:]"'\''\\])'
-first='("([^"\\]|\\.)*"|'\''[^'\'']*'\''|\\.|[^-[:space:]"'\''\\])'
-opts="([[:space:]]+-$piece*([[:space:]]+$first$piece*)?)*"
+def api(args):
+    # Unlike command-wide matching, option parsing preserves headers, fields,
+    # and templates as data and checks every actual positional endpoint.
+    options = {"-H", "--header", "-q", "--jq", "-t", "--template", "--hostname",
+               "-p", "--preview", "--cache", "-f", "-F", "--field", "--raw-field", "--input", "-X", "--method"}
+    method = None
+    data = False
+    endpoints, queries, inputs = [], [], []
+    i = 0
+    positional = False
+    while i < len(args):
+        token = args[i]
+        i += 1
+        if token == "--":
+            positional = True
+            continue
+        option, value = token, None
+        if not positional and token.startswith("--") and "=" in token:
+            option, value = token.split("=", 1)
+        elif not positional and token[:2] in options and len(token) > 2 and not token.startswith("--"):
+            option, value = token[:2], token[2:].lstrip("=")
+        if not positional and option in options:
+            if value is None:
+                if i == len(args):
+                    block("API option value cannot be checked")
+                value = args[i]
+                i += 1
+            if option in ("-X", "--method"):
+                method = value.upper()
+            elif option in ("-f", "-F", "--field", "--raw-field", "--input"):
+                data = True
+                if option == "--input":
+                    inputs.append(value)
+                elif value.startswith("query="):
+                    queries.append(value[6:])
+        elif positional or not token.startswith("-"):
+            endpoints.append(re.split(r"[?#]", token, 1)[0].rstrip("/"))
+    method = method or ("POST" if data else "GET")
+    if method == "GET":
+        return
+    for endpoint in endpoints:
+        # Share host/path normalization between REST and GraphQL, including GHES.
+        endpoint = re.sub(r"^(?:https?://[^/]+)?/*(?:api/)?", "", endpoint, flags=re.I)
+        if (method == "PUT" and re.search(r"/pulls/\d+/merge$", endpoint)) or (method == "POST" and endpoint.endswith("/merges")):
+            block("merging through the API")
+        if method in ("DELETE", "PATCH", "PUT") and re.search(r"(?:^|/)repos/[^/]+/[^/]+(?:$|/(?:rules|rulesets|branches|tags|git/refs|settings|interaction-limits)(?:/|$))", endpoint):
+            block("destructive repository API request")
+        if endpoint != "graphql":
+            continue
+        for filename in inputs:
+            if filename == "-":
+                block("GraphQL input cannot be checked")
+            payload = json.loads(Path(filename).read_text())
+            if not isinstance(payload, dict) or not isinstance(payload.get("query"), str):
+                block("GraphQL input has no readable query")
+            queries.append(payload["query"])
+        for query in queries:
+            if query.startswith("@"):
+                query = Path(query[1:]).read_text()
+            # Ignore strings and comments so ordinary query data remains data.
+            query = re.sub(r'"(?:\\.|[^"\\])*"|#[^\n]*', "", query)
+            mutations = r"mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|mergeBranch|createCommitOnBranch|(?:create|update|delete)(?:Refs?|Repository|RepositoryRuleset|BranchProtectionRule)"
+            if re.search(r"\bmutation\b", query) and re.search(r"\b(?:" + mutations + r")\s*\(", query):
+                block("GraphQL merge, ref or repository mutation")
 
-if has "$git_cmd$opts"'[[:space:]]+push\b'; then
-  has '(--force|--force-with-lease|--force-if-includes|--mirror|--delete|--prune)\b' && block "force/delete push"
-  has '[[:space:]]-[a-zA-Z]*[fd]\b' && block "force/delete push (-f/-d)"
-  has '[[:space:]]\+[^[:space:]]' && block "force refspec (+ref)"
-  has '[[:space:]]:[^[:space:]]' && block "delete refspec (:ref)"
-  has '(^|[[:space:]:/"'\''(])main([[:space:]"'\'';&|)]|$)' && block "push to main"
-  has '--all\b' && block "push --all"
-fi
 
-has '--no-verify' && block "--no-verify"
-has "$git_cmd"'[[:space:]].*commit([[:space:]].*)?[[:space:]]-[a-zA-Z]*n' && block "git commit -n (skips hooks)"
-# git config keys are case-insensitive, and on macOS so are paths.
-has_i 'hookspath|lefthook=["'\'']?(0|false)\b|lefthook_[a-z]|lefthook[[:space:]]+uninstall|lefthook-local|\.git/hooks|git-path[[:space:]=]+["'\'']?hooks' &&
-  block "disabling git hooks"
-# A git alias can run push --force under another name.
-has_i "$git_cmd"'.*alias\.' && block "defining a git alias"
-has "$gh_cmd$opts[[:space:]]+pr$opts"'[[:space:]]+merge\b' && block "merging a PR"
-has "$gh_cmd$opts"'[[:space:]]+alias[[:space:]]+(set|import)\b' && block "defining a gh alias"
-# gh api, flattened so a GraphQL query over several lines is one string. The
-# query can't be checked when it comes from a file (-F query=@file, --input).
-flat=${scan//$'\n'/ }
-match '' "$gh_cmd$opts"'[[:space:]]+api\b.*(/merge\b|merges|git/refs|/protection|rulesets|mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|mergeBranch|createCommitOnBranch|(create|update|delete)Refs?\b)' "$flat" &&
-  block "changing refs or merging through the GitHub API"
-match '' "$gh_cmd$opts"'[[:space:]]+api\b.*graphql.*(=@|--input)' "$flat" && block "a GraphQL query from a file"
-has "$gh_cmd$opts"'[[:space:]]+(repo[[:space:]]+(delete|edit)|release[[:space:]]+delete)' && block "changing repo settings"
+def check(args, depth):
+    if not args:
+        return
+    args = unwrap(args[:], depth)
+    if not args:
+        return
+    exe = os.path.basename(args[0]).lstrip("\\")
+    if exe in ("bash", "sh", "zsh"):
+        for i, value in enumerate(args[1:], 1):
+            if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", value) and i + 1 < len(args):
+                inspect(args[i + 1], depth + 1)
+                return
+    if exe in ("eval", "source", "."):
+        inspect(" ".join(args[1:]), depth + 1)
+        return
+    # Redirection targets are checked independently of the command.
+    for i, value in enumerate(args[:-1]):
+        if ">" in value and protected(args[i + 1]):
+            block("overwriting guards or pre-push hook")
+    if any(x.lower().endswith(".git/config") for x in args) and any("hookspath" in x.lower() for x in args) and any(">" in x for x in args):
+        block("changing hook configuration")
+    if exe == "git":
+        # Drop message data before checking git flags and configuration keys.
+        filtered = []
+        skip = False
+        for value in args:
+            if skip:
+                skip = False
+                continue
+            if value.startswith("--message="):
+                continue
+            filtered.append(value)
+            skip = value == "--message" or bool(re.match(r"^-[A-Za-z]*m$", value))
+        args = filtered
+        if "--no-verify" in args:
+            block("skipping hooks")
+        if any("core.hookspath" in x.lower() for x in args):
+            # Read-only queries cannot excuse a separate -c/--config-env
+            # override, even when the command itself is config --get.
+            override = any((x == "-c" and i + 1 < len(args) and "core.hookspath" in args[i + 1].lower()) or (x.startswith(("-c", "--config-env")) and "core.hookspath" in x.lower()) for i, x in enumerate(args))
+            readonly = "config" in args and args[-1].lower() == "core.hookspath" and not override and not any(x in args for x in ("--unset", "--unset-all", "--remove-section", "--replace-all", "--add"))
+            if not readonly:
+                block("changing core.hooksPath")
+        if "commit" in args:
+            flags = args[args.index("commit") + 1:]
+            # Message values are data, including combined -am/-nm flags.
+            skip = False
+            for flag in flags:
+                if skip:
+                    skip = False
+                    continue
+                if re.match(r"^-[A-Za-z]*n[A-Za-z]*$", flag):
+                    block("git commit -n skips hooks")
+                skip = flag in ("-m", "--message") or bool(re.match(r"^-[A-Za-z]*m$", flag))
+    if exe == "lefthook" and "uninstall" in args:
+        block("uninstalling hooks")
+    if exe == "gh":
+        # Strip global repository/hostname options before identifying the command.
+        rest = args[1:]
+        while rest and rest[0].startswith("-"):
+            option = rest.pop(0)
+            if option in ("-R", "--repo", "--hostname") and rest:
+                rest.pop(0)
+        sub = rest[1:]
+        while sub and sub[0].startswith("-"):
+            option = sub.pop(0)
+            if option in ("-R", "--repo") and sub:
+                sub.pop(0)
+        if rest[:1] == ["pr"] and sub[:1] == ["merge"]:
+            block("merging a PR")
+        if rest[:2] in (["alias", "set"], ["alias", "import"]):
+            block("defining a gh alias")
+        if rest[:2] in (["repo", "delete"], ["repo", "edit"], ["release", "delete"]):
+            block("changing repository settings")
+        if rest[:1] == ["api"]:
+            api(rest[1:])
+    writers = {"tee", "cp", "mv", "rm", "ln", "unlink", "truncate", "install", "dd", "rsync", "chmod", "chflags"}
+    writing = exe in writers or (exe in ("sed", "perl") and any(re.match(r"^-[A-Za-z]*i", x) or x == "--in-place" for x in args[1:]))
+    writing |= exe == "git" and any(x in args for x in ("checkout", "restore", "rm", "mv"))
+    targets = args[-1:] if exe == "cp" else args[1:]
+    if writing and any(protected(x) for x in targets):
+        block("editing guards")
+    if exe in ("python", "python3", "node", "ruby") and any(re.search(r"guard-git\.sh|guard-push\.sh|install-hooks\.sh|scripts/pre-push|\.claude/(hooks|settings)|lefthook", x) for x in args[1:]):
+        block("script editing guards")
+    if exe == "patch" or (exe == "git" and len(args) > 1 and args[1] in ("apply", "am")):
+        if any(x in args for x in ("--check", "--stat", "--numstat", "--summary", "--dry-run", "--abort", "--quit", "--show-current-patch")):
+            return
+        # Inspect literal patch files without executing them. Unknown inputs fail closed.
+        files = [Path(x) for x in args[1:] if not x.startswith("-") and Path(x).is_file()]
+        if not files:
+            block("patch input cannot be checked for guard edits")
+        for path in files:
+            for line in path.read_text().splitlines():
+                if line.startswith(("+++ ", "--- ", "diff --git ", "rename to ", "rename from ")):
+                    if any(protected(x) for x in shlex.split(line)[1:]):
+                        block("patch editing guards")
 
-# A patch can change a guard without naming it, so applying one is blocked.
-# Checking one (--check, --stat, --dry-run) is fine. Checked per command.
-patch_cmd='(^[[:space:]]*(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*|sudo|env|xargs|command|exec|nohup|time)[[:space:]]+)*|["'\''])([^[:space:]"'\'']*/)?patch([[:space:]]|$)'
-while IFS= read -r seg; do
-  match '' "$git_cmd$opts"'[[:space:]]+(apply|am)\b|'"$patch_cmd" "$seg" || continue
-  match '' '[[:space:]](--check|--stat|--numstat|--summary|--dry-run|--abort|--quit|--show-current-patch)\b' "$seg" ||
-    block "applying a patch (it could change the guards)"
-done < <(tr ';&|()' '\n' <<<"$scan")
 
-# Editing the guards: a guard file (also relative after a cd, and the scripts/,
-# .claude/ and hooks/ dirs) together with a write. 2>&1 and >/dev/null don't
-# count as writes.
-guards='guard-git\.sh|guard-push\.sh|install-hooks\.sh|\.claude/(settings|hooks)|(^|[^[:alnum:]_.-])\.?lefthook(-local)?\.(ya?ml|json|toml)|(^|[/[:space:]"'\''=])(pre-push|settings(\.local)?\.json|hooks|\.claude|scripts)/?([[:space:]"'\'';&|)]|$)'
-writes='>|(^|[[:space:];&|(])(sudo[[:space:]]+)?(tee|rm|mv|cp|ln|chmod|chflags|truncate|install|dd|rsync|unlink|patch)[[:space:]]|sed([[:space:]]+[^[:space:];&|]+)*[[:space:]]+(-[a-zA-Z]*i|--in-place)|perl[[:space:]]+-[a-z]*i|python|node|ruby|git[[:space:]]+(checkout|restore|rm|mv|apply)'
-wscan=$(sed -E 's#[0-9]*>&[0-9-]+##g; s#[0-9&]*>>?[[:space:]]*/dev/null([^[:alnum:]_./-]|$)#\1#g' <<<"$scan") || wscan=$scan
-if match '' "$guards" "$wscan" && match '' "$writes" "$wscan"; then
-  block "editing the git guards"
-fi
-
-exit 0
+try:
+    inspect(command)
+except (OSError, ValueError):
+    block("command or patch input cannot be checked")
+PY

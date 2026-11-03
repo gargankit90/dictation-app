@@ -13,7 +13,7 @@ has a free tier and is the one this guide uses; OpenAI works the same way.
 
 1. Download the DMG (`dictation-app_<version>_aarch64.dmg`) from the newest
    release at
-   <https://github.com/gargankit90/dictation-app-releases/releases/latest>,
+   <https://github.com/gargankit90/dictation-app/releases/latest>,
    or use the one you were sent, and open it.
 2. Drag **dictation-app** onto the **Applications** shortcut in the window.
 3. Eject the DMG (Finder sidebar, or drag it to the Trash).
