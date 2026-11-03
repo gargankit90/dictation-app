@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/gargankit90/dictation-app/blob/main/SECURITY.md
+    about: Please don't open a public issue for a vulnerability. SECURITY.md explains how to report it privately.

@@ -1,0 +1,64 @@
+name: Bug report
+description: Something in dictation-app doesn't work
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing. This issue is public: **never paste an API key**.
+        For a security problem, use the link on the previous page instead.
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: Apple menu > About This Mac
+      placeholder: macOS 15.1
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model
+      description: Apple menu > About This Mac (alpha builds need Apple Silicon)
+      placeholder: MacBook Air, M2
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: dictation-app version
+      description: 'Menu-bar icon > Check for updates… shows "dictation-app x.y.z is the newest version"'
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do? Which provider (Groq or OpenAI)? Which app had focus?
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log zip
+      description: |
+        Menu-bar icon > Reveal log, select all the files, right-click > Compress, then drag the
+        zip here. The log never holds keys or what you said, but open it and check before you attach it.
+    validations:
+      required: false
