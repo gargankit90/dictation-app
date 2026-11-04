@@ -29,7 +29,7 @@
 //! again.
 //!
 //! M5.1, U4: the `overlay` window (the recording pill) shows Listening with
-//! a level meter, No sound, Transcribing, Pasted and errors
+//! a level meter, No sound, Transcribing, Paste sent and errors
 //! without taking focus ([`overlay`]).
 //!
 //! M5.2: onboarding. The settings window shows the first-run steps

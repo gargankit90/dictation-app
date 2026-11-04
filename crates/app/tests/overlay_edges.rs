@@ -58,9 +58,9 @@ fn the_error_stays_up_for_four_seconds() {
 }
 
 // U4 criterion 5 changed the end of a successful dictation: Inserting then
-// Idle shows "Pasted" (which hides by itself), not Hidden.
+// Idle shows "Paste sent" (which hides by itself), not Hidden.
 #[test]
-fn rapid_dictations_each_show_recording_then_pasted() {
+fn rapid_dictations_each_show_recording_then_paste_sent() {
     let mut model = OverlayModel::default();
     let mut shown = Vec::new();
     for _ in 0..5 {
@@ -78,11 +78,11 @@ fn rapid_dictations_each_show_recording_then_pasted() {
     let one = [
         OverlayView::Recording,
         OverlayView::Transcribing,
-        OverlayView::Pasted,
+        OverlayView::PasteSent,
     ];
     let expected: Vec<OverlayView> = (0..5).flat_map(|_| one.clone()).collect();
     assert_eq!(shown, expected);
-    assert_eq!(model.view(), &OverlayView::Pasted);
+    assert_eq!(model.view(), &OverlayView::PasteSent);
 }
 
 #[test]

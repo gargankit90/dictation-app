@@ -10,7 +10,7 @@ export type OverlayView =
   | { state: "recording" }
   | { state: "no_sound"; device?: string }
   | { state: "transcribing" }
-  | { state: "pasted" }
+  | { state: "paste_sent" }
   | { state: "error"; message: string };
 
 /** The view event (sent only to the overlay window). */
@@ -56,8 +56,8 @@ export function parseView(payload: unknown): OverlayView {
         : { state: "no_sound" };
     case "transcribing":
       return { state: "transcribing" };
-    case "pasted":
-      return { state: "pasted" };
+    case "paste_sent":
+      return { state: "paste_sent" };
     case "error":
       return "message" in payload && typeof payload.message === "string"
         ? { state: "error", message: payload.message }

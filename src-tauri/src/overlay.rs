@@ -1,5 +1,5 @@
 //! The overlay window (M5.1, U4): the recording pill, which shows
-//! Listening with a live level meter, "No sound", Transcribing, "Pasted"
+//! Listening with a live level meter, "No sound", Transcribing, "Paste sent"
 //! and errors without taking focus. [`start`] creates the window
 //! (`dictation_platform::overlay`) and runs `dictation_pipeline::overlay`
 //! against it; this module only connects the two and sends each view to the
@@ -15,7 +15,9 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use dictation_pipeline::overlay::{self, ERROR_VISIBLE_FOR, OverlaySurface, OverlayView};
+use dictation_pipeline::overlay::{
+    self, ERROR_VISIBLE_FOR, LevelDispatch, OverlaySurface, OverlayView,
+};
 use dictation_pipeline::pipeline::LevelReceiver;
 use dictation_pipeline::ui_events::{UiSender, ui_channel};
 use dictation_platform::overlay::{Overlay, OverlaySpec};
@@ -79,6 +81,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, levels: LevelReceiver) -> tauri::Re
             app: app.clone(),
             window,
             relay,
+            levels: LevelDispatch::new(),
         },
         ERROR_VISIBLE_FOR,
     ));
@@ -157,22 +160,51 @@ struct Surface<R: Runtime> {
     app: AppHandle<R>,
     window: Overlay<R>,
     relay: Relay,
+    /// At most one level on its way to the page (U4 review).
+    levels: LevelDispatch,
 }
 
 impl<R: Runtime> OverlaySurface for Surface<R> {
     /// The meter's level. Not logged: 20 a second, and a level stays out
     /// of the logs at info level (privacy rule).
+    ///
+    /// Bounded for a slow page (U4 review): each emit queues a script on
+    /// the main thread's event loop, so the level is handed over from a
+    /// task on that loop, at most one at a time, with the newest level
+    /// when it runs ([`LevelDispatch`]). While the loop is busy, newer
+    /// levels replace the pending one instead of queueing.
     fn level(&mut self, dbfs: f32) {
-        if let Err(error) = self.app.emit_to(
-            EventTarget::webview_window(LABEL),
-            LEVEL_EVENT,
-            LevelPayload { dbfs },
-        ) {
-            tracing::debug!(%error, "could not update the overlay's meter");
+        if !self.levels.offer(dbfs) {
+            return;
+        }
+        let app = self.app.clone();
+        let levels = self.levels.clone();
+        let scheduled = self.app.run_on_main_thread(move || {
+            if let Some(dbfs) = levels.take()
+                && let Err(error) = app.emit_to(
+                    EventTarget::webview_window(LABEL),
+                    LEVEL_EVENT,
+                    LevelPayload { dbfs },
+                )
+            {
+                tracing::debug!(%error, "could not update the overlay's meter");
+            }
+        });
+        if let Err(error) = scheduled {
+            // Nothing will run it: end the delivery so the next level tries.
+            let _ = self.levels.take();
+            tracing::debug!(%error, "could not schedule the overlay's meter");
         }
     }
 
     fn show(&mut self, view: &OverlayView) {
+        // Levels only while a recording view shows; a hide drops the
+        // pending one.
+        if matches!(view, OverlayView::Recording | OverlayView::NoSound { .. }) {
+            self.levels.open();
+        } else {
+            self.levels.close();
+        }
         // The page first, so the window never shows the previous state.
         self.relay.send(view, |view| send(&self.app, view));
         // The state's name only, never an error's text.
@@ -210,7 +242,7 @@ enum Payload<'a> {
         device: Option<&'a str>,
     },
     Transcribing,
-    Pasted,
+    PasteSent,
     Error {
         message: &'a str,
     },
@@ -225,7 +257,7 @@ impl<'a> From<&'a OverlayView> for Payload<'a> {
                 device: device.as_deref(),
             },
             OverlayView::Transcribing => Self::Transcribing,
-            OverlayView::Pasted => Self::Pasted,
+            OverlayView::PasteSent => Self::PasteSent,
             OverlayView::Error { message, .. } => Self::Error { message },
         }
     }
@@ -239,7 +271,7 @@ impl Payload<'_> {
             Self::Recording => "recording",
             Self::NoSound { .. } => "no_sound",
             Self::Transcribing => "transcribing",
-            Self::Pasted => "pasted",
+            Self::PasteSent => "paste_sent",
             Self::Error { .. } => "error",
         }
     }
@@ -337,7 +369,7 @@ mod tests {
             (OverlayView::Hidden, r#"{"state":"hidden"}"#),
             (OverlayView::Recording, r#"{"state":"recording"}"#),
             (OverlayView::Transcribing, r#"{"state":"transcribing"}"#),
-            (OverlayView::Pasted, r#"{"state":"pasted"}"#),
+            (OverlayView::PasteSent, r#"{"state":"paste_sent"}"#),
             (
                 OverlayView::NoSound { device: None },
                 r#"{"state":"no_sound"}"#,

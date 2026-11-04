@@ -4,14 +4,16 @@
 //! [`OverlayModel`] is the pure part: it turns each event and level into the
 //! view the overlay should show. [`run`] drives it against an
 //! [`OverlaySurface`] (the shell's overlay window), hides an error after
-//! [`ERROR_VISIBLE_FOR`] and "Pasted" after [`PASTED_VISIBLE_FOR`];
+//! [`ERROR_VISIBLE_FOR`] and "Paste sent" after [`PASTE_SENT_VISIBLE_FOR`];
 //! [`run_with_levels`] also passes each input level to the surface for the
 //! meter, and says "No sound" after [`NO_SOUND_AFTER`] of quiet.
 //!
-//! "Pasted" follows the pipeline's paste result through the coordinator:
-//! it goes Inserting → Idle only when the paste succeeded (`InsertDone`); a
-//! failed or blocked paste shows its error first, and a transcript with
-//! nothing to paste never reaches Inserting.
+//! "Paste sent" follows the pipeline's paste result through the
+//! coordinator: it goes Inserting → Idle only when the inserter returned
+//! success (`InsertDone`); a failed or blocked paste shows its error first,
+//! and a transcript with nothing to paste never reaches Inserting. It says
+//! "sent", not "pasted": a successful insert means the paste keystroke was
+//! sent to the focused app, not that the app took the text (U4 review).
 //! Its events come through the same bounded queue as the main UI's
 //! ([`crate::ui_events`], #84, #112): an overlay webview that stops reading
 //! can't make the app grow, and the overlay still ends on the current phase.
@@ -20,6 +22,7 @@
 //! [`DictationError`](dictation_core::error::DictationError)'s user-facing
 //! text, which never contains the transcript or an API key.
 
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use dictation_core::coordinator::Phase;
@@ -35,8 +38,8 @@ use crate::ui_events::UiReceiver;
 /// How long an error stays on screen unless something newer replaces it.
 pub const ERROR_VISIBLE_FOR: Duration = Duration::from_secs(4);
 
-/// How long "Pasted" stays on screen after a successful paste (U4).
-pub const PASTED_VISIBLE_FOR: Duration = Duration::from_millis(800);
+/// How long "Paste sent" stays on screen after a paste was sent (U4).
+pub const PASTE_SENT_VISIBLE_FOR: Duration = Duration::from_millis(800);
 
 /// What the overlay shows.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -55,8 +58,9 @@ pub enum OverlayView {
     },
     /// The recording is being transcribed (and then pasted).
     Transcribing,
-    /// The paste succeeded (U4); hides after [`PASTED_VISIBLE_FOR`].
-    Pasted,
+    /// The paste was sent: the inserter returned success (U4). Not proof
+    /// the text landed. Hides after [`PASTE_SENT_VISIBLE_FOR`].
+    PasteSent,
     /// A dictation failed; `message` is the user-facing error text.
     Error {
         /// The error's `Display` text.
@@ -72,7 +76,7 @@ pub struct Change {
     /// The new view.
     pub view: OverlayView,
     /// Whether this view hides by itself: an error after
-    /// [`ERROR_VISIBLE_FOR`], "Pasted" after [`PASTED_VISIBLE_FOR`]. A later
+    /// [`ERROR_VISIBLE_FOR`], "Paste sent" after [`PASTE_SENT_VISIBLE_FOR`]. A later
     /// change cancels the timer.
     pub expires: bool,
 }
@@ -128,7 +132,7 @@ impl OverlayModel {
                     // Inserting, then Idle with no error: the paste
                     // succeeded (U4).
                     OverlayView::Transcribing if pasted => {
-                        let change = self.set(OverlayView::Pasted);
+                        let change = self.set(OverlayView::PasteSent);
                         return change.map(|change| Change {
                             expires: true,
                             ..change
@@ -188,11 +192,11 @@ impl OverlayModel {
         )
     }
 
-    /// The timer of an error or "Pasted" ran out: hides it if it still
+    /// The timer of an error or "Paste sent" ran out: hides it if it still
     /// shows.
     pub fn on_error_expired(&mut self) -> Option<Change> {
         match self.view {
-            OverlayView::Error { .. } | OverlayView::Pasted => self.set(OverlayView::Hidden),
+            OverlayView::Error { .. } | OverlayView::PasteSent => self.set(OverlayView::Hidden),
             _ => None,
         }
     }
@@ -211,6 +215,86 @@ impl OverlayModel {
     }
 }
 
+/// Bounds how many input levels wait on their way to the page (U4 review).
+///
+/// Each level the shell hands the webview becomes a script on the webview's
+/// event loop, and the watch before [`run_with_levels`] can't take back one
+/// already handed over: a slow webview would pile up stale levels, and a
+/// hide would wait behind them. So the shell sends levels through this:
+///
+/// - [`offer`](Self::offer) keeps only the newest level and says whether a
+///   delivery must be scheduled. At most one is scheduled at a time; while
+///   it waits, newer levels just replace the pending one.
+/// - The scheduled delivery, running where it hands the level over (the
+///   shell: on the main thread, the webview's event loop), calls
+///   [`take`](Self::take) for the newest level and ends the delivery, so the
+///   next offer schedules the next one. A level handed over is queued ahead
+///   of that next delivery, so at most one level and one delivery wait.
+/// - [`close`](Self::close), when the recording view goes, drops the pending
+///   level; a delivery still scheduled then delivers nothing.
+///   [`open`](Self::open) starts taking levels again.
+///
+/// Clones share the state.
+#[derive(Debug, Clone, Default)]
+pub struct LevelDispatch(Arc<Mutex<Dispatch>>);
+
+#[derive(Debug, Default)]
+struct Dispatch {
+    /// The newest level not handed over yet.
+    pending: Option<f32>,
+    /// A delivery is scheduled and hasn't run.
+    scheduled: bool,
+    /// A recording view shows, so levels are wanted.
+    open: bool,
+}
+
+impl LevelDispatch {
+    /// A closed dispatch: no level is wanted yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Dispatch> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// A recording view shows: levels are wanted.
+    pub fn open(&self) {
+        self.lock().open = true;
+    }
+
+    /// The recording view went: the pending level is dropped, and a
+    /// delivery still scheduled delivers nothing.
+    pub fn close(&self) {
+        let mut dispatch = self.lock();
+        dispatch.open = false;
+        dispatch.pending = None;
+    }
+
+    /// Offers the newest level. Returns whether the caller must schedule a
+    /// delivery (which calls [`take`](Self::take)): only when none is
+    /// scheduled yet and levels are wanted.
+    #[must_use]
+    pub fn offer(&self, dbfs: f32) -> bool {
+        let mut dispatch = self.lock();
+        if !dispatch.open {
+            return false;
+        }
+        dispatch.pending = Some(dbfs);
+        !std::mem::replace(&mut dispatch.scheduled, true)
+    }
+
+    /// In the scheduled delivery: the newest level to hand over, if any is
+    /// still wanted. Ends the delivery either way.
+    #[must_use]
+    pub fn take(&self) -> Option<f32> {
+        let mut dispatch = self.lock();
+        dispatch.scheduled = false;
+        dispatch.pending.take().filter(|_| dispatch.open)
+    }
+}
+
 /// The shell's overlay window.
 pub trait OverlaySurface {
     /// Shows `view`, or hides the window for [`OverlayView::Hidden`]. Must
@@ -219,7 +303,9 @@ pub trait OverlaySurface {
 
     /// Shows an input level, in dBFS, on the meter of the recording view
     /// showing now (U4). Called about 20 times a second while recording,
-    /// so it must not log the level at info level. Does nothing by default.
+    /// so it must not log the level at info level, and must not queue
+    /// levels without bound for a slow page: see [`LevelDispatch`]. Does
+    /// nothing by default.
     fn level(&mut self, dbfs: f32) {
         let _ = dbfs;
     }
@@ -246,7 +332,7 @@ impl OverlayEvents for tokio::sync::mpsc::UnboundedReceiver<UiEvent> {
 }
 
 /// Shows each event on `surface` until `events` closes; an error hides
-/// after `error_visible_for`, "Pasted" after [`PASTED_VISIBLE_FOR`]. No
+/// after `error_visible_for`, "Paste sent" after [`PASTE_SENT_VISIBLE_FOR`]. No
 /// levels: see [`run_with_levels`].
 pub async fn run<S: OverlaySurface>(
     events: impl OverlayEvents,
@@ -296,8 +382,8 @@ pub async fn run_with_levels<S: OverlaySurface>(
         };
         if let Some(change) = change {
             deadline = change.expires.then(|| {
-                let visible_for = if change.view == OverlayView::Pasted {
-                    PASTED_VISIBLE_FOR
+                let visible_for = if change.view == OverlayView::PasteSent {
+                    PASTE_SENT_VISIBLE_FOR
                 } else {
                     error_visible_for
                 };
@@ -324,7 +410,6 @@ async fn expiry(deadline: Option<Instant>) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::ui_events::{UI_ERRORS_QUEUED, UI_EVENTS_QUEUED, ui_channel};
@@ -352,9 +437,9 @@ mod tests {
         assert_eq!(OverlayModel::default().view(), &OverlayView::Hidden);
     }
 
-    /// U4 criterion 5: a successful paste ends on "Pasted", which expires.
+    /// U4 criterion 5: a successful paste ends on "Paste sent", which expires.
     #[test]
-    fn criterion_u4_5_a_dictation_shows_recording_then_transcribing_then_pasted() {
+    fn criterion_u4_5_a_dictation_shows_recording_then_transcribing_then_paste_sent() {
         let mut model = OverlayModel::default();
         let steps = [
             (Phase::Recording, shown(OverlayView::Recording)),
@@ -363,7 +448,7 @@ mod tests {
             (
                 Phase::Idle,
                 Some(Change {
-                    view: OverlayView::Pasted,
+                    view: OverlayView::PasteSent,
                     expires: true,
                 }),
             ),
@@ -380,7 +465,7 @@ mod tests {
     /// U4 criterion 5: nothing pasted (the transcript was dropped, so no
     /// Inserting) just hides.
     #[test]
-    fn criterion_u4_5_nothing_pasted_hides_without_pasted() {
+    fn criterion_u4_5_nothing_pasted_hides_without_paste_sent() {
         let mut model = OverlayModel::default();
         model.on_event(&UiEvent::StateChanged(Phase::Recording));
         model.on_event(&UiEvent::StateChanged(Phase::Transcribing));
@@ -391,9 +476,9 @@ mod tests {
     }
 
     /// U4 criterion 5: a failed or blocked paste shows its error, never
-    /// "Pasted".
+    /// "Paste sent".
     #[test]
-    fn criterion_u4_5_a_failed_paste_shows_the_error_not_pasted() {
+    fn criterion_u4_5_a_failed_paste_shows_the_error_not_paste_sent() {
         for failure in [
             DictationError::InsertFailed {
                 reason: "no focused app".into(),
@@ -421,10 +506,10 @@ mod tests {
         }
     }
 
-    /// U4 criterion 5: a new recording replaces "Pasted", and its timer
+    /// U4 criterion 5: a new recording replaces "Paste sent", and its timer
     /// then hides nothing.
     #[test]
-    fn criterion_u4_5_a_new_recording_replaces_pasted() {
+    fn criterion_u4_5_a_new_recording_replaces_paste_sent() {
         let mut model = OverlayModel::default();
         for phase in [
             Phase::Recording,
@@ -434,7 +519,7 @@ mod tests {
         ] {
             model.on_event(&UiEvent::StateChanged(phase));
         }
-        assert_eq!(model.view(), &OverlayView::Pasted);
+        assert_eq!(model.view(), &OverlayView::PasteSent);
         assert_eq!(model.on_error_expired(), shown(OverlayView::Hidden));
 
         for phase in [
@@ -721,6 +806,118 @@ mod tests {
         }
     }
 
+    /// U4 review finding 2: a consumer that never runs its deliveries (a
+    /// stalled webview) holds at most one, however many levels come.
+    #[test]
+    fn a_stalled_consumer_holds_one_delivery_and_gets_the_newest_level() {
+        let dispatch = LevelDispatch::new();
+        dispatch.open();
+        let mut scheduled = 0;
+        for step in 0..6_000_u16 {
+            if dispatch.offer(-f32::from(step % 60)) {
+                scheduled += 1;
+            }
+        }
+        assert_eq!(scheduled, 1);
+        // It runs at last: the newest level only, then it's done.
+        assert_eq!(dispatch.take(), Some(-f32::from(5_999_u16 % 60)));
+        assert_eq!(dispatch.take(), None);
+        // The next level schedules the next delivery.
+        assert!(dispatch.offer(-20.0));
+        assert!(!dispatch.offer(-21.0));
+        assert_eq!(dispatch.take(), Some(-21.0));
+    }
+
+    /// Stopping drops the pending level: the delivery still scheduled
+    /// delivers nothing, and levels after it are refused until reopened.
+    #[test]
+    fn closing_drops_the_pending_level() {
+        let dispatch = LevelDispatch::new();
+        assert!(!dispatch.offer(-20.0), "closed until a recording shows");
+        dispatch.open();
+        assert!(dispatch.offer(-20.0));
+        dispatch.close();
+        assert!(!dispatch.offer(-10.0));
+        assert_eq!(dispatch.take(), None);
+        // The next recording.
+        dispatch.open();
+        assert!(dispatch.offer(-30.0));
+        assert_eq!(dispatch.take(), Some(-30.0));
+    }
+
+    /// A surface like the shell's: levels go through a [`LevelDispatch`]
+    /// to deliveries a test consumer runs when it likes.
+    #[derive(Clone, Default)]
+    struct SlowPage {
+        dispatch: LevelDispatch,
+        /// Scheduled deliveries not run yet.
+        queued: Arc<Mutex<usize>>,
+        most_queued: Arc<Mutex<usize>>,
+        views: Arc<Mutex<Vec<OverlayView>>>,
+    }
+
+    impl SlowPage {
+        /// Runs the queued deliveries: the levels they hand over.
+        fn deliver(&self) -> Vec<f32> {
+            let queued = std::mem::take(&mut *self.queued.lock().unwrap());
+            (0..queued).filter_map(|_| self.dispatch.take()).collect()
+        }
+    }
+
+    impl OverlaySurface for SlowPage {
+        fn show(&mut self, view: &OverlayView) {
+            if matches!(view, OverlayView::Recording | OverlayView::NoSound { .. }) {
+                self.dispatch.open();
+            } else {
+                self.dispatch.close();
+            }
+            self.views.lock().unwrap().push(view.clone());
+        }
+
+        fn level(&mut self, dbfs: f32) {
+            if self.dispatch.offer(dbfs) {
+                let mut queued = self.queued.lock().unwrap();
+                *queued += 1;
+                let mut most = self.most_queued.lock().unwrap();
+                *most = (*most).max(*queued);
+            }
+        }
+    }
+
+    /// Five minutes of levels at 20 a second into a page that never runs a
+    /// delivery: one waits at a time; after the hide it delivers nothing;
+    /// the next recording's levels flow again.
+    #[tokio::test(start_paused = true)]
+    async fn criterion_u4_2_a_stalled_page_never_piles_up_levels() {
+        let (tx, rx) = ui_channel();
+        let (levels_tx, levels) = tokio::sync::watch::channel(None);
+        let page = SlowPage::default();
+        let task = tokio::spawn(run_with_levels(rx, levels, page.clone(), VISIBLE));
+        tx.send(UiEvent::StateChanged(Phase::Recording));
+        tokio::time::sleep(ms(10)).await;
+        for step in 0..6_000_u16 {
+            levels_tx.send_replace(reading(if step % 2 == 0 { -30.0 } else { -25.0 }));
+            tokio::time::sleep(ms(50)).await;
+        }
+        assert_eq!(*page.most_queued.lock().unwrap(), 1);
+
+        // Released: the pending level is dropped.
+        tx.send(UiEvent::StateChanged(Phase::Transcribing));
+        levels_tx.send_replace(None);
+        tokio::time::sleep(ms(10)).await;
+        assert_eq!(page.deliver(), Vec::<f32>::new());
+
+        // The next recording: levels reach the page again.
+        tx.send(UiEvent::StateChanged(Phase::Recording));
+        tokio::time::sleep(ms(10)).await;
+        levels_tx.send_replace(reading(-20.0));
+        tokio::time::sleep(ms(10)).await;
+        assert_eq!(page.deliver(), [-20.0]);
+        drop(tx);
+        task.await.unwrap();
+        assert_eq!(*page.most_queued.lock().unwrap(), 1);
+    }
+
     /// Records views and levels in the order the surface got them.
     #[derive(Clone, Default)]
     struct MeterRecorder(Arc<Mutex<Vec<Shown>>>);
@@ -777,10 +974,10 @@ mod tests {
         })
     }
 
-    /// U4 criterion 5: "Pasted" shows for 800 ms after a paste, then hides.
+    /// U4 criterion 5: "Paste sent" shows for 800 ms after a paste, then hides.
     #[tokio::test(start_paused = true)]
-    async fn criterion_u4_5_run_shows_pasted_for_800_ms() {
-        assert_eq!(PASTED_VISIBLE_FOR, Duration::from_millis(800));
+    async fn criterion_u4_5_run_shows_paste_sent_for_800_ms() {
+        assert_eq!(PASTE_SENT_VISIBLE_FOR, Duration::from_millis(800));
         let (tx, rx) = ui_channel();
         let recorder = Recorder::default();
         let task = tokio::spawn(run(rx, recorder.clone(), VISIBLE));
@@ -800,12 +997,12 @@ mod tests {
             [
                 OverlayView::Recording,
                 OverlayView::Transcribing,
-                OverlayView::Pasted,
+                OverlayView::PasteSent,
                 OverlayView::Hidden
             ]
         );
         let times = recorder.times();
-        assert_eq!(times[3] - times[2], PASTED_VISIBLE_FOR);
+        assert_eq!(times[3] - times[2], PASTE_SENT_VISIBLE_FOR);
     }
 
     /// U4 criteria 2 and 4: levels reach the surface while recording, after

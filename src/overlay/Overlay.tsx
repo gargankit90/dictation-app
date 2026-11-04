@@ -143,13 +143,15 @@ export function OverlayContent({
           <span className="overlay-label">Transcribing…</span>
         </div>
       );
-    case "pasted":
+    case "paste_sent":
+      // "sent", not "pasted": the inserter can't tell whether the focused
+      // app took the text (U4 review).
       return (
-        <div className="overlay overlay-pasted" role="status" data-state="pasted">
+        <div className="overlay overlay-paste-sent" role="status" data-state="paste_sent">
           <span className="overlay-check" aria-hidden="true">
             ✓
           </span>
-          <span className="overlay-label">Pasted</span>
+          <span className="overlay-label">Paste sent</span>
         </div>
       );
     case "error":

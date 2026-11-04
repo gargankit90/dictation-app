@@ -222,9 +222,9 @@ e2e_overlay_rendered_states_and_error() {
   expect "that dictation ends Idle" wait_for_idle_count 5 15
   expect "the overlay is hidden" overlay_shows "$OVERLAY_HIDDEN"
   expect "the panel is off screen" overlay_off_screen
-  # U4: a successful paste shows Pasted (800 ms) before hiding.
-  expect "the overlay went recording, transcribing, error, recording, transcribing, pasted, hidden" \
-    test "$(overlay_log_since "$mark")" = "recording transcribing error recording transcribing pasted hidden"
+  # U4: a paste that was sent shows Paste sent (800 ms) before hiding.
+  expect "the overlay went recording, transcribing, error, recording, transcribing, paste_sent, hidden" \
+    test "$(overlay_log_since "$mark")" = "recording transcribing error recording transcribing paste_sent hidden"
   expect "it pasted" textedit_is "$(esc_b64 "$PROVIDER_TEXT")"
 
   [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_overlay_rendered_states_and_error

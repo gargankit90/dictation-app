@@ -1,5 +1,5 @@
 // M5.1 criterion 1, U4: the overlay renders the recording pill's states
-// (Listening with the level meter, No sound, Transcribing, Pasted, Error) and
+// (Listening with the level meter, No sound, Transcribing, Paste sent, Error) and
 // nothing while hidden; it follows the events the Rust side sends.
 
 import { act, cleanup, render, screen } from "@testing-library/react";
@@ -44,7 +44,7 @@ const ALL_VIEWS: OverlayView[] = [
   { state: "no_sound" },
   { state: "no_sound", device: "MacBook Pro Microphone" },
   { state: "transcribing" },
-  { state: "pasted" },
+  { state: "paste_sent" },
   { state: "error", message: MESSAGE },
 ];
 
@@ -103,11 +103,11 @@ describe("criterion_m5_1_1 criterion_u4_3 OverlayContent", () => {
     expect(status.dataset.state).toBe("transcribing");
   });
 
-  it("shows Pasted with a check", () => {
-    render(<OverlayContent view={{ state: "pasted" }} />);
+  it("shows Paste sent with a check", () => {
+    render(<OverlayContent view={{ state: "paste_sent" }} />);
     const status = screen.getByRole("status");
-    expect(status.dataset.state).toBe("pasted");
-    expect(status.querySelector(".overlay-label")?.textContent).toBe("Pasted");
+    expect(status.dataset.state).toBe("paste_sent");
+    expect(status.querySelector(".overlay-label")?.textContent).toBe("Paste sent");
     expect(status.querySelector(".overlay-check")?.textContent).toBe("✓");
   });
 
@@ -198,8 +198,11 @@ describe("criterion_m5_1_1 criterion_u4_2 Overlay follows the overlay events", (
     await send({ state: "transcribing" });
     expect(screen.getByRole("status").textContent).toBe("Transcribing…");
 
+    await send({ state: "paste_sent" });
+    expect(screen.getByRole("status").textContent).toContain("Paste sent");
+    // The old state name is not a view.
     await send({ state: "pasted" });
-    expect(screen.getByRole("status").textContent).toContain("Pasted");
+    expect(screen.queryByRole("status")).toBeNull();
 
     await send({ state: "error", message: MESSAGE });
     expect(screen.getByRole("alert").textContent).toContain(MESSAGE);
@@ -296,7 +299,8 @@ describe("parseView", () => {
     [{ state: "no_sound", device: "" }, { state: "no_sound" }],
     [{ state: "no_sound", device: 7 }, { state: "no_sound" }],
     [{ state: "transcribing" }, { state: "transcribing" }],
-    [{ state: "pasted" }, { state: "pasted" }],
+    [{ state: "paste_sent" }, { state: "paste_sent" }],
+    [{ state: "pasted" }, { state: "hidden" }],
     [
       { state: "error", message: MESSAGE },
       { state: "error", message: MESSAGE },
