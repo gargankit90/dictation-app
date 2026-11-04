@@ -5,7 +5,7 @@
 # _provider_helpers.sh) takes. Permissions shows both allowed, Try it's
 # dictation pastes into the practice box, Ready shows the real states, and
 # Start dictating hides the window and takes "Resume setup…" off the tray.
-# Settings, Help brings the window back at the step the user was on. Neither
+# "Run setup again" in Settings, Help goes through the steps from Welcome. Neither
 # key nor the transcript is ever in the app's log.
 #
 # The golden image grants the app the microphone and Accessibility. The launch
@@ -103,15 +103,16 @@ e2e_onboarding_first_run() {
   expect "the app logs that onboarding finished" wait_for_log 'onboarding finished'
 
   # U5, U8: with setup done the tray no longer lists "Resume setup…"; setup is
-  # reached from Settings, Help, at the step the user was on.
+  # reached from Settings, Help, and starts again from Welcome.
   expect "the tray has no Resume setup once setup is done" tray_has_no_resume_setup
   expect "Settings… in the tray opens the window" open_settings
-  expect "Settings shows Help, Set up dictation…" \
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Set up dictation" 10
-  expect "Set up dictation… in Settings, Help, opens it again" \
-    ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Set up dictation…"
+  expect "open the Help section" ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Help
+  expect "Help offers Run setup again" \
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Go through the first-run steps again" 10
+  expect "Run setup again opens it" \
+    ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Run setup again"
   expect "its window is on screen" ax_ok wait-window "$APP_NAME" "$ONBOARDING_WINDOW" 10
-  expect "at Ready" ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "You're set" 10
+  expect "at Welcome" ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Talk instead of type" 10
   expect "closing it hides it" ax_ok close "$APP_NAME" "$ONBOARDING_WINDOW"
   expect "it is gone" ax_ok wait-no-window "$APP_NAME" "$ONBOARDING_WINDOW" 10
   expect "the tray still has no Resume setup" tray_has_no_resume_setup

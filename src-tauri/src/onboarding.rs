@@ -223,6 +223,20 @@ impl Onboarding {
         step
     }
 
+    /// "Run setup again": setup that was finished goes through the steps from
+    /// Welcome. It stays finished, so the tray doesn't start offering "Resume
+    /// setup…", and Welcome stays passed, so sending doesn't stop.
+    pub fn start_over_if_finished(&self) {
+        let mut state = self.lock();
+        if !state.progress.completed {
+            return;
+        }
+        state.progress.step = Step::Welcome;
+        let progress = state.progress;
+        drop(state);
+        self.keep(&progress);
+    }
+
     /// Switches the window back to the settings view; the step is kept for
     /// the next [`open`](Self::open).
     pub fn close(&self) {
@@ -679,6 +693,23 @@ mod tests {
         assert!(relaunched.completed());
         assert!(!relaunched.in_progress());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_setup_again_starts_over_only_after_finishing() {
+        let onboarding = Onboarding::new();
+        onboarding.pass_welcome();
+        onboarding.open(Readiness::READY);
+        onboarding.go_to(Step::Try, Readiness::READY).unwrap();
+        onboarding.start_over_if_finished();
+        assert_eq!(onboarding.open(Readiness::READY), Step::Try, "still going");
+
+        onboarding.finish();
+        onboarding.start_over_if_finished();
+        assert_eq!(onboarding.open(Readiness::READY), Step::Welcome);
+        assert!(onboarding.completed());
+        assert!(onboarding.welcome_passed());
+        assert!(!onboarding.in_progress());
     }
 
     #[test]

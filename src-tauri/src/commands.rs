@@ -746,9 +746,9 @@ pub async fn get_onboarding(
     Ok(onboarding.status(&*permissions.0, diagnostics.hotkey_is_down()))
 }
 
-/// Settings, Help, "Set up dictation…" (U5): opens the first-run steps at
-/// the step the user was on, now that the tray's "Resume setup…" is hidden
-/// once setup is done. The key is read (bounded) off the async runtime.
+/// Settings, Help, "Run setup again" (U5, U6): opens the first-run steps,
+/// from the start if setup was finished (U8), otherwise at the step the user
+/// was on. The key is read (bounded) off the async runtime.
 #[tauri::command]
 #[specta::specta]
 pub async fn open_setup(
@@ -764,6 +764,7 @@ pub async fn open_setup(
         let readiness = onboarding::readiness(&*os, onboarding.welcome_passed(), true, || {
             onboarding::key_saved(&config, &live)
         });
+        onboarding.start_over_if_finished();
         let step = onboarding.open(readiness);
         tracing::info!(?step, "onboarding opened from Settings");
     })
