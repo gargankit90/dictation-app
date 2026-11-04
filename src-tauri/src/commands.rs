@@ -56,6 +56,18 @@ pub struct ActiveHotkey(pub HotkeyControl);
 /// The app's config directory, where Relaunch leaves its marker (M5.2).
 pub struct ConfigDir(pub std::path::PathBuf);
 
+/// What Settings says about this launch, if anything (U1: the first launch
+/// after the rename from dictation-app). Managed Tauri state.
+pub struct LaunchNotice(pub Option<&'static str>);
+
+/// The notice for this launch only: macOS may ask once to let Vocet use the
+/// saved key. `None` on every other launch.
+#[tauri::command]
+#[specta::specta]
+pub async fn launch_notice(state: State<'_, LaunchNotice>) -> Result<Option<String>, String> {
+    Ok(state.0.map(str::to_owned))
+}
+
 /// What the onboarding commands ask of the app itself (M5.2).
 pub trait Shell: Send + Sync {
     /// Hides the settings window.
@@ -798,6 +810,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::open_issue,
         crate::diagnostics::take_troubleshoot_request,
         crate::diagnostics::dictation_progress,
+        launch_notice,
     ])
 }
 
@@ -899,6 +912,7 @@ mod tests {
             "openIssue",
             "takeTroubleshootRequest",
             "dictationProgress",
+            "launchNotice",
         ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
@@ -907,7 +921,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 24,
+            commands, 25,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -2558,6 +2572,7 @@ mod capability_tests {
         app.manage(super::AppShell(std::sync::Arc::new(NoShell)));
         app.manage(crate::usage::Usage::disabled());
         app.manage(crate::diagnostics::Diagnostics::default());
+        app.manage(super::LaunchNotice(None));
         let windows = labels
             .iter()
             .map(|label| {
@@ -2738,7 +2753,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 24);
+        assert_eq!(COMMAND_NAMES.len(), 25);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

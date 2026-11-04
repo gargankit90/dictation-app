@@ -126,6 +126,11 @@ export const commands = {
 	 *  only when `completed` grows while its step is open.
 	 */
 	dictationProgress: () => typedError<DictationProgressView_Serialize, string>(__TAURI_INVOKE("dictation_progress")),
+	/**
+	 *  The notice for this launch only: macOS may ask once to let Vocet use the
+	 *  saved key. `None` on every other launch.
+	 */
+	launchNotice: () => typedError<string | null, string>(__TAURI_INVOKE("launch_notice")),
 };
 
 /* Types */

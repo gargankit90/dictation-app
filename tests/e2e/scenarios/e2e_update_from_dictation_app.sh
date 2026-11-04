@@ -314,6 +314,19 @@ e2e_update_from_dictation_app() {
   expect "the app restarts as $TR_NEW by itself" wait_for_log "INFO .*starting version=\"$TR_NEW\""
   expect "it logged the install before the restart" wait_for_log "update installed; restarting"
   sleep 3
+  # The running app registers its login item again under its new name, in a
+  # background thread (unregistering can take many seconds, #238): wait for
+  # it before anything quits the app.
+  expect "the app registers its login item again under the new name" \
+    wait_for_log "login item registered again" 150
+  expect "and remembers it (the marker file)" \
+    vm 'test -s "$HOME/Library/Application Support/com.dictationapp.desktop/login-item-registered"'
+  expect "Settings says what to expect from the Keychain on this first launch" \
+    ax_ok tray-click "$APP_NAME" "Settings"
+  expect "the notice is there" \
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Choose Always Allow" 15
+  screenshot u1-settings-keychain-notice
+  ax_ok close "$APP_NAME" "$SETTINGS_WINDOW" || true
   expect "one copy runs" test "$(app_count)" = 1
   tr_note "after the in-app update, ~/Applications holds: $(tr_copies | tr '\n' ' ')"
   expect "exactly one bundle with this id is in ~/Applications" test "$(tr_copy_count)" = 1

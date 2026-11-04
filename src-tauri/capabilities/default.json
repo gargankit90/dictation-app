@@ -27,6 +27,7 @@
     "allow-save-report",
     "allow-open-issue",
     "allow-take-troubleshoot-request",
-    "allow-dictation-progress"
+    "allow-dictation-progress",
+    "allow-launch-notice"
   ]
 }

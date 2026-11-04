@@ -9,6 +9,7 @@ pub mod launch;
 pub mod overlay;
 pub mod pipeline;
 pub mod progress;
+pub mod rename;
 pub mod stand_ins;
 pub mod test_hooks;
 pub mod tray;

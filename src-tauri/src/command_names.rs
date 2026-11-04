@@ -32,4 +32,5 @@ pub const COMMAND_NAMES: &[&str] = &[
     "open_issue",
     "take_troubleshoot_request",
     "dictation_progress",
+    "launch_notice",
 ];
