@@ -28,7 +28,7 @@ pub enum LaunchProblem {
     Os(String),
     /// Registered, but the user has to allow it in the OS settings.
     #[error(
-        "Launch at login needs your approval: open System Settings, General, Login Items, and allow dictation-app."
+        "Launch at login needs your approval: open System Settings → General → Login Items, and allow Vocet."
     )]
     NeedsApproval,
     /// The OS said yes, but its state didn't change.
@@ -611,7 +611,7 @@ mod tests {
         assert!(!outcome.enabled);
         let problem = outcome.problem.unwrap();
         assert_eq!(problem, LaunchProblem::NeedsApproval);
-        assert!(problem.to_string().contains("General, Login Items"));
+        assert!(problem.to_string().contains("General → Login Items"));
         assert_eq!(stored.lock().unwrap().len(), 1);
     }
 

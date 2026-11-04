@@ -163,6 +163,23 @@ export function Settings({ open = null, ...help }: Props) {
   const [section, setSection] = useState<SectionId>(rememberedSection);
   const { models, error: modelsError, refresh: refreshModels } = useModels();
   const { engine, refresh: refreshEngine } = useEngineStatus();
+  // The first launch after the rename says something about the Keychain (U1).
+  const [launchNotice, setLaunchNotice] = useState<string | null>(null);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const result = await commands.launchNotice();
+          if (result.status === "ok") setLaunchNotice(result.data);
+        } catch {
+          // No notice is the same as nothing to say.
+        }
+      })();
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, []);
   const launch = useLaunchAtLogin(settings?.launch_at_login ?? false);
   const tabs = useRef<Partial<Record<SectionId, HTMLButtonElement | null>>>({});
 
@@ -323,6 +340,11 @@ export function Settings({ open = null, ...help }: Props) {
         tabIndex={0}
       >
         <h1>{current.name}</h1>
+        {launchNotice !== null ? (
+          <p role="status" className="notice ok" data-testid="launch-notice">
+            {launchNotice}
+          </p>
+        ) : null}
         {pane}
       </div>
     </main>

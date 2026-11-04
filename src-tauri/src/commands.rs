@@ -90,6 +90,18 @@ pub struct ActiveHotkey(pub HotkeyControl);
 /// The app's config directory, where Relaunch leaves its marker (M5.2).
 pub struct ConfigDir(pub std::path::PathBuf);
 
+/// What Settings says about this launch, if anything (U1: the first launch
+/// after the rename from dictation-app). Managed Tauri state.
+pub struct LaunchNotice(pub Option<&'static str>);
+
+/// The notice for this launch only: macOS may ask once to let Vocet use the
+/// saved key. `None` on every other launch.
+#[tauri::command]
+#[specta::specta]
+pub async fn launch_notice(state: State<'_, LaunchNotice>) -> Result<Option<String>, String> {
+    Ok(state.0.map(str::to_owned))
+}
+
 /// What the onboarding commands ask of the app itself (M5.2).
 pub trait Shell: Send + Sync {
     /// Hides the settings window.
@@ -806,8 +818,7 @@ pub async fn relaunch_app(
 ) -> Result<(), String> {
     onboarding::leave_resume_marker(&dirs.0).map_err(|error| {
         tracing::warn!(%error, "couldn't leave the onboarding marker");
-        "Couldn't prepare the relaunch. Quit dictation-app from the menu bar and open it again."
-            .to_owned()
+        "Couldn't prepare the relaunch. Quit Vocet from the menu bar and open it again.".to_owned()
     })?;
     tracing::info!("relaunching for onboarding");
     shell.0.restart();
@@ -852,6 +863,8 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::save_report,
         crate::diagnostics::open_issue,
         crate::diagnostics::take_troubleshoot_request,
+        crate::diagnostics::dictation_progress,
+        launch_notice,
         crate::preferences::set_language,
         crate::preferences::use_cloud_engine,
         crate::preferences::use_local_model,
@@ -965,6 +978,8 @@ mod tests {
             "saveReport",
             "openIssue",
             "takeTroubleshootRequest",
+            "dictationProgress",
+            "launchNotice",
             "setLanguage",
             "useCloudEngine",
             "useLocalModel",
@@ -984,7 +999,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 35,
+            commands, 37,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -2602,6 +2617,7 @@ mod capability_tests {
         app.manage(super::AppShell(std::sync::Arc::new(NoShell)));
         app.manage(crate::usage::Usage::disabled());
         app.manage(crate::diagnostics::Diagnostics::default());
+        app.manage(super::LaunchNotice(None));
         app.manage(crate::overlay::OverlayLevel::default());
         // U6: a microphone that never opens, and no update check.
         app.manage(crate::preferences::AppMicTest(
@@ -2820,7 +2836,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 35);
+        assert_eq!(COMMAND_NAMES.len(), 37);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

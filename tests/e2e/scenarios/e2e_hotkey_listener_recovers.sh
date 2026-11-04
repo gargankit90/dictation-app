@@ -22,8 +22,8 @@
 # crates/app/src/tray.rs, and DictationError::HotkeyFailed in the tooltip.
 TRAY_HOTKEY_TITLE="Hotkey unavailable"
 # What the tray shows (the code table, ErrorCode::user_text).
-TRAY_HOTKEY_SHOWN="The hotkey isn't working. Allow Accessibility; it comes back by itself."
-TRAY_HOTKEY_ERROR="The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself."
+TRAY_HOTKEY_SHOWN="The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
+TRAY_HOTKEY_ERROR="The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
 
 e2e_hotkey_listener_recovers() {
   arm_key_cleanup e2e_hotkey_listener_recovers
@@ -47,7 +47,7 @@ posted up" real_key_hold 1.5
   expect "the app says the hotkey isn't working" \
     wait_for_log "shown to the user error=The dictation hotkey isn.t working"
   expect "the tray says Hotkey unavailable" \
-    tray_shows "$TRAY_HOTKEY_TITLE" "$TRAY_TOOLTIP: $TRAY_HOTKEY_SHOWN (hotkey_unregistered)" 10
+    tray_shows "$TRAY_HOTKEY_TITLE" "$TRAY_TOOLTIP: $TRAY_HOTKEY_SHOWN" 10
   expect "the supervisor is retrying (Accessibility looks missing)" \
     wait_for_log 'PermissionMissing: the hotkey is off until Accessibility is granted; it starts by itself then' 10
 

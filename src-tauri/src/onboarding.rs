@@ -265,13 +265,13 @@ pub fn request(
     let prompt = |permission| {
         permissions.request(permission).map_err(|error| {
             tracing::warn!(%error, ?permission, "onboarding: the prompt failed");
-            "macOS didn't show its prompt. Open System Settings, Privacy & Security, and allow dictation-app there.".to_owned()
+            "macOS didn't show its prompt. Open System Settings → Privacy & Security and allow Vocet there.".to_owned()
         })
     };
     let settings = |permission| {
         open_settings(permission).map_err(|error| {
             tracing::warn!(%error, ?permission, "onboarding: couldn't open System Settings");
-            "Couldn't open System Settings. Open it yourself: Privacy & Security, then allow dictation-app there.".to_owned()
+            "Couldn't open System Settings. Open it yourself: System Settings → Privacy & Security, then allow Vocet there.".to_owned()
         })
     };
     match (permission, status) {

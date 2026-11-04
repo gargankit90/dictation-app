@@ -13,8 +13,8 @@ pub const MAIN: &str = "main";
 #[must_use]
 pub fn title(view: View) -> &'static str {
     match view {
-        View::Settings => "dictation-app Settings",
-        View::Onboarding => "Set up dictation-app",
+        View::Settings => "Vocet Settings",
+        View::Onboarding => "Set up Vocet",
     }
 }
 
@@ -52,8 +52,8 @@ mod tests {
 
     #[test]
     fn each_view_has_its_own_title() {
-        assert_eq!(title(View::Settings), "dictation-app Settings");
-        assert_eq!(title(View::Onboarding), "Set up dictation-app");
+        assert_eq!(title(View::Settings), "Vocet Settings");
+        assert_eq!(title(View::Onboarding), "Set up Vocet");
     }
 
     /// U6 criterion 1: Settings opens at about 720×520, resizable down to

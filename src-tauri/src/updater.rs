@@ -57,7 +57,7 @@ impl Outcome {
             ),
             Self::UpToDate { current } => (
                 "You're up to date",
-                format!("dictation-app {current} is the newest version."),
+                format!("Vocet {current} is the newest version."),
             ),
             Self::Available {
                 current,
@@ -65,7 +65,7 @@ impl Outcome {
                 notes,
             } => {
                 let mut text = format!(
-                    "dictation-app {version} is available; you have {current}.\n\nInstall it \
+                    "Vocet {version} is available; you have {current}.\n\nInstall it \
                      now? The app restarts, and your Microphone and Accessibility permissions \
                      stay."
                 );

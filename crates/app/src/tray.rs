@@ -167,7 +167,7 @@ mod tests {
                 DictationError::TranscriptionFailed {
                     reason: "Something went wrong: couldn't load the on-device model: oom.".into(),
                 },
-                "Pick or download another model in Settings.",
+                "Pick or download another in Settings → Speech.",
             ),
             (
                 DictationError::InsertFailed {
@@ -177,7 +177,7 @@ mod tests {
             ),
             (
                 DictationError::PermissionMissing(Permission::Accessibility),
-                "Allow it in Privacy & Security, Accessibility.",
+                "Allow it in System Settings → Privacy & Security → Accessibility.",
             ),
         ];
         for (error, step) in cases {
@@ -186,6 +186,7 @@ mod tests {
             let detail = shown.detail.unwrap();
             assert!(detail.ends_with(step), "{error:?}: {detail}");
             assert_eq!(detail, shown.code.unwrap().user_text());
+            assert!(!detail.contains(shown.code.unwrap().as_str()), "{detail}");
             assert!(
                 !detail.contains("no focused app") && !detail.contains("oom"),
                 "{detail}"

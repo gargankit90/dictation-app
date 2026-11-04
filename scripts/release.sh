@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds a tester release of dictation-app on the owner's Mac (M5.4):
+# Builds a tester release of Vocet on the owner's Mac (M5.4):
 #
 #   scripts/release.sh <version> [--notes <text>]             # dry run
 #   scripts/release.sh <version> [--notes <text>] --publish   # and upload
@@ -12,9 +12,9 @@
 # Both build the signed release (`dictation-app Dev`, not notarised) and put
 # into target/release-out/v<version>/:
 #
-#   dictation-app_<version>_<arch>.dmg          the installer testers get
-#   dictation-app_<version>_<arch>.app.tar.gz   the updater bundle
-#   dictation-app_<version>_<arch>.app.tar.gz.sig
+#   Vocet_<version>_<arch>.dmg          the installer testers get
+#   Vocet_<version>_<arch>.app.tar.gz   the updater bundle
+#   Vocet_<version>_<arch>.app.tar.gz.sig
 #   latest.json                                 what installed apps fetch
 #   README.md (docs/TESTERS.md), THIRD-PARTY-LICENSES.txt, SHA256SUMS
 #
@@ -54,7 +54,7 @@ PASSWORD_SERVICE=dictation-app-updater-password
 POSTHOG_SERVICE=dictation-app-posthog-key
 SENTRY_SERVICE=dictation-app-sentry-dsn
 IDENTITY="dictation-app Dev"
-APP=dictation-app
+APP=Vocet
 
 say() { printf 'release: %s\n' "$*"; }
 die() {

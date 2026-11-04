@@ -32,6 +32,8 @@ pub const COMMAND_NAMES: &[&str] = &[
     "save_report",
     "open_issue",
     "take_troubleshoot_request",
+    "dictation_progress",
+    "launch_notice",
     "set_language",
     "use_cloud_engine",
     "use_local_model",

@@ -59,6 +59,8 @@ class Backend {
   engine: EngineStatus = { state: "ready", message: null };
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
   testResult: KeyTestError | null = null;
+  /** What `launch_notice` says: the first launch after the rename (U1). */
+  launchNotice: string | null = null;
   /** The levels the microphone test reads, in order (then the last again). */
   micLevels: number[] = [-90];
   micRunning = false;
@@ -80,6 +82,8 @@ class Backend {
     switch (command) {
       case "get_settings":
         return this.settings;
+      case "launch_notice":
+        return this.launchNotice;
       case "set_hotkey":
         this.settings = { ...this.settings, hotkey: args.spec as string };
         return null;
@@ -900,6 +904,20 @@ describe("Privacy", () => {
 });
 
 describe("loading", () => {
+  it("U1: says what to expect from the Keychain on the first launch after the rename", async () => {
+    backend.launchNotice =
+      "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to your speech provider (Groq or OpenAI).";
+    await open();
+    const notice = await screen.findByTestId("launch-notice");
+    expect(notice.textContent).toContain("Choose Always Allow");
+    expect(notice.textContent).toContain("sent only to your speech provider (Groq or OpenAI)");
+  });
+
+  it("U1: says nothing about the Keychain on any other launch", async () => {
+    await open();
+    expect(screen.queryByTestId("launch-notice")).toBeNull();
+  });
+
   it("shows why the settings couldn't load", async () => {
     backend.failing.set("get_settings", "The settings file is damaged.");
     render(<Settings />);
