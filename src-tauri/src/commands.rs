@@ -1348,11 +1348,7 @@ mod tests {
             let item = LoginItem::new(Arc::new(fake), Arc::clone(&config));
             let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
             assert_eq!(outcome.problem, Some(launch::LaunchProblem::NeedsApproval));
-            assert!(
-                !config
-                    .settings()
-                    .map_or(false, |saved| saved.launch_at_login)
-            );
+            assert!(!config.settings().is_ok_and(|saved| saved.launch_at_login));
             let _ = std::fs::remove_dir_all(dir);
         }
 
