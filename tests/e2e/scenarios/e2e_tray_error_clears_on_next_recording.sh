@@ -29,7 +29,8 @@ tray_shows() {
     if info=$(tray_info) && menu=$(tray_menu); then
       title=$(tray_field title "$info")
       help=$(tray_field help "$info")
-      first=$(printf '%s\n' "$menu" | sed -n 1p)
+      # The status lines are disabled items: ax.js marks them "(off) ".
+      first=$(printf '%s\n' "$menu" | sed -n 1p | sed 's/^(off) //')
       second=$(printf '%s\n' "$menu" | sed -n 2p)
       if [ -z "$title" ] && [ "$help" = "$want_help" ] && [ "$first" = "$want" ] &&
         { [ -z "${TRAY_FIX-}" ] || [ "$second" = "$TRAY_FIX" ]; }; then
