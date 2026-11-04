@@ -120,7 +120,10 @@ e2e_settings_save_reopen() {
   expect "and detects the language automatically" field_shows language "Detect automatically"
   expect "pick German in the language popup" \
     ax_ok combo-pick "$APP_NAME" "$SETTINGS_WINDOW" language german "German (Deutsch)"
-  expect "the window says Saved, at once" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Saved" 10
+  # "Saved" shows for 2 s, less than a Terminal job can take to look for it
+  # (the unit tests check it), so the stored value is what is checked here.
+  expect "it is saved at once, with no Save button" wait_for_log 'settings saved' 10
+  expect "the settings file has German at once" settings_file_has language de
   expect "record Left Option as the shortcut" record_shortcut left-option
   expect "the app applied the new hotkey" wait_for_log 'hotkey applied.*hotkey=LeftAlt' 10
   expect "the keycap shows it" keycap_shows "Left ⌥"
