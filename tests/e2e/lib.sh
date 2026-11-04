@@ -9,8 +9,12 @@ VM_USER=lume
 # The app is called Vocet (the .app and the process); its log files keep their
 # old prefix, so settings, the saved key and logs carry over an update (U1).
 APP_NAME=Vocet
-# The executable inside the bundle and the log files keep the crate name.
-PROC_NAME=dictation-app
+# The executable inside the bundle is Vocet too (mainBinaryName), so Login
+# Items and Activity Monitor say Vocet; the log files keep their old prefix.
+# OLD_PROC_NAME is the executable of builds from before the rename: a copy of
+# it still counts as the app running.
+PROC_NAME=Vocet
+OLD_PROC_NAME=dictation-app
 LOG_PREFIX=dictation-app
 # The name before the rename, still on the golden image.
 OLD_APP_NAME=dictation-app
@@ -164,7 +168,7 @@ install_fixtures() {
 fresh_app_state() {
   local name i
   name=$(q "$PROC_NAME")
-  vm "pkill -x $name; sleep 1; pkill -9 -x $name; rm -rf $(q "$VM_LOG_DIR")" || true
+  vm "pkill -x $name; pkill -x $OLD_PROC_NAME; sleep 1; pkill -9 -x $name; pkill -9 -x $OLD_PROC_NAME; rm -rf $(q "$VM_LOG_DIR")" || true
   for i in 1 2 3 4 5; do
     [ "$(app_count)" = 0 ] && return 0
     sleep 1
@@ -206,7 +210,7 @@ launch() {
 }
 
 app_count() {
-  vm "pgrep -x $(q "$PROC_NAME") | wc -l" | tr -d ' '
+  vm "(pgrep -x $(q "$PROC_NAME"); pgrep -x $OLD_PROC_NAME) | wc -l" | tr -d ' '
 }
 
 # The app's log so far (all rotated files, oldest first).
