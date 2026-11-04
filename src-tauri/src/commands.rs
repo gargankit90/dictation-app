@@ -64,11 +64,7 @@ impl LoginItem {
         config: Arc<Config<S>>,
     ) -> Self {
         let sync = LoginSync::new(Arc::clone(&login), move |outcome| {
-            if let Err(error) = store_launch_at_login(&config, outcome.enabled) {
-                // Settings shows the OS's state anyway, so a flag that lags
-                // in the file is harmless; say so for diagnosis.
-                tracing::warn!(%error, "could not store the launch-at-login result");
-            }
+            store_launch_at_login(&config, outcome.enabled).map_err(|error| error.to_string())
         });
         Self { login, sync }
     }
@@ -1337,6 +1333,30 @@ mod tests {
             let _ = std::fs::remove_dir_all(dir);
         }
 
+        /// S1 review, R2: an unwritable settings file after the OS changed is
+        /// an error the user sees, the OS result is kept, and a later change
+        /// stores again.
+        #[test]
+        fn a_settings_file_that_cannot_be_written_is_reported() {
+            let (config, dir) = config();
+            let _ = std::fs::remove_dir_all(&dir);
+            // A file where the settings directory should be.
+            std::fs::write(&dir, "not a directory").unwrap();
+            let fake = FakeLaunchAtLogin::new();
+            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
+            let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
+            assert!(outcome.enabled);
+            assert_eq!(fake.state(), Ok(LaunchAtLoginState::Enabled));
+            let text = outcome.problem.unwrap().to_string();
+            assert!(text.contains("couldn't be saved"), "{text}");
+            assert!(text.contains("try again"), "{text}");
+            let _ = std::fs::remove_file(&dir);
+            let again = tauri::async_runtime::block_on(item.sync.request(false)).unwrap();
+            assert!(again.problem.is_none(), "{again:?}");
+            assert!(!config.settings().unwrap().launch_at_login);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
         /// A refusal stores what the OS really has, and says why.
         #[test]
         fn a_refused_change_stores_the_real_state() {
@@ -1808,7 +1828,7 @@ mod tests {
             assert_eq!(config.settings().unwrap().hotkey, "RightAlt");
             let shown = read_settings(
                 &config,
-                &LoginSync::new(Arc::new(login.clone()), |_| {}),
+                &LoginSync::new(Arc::new(login.clone()), |_| Ok(())),
                 &hotkey,
             )
             .unwrap();
@@ -1838,7 +1858,7 @@ mod tests {
             assert_eq!(
                 read_settings(
                     &config,
-                    &LoginSync::new(Arc::new(login.clone()), |_| {}),
+                    &LoginSync::new(Arc::new(login.clone()), |_| Ok(())),
                     &hotkey
                 )
                 .unwrap()

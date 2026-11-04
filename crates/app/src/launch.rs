@@ -34,6 +34,18 @@ pub enum LaunchProblem {
     /// The OS said yes, but its state didn't change.
     #[error("The system didn't change launch at login. Try again.")]
     NotApplied,
+    /// The OS changed, but the setting couldn't be written to the settings
+    /// file (S1 review, R2).
+    #[error(
+        "Launch at login is {} now, but the setting couldn't be saved ({reason}). Check that dictation-app's settings folder can be written, then try again.",
+        if *enabled { "on" } else { "off" }
+    )]
+    NotStored {
+        /// What the OS has now.
+        enabled: bool,
+        /// Why the write failed.
+        reason: String,
+    },
 }
 
 impl From<LaunchAtLoginError> for LaunchProblem {
@@ -176,7 +188,7 @@ pub struct LoginSync {
     known: Arc<Mutex<Option<LaunchAtLoginState>>>,
     /// Called with each final outcome before the receivers are told, with
     /// no other change running or starting: stores the result.
-    on_done: Arc<dyn Fn(&Outcome) + Send + Sync>,
+    on_done: Arc<dyn Fn(&Outcome) -> Result<(), String> + Send + Sync>,
     pending: Arc<Mutex<Pending>>,
 }
 
@@ -184,7 +196,7 @@ impl LoginSync {
     /// A sync over `login`; `on_done` is called with every final outcome.
     pub fn new(
         login: Arc<dyn LaunchAtLogin>,
-        on_done: impl Fn(&Outcome) + Send + Sync + 'static,
+        on_done: impl Fn(&Outcome) -> Result<(), String> + Send + Sync + 'static,
     ) -> Self {
         Self {
             login,
@@ -286,7 +298,7 @@ fn lock(pending: &Mutex<Pending>) -> std::sync::MutexGuard<'_, Pending> {
 
 fn work(
     login: &dyn LaunchAtLogin,
-    on_done: &(dyn Fn(&Outcome) + Send + Sync),
+    on_done: &(dyn Fn(&Outcome) -> Result<(), String> + Send + Sync),
     shared: &Mutex<Pending>,
     known: &Mutex<Option<LaunchAtLoginState>>,
 ) {
@@ -304,31 +316,51 @@ fn work(
             wanted
         };
         let started = std::time::Instant::now();
-        let outcome = change(login, wanted);
+        let mut outcome = change(login, wanted);
         tracing::info!(
             wanted,
             enabled = outcome.enabled,
             elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             "login item changed"
         );
-        let mut pending = lock(shared);
-        if pending.wanted.is_some() {
-            // Toggled again meanwhile: this outcome is stale.
-            continue;
+        // What the change read last; no second read of the OS, and never one
+        // under the lock (S1 review, R1: it takes seconds).
+        *known
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(if outcome.enabled {
+            LaunchAtLoginState::Enabled
+        } else {
+            LaunchAtLoginState::Disabled
+        });
+        let waiters = {
+            let mut pending = lock(shared);
+            if pending.wanted.is_some() {
+                // Toggled again meanwhile: this outcome is stale.
+                continue;
+            }
+            std::mem::take(&mut pending.waiters)
+        };
+        // Stored outside the lock, with `running` still set: a newer request
+        // only queues, so it can't overtake the store, and nobody waits on
+        // the settings file here.
+        if let Err(reason) = on_done(&outcome) {
+            tracing::warn!(%reason, "could not store the launch-at-login result");
+            if outcome.problem.is_none() {
+                outcome.problem = Some(LaunchProblem::NotStored {
+                    enabled: outcome.enabled,
+                    reason,
+                });
+            }
         }
-        // Still holding the lock: a newer request can't overtake the store.
-        on_done(&outcome);
-        if let Ok(state) = login.state() {
-            *known
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(state);
-        }
-        pending.running = false;
-        pending.applying = None;
-        for waiter in pending.waiters.drain(..) {
+        for waiter in waiters {
             let _ = waiter.send(outcome.clone());
         }
-        return;
+        let mut pending = lock(shared);
+        if pending.wanted.is_none() {
+            pending.running = false;
+            pending.applying = None;
+            return;
+        }
     }
 }
 
@@ -474,6 +506,7 @@ mod tests {
         let sink = Arc::clone(&stored);
         let sync = LoginSync::new(Arc::new(login.clone()), move |outcome| {
             sink.lock().unwrap().push(outcome.clone());
+            Ok(())
         });
         (sync, stored)
     }
@@ -587,7 +620,9 @@ mod tests {
     fn the_screen_does_not_wait_for_a_slow_state_read() {
         let fake = FakeLaunchAtLogin::new();
         fake.set_state(LaunchAtLoginState::Enabled);
-        let sync = LoginSync::new(Arc::new(SlowRead(fake, READ_LIMIT * 4)), |_: &Outcome| {});
+        let sync = LoginSync::new(Arc::new(SlowRead(fake, READ_LIMIT * 4)), |_: &Outcome| {
+            Ok(())
+        });
         let started = std::time::Instant::now();
         // Nothing known yet: the saved value shows, after the limit.
         let shown = sync.shown(settings(false));
@@ -622,5 +657,99 @@ mod tests {
         assert!(!sync.shown(settings(true)).launch_at_login);
         fake.set_state(LaunchAtLoginState::Enabled);
         assert!(sync.shown(settings(false)).launch_at_login);
+    }
+
+    /// Blocks the third `state()` call (the one a change used to make under
+    /// the lock, after its own two reads) until released.
+    struct GatedRead {
+        inner: FakeLaunchAtLogin,
+        reads: std::sync::atomic::AtomicUsize,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl LaunchAtLogin for GatedRead {
+        fn state(&self) -> Result<LaunchAtLoginState, LaunchAtLoginError> {
+            let n = self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            if n >= 3 {
+                let _ = self
+                    .release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5));
+            }
+            self.inner.state()
+        }
+
+        fn set_enabled(&self, enabled: bool) -> Result<(), LaunchAtLoginError> {
+            self.inner.set_enabled(enabled)
+        }
+    }
+
+    /// S1 review, R1: a slow read of the OS never holds the lock a new
+    /// request and the screen need.
+    #[test]
+    fn a_slow_os_read_after_a_change_does_not_block_requests_or_the_screen() {
+        let (release, gate) = std::sync::mpsc::channel();
+        let login = Arc::new(GatedRead {
+            inner: FakeLaunchAtLogin::new(),
+            reads: std::sync::atomic::AtomicUsize::new(0),
+            release: Mutex::new(gate),
+        });
+        let sync = LoginSync::new(
+            Arc::clone(&login) as Arc<dyn LaunchAtLogin>,
+            |_: &Outcome| Ok(()),
+        );
+        let first = sync.request(true);
+        // The change has made its two reads and its change.
+        for _ in 0..200 {
+            if login.reads.load(std::sync::atomic::Ordering::SeqCst) >= 2 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        let (done, finished) = std::sync::mpsc::channel();
+        let worker = sync.clone();
+        std::thread::spawn(move || {
+            let again = worker.request(true);
+            let shown = worker.shown(settings(false));
+            let _ = done.send(shown.launch_at_login);
+            drop(again);
+        });
+        let answered = finished.recv_timeout(Duration::from_secs(2));
+        let _ = release.send(());
+        let _ = release.send(());
+        assert!(
+            answered.is_ok(),
+            "a request or the screen waited for the OS read"
+        );
+        drop(first);
+    }
+
+    /// S1 review, R2: the OS changed but the file couldn't be written.
+    #[tokio::test]
+    async fn a_failed_store_is_reported_with_the_real_state() {
+        let fake = FakeLaunchAtLogin::new();
+        let sync = LoginSync::new(Arc::new(fake.clone()), |_: &Outcome| {
+            Err("disk full".to_owned())
+        });
+        let outcome = sync.request(true).await.unwrap();
+        assert!(outcome.enabled, "the OS result is kept");
+        assert_eq!(fake.state(), Ok(LaunchAtLoginState::Enabled));
+        let problem = outcome.problem.unwrap();
+        let text = problem.to_string();
+        assert!(
+            text.contains("on now") && text.contains("disk full"),
+            "{text}"
+        );
+        assert!(text.contains("try again"), "{text}");
+        // And an OS refusal is not hidden by it.
+        let refused = FakeLaunchAtLogin::new();
+        refused.enabling_gives(LaunchAtLoginState::RequiresApproval);
+        let sync = LoginSync::new(Arc::new(refused), |_: &Outcome| Err("disk full".to_owned()));
+        assert_eq!(
+            sync.request(true).await.unwrap().problem,
+            Some(LaunchProblem::NeedsApproval)
+        );
     }
 }
