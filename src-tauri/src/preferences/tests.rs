@@ -291,3 +291,51 @@ fn criterion_6_microphone_problems_say_what_to_do() {
 fn app_info_has_the_version() {
     assert_eq!(get_app_info().unwrap().version, env!("CARGO_PKG_VERSION"));
 }
+
+/// Every source file under `dir` (recursively) with one of `extensions`.
+fn sources(dir: &Path, extensions: &[&str], found: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if !path.ends_with("target") && !path.ends_with("node_modules") {
+                sources(&path, extensions, found);
+            }
+        } else if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extensions.contains(&extension))
+        {
+            found.push(path);
+        }
+    }
+}
+
+/// U6 criterion 7b: the section is Speech now, so no user-facing sentence
+/// may send the user to the old Transcription section (U1's error sentences
+/// and helper lines). Searches the Rust crates, the shell and the UI.
+#[test]
+fn criterion_u6_7b_no_sentence_names_a_transcription_section() {
+    let old = ["Settings → ", "Transcription"].concat();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut files = Vec::new();
+    for dir in ["crates", "src-tauri/src", "src"] {
+        sources(&root.join(dir), &["rs", "ts", "tsx"], &mut files);
+    }
+    assert!(
+        files.len() > 50,
+        "the search found only {} files",
+        files.len()
+    );
+    let named: Vec<String> = files
+        .iter()
+        .filter(|path| std::fs::read_to_string(path).is_ok_and(|text| text.contains(&old)))
+        .map(|path| path.display().to_string())
+        .collect();
+    assert!(
+        named.is_empty(),
+        "say Settings → Speech instead in: {named:?}"
+    );
+}
