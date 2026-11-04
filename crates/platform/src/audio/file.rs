@@ -21,9 +21,10 @@ use super::lock;
 /// with an unsupported sample width, is [`AudioError::Device`].
 ///
 /// Its [`LevelMeter`] (U4) plays the file's level in real time: while
-/// recording, a thread feeds the meter one 10 ms chunk every 10 ms, and
-/// silence once the file has played, as a microphone would. So the
-/// overlay's meter and "No sound" can be checked end to end with a file.
+/// recording, a thread feeds the meter one 10 ms chunk every 10 ms, the
+/// file over and over, as a microphone hearing it would. So the overlay's
+/// meter can be checked end to end with a file: a tone keeps it up, and a
+/// silent file shows "No sound".
 #[derive(Debug, Clone)]
 pub struct FileAudioSource {
     path: Arc<PathBuf>,
@@ -61,7 +62,10 @@ impl FileAudioSource {
         let playing = thread::Builder::new()
             .name("file-levels".into())
             .spawn(move || {
-                for block in samples.chunks(chunk) {
+                if samples.is_empty() {
+                    return;
+                }
+                for block in samples.chunks(chunk).cycle() {
                     if current.load(Ordering::Acquire) != generation {
                         return;
                     }
@@ -271,6 +275,22 @@ mod tests {
         source.start().unwrap();
         let level = sound_level(&meter).unwrap();
         assert!((level + 20.0).abs() <= 2.0, "{level}");
+        source.stop().unwrap();
+        assert_eq!(meter.take(), None);
+    }
+
+    /// U4: the file plays over and over while recording, like a microphone
+    /// that keeps hearing it.
+    #[test]
+    fn criterion_u4_1_the_meter_loops_the_file() {
+        let wav = TempWav::int16(16_000, 1, &[8_000; 320]);
+        let mut source = FileAudioSource::new(&wav.0);
+        let meter = source.level_meter().unwrap();
+        source.start().unwrap();
+        // Five times the file's 20 ms.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let _ = meter.take();
+        assert!(sound_level(&meter).is_some());
         source.stop().unwrap();
         assert_eq!(meter.take(), None);
     }
