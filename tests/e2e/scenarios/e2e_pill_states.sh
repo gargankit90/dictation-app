@@ -1,0 +1,96 @@
+# U4: the recording pill's states, read from the overlay's WebView (ax.js
+# overlay) and the log, with a screenshot of each for the PR. The file source
+# plays its level in real time, over and over (FileAudioSource), so:
+#
+# 1. The tone: the pill renders Listening with its hint while held, and still
+#    Listening after 2.5 s (a sound never says "No sound"). On release the
+#    mock pastes, and the pill renders "Pasted", for 800 ms by the log, then
+#    hides.
+# 2. The silence fixture: the pill renders Listening, then "No sound" with
+#    "Check your microphone" about 1.5 s after the press (the file source
+#    has no device name). Nothing is pasted, so on release it goes
+#    Transcribing, then hides without "Pasted".
+#
+# The meter's bars carry no text (aria-hidden); the screenshots show them.
+
+# The pill's Pasted time (crates/app/src/overlay.rs PASTED_VISIBLE_FOR) and
+# the No sound wait (dictation_core::level::NO_SOUND_AFTER), with slack for
+# the log's timestamps and a 50 ms level interval.
+PILL_PASTED_MS=800
+PILL_NO_SOUND_MS=1500
+PILL_SLACK_MS=300
+
+# pill_near <ms> <want>: within PILL_SLACK_MS of <want>.
+pill_near() {
+  [ -n "$1" ] && [ "$1" -ge $(($2 - PILL_SLACK_MS)) ] && [ "$1" -le $(($2 + PILL_SLACK_MS)) ]
+}
+
+# The overlay's log lines after the first <n>, space-separated.
+pill_log_since() {
+  app_log | sed -nE 's/.*overlay (shown state="?([a-z_]+)"?|(hidden)).*/\2\3/p' |
+    tail -n +$(($1 + 1)) | paste -sd ' ' -
+}
+
+# TextEdit holds some text (the mock's).
+pill_textedit_has_text() {
+  local text
+  text=$(textedit_text) || return 1
+  [ -n "$(printf '%s' "$text" | tr -d '[:space:]')" ]
+}
+
+pill_log_mark() {
+  app_log | grep -cE 'overlay (shown state|hidden)' || true
+}
+
+e2e_pill_states() {
+  local mark gap
+  fresh_app_state
+  launch_full
+  expect "the app starts and logs ready" wait_for_log 'INFO .*ready'
+  textedit_fresh
+
+  # 1. Sound: Listening, then Pasted, then hidden.
+  mark=$(pill_log_mark)
+  launch --press
+  expect "the pill renders Listening with its hint" overlay_shows "$OVERLAY_RECORDING"
+  sleep 0.5
+  screenshot e2e_pill_states.listening
+  sleep 2
+  expect "a sound keeps it Listening" overlay_shows "$OVERLAY_RECORDING" 1
+  launch --release
+  expect "the dictation gets back to Idle" wait_for_idle_count 1
+  expect "the pill renders Pasted" wait_for_log 'overlay shown state="?pasted' 5
+  screenshot e2e_pill_states.pasted
+  expect "then hides" wait_for_log_count 'overlay hidden' 1 5
+  gap=$(log_gap_ms 'overlay shown state="?pasted' 'overlay (hidden|shown)') || gap=""
+  log "  Pasted showed for ${gap:-?} ms by the log"
+  expect "Pasted stayed up for ${PILL_PASTED_MS} ms" pill_near "$gap" "$PILL_PASTED_MS"
+  expect "the pill went recording, transcribing, pasted, hidden" \
+    test "$(pill_log_since "$mark")" = "recording transcribing pasted hidden"
+  expect "the text was pasted" pill_textedit_has_text
+  collect_log e2e_pill_states.sound
+
+  # 2. Silence: Listening, then No sound, then hidden without Pasted.
+  fresh_app_state
+  launch_full "$VM_SILENCE"
+  expect "the app starts again and logs ready" wait_for_log 'INFO .*ready'
+  textedit_fresh
+  mark=$(pill_log_mark)
+  launch --press
+  expect "the pill renders Listening" overlay_shows "$OVERLAY_RECORDING"
+  expect "then No sound with its hint" overlay_shows "$OVERLAY_NO_SOUND" 5
+  screenshot e2e_pill_states.no_sound
+  gap=$(log_gap_ms 'overlay shown state="?recording' 'overlay (hidden|shown)') || gap=""
+  log "  No sound came ${gap:-?} ms after Listening by the log"
+  expect "No sound came after about ${PILL_NO_SOUND_MS} ms of silence" \
+    pill_near "$gap" "$PILL_NO_SOUND_MS"
+  launch --release
+  expect "the silent dictation gets back to Idle" wait_for_idle_count 1
+  expect "the pill hides" overlay_shows "$OVERLAY_HIDDEN"
+  expect "the pill went recording, no_sound, transcribing, hidden (no pasted)" \
+    test "$(pill_log_since "$mark")" = "recording no_sound transcribing hidden"
+  expect "nothing was pasted" textedit_is_empty
+
+  [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_pill_states
+  collect_log e2e_pill_states
+}

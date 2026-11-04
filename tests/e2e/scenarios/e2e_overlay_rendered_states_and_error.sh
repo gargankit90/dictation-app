@@ -22,10 +22,10 @@
 # The panel is checked on screen (CGWindowList, e2e_overlay_focus.sh's
 # overlay_on_screen) whenever it shows something, and off screen when hidden.
 
-# The overlay's text for the provider's 401 (TranscribeError::BadKey's user
-# message in DictationError's "Transcription failed: …"). The "!" icon is
-# aria-hidden, so it isn't in the text.
-OVERLAY_BAD_KEY="shown: The provider rejected your API key. Check or re-enter it in Settings. key_rejected"
+# The overlay's text for the provider's 401 (the error code table's user
+# text). The "!" icon is aria-hidden, so it isn't in the text, and since U4
+# the overlay shows no code.
+OVERLAY_BAD_KEY="shown: The provider rejected your API key. Check or re-enter it in Settings."
 # The error's time on screen (crates/app/src/overlay.rs ERROR_VISIBLE_FOR),
 # and how far the log's show-to-hide gap may stray from it.
 OVERLAY_ERROR_MS=4000
@@ -149,6 +149,7 @@ e2e_overlay_rendered_states_and_error() {
   launch --release
   expect "the provider holds the reply" provider_wait_event '^held n=1'
   expect "the overlay renders Transcribing while it waits" overlay_shows "$OVERLAY_TRANSCRIBING"
+  screenshot e2e_overlay_rendered_states_and_error.transcribing
   expect "the panel is still on screen" overlay_on_screen
   expect "TextEdit is in front again for the paste" textedit_front
   provider_release
@@ -175,6 +176,7 @@ e2e_overlay_rendered_states_and_error() {
   expect "the dictation fails and is back in Idle" wait_for_idle_count 3 15
   expect "the provider rejected the key" provider_request_has 1 auth=bad
   expect "the overlay renders the error's text" overlay_shows "$OVERLAY_BAD_KEY"
+  screenshot e2e_overlay_rendered_states_and_error.error
   expect "the panel is on screen with the error" overlay_on_screen
   overlay_watch_end
   watch=$OVERLAY_WATCHED
@@ -220,8 +222,9 @@ e2e_overlay_rendered_states_and_error() {
   expect "that dictation ends Idle" wait_for_idle_count 5 15
   expect "the overlay is hidden" overlay_shows "$OVERLAY_HIDDEN"
   expect "the panel is off screen" overlay_off_screen
-  expect "the overlay went recording, transcribing, error, recording, transcribing, hidden" \
-    test "$(overlay_log_since "$mark")" = "recording transcribing error recording transcribing hidden"
+  # U4: a successful paste shows Pasted (800 ms) before hiding.
+  expect "the overlay went recording, transcribing, error, recording, transcribing, pasted, hidden" \
+    test "$(overlay_log_since "$mark")" = "recording transcribing error recording transcribing pasted hidden"
   expect "it pasted" textedit_is "$(esc_b64 "$PROVIDER_TEXT")"
 
   [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_overlay_rendered_states_and_error
