@@ -28,6 +28,11 @@
 //                                    (focus, empty it, the keys; lowercase
 //                                    letters and digits only), as a person
 //                                    would; prints "typed"
+//   combo-pick <app> <window> <field> <search> <label>  chooses an option in
+//                                    a searchable popup (the language
+//                                    picker): focus, type <search>, press
+//                                    Return, then checks the field shows
+//                                    <label>; prints "picked"
 //   secret-set <app> <window> <field> <value>  field-set for a password
 //                                    field, whose value can't be read back:
 //                                    checks only that it holds as many
@@ -81,6 +86,7 @@ const AX_ACTION_UNSUPPORTED = -25206;
 const MAX_NODES = 4000;
 const KEY_A = 0;
 const KEY_DELETE = 51;
+const KEY_RETURN = 36;
 const KEY_ESCAPE = 53;
 const COMMAND = 0x100000;
 // The ANSI (US layout, as in the VM) key code of each character is its
@@ -460,7 +466,7 @@ function charCount(field) {
   return text(field, "AXValue").length;
 }
 
-function typeInto(appEl, window, field, value, secret = false) {
+function typeInto(appEl, window, field, value, secret = false, pick = null) {
   const keys = [];
   for (const ch of value) {
     if (!/^[a-z0-9]$/.test(ch)) {
@@ -490,6 +496,15 @@ function typeInto(appEl, window, field, value, secret = false) {
   }
   for (const code of keys) postKey(code, 0);
   delay(0.5);
+  // A popup: Return takes the first match, which then shows in the field.
+  if (pick !== null) {
+    postKey(KEY_RETURN, 0);
+    delay(0.5);
+    const shown = text(field, "AXValue");
+    if (shown !== pick)
+      fail("searched " + JSON.stringify(value) + " but the field shows " + JSON.stringify(shown));
+    return "picked";
+  }
   if (secret) {
     const count = charCount(field);
     if (count !== value.length)
@@ -566,6 +581,10 @@ function run(argv) {
     case "field-set": {
       const window = findWindow(appEl, rest[0]);
       return typeInto(appEl, window, findField(window, rest[1]), rest[2] || "");
+    }
+    case "combo-pick": {
+      const window = findWindow(appEl, rest[0]);
+      return typeInto(appEl, window, findField(window, rest[1]), rest[2] || "", false, rest[3]);
     }
     case "secret-set": {
       const window = findWindow(appEl, rest[0]);

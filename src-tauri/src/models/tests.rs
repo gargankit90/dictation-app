@@ -61,6 +61,12 @@ fn criterion_4_lists_the_catalogue_with_statuses() {
     assert_eq!(list[0].id, DEFAULT);
     assert!(list[0].default && !list[1].default);
     assert_eq!(list[0].languages, "English only");
+    // The language picker (U2) filters by these codes.
+    assert_eq!(list[0].language_codes, ["en"]);
+    assert!(list[1].language_codes.iter().any(|c| c == "hi"));
+    for (info, model) in list.iter().zip(local_models::CATALOGUE) {
+        assert_eq!(info.language_codes, model.languages);
+    }
     assert!(list.iter().all(|m| m.state == ModelState::Missing));
     assert_eq!(list[0].size_bytes, 477_274_496.0);
 
