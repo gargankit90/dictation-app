@@ -107,12 +107,18 @@ set_clipboard() {
 # item) is off the clipboard: restored, or replaced by a copy. A failed
 # paste leaves the transcript there for good; then it reads it after 4 s.
 clipboard() {
+  clipboard_settled
+  vm "pbpaste"
+}
+
+# Waits (up to 4 s) until the app's dictation write is off the clipboard;
+# for scenarios that read the clipboard their own way (images, types).
+clipboard_settled() {
   local i
   for i in $(seq 1 20); do
-    clipboard_has_dictation || break
+    clipboard_has_dictation || return 0
     sleep 0.2
   done
-  vm "pbpaste"
 }
 
 # Whether the app's dictation write is on the clipboard now.
