@@ -229,19 +229,13 @@ e2e_accessibility_revoked() {
   expect "Accessibility is switched on again (password over VNC)" ax_switch_on
   expect "the supervisor restarts the listener by itself" \
     wait_for_log 'hotkey restored; shown to the user' 15
-  # A tap made before the grant may stay dead until a relaunch (#50), so the
-  # menu must not say Ready: it asks for the relaunch (U5, Tester run 1).
-  expect "the tray doesn't say Ready; it asks for a relaunch" \
-    env_tray_fix "Relaunch Vocet" tray_shows "! Relaunch Vocet to finish turning on Accessibility" "Vocet: Relaunch Vocet to finish turning on Accessibility" 10
-  ready=$(log_count 'INFO .*ready')
-  missing=$(log_count 'PermissionMissing')
-  expect "Relaunch Vocet is pressed in the tray menu" \
-    ax_ok tray-click "$APP_NAME" "Relaunch Vocet"
-  expect "the app relaunches" wait_for_log 'relaunching from the tray' 10
-  expect "the app is relaunched and logs ready" wait_for_log_count 'INFO .*ready' $((ready + 1)) 30
-  sleep 3
-  expect "the hotkey listens at once after the relaunch (no new PermissionMissing)" \
-    test "$(log_count 'PermissionMissing')" = "$missing"
+  # A restored listener is Ready at once (U5 round 3).
+  expect "the tray is ready again" tray_is_clear 15
+  expect "a real hold dictates in the running app" ax_hold_dictates
+  expect "the app quits" fresh_app_state
+  launch_full
+  expect "the app is relaunched and logs ready" wait_for_log 'INFO .*ready'
+  expect "the hotkey listens at once after the relaunch" hotkey_is_on
   expect "a real hold dictates after the relaunch" ax_hold_dictates
   log "  evidence: $(paste -sd '|' "$AX_EVIDENCE")"
 

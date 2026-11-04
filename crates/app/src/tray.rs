@@ -351,10 +351,11 @@ pub struct TrayStatus {
     grant_opened: bool,
     /// Whether a recording is in progress.
     recording: bool,
-    /// Whether Accessibility was missing at some point in this run and no
-    /// recording has started since. macOS often leaves a hotkey tap made
-    /// before the grant dead, so once the grant shows up the menu can't say
-    /// Ready until a recording proves the key works, or the app relaunches.
+    /// Whether Accessibility was missing (as the OS reports it) at some
+    /// point since the hotkey last worked. While the hotkey is still down
+    /// after the grant, macOS has not applied it to this process: the menu
+    /// asks for a relaunch. Cleared when the hotkey is restored or a
+    /// recording starts.
     lacked_accessibility: bool,
     /// Whether a dictation succeeded in this run.
     has_last: bool,
@@ -382,8 +383,10 @@ impl TrayStatus {
         let before = (self.error, self.hotkey_down, self.recording);
         match event {
             UiEvent::Error(DictationError::HotkeyFailed) => {
+                // Only missing Accessibility (seen in `set_ambient`) makes a
+                // dead hotkey an Accessibility matter; any other cause is
+                // just the hotkey's own problem.
                 self.hotkey_down = true;
-                self.lacked_accessibility = true;
                 self.error = None;
             }
             UiEvent::Error(error) => {
@@ -393,7 +396,11 @@ impl TrayStatus {
                 }
                 self.error = Some(code);
             }
-            UiEvent::HotkeyRestored => self.hotkey_down = false,
+            UiEvent::HotkeyRestored => {
+                // The listener runs again: every hotkey problem is over.
+                self.hotkey_down = false;
+                self.lacked_accessibility = false;
+            }
             UiEvent::StateChanged(phase) => {
                 self.recording = *phase == Phase::Recording;
                 if self.recording {
@@ -472,7 +479,10 @@ impl TrayStatus {
     /// shown the key works.
     #[must_use]
     pub fn relaunch_needed(&self) -> bool {
-        self.lacked_accessibility && self.shown_problem().is_none()
+        self.lacked_accessibility
+            && self.hotkey_down
+            && self.error.is_none()
+            && self.ambient.problem != Some(ErrorCode::AccessibilityMissing)
     }
 
     /// The fix row's action for the current problem, if there is one.
@@ -500,7 +510,8 @@ impl TrayStatus {
         } else {
             None
         };
-        let problem = if download.is_some() {
+        let relaunch = self.relaunch_needed();
+        let problem = if download.is_some() || relaunch {
             None
         } else {
             self.shown_problem()
@@ -520,7 +531,7 @@ impl TrayStatus {
                 entries.push(Entry::item(fix.id(), fix.label()));
             }
             format!("{APP_NAME}: {sentence}")
-        } else if self.relaunch_needed() {
+        } else if relaunch {
             entries.push(Entry::disabled(
                 id::STATUS,
                 format!("! {RELAUNCH_SENTENCE}"),
@@ -568,7 +579,7 @@ impl TrayStatus {
         // after, if the problem remains.
         let icon = if self.recording {
             TrayIcon::Recording
-        } else if problem.is_some() || self.relaunch_needed() {
+        } else if problem.is_some() || relaunch {
             TrayIcon::Attention
         } else {
             TrayIcon::Normal
@@ -1028,23 +1039,40 @@ mod tests {
         assert_eq!(tray.menu().icon, TrayIcon::Normal);
     }
 
-    /// Tester run 1: after Accessibility is re-granted the menu must not say
-    /// Ready (a tap made before the grant may be dead) until a recording
-    /// proves the key works, or the app relaunches.
+    /// Codex round 2: a hotkey failure with no Accessibility cause shows its
+    /// own row, and the restore returns to Ready at once, no dot.
     #[test]
-    fn ready_is_not_shown_after_a_regrant_until_a_recording_or_relaunch() {
+    fn a_hotkey_failure_without_an_accessibility_cause_is_restored_to_ready() {
         let mut tray = ready("RightAlt", "Groq");
+        tray.set_ambient(ambient("RightAlt", "Groq"));
+        tray.on_event(&error(DictationError::HotkeyFailed));
+        let menu = tray.menu();
+        assert_eq!(
+            label_of(&menu, id::STATUS).as_deref(),
+            Some("! Right ⌥ isn't working. Choose another key.")
+        );
         assert!(!tray.relaunch_needed());
-        // Revoked: the hotkey dies, Accessibility is missing.
+        assert_eq!(tray.fix(), Some(Fix::ChooseAnotherKey));
+        tray.on_event(&UiEvent::HotkeyRestored);
+        let menu = tray.menu();
+        assert!(label_of(&menu, id::STATUS).unwrap().starts_with("✓ Ready"));
+        assert_eq!(menu.icon, TrayIcon::Normal);
+        assert!(!tray.relaunch_needed());
+    }
+
+    /// Accessibility revoked, then granted again, the tap not live yet: the
+    /// menu asks for a relaunch.
+    #[test]
+    fn a_regrant_with_the_tap_not_live_asks_for_a_relaunch() {
+        let mut tray = ready("RightAlt", "Groq");
         tray.on_event(&error(DictationError::HotkeyFailed));
         tray.set_ambient(Ambient {
             problem: Some(ErrorCode::AccessibilityMissing),
             ..ambient("RightAlt", "Groq")
         });
         assert_eq!(tray.fix(), Some(Fix::OpenAccessibilitySettings));
-        // Granted again: the supervisor restarts the listener.
+        // Granted again; the hotkey is still down.
         tray.set_ambient(ambient("RightAlt", "Groq"));
-        tray.on_event(&UiEvent::HotkeyRestored);
         let menu = tray.menu();
         assert_eq!(
             label_of(&menu, id::STATUS).as_deref(),
@@ -1054,19 +1082,29 @@ mod tests {
             label_of(&menu, id::FIX_RELAUNCH).as_deref(),
             Some("Relaunch Vocet")
         );
+        assert!(label_of(&menu, id::FIX_KEY).is_none());
         assert_eq!(menu.icon, TrayIcon::Attention);
         assert_eq!(
             menu.tooltip,
             "Vocet: Relaunch Vocet to finish turning on Accessibility"
         );
-        // A recording proves the key works: Ready again.
-        tray.on_event(&UiEvent::StateChanged(Phase::Recording));
-        tray.on_event(&UiEvent::StateChanged(Phase::Idle));
-        assert!(
-            label_of(&tray.menu(), id::STATUS)
-                .unwrap()
-                .starts_with("✓ Ready")
-        );
+    }
+
+    /// Re-granted and the tap restarted: Ready at once.
+    #[test]
+    fn a_regrant_with_the_tap_restarted_is_ready() {
+        let mut tray = ready("RightAlt", "Groq");
+        tray.on_event(&error(DictationError::HotkeyFailed));
+        tray.set_ambient(Ambient {
+            problem: Some(ErrorCode::AccessibilityMissing),
+            ..ambient("RightAlt", "Groq")
+        });
+        tray.set_ambient(ambient("RightAlt", "Groq"));
+        tray.on_event(&UiEvent::HotkeyRestored);
+        let menu = tray.menu();
+        assert!(label_of(&menu, id::STATUS).unwrap().starts_with("✓ Ready"));
+        assert_eq!(menu.icon, TrayIcon::Normal);
+        assert!(!tray.relaunch_needed());
     }
 
     #[test]
