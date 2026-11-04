@@ -1,8 +1,10 @@
-//! The overlay window (M5.1): shows Recording, Transcribing and errors
-//! without taking focus. [`start`] creates the window
+//! The overlay window (M5.1, U4): the recording pill, which shows
+//! Listening with a live level meter, "No sound", Transcribing, "Pasted"
+//! and errors without taking focus. [`start`] creates the window
 //! (`dictation_platform::overlay`) and runs `dictation_pipeline::overlay`
 //! against it; this module only connects the two and sends each view to the
-//! page (`src/overlay/`) as [`EVENT`].
+//! page (`src/overlay/`) as [`EVENT`], and each input level as
+//! [`LEVEL_EVENT`] (about 20 a second while recording; never logged).
 //!
 //! An event sent before the page's listener is registered is dropped (Tauri
 //! only delivers to registered listeners), so a dictation started right
@@ -14,6 +16,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use dictation_pipeline::overlay::{self, ERROR_VISIBLE_FOR, OverlaySurface, OverlayView};
+use dictation_pipeline::pipeline::LevelReceiver;
 use dictation_pipeline::ui_events::{UiSender, ui_channel};
 use dictation_platform::overlay::{Overlay, OverlaySpec};
 use serde::Serialize;
@@ -23,6 +26,9 @@ use tauri::{AppHandle, Emitter, EventTarget, LogicalSize, Runtime};
 pub const LABEL: &str = "overlay";
 /// The one event the overlay page listens to (`src/overlay/view.ts`).
 pub const EVENT: &str = "overlay-view";
+/// The input level for the pill's meter while recording (U4):
+/// `{"dbfs": -32.5}` (`OVERLAY_LEVEL_EVENT` in `src/overlay/view.ts`).
+pub const LEVEL_EVENT: &str = "overlay-level";
 /// The start of the document title the overlay page sets once its listener
 /// is registered (`LISTENING_TITLE` in `src/overlay/view.ts`; a count
 /// follows, so each new listener changes the title).
@@ -40,14 +46,14 @@ fn spec() -> OverlaySpec {
 }
 
 /// Creates the overlay window, hidden, and starts showing the pipeline's
-/// events on it. Returns where to send those events. Call on the main
+/// events and input `levels` on it. Returns where to send those events. Call on the main
 /// thread, inside the Tauri runtime, after registering
 /// `dictation_platform::overlay::plugin`.
 ///
 /// # Errors
 ///
 /// If the window can't be created.
-pub fn start<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<UiSender> {
+pub fn start<R: Runtime>(app: &AppHandle<R>, levels: LevelReceiver) -> tauri::Result<UiSender> {
     let relay = Relay::default();
     let on_title = {
         let app = app.clone();
@@ -66,8 +72,9 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<UiSender> {
     log_native_window(&window);
     // Bounded, like the main UI's queue (#112).
     let (events, receiver) = ui_channel();
-    tauri::async_runtime::spawn(overlay::run(
+    tauri::async_runtime::spawn(overlay::run_with_levels(
         receiver,
+        levels,
         Surface {
             app: app.clone(),
             window,
@@ -153,6 +160,18 @@ struct Surface<R: Runtime> {
 }
 
 impl<R: Runtime> OverlaySurface for Surface<R> {
+    /// The meter's level. Not logged: 20 a second, and a level stays out
+    /// of the logs at info level (privacy rule).
+    fn level(&mut self, dbfs: f32) {
+        if let Err(error) = self.app.emit_to(
+            EventTarget::webview_window(LABEL),
+            LEVEL_EVENT,
+            LevelPayload { dbfs },
+        ) {
+            tracing::debug!(%error, "could not update the overlay's meter");
+        }
+    }
+
     fn show(&mut self, view: &OverlayView) {
         // The page first, so the window never shows the previous state.
         self.relay.send(view, |view| send(&self.app, view));
@@ -173,16 +192,27 @@ impl<R: Runtime> OverlaySurface for Surface<R> {
     }
 }
 
-/// [`EVENT`]'s payload: `OverlayView` in `src/overlay/view.ts`.
+/// [`LEVEL_EVENT`]'s payload.
+#[derive(Debug, Clone, Copy, Serialize)]
+struct LevelPayload {
+    dbfs: f32,
+}
+
+/// [`EVENT`]'s payload: `OverlayView` in `src/overlay/view.ts`. An error
+/// carries only its user-facing message, no code (U4 criterion 6).
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "state", rename_all = "lowercase")]
+#[serde(tag = "state", rename_all = "snake_case")]
 enum Payload<'a> {
     Hidden,
     Recording,
+    NoSound {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        device: Option<&'a str>,
+    },
     Transcribing,
+    Pasted,
     Error {
         message: &'a str,
-        code: &'static str,
     },
 }
 
@@ -191,11 +221,12 @@ impl<'a> From<&'a OverlayView> for Payload<'a> {
         match view {
             OverlayView::Hidden => Self::Hidden,
             OverlayView::Recording => Self::Recording,
-            OverlayView::Transcribing => Self::Transcribing,
-            OverlayView::Error { message, code } => Self::Error {
-                message,
-                code: code.as_str(),
+            OverlayView::NoSound { device } => Self::NoSound {
+                device: device.as_deref(),
             },
+            OverlayView::Transcribing => Self::Transcribing,
+            OverlayView::Pasted => Self::Pasted,
+            OverlayView::Error { message, .. } => Self::Error { message },
         }
     }
 }
@@ -206,7 +237,9 @@ impl Payload<'_> {
         match self {
             Self::Hidden => "hidden",
             Self::Recording => "recording",
+            Self::NoSound { .. } => "no_sound",
             Self::Transcribing => "transcribing",
+            Self::Pasted => "pasted",
             Self::Error { .. } => "error",
         }
     }
@@ -304,9 +337,21 @@ mod tests {
             (OverlayView::Hidden, r#"{"state":"hidden"}"#),
             (OverlayView::Recording, r#"{"state":"recording"}"#),
             (OverlayView::Transcribing, r#"{"state":"transcribing"}"#),
+            (OverlayView::Pasted, r#"{"state":"pasted"}"#),
+            (
+                OverlayView::NoSound { device: None },
+                r#"{"state":"no_sound"}"#,
+            ),
+            (
+                OverlayView::NoSound {
+                    device: Some("MacBook Pro Microphone".into()),
+                },
+                r#"{"state":"no_sound","device":"MacBook Pro Microphone"}"#,
+            ),
+            // U4 criterion 6: the message only, no code.
             (
                 error,
-                r#"{"state":"error","message":"No speech was recognised.","code":"no_speech"}"#,
+                r#"{"state":"error","message":"No speech was recognised."}"#,
             ),
         ];
         for (view, json) in cases {
@@ -315,5 +360,15 @@ mod tests {
             // The log names the state the page gets.
             assert!(json.starts_with(&format!(r#"{{"state":"{}""#, payload.name())));
         }
+    }
+
+    /// The level's JSON (`parseLevel` in `src/overlay/view.ts`).
+    #[test]
+    fn the_level_payload_matches_the_page() {
+        assert_eq!(LEVEL_EVENT, "overlay-level");
+        assert_eq!(
+            serde_json::to_string(&LevelPayload { dbfs: -32.5 }).unwrap(),
+            r#"{"dbfs":-32.5}"#
+        );
     }
 }
