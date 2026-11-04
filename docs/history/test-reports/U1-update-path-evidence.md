@@ -79,3 +79,13 @@ BTM after the DMG-style move:
     Bundle Identifier: com.dictationapp.desktop
 login item name in Login Items:                  Name: dictation-app
 ```
+
+## Round 3: control and login item
+
+Control `e2e_update_keychain_control` (same pre-rename commit, product dictation-app, 0.1.0 to 0.1.1, same certificate): the updated build could not read the key saved by the old build and SecurityAgent showed the prompt (screenshot 7). Evidence:
+
+```
+CONTROL RESULT: the same-name update could not read the key: 2026-11-04T10:32:06.747333Z  WARN dictation_app_lib::engine: could not read the API key from the keychain error=keychain error: no answer from the keychain after 15 s (locked, or waiting for access to be allowed)
+2026-11-04T10:32:06.747684Z  INFO dictation_app_lib::engine: engine settings provider=groq model=whisper-large-v3-turbo language=None has_key=false
+SecurityAgent running: 1
+```
