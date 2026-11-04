@@ -148,14 +148,14 @@ fn read_settings<S: SecretStore>(
 /// What a save did besides writing the file: the parts that didn't simply
 /// take effect.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Saved {
+pub(crate) struct Saved {
     /// What happened to the hotkey.
     hotkey: HotkeyChange,
 }
 
 impl Saved {
     /// What to tell the user instead of a plain "saved", if anything.
-    fn problem(&self) -> Option<String> {
+    pub(crate) fn problem(&self) -> Option<String> {
         let problems: Vec<String> = self.hotkey.problem().into_iter().collect();
         (!problems.is_empty()).then(|| problems.join(" "))
     }
@@ -163,7 +163,7 @@ impl Saved {
 
 /// Why a save failed: its cause, and what couldn't be put back afterwards.
 #[derive(Debug)]
-struct SaveFailed {
+pub(crate) struct SaveFailed {
     /// Why the settings weren't saved.
     cause: ConfigError,
     /// The hotkey switched for the save that couldn't be switched back.
@@ -316,10 +316,26 @@ fn write_hotkey<S: SecretStore + 'static>(
     control: &HotkeyControl,
     hotkey: &str,
 ) -> Result<(Option<usage::SettingsChange>, Saved), SaveFailed> {
+    write_change(config, live, control, |settings| {
+        hotkey.clone_into(&mut settings.hotkey);
+    })
+}
+
+/// Changes one preference (U6: every control in Settings saves on its own):
+/// `change` is applied to what is stored now, under [`settings_write`], so
+/// it can never put back another control's older value. Validated, saved
+/// and followed by the engine as a Save is. Fails if the stored settings
+/// can't be read.
+pub(crate) fn write_change<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    live: &LiveEngine,
+    control: &HotkeyControl,
+    change: impl FnOnce(&mut Settings),
+) -> Result<(Option<usage::SettingsChange>, Saved), SaveFailed> {
     let _writing = settings_write();
     let before = config.settings()?;
     let mut settings = before.clone();
-    hotkey.clone_into(&mut settings.hotkey);
+    change(&mut settings);
     save_locked(config, live, control, settings, Some(before))
 }
 
@@ -836,6 +852,17 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::save_report,
         crate::diagnostics::open_issue,
         crate::diagnostics::take_troubleshoot_request,
+        crate::preferences::set_language,
+        crate::preferences::use_cloud_engine,
+        crate::preferences::use_local_model,
+        crate::preferences::get_engine_status,
+        crate::preferences::delete_api_key,
+        crate::preferences::start_microphone_test,
+        crate::preferences::read_microphone_test,
+        crate::preferences::stop_microphone_test,
+        crate::preferences::open_link,
+        crate::preferences::get_app_info,
+        crate::preferences::check_for_updates,
         crate::overlay::get_overlay_level,
     ])
 }
@@ -938,6 +965,17 @@ mod tests {
             "saveReport",
             "openIssue",
             "takeTroubleshootRequest",
+            "setLanguage",
+            "useCloudEngine",
+            "useLocalModel",
+            "getEngineStatus",
+            "deleteApiKey",
+            "startMicrophoneTest",
+            "readMicrophoneTest",
+            "stopMicrophoneTest",
+            "openLink",
+            "getAppInfo",
+            "checkForUpdates",
         ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
@@ -946,7 +984,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 24,
+            commands, 35,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -2565,6 +2603,15 @@ mod capability_tests {
         app.manage(crate::usage::Usage::disabled());
         app.manage(crate::diagnostics::Diagnostics::default());
         app.manage(crate::overlay::OverlayLevel::default());
+        // U6: a microphone that never opens, and no update check.
+        app.manage(crate::preferences::AppMicTest(
+            dictation_pipeline::mic_test::MicTest::new(Box::new(|| {
+                Box::new(dictation_platform::fakes::FileAudioSource::new(
+                    "/nonexistent/u6-mic-test.wav",
+                ))
+            })),
+        ));
+        app.manage(crate::preferences::UpdateCheck(std::sync::Arc::new(|| {})));
         let windows = labels
             .iter()
             .map(|label| {
@@ -2697,6 +2744,8 @@ mod capability_tests {
             "permission": "camera",
             "step": "done",
             "id": 0,
+            "language": 0,
+            "link": 0,
         })
     }
 
@@ -2740,6 +2789,17 @@ mod capability_tests {
                 "run_checks" | "test_connection" | "build_report" | "take_troubleshoot_request" => {
                     invoke(main, command, args(command)).map(|_| ())
                 }
+                // U6: no keychain, network or OS: fakes and memory only.
+                "get_engine_status"
+                | "read_microphone_test"
+                | "stop_microphone_test"
+                | "get_app_info"
+                | "check_for_updates" => invoke(main, command, args(command)).map(|_| ()),
+                // U6: the fake microphone refuses; the command ran.
+                "start_microphone_test" => match invoke(main, command, args(command)) {
+                    Err(error) if !error.to_string().contains("not allowed") => Ok(()),
+                    other => other.map(|_| ()),
+                },
                 // No keychain, network or OS prompt: the onboarding ones
                 // run on fakes (granted permissions, no shell).
                 "get_settings" | "save_settings" | "get_onboarding" | "finish_onboarding"
@@ -2760,7 +2820,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 24);
+        assert_eq!(COMMAND_NAMES.len(), 35);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

@@ -133,6 +133,47 @@ export const commands = {
 	 */
 	takeTroubleshootRequest: () => typedError<boolean, string>(__TAURI_INVOKE("take_troubleshoot_request")),
 	/**
+	 *  Sets the language and nothing else (`None` or empty: detect it). The
+	 *  engine follows at once.
+	 */
+	setLanguage: (language: string | null) => typedError<null, string>(__TAURI_INVOKE("set_language", { language })),
+	/**
+	 *  Dictates with `provider` and the user's own key from now on. Switching
+	 *  provider also switches to its default model.
+	 */
+	useCloudEngine: (provider: Provider) => typedError<null, string>(__TAURI_INVOKE("use_cloud_engine", { provider })),
+	/**
+	 *  Dictates with on-device model `id` from now on, once it has loaded: the
+	 *  model is loaded first ([`LiveEngine::preload_local`]) and the settings
+	 *  choose it only if that worked, so until then the engine in use stays in
+	 *  use (from another on-device model, it is reloaded if the new one fails).
+	 *  Takes seconds; Settings shows "Loading…" meanwhile.
+	 */
+	useLocalModel: (id: string) => typedError<null, string>(__TAURI_INVOKE("use_local_model", { id })),
+	/**  The engine in use: loading, ready, or failed and why. Never blocks. */
+	getEngineStatus: () => typedError<EngineStatus_Serialize, string>(__TAURI_INVOKE("get_engine_status")),
+	/**
+	 *  Deletes `provider`'s API key from the keychain (Remove key). Bounded
+	 *  like saving one.
+	 */
+	deleteApiKey: (provider: Provider) => typedError<null, string>(__TAURI_INVOKE("delete_api_key", { provider })),
+	/**
+	 *  Starts recording from the microphone for a few seconds, only to show
+	 *  its level ([`read_microphone_test`]). Ends by itself after
+	 *  [`mic_test::MAX_TEST`].
+	 */
+	startMicrophoneTest: () => typedError<null, string>(__TAURI_INVOKE("start_microphone_test")),
+	/**  The test's level since the last call, and the device. Never blocks. */
+	readMicrophoneTest: () => typedError<MicReading_Serialize, string>(__TAURI_INVOKE("read_microphone_test")),
+	/**  Ends the microphone test. */
+	stopMicrophoneTest: () => typedError<null, string>(__TAURI_INVOKE("stop_microphone_test")),
+	/**  Opens `link` in the browser. */
+	openLink: (link: Link) => typedError<null, string>(__TAURI_INVOKE("open_link", { link })),
+	/**  The version, and when updates were last checked. */
+	getAppInfo: () => typedError<AppInfo_Serialize, string>(__TAURI_INVOKE("get_app_info")),
+	/**  Checks for updates as the tray's item does: a dialog says what it found. */
+	checkForUpdates: () => typedError<null, string>(__TAURI_INVOKE("check_for_updates")),
+	/**
 	 *  The newest input level, in dBFS, for the overlay's meter; silence when
 	 *  nothing records. Only the overlay window may call it
 	 *  (`capabilities/overlay.json`), and it returns a number only. Never
@@ -142,6 +183,31 @@ export const commands = {
 };
 
 /* Types */
+/**  What About and General show. */
+export type AppInfo = AppInfo_Serialize | AppInfo_Deserialize;
+
+/**  What About and General show. */
+export type AppInfo_Deserialize = {
+	/**  This build's version. */
+	version: string,
+	/**
+	 *  When this run of the app last heard from the update server, in
+	 *  milliseconds since 1970; `None` if it hasn't yet.
+	 */
+	last_update_check_ms?: number | null,
+};
+
+/**  What About and General show. */
+export type AppInfo_Serialize = {
+	/**  This build's version. */
+	version: string,
+	/**
+	 *  When this run of the app last heard from the update server, in
+	 *  milliseconds since 1970; `None` if it hasn't yet.
+	 */
+	last_update_check_ms: number | null,
+};
+
 /**  A permission the onboarding steps ask for. */
 export type AppPermission = 
 /**  The microphone. */
@@ -227,6 +293,37 @@ export type ConnectionResult_Serialize = {
 	message: string,
 };
 
+/**  Where the engine in use is. */
+export type EngineState = 
+/**  The on-device model is loading. */
+"loading" | 
+/**
+ *  It can dictate (for a cloud engine: it was built; the key is
+ *  checked when used).
+ */
+"ready" | 
+/**  It can't dictate; `message` says why. */
+"failed";
+
+/**  The engine in use, for the Speech section's chips. */
+export type EngineStatus = EngineStatus_Serialize | EngineStatus_Deserialize;
+
+/**  The engine in use, for the Speech section's chips. */
+export type EngineStatus_Deserialize = {
+	/**  Where it is. */
+	state: EngineState,
+	/**  Why it can't dictate, in plain words, when it can't. */
+	message?: string | null,
+};
+
+/**  The engine in use, for the Speech section's chips. */
+export type EngineStatus_Serialize = {
+	/**  Where it is. */
+	state: EngineState,
+	/**  Why it can't dictate, in plain words, when it can't. */
+	message: string | null,
+};
+
 /**
  *  A stable name for a way dictation can fail. The `snake_case` text
  *  ([`ErrorCode::as_str`]) is what the user sees and quotes in a report; do
@@ -304,6 +401,24 @@ export type KeyTestKind =
 /**  The saved key couldn't be read from the keychain. */
 "keychain";
 
+/**
+ *  A page Settings links to. A closed list: the window can't open any
+ *  other URL.
+ */
+export type Link = 
+/**  Groq's page for creating an API key. */
+"groq_keys" | 
+/**  `OpenAI`'s page for creating an API key. */
+"openai_keys" | 
+/**  The privacy notice: what the app sends. */
+"privacy" | 
+/**  The source code. */
+"repository" | 
+/**  The MIT licence. */
+"licence" | 
+/**  The credits for adapted code. */
+"notice";
+
 /**  One catalogue model, for the picker. */
 export type LocalModelInfo = LocalModelInfo_Serialize | LocalModelInfo_Deserialize;
 
@@ -349,6 +464,31 @@ export type LocalModelInfo_Serialize = {
 	error: string | null,
 	/**  Whether it is the catalogue's default. */
 	default: boolean,
+};
+
+/**  The microphone test's level and device, as Settings polls them. */
+export type MicReading = MicReading_Serialize | MicReading_Deserialize;
+
+/**  The microphone test's level and device, as Settings polls them. */
+export type MicReading_Deserialize = {
+	/**
+	 *  The level since the last reading, in dBFS; `None` once the test
+	 *  has ended.
+	 */
+	level?: number | null,
+	/**  The input device's name, if known. */
+	device?: string | null,
+};
+
+/**  The microphone test's level and device, as Settings polls them. */
+export type MicReading_Serialize = {
+	/**
+	 *  The level since the last reading, in dBFS; `None` once the test
+	 *  has ended.
+	 */
+	level: number | null,
+	/**  The input device's name, if known. */
+	device: string | null,
 };
 
 /**  Where a model is, as Settings shows it. */

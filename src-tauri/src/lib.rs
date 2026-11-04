@@ -57,6 +57,7 @@ mod logging;
 pub mod models;
 pub mod onboarding;
 mod overlay;
+pub mod preferences;
 mod updater;
 pub mod usage;
 mod window;
@@ -402,6 +403,14 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         }
     };
     app.manage(models::ModelDownloads::default());
+    let handle = app.handle().clone();
+    app.manage(preferences::UpdateCheck(Arc::new(move || {
+        updater::check_from_tray(&handle);
+    })));
+    // Settings' "Test microphone" (U6) records from a microphone of its own.
+    app.manage(preferences::AppMicTest(
+        dictation_pipeline::mic_test::MicTest::new(Box::new(|| Box::new(SystemMicrophone::new()))),
+    ));
     tracing::info!(
         transcriber = choice.name(),
         engine = transcribers.name(),
