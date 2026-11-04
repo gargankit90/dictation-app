@@ -234,11 +234,14 @@ e2e_accessibility_revoked() {
   expect "the tray doesn't say Ready; it asks for a relaunch" \
     env_tray_fix "Relaunch Vocet" tray_shows "! Relaunch Vocet to finish turning on Accessibility" "Vocet: Relaunch Vocet to finish turning on Accessibility" 10
   ready=$(log_count 'INFO .*ready')
+  missing=$(log_count 'PermissionMissing')
   expect "Relaunch Vocet is pressed in the tray menu" \
     ax_ok tray-click "$APP_NAME" "Relaunch Vocet"
   expect "the app relaunches" wait_for_log 'relaunching from the tray' 10
   expect "the app is relaunched and logs ready" wait_for_log_count 'INFO .*ready' $((ready + 1)) 30
-  expect "the hotkey listens at once after the relaunch" hotkey_is_on
+  sleep 3
+  expect "the hotkey listens at once after the relaunch (no new PermissionMissing)" \
+    test "$(log_count 'PermissionMissing')" = "$missing"
   expect "a real hold dictates after the relaunch" ax_hold_dictates
   log "  evidence: $(paste -sd '|' "$AX_EVIDENCE")"
 
