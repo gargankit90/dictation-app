@@ -8,7 +8,7 @@
 #   scripts/updater-test.sh serve            # serve them (Ctrl-C to stop)
 #
 # Then (docs/releasing.md, "Try the updater"): install
-# target/updater-test/old/dictation-app.app on a Mac or in the VM, open it,
+# target/updater-test/old/Vocet.app on a Mac or in the VM, open it,
 # menu-bar icon > Check for updates… > Install and restart, and see 0.1.1 run
 # with its permissions kept.
 #
@@ -52,9 +52,9 @@ build_one() {
     npm run tauri build -- --debug --bundles app --config "$config"
   rm -rf "$outdir"
   mkdir -p "$outdir"
-  cp -R target/debug/bundle/macos/dictation-app.app "$outdir/"
-  cp target/debug/bundle/macos/dictation-app.app.tar.gz "$outdir/"
-  cp target/debug/bundle/macos/dictation-app.app.tar.gz.sig "$outdir/"
+  cp -R target/debug/bundle/macos/Vocet.app "$outdir/"
+  cp target/debug/bundle/macos/Vocet.app.tar.gz "$outdir/"
+  cp target/debug/bundle/macos/Vocet.app.tar.gz.sig "$outdir/"
 }
 
 case ${1:-} in
@@ -66,10 +66,10 @@ case ${1:-} in
     build_one "$OLD_VERSION" "$dir/old"
     build_one "$NEW_VERSION" "$dir/new"
     mkdir -p "$dir/serve"
-    cp "$dir/new/dictation-app.app.tar.gz" "$dir/serve/dictation-app_$NEW_VERSION.app.tar.gz"
+    cp "$dir/new/Vocet.app.tar.gz" "$dir/serve/Vocet_$NEW_VERSION.app.tar.gz"
     scripts/make-latest-json.sh "$NEW_VERSION" "A test update." \
-      "$dir/serve/dictation-app_$NEW_VERSION.app.tar.gz" "$dir/new/dictation-app.app.tar.gz.sig" \
-      "$base/dictation-app_$NEW_VERSION.app.tar.gz" >"$dir/serve/latest.json"
+      "$dir/serve/Vocet_$NEW_VERSION.app.tar.gz" "$dir/new/Vocet.app.tar.gz.sig" \
+      "$base/Vocet_$NEW_VERSION.app.tar.gz" >"$dir/serve/latest.json"
     echo "updater-test: built $OLD_VERSION ($dir/old) and $NEW_VERSION ($dir/new)"
     echo "updater-test: manifest: $dir/serve/latest.json"
     ;;

@@ -4,7 +4,7 @@
 //
 //   osascript -l JavaScript ax.js <command> <app> [args...]
 //
-// <app> is a process id or an app's name ("dictation-app", "Terminal"). It
+// <app> is a process id or an app's name ("Vocet", "Terminal"). It
 // calls the AX functions directly, not System Events, so the only grant it
 // needs is Accessibility for the process that runs it (Terminal in the VM);
 // an ssh session has none. Each command prints what it found or did and

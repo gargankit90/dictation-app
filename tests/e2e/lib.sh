@@ -6,7 +6,10 @@
 
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/dictation_vm_ed25519}"
 VM_USER=lume
-APP_NAME=dictation-app
+# The app is called Vocet (the .app and the process); its log files keep their
+# old prefix, so settings, the saved key and logs carry over an update (U1).
+APP_NAME=Vocet
+LOG_PREFIX=dictation-app
 # Where the app lives in the VM, and where it logs (Tauri's app_log_dir).
 VM_APP="/Users/$VM_USER/Applications/$APP_NAME.app"
 VM_LOG_DIR="/Users/$VM_USER/Library/Logs/com.dictationapp.desktop"
@@ -198,7 +201,7 @@ app_count() {
 # The app's log so far (all rotated files, oldest first).
 app_log() {
   # sh, not the login shell (zsh), so a glob with no log yet isn't an error.
-  vm "sh -c 'cat \"\$0\"/\"\$1\".log* 2>/dev/null' $(q "$VM_LOG_DIR" "$APP_NAME")" || true
+  vm "sh -c 'cat \"\$0\"/\"\$1\".log* 2>/dev/null' $(q "$VM_LOG_DIR" "$LOG_PREFIX")" || true
 }
 
 # Waits up to `timeout` seconds for an extended regex to appear in the log.

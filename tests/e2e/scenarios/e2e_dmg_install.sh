@@ -75,9 +75,9 @@ e2e_dmg_install() {
   # The guide's command, for /Applications; the VM's user installs into
   # ~/Applications (see above), so only the path is swapped.
   local doc_command vm_command
-  doc_command=$(grep -m 1 '^xattr -dr com.apple.quarantine /Applications/dictation-app.app$' "$TESTERS_DOC" || true)
+  doc_command=$(grep -m 1 '^xattr -dr com.apple.quarantine /Applications/Vocet.app$' "$TESTERS_DOC" || true)
   expect "docs/TESTERS.md has the quarantine command" test -n "$doc_command"
-  vm_command=${doc_command//\/Applications\/dictation-app.app/$(q "$VM_APP")}
+  vm_command=${doc_command//\/Applications\/Vocet.app/$(q "$VM_APP")}
   log "  running the guide's command: $vm_command"
   [ -z "$vm_command" ] || vm "$vm_command"
   expect "the guide's xattr command clears the quarantine" e2e_not_quarantined "$VM_APP"

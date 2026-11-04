@@ -61,7 +61,7 @@ upd_build() {
     return 1
   fi
   rm -rf "$APP_PATH" && ditto "$saved" "$APP_PATH"
-  local serve=$UPD_DIR/serve bundle=$UPD_DIR/serve/dictation-app_$UPD_NEW.app.tar.gz
+  local serve=$UPD_DIR/serve bundle=$UPD_DIR/serve/Vocet_$UPD_NEW.app.tar.gz
   mv "$serve/latest.json" "$serve/good.json"
   # The same version, so the app is up to date.
   jq --arg v "$UPD_OLD" '.version = $v' "$serve/good.json" >"$serve/uptodate.json"
@@ -162,8 +162,8 @@ upd_dialog_count() {
 upd_no_dialog() {
   local secs=$1 count
   sleep "$secs"
-  count=$(upd_dialog_count "dictation-app")
-  log "  dialogs naming dictation-app: $count"
+  count=$(upd_dialog_count "Vocet")
+  log "  dialogs naming Vocet: $count"
   [ "$count" = 0 ]
 }
 
@@ -171,12 +171,12 @@ upd_no_dialog() {
 # UserNotificationCenter's). True once none is left.
 upd_dismiss_dialogs() {
   local text said
-  for text in "dictation-app" "update"; do
+  for text in "Vocet" "update"; do
     [ "$(upd_dialog_count "$text")" != 0 ] || continue
     said=$(ax alert-dismiss "$UPD_DIALOG_APP" "$text" Later OK 2>&1) || true
     log "  $UPD_DIALOG_APP: $said"
   done
-  [ "$(upd_dialog_count "dictation-app")" = 0 ] && [ "$(upd_dialog_count "update")" = 0 ]
+  [ "$(upd_dialog_count "Vocet")" = 0 ] && [ "$(upd_dialog_count "update")" = 0 ]
 }
 
 upd_tray_check() {
@@ -233,7 +233,7 @@ e2e_update_keeps_permissions() {
 
   # The server's files in the VM: the bundle and the three manifests.
   vm "rm -rf $(q "$VM_UPD_DIR") && mkdir -p $(q "$VM_UPD_DIR/www" "$VM_UPD_DIR/manifests")"
-  tar -C "$UPD_DIR/serve" -cf - "dictation-app_$UPD_NEW.app.tar.gz" |
+  tar -C "$UPD_DIR/serve" -cf - "Vocet_$UPD_NEW.app.tar.gz" |
     VM_CMD_TIMEOUT=300 vm "tar -C $(q "$VM_UPD_DIR/www") -xf -"
   tar -C "$UPD_DIR/serve" -cf - good.json badsig.json uptodate.json |
     vm "tar -C $(q "$VM_UPD_DIR/manifests") -xf -"
@@ -264,7 +264,7 @@ e2e_update_keeps_permissions() {
   expect "it offers it" upd_dialog "$UPD_NEW is available; you have $UPD_OLD" "Install and restart"
   expect "the install is refused for its signature" upd_dialog "$UPD_SIGNATURE_TEXT" OK
   expect "the bundle was downloaded (and then refused)" \
-    test "$(upd_server_requests "/dictation-app_$UPD_NEW.app.tar.gz")" -ge 1
+    test "$(upd_server_requests "/Vocet_$UPD_NEW.app.tar.gz")" -ge 1
   expect "the app keeps running, the same process" test "$(app_pid)" = "$pid"
   expect "0.1.0 is still installed" test "$(upd_installed_version)" = "$UPD_OLD"
   expect "the log says the update failed" wait_for_log 'WARN .*update failed'

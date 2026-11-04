@@ -17,7 +17,7 @@
 # is removed) so no later scenario starts with this hotkey.
 
 SETTINGS_FILE_VM="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/settings.json"
-# Text in the settings window's title ("dictation-app Settings").
+# Text in the settings window's title ("Vocet Settings").
 SETTINGS_WINDOW=Settings
 
 settings_reset() {

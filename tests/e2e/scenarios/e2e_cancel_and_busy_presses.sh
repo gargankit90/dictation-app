@@ -32,7 +32,7 @@ hold_escape_release() {
     release() { if [ \$down = 1 ]; then $key up; fi; }
     trap release EXIT; trap 'exit 1' INT TERM HUP
     recordings() {
-      sh -c 'cat \"\$0\"/\"\$1\".log* 2>/dev/null' $(q "$VM_LOG_DIR" "$APP_NAME") |
+      sh -c 'cat \"\$0\"/\"\$1\".log* 2>/dev/null' $(q "$VM_LOG_DIR" "$LOG_PREFIX") |
         grep -c 'state changed phase=Recording'
     }
     before=\$(recordings)
