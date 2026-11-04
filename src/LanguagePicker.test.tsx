@@ -59,6 +59,13 @@ describe("LanguagePicker", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
+  it("matches the start of a word, so 'hin' does not find Chinese", () => {
+    render(<Harness supported={["zh", "hi"]} />);
+    fireEvent.focus(box());
+    fireEvent.change(box(), { target: { value: "hin" } });
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Hindi (हिन्दी)"]);
+  });
+
   it("also finds a language by its own name", () => {
     render(<Harness />);
     fireEvent.focus(box());

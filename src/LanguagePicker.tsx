@@ -61,7 +61,7 @@ export function LanguagePicker({
     return all.filter((option) => {
       if (q === "") return true;
       if (option.value === "") return AUTO_LABEL.toLowerCase().includes(q);
-      return languageMatches(option.value, q) || option.label.toLowerCase().includes(q);
+      return languageMatches(option.value, q);
     });
   }, [supported, unsupported, value, selectedLabel, query]);
 

@@ -145,13 +145,20 @@ export function englishName(code: string): string {
   return NAMES[code]?.[0] ?? languageLabel(code);
 }
 
-/** Whether `query` finds `code`: any part of either name, case-insensitive. */
+/**
+ * Whether `query` finds `code`: it starts a word of either name,
+ * case-insensitive ("hin" finds Hindi, not Chinese).
+ */
 export function languageMatches(code: string, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (q === "") return true;
-  const names = NAMES[code];
-  if (names === undefined) return languageLabel(code).toLowerCase().includes(q);
-  return names.some((name) => name.toLowerCase().includes(q));
+  const names = NAMES[code] ?? [languageLabel(code)];
+  return names.some((name) =>
+    name
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .some((word) => word.startsWith(q)),
+  );
 }
 
 /** `codes` sorted by English name. */
