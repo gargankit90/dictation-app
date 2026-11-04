@@ -44,7 +44,7 @@ MIC_ERROR="Microphone is off. Allow it in Privacy & Security, Microphone, then r
 # The tray menu's item while the microphone is denied (src-tauri).
 MIC_RELAUNCH="Relaunch Vocet"
 # The tray's status sentence for it (the code table's message).
-MIC_STATUS="Microphone is off for dictation-app."
+MIC_STATUS="Vocet needs the microphone to hear you."
 MIC_PROMPT_APP=UserNotificationCenter
 MIC_PROMPT_TEXT="would like to access the microphone"
 MIC_SETTINGS_URL='x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'

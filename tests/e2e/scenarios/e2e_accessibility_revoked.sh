@@ -44,7 +44,7 @@ AX_TYPE_KEYS="$VM_FIXTURES/type-keys.js"
 # DictationError::HotkeyFailed's text (crates/core) and the tray's title
 # for it (crates/app/src/tray.rs).
 # What the tray's status line and tooltip say (the code table's message).
-AX_HOTKEY_SHOWN="Accessibility is off for dictation-app."
+AX_HOTKEY_SHOWN="Vocet needs Accessibility to hear your key."
 # What the log says (DictationError's Display).
 AX_HOTKEY_ERROR="The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself."
 AX_EVIDENCE=""
