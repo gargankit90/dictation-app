@@ -24,11 +24,14 @@ fn command_line(dir: &Path) -> (&'static str, Vec<OsString>) {
 /// the owner's Keychain items.
 pub const NO_LAUNCH_VAR: &str = "DICTATION_NO_LAUNCH";
 
-/// Whether host side effects are off: in this crate's own tests, or when
+/// Whether host side effects are off: in this crate's own tests, in any
+/// build with feature `testing` (which only test targets of other crates
+/// enable, never the shipped app or `tauri dev`, so every crate's tests are
+/// covered with plain `cargo test`, nextest or the gate), or when
 /// [`NO_LAUNCH_VAR`] is set.
 #[must_use]
-pub(crate) fn launching_disabled() -> bool {
-    cfg!(test) || std::env::var_os(NO_LAUNCH_VAR).is_some()
+pub fn launching_disabled() -> bool {
+    cfg!(test) || cfg!(feature = "testing") || std::env::var_os(NO_LAUNCH_VAR).is_some()
 }
 
 fn launch_allowed() -> io::Result<()> {

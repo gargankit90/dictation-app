@@ -2532,16 +2532,18 @@ mod capability_tests {
             serde_json::json!({ "settings": local }),
         )
         .unwrap();
+        // F1: a report on screen, so `open_issue` has something to open.
+        invoke(main, "build_report", args("build_report")).unwrap();
         for command in COMMAND_NAMES {
             let reached = match *command {
-                // E1: these have no arguments to be unusable. Saving and
-                // opening need a report on screen and a window, which the
-                // fixture has none of; an error that isn't the ACL's means
-                // the command ran.
-                "save_report" | "open_issue" => match invoke(main, command, args(command)) {
+                // E1: saving needs a window, which the fixture has none of;
+                // an error that isn't the ACL's means the command ran.
+                "save_report" => match invoke(main, command, args(command)) {
                     Err(error) if !error.to_string().contains("not allowed") => Ok(()),
                     other => other.map(|_| ()),
                 },
+                // F1: it must succeed, through the fake opener.
+                "open_issue" => invoke(main, command, args(command)).map(|_| ()),
                 "run_checks" | "test_connection" | "build_report" | "take_troubleshoot_request" => {
                     invoke(main, command, args(command)).map(|_| ())
                 }
@@ -2566,12 +2568,54 @@ mod capability_tests {
             );
         }
         assert_eq!(COMMAND_NAMES.len(), 21);
-        // F1: open_issue reached the fake, not a browser. (It may have found
-        // no report to open, in which case nothing was recorded.)
-        for url in fixture.opener.urls() {
-            assert!(url.starts_with("https://github.com/"), "{url}");
-        }
+        // F1: open_issue reached the fake, not a browser: exactly one call.
+        let urls = fixture.opener.urls();
+        assert_eq!(urls.len(), 1, "{urls:?}");
+        assert!(
+            urls[0].starts_with("https://github.com/gargankit90/dictation-app/issues/new?"),
+            "{}",
+            urls[0]
+        );
         assert!(fixture.opener.folders().is_empty());
+    }
+
+    /// F1: a failing launcher is reported, not swallowed.
+    #[test]
+    fn open_issue_reports_a_launcher_that_fails() {
+        let fixture = app_with_windows(&[MAIN]);
+        let main = &fixture.windows[0];
+        let local = dictation_core::settings::Settings {
+            transcription: dictation_core::settings::Transcription::Local,
+            ..dictation_core::settings::Settings::default()
+        };
+        invoke(
+            main,
+            "save_settings",
+            serde_json::json!({ "settings": local }),
+        )
+        .unwrap();
+        invoke(main, "build_report", args("build_report")).unwrap();
+        fixture.opener.fail_from_now_on();
+        let error = invoke(main, "open_issue", args("open_issue")).unwrap_err();
+        assert!(
+            error.to_string().contains("Couldn't open the browser"),
+            "{error}"
+        );
+        assert_eq!(fixture.opener.urls().len(), 1);
+    }
+
+    /// F1: the host-side-effect guard is active in this crate's tests too
+    /// (not only the platform crate's), without the gate's environment
+    /// variable: the real launcher and the real keychain refuse.
+    #[test]
+    fn the_real_launcher_and_keychain_refuse_in_this_crates_tests() {
+        use dictation_ports::{Opener as _, SecretStore as _};
+        assert!(dictation_platform::reveal::launching_disabled());
+        let opener = dictation_platform::reveal::SystemOpener;
+        assert!(opener.open_url("https://example.com").is_err());
+        assert!(opener.reveal_folder(std::path::Path::new("/tmp")).is_err());
+        let store = dictation_platform::secrets::KeychainSecretStore::new();
+        assert!(store.get("groq-api-key").is_err());
     }
 
     #[test]
