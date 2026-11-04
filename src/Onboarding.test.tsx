@@ -541,7 +541,7 @@ describe("the window", () => {
     render(<App />);
     await heading("Try it");
     fireEvent.click(button("Done"));
-    expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeTruthy();
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
   });
 
   it("reopened from the tray, resumes at the step the user went back to", async () => {
@@ -556,11 +556,11 @@ describe("the window", () => {
     // Settings… in the tray, then Set up dictation… again.
     backend.view = "settings";
     windowShown();
-    expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeTruthy();
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
     backend.view = "onboarding";
     windowShown();
     await heading("Allow Accessibility");
-    expect(screen.queryByRole("heading", { level: 1, name: "Settings" })).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "Settings sections" })).toBeNull();
   });
 
   it("falls back to settings if the app can't say", async () => {
@@ -571,6 +571,6 @@ describe("the window", () => {
       return false;
     });
     render(<App />);
-    expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeTruthy();
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
   });
 });

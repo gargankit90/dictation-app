@@ -30,12 +30,14 @@ describe("App", () => {
           share_usage_events: true,
         };
       }
+      if (command === "list_local_models") return [];
+      if (command === "get_engine_status") return { state: "ready", message: null };
       return false; // has_api_key
     });
     render(<App />);
 
-    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Settings");
-    expect(await screen.findByLabelText("Or type it")).toBeTruthy();
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
+    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("General");
   });
 
   it("opens Troubleshoot when the tray asked for it, and from the Settings button", async () => {
@@ -68,14 +70,20 @@ describe("App", () => {
           share_usage_events: true,
         };
       }
+      if (command === "list_local_models") return [];
+      if (command === "get_engine_status") return { state: "ready", message: null };
       return false;
     });
     render(<App />);
 
     expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Troubleshoot");
     fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
-    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Settings");
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Help" }));
     fireEvent.click(await screen.findByRole("button", { name: "Troubleshoot…" }));
     expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Troubleshoot");
+    // ⌘, goes back to Settings (U6).
+    fireEvent.keyDown(window, { key: ",", metaKey: true });
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
   });
 });

@@ -16,6 +16,20 @@ export function App() {
   // Settings, or Troubleshoot (E1), which the tray can ask for.
   const [page, setPage] = useState<"settings" | "troubleshoot">("settings");
 
+  // ⌘, opens Settings (U6), as in every Mac app, from Troubleshoot too.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey && event.key === ",") {
+        event.preventDefault();
+        setPage("settings");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
   useEffect(() => {
     const state = { cancelled: false };
     const ask = async () => {
@@ -77,6 +91,9 @@ export function App() {
   return (
     <Settings
       onTroubleshoot={() => {
+        setPage("troubleshoot");
+      }}
+      onReport={() => {
         setPage("troubleshoot");
       }}
     />

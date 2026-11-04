@@ -274,21 +274,6 @@ fieldset.choice {
   margin: 0 0 var(--vc-space-4);
 }
 
-.local-models ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.local-models li {
-  margin-bottom: var(--vc-space-3);
-}
-
-.local-models progress {
-  width: 100%;
-  accent-color: var(--vc-accent);
-}
-
 .checks {
   margin: var(--vc-space-3) 0;
   padding: 0;
@@ -401,4 +386,303 @@ button.link {
   font: inherit;
   text-decoration: underline;
   cursor: pointer;
+}
+
+/* U6: the settings window, a sidebar of sections and a scrolling pane of
+   grouped rows (design-system "Settings rows"). */
+.settings-window {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.settings-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--vc-space-3) var(--vc-space-2);
+  overflow-y: auto;
+  border-right: 1px solid var(--vc-line);
+  background: var(--vc-bg-grouped);
+}
+
+.settings-sidebar button {
+  min-height: var(--vc-control-h);
+  padding: 0 var(--vc-space-3);
+  border: 0;
+  border-radius: var(--vc-radius-sm);
+  background: transparent;
+  color: var(--vc-ink-2);
+  text-align: left;
+}
+
+.settings-sidebar button:hover:not(.selected) {
+  background: var(--vc-line);
+}
+
+.settings-sidebar button.selected {
+  background: var(--vc-accent);
+  color: var(--vc-accent-fg);
+}
+
+.settings-pane {
+  min-width: 0;
+  padding: var(--vc-space-5) var(--vc-space-6);
+  overflow-y: auto;
+}
+
+.settings-pane:focus-visible {
+  outline-offset: -3px;
+}
+
+.settings-pane h1 {
+  margin: 0 0 var(--vc-space-4);
+  font-family: var(--vc-font-display);
+  font-size: var(--vc-text-xl);
+}
+
+.settings-group {
+  margin-bottom: var(--vc-space-5);
+}
+
+.group-title {
+  margin: 0 var(--vc-space-1) var(--vc-space-2);
+  color: var(--vc-muted);
+  font-size: var(--vc-text-sm);
+  font-weight: 600;
+}
+
+.group-rows {
+  border-radius: var(--vc-radius-md);
+  background: var(--vc-bg-grouped);
+}
+
+.settings-row {
+  padding: var(--vc-space-3) var(--vc-space-4);
+  border-top: 1px solid var(--vc-line);
+}
+
+.settings-row:first-child {
+  border-top: 0;
+}
+
+.row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vc-space-3);
+}
+
+.row-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row-label {
+  font-weight: 600;
+}
+
+.row-label label {
+  font-weight: inherit;
+}
+
+.row-caption {
+  color: var(--vc-muted);
+  font-size: var(--vc-text-sm);
+}
+
+.row-control {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--vc-space-2);
+}
+
+.row-note,
+.saved-note {
+  margin: 0;
+  color: var(--vc-muted);
+  font-size: var(--vc-text-sm);
+}
+
+.saved-note {
+  display: inline-block;
+  margin-top: var(--vc-space-1);
+  color: var(--vc-ready);
+}
+
+.row-error {
+  margin: var(--vc-space-2) 0 0;
+}
+
+.settings-row progress {
+  width: 100%;
+  margin-top: var(--vc-space-2);
+  accent-color: var(--vc-accent);
+}
+
+.chip.plain {
+  border: 1px solid var(--vc-line-strong);
+  color: var(--vc-ink-2);
+}
+
+/* The switch: a checkbox drawn as a track and a knob. */
+input.switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  border-radius: var(--vc-radius-pill);
+  background: var(--vc-line-strong);
+  cursor: pointer;
+  transition: background-color var(--vc-dur) var(--vc-ease);
+}
+
+input.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--vc-accent-fg);
+  box-shadow: var(--vc-shadow-card);
+  transition: transform var(--vc-dur) var(--vc-ease);
+}
+
+input.switch:checked {
+  background: var(--vc-accent);
+}
+
+input.switch:checked::after {
+  transform: translateX(16px);
+}
+
+/* The "…" menu on a model row. */
+.row-menu {
+  position: relative;
+}
+
+button.menu-button {
+  padding: 0 var(--vc-space-2);
+}
+
+.row-popover {
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + var(--vc-space-1));
+  right: 0;
+  padding: var(--vc-space-1);
+  border: 1px solid var(--vc-line);
+  border-radius: var(--vc-radius-sm);
+  background: var(--vc-bg);
+  box-shadow: var(--vc-shadow-pop);
+  white-space: nowrap;
+}
+
+/* The own-key panel, under its row. */
+.own-key-panel {
+  margin-top: var(--vc-space-3);
+  padding-top: var(--vc-space-3);
+  border-top: 1px solid var(--vc-line);
+}
+
+.panel-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vc-space-1);
+  margin-bottom: var(--vc-space-3);
+}
+
+.panel-row label {
+  font-weight: 600;
+}
+
+.panel-row input,
+.panel-row select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--vc-control-h);
+  padding: var(--vc-space-1) var(--vc-space-2);
+  border: 1px solid var(--vc-line-strong);
+  border-radius: var(--vc-radius-sm);
+  background: var(--vc-bg);
+  color: var(--vc-ink);
+  font: inherit;
+}
+
+.panel-row input[aria-invalid="true"] {
+  border-color: var(--vc-danger);
+}
+
+.key-steps {
+  margin: 0 0 var(--vc-space-3);
+  padding-left: var(--vc-space-5);
+  color: var(--vc-ink-2);
+}
+
+.row-details {
+  margin-top: var(--vc-space-2);
+}
+
+.row-details summary {
+  color: var(--vc-accent);
+  cursor: pointer;
+}
+
+/* Test microphone: U4's meter bars, in the window's colours. */
+.mic-test {
+  display: flex;
+  align-items: center;
+  gap: var(--vc-space-3);
+  margin-top: var(--vc-space-2);
+  color: var(--vc-ink-2);
+  font-size: var(--vc-text-sm);
+}
+
+.mic-meter {
+  display: inline-flex;
+  height: 18px;
+  align-items: center;
+  gap: 2px;
+}
+
+.mic-meter i {
+  width: 3px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--vc-accent);
+  transition: height var(--vc-dur-fast) var(--vc-ease);
+}
+
+.row-control .language-picker {
+  width: 240px;
+}
+
+.row-control .language-picker input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--vc-control-h);
+  padding: var(--vc-space-1) var(--vc-space-2);
+  border: 1px solid var(--vc-line-strong);
+  border-radius: var(--vc-radius-sm);
+  background: var(--vc-bg);
+  color: var(--vc-ink);
+  font: inherit;
+}
+
+.row-control .language-picker input[aria-invalid="true"] {
+  border-color: var(--vc-danger);
+}
+
+.row-control .hotkey-recorder .row {
+  margin-top: var(--vc-space-1);
 }
