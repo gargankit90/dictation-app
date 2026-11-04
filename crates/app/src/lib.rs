@@ -5,6 +5,7 @@
 pub mod config;
 pub mod debug_audio;
 pub mod hotkey_setting;
+pub mod last_dictation;
 pub mod launch;
 pub mod overlay;
 pub mod pipeline;
