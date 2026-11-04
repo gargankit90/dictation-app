@@ -1049,7 +1049,7 @@ describe("launch at login", () => {
     expect(backend.named("set_launch_at_login")[0]?.args.enabled).toBe(true);
     expect(backend.named("save_settings")).toHaveLength(0);
     // Saving the rest does not wait for the login item.
-    type("Language", "de");
+    pick("de");
     click("Save");
     await screen.findByText("Settings saved.");
     expect(screen.getByText(/Applying…/u)).toBeTruthy();
