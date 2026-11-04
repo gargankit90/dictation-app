@@ -37,13 +37,13 @@ pub enum LaunchProblem {
     /// The OS changed, but the setting couldn't be written to the settings
     /// file (S1 review, R2).
     #[error(
-        "Launch at login is {} now, but the setting couldn't be saved ({reason}). Check that dictation-app's settings folder can be written, then try again.",
+        "Launch at login is {} now, but Vocet couldn't save that setting. Try again, or see Troubleshoot.",
         if *enabled { "on" } else { "off" }
     )]
     NotStored {
         /// What the OS has now.
         enabled: bool,
-        /// Why the write failed.
+        /// Why the write failed: for the log, not shown to the user.
         reason: String,
     },
 }
@@ -741,11 +741,19 @@ mod tests {
         assert_eq!(fake.state(), Ok(LaunchAtLoginState::Enabled));
         let problem = outcome.problem.unwrap();
         let text = problem.to_string();
-        assert!(
-            text.contains("on now") && text.contains("disk full"),
-            "{text}"
+        assert_eq!(
+            text,
+            "Launch at login is on now, but Vocet couldn't save that setting. Try again, or see Troubleshoot."
         );
-        assert!(text.contains("try again"), "{text}");
+        assert!(!text.contains("disk full"), "the reason is for the log");
+        assert_eq!(
+            LaunchProblem::NotStored {
+                enabled: false,
+                reason: String::new()
+            }
+            .to_string(),
+            "Launch at login is off now, but Vocet couldn't save that setting. Try again, or see Troubleshoot."
+        );
         // And an OS refusal is not hidden by it.
         let refused = FakeLaunchAtLogin::new();
         refused.enabling_gives(LaunchAtLoginState::RequiresApproval);

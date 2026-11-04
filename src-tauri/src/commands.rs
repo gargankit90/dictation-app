@@ -1348,8 +1348,8 @@ mod tests {
             assert!(outcome.enabled);
             assert_eq!(fake.state(), Ok(LaunchAtLoginState::Enabled));
             let text = outcome.problem.unwrap().to_string();
-            assert!(text.contains("couldn't be saved"), "{text}");
-            assert!(text.contains("try again"), "{text}");
+            assert!(text.contains("Vocet couldn't save that setting"), "{text}");
+            assert!(text.contains("see Troubleshoot"), "{text}");
             let _ = std::fs::remove_file(&dir);
             let again = tauri::async_runtime::block_on(item.sync.request(false)).unwrap();
             assert!(again.problem.is_none(), "{again:?}");
