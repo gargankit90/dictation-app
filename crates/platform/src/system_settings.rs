@@ -31,6 +31,12 @@ pub fn open_privacy_settings(permission: Permission) -> io::Result<()> {
     if !cfg!(target_os = "macos") {
         return Ok(());
     }
+    if crate::reveal::launching_disabled() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "launching programs is disabled in tests (DICTATION_NO_LAUNCH)",
+        ));
+    }
     // Waits for `open` (it returns at once), so no zombie is left.
     let status = Command::new("/usr/bin/open")
         .arg(privacy_url(permission))

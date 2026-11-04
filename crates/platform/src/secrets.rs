@@ -17,6 +17,8 @@ pub const SERVICE: &str = "com.dictationapp.desktop";
 #[derive(Debug, Clone)]
 pub struct KeychainSecretStore {
     service: String,
+    /// Refuses every call without asking the OS (see [`Self::disabled`]).
+    disabled: bool,
 }
 
 impl Default for KeychainSecretStore {
@@ -38,7 +40,33 @@ impl KeychainSecretStore {
     pub fn with_service(service: impl Into<String>) -> Self {
         Self {
             service: service.into(),
+            disabled: false,
         }
+    }
+
+    /// A store that fails every call without touching the keychain, as on an
+    /// OS with no adapter. Test fixtures use it where the type must be the
+    /// real one (F1): no Keychain prompt, no read of the owner's items.
+    #[must_use]
+    pub fn disabled() -> Self {
+        Self {
+            disabled: true,
+            ..Self::new()
+        }
+    }
+
+    /// Why this store must not reach the OS, if it mustn't: it was made
+    /// [`disabled`](Self::disabled), or the test harness set
+    /// [`NO_LAUNCH_VAR`](crate::reveal::NO_LAUNCH_VAR), or this is the
+    /// platform crate's own unit tests.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn blocked(&self) -> Result<(), SecretError> {
+        if self.disabled || crate::reveal::launching_disabled() {
+            return Err(SecretError::Store(
+                "the keychain is disabled in tests (DICTATION_NO_LAUNCH)".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// The service name items are stored under.
@@ -51,6 +79,7 @@ impl KeychainSecretStore {
 #[cfg(target_os = "macos")]
 impl SecretStore for KeychainSecretStore {
     fn get(&self, name: &str) -> Result<Option<Secret>, SecretError> {
+        self.blocked()?;
         match entry(&self.service, name)?.get_password() {
             Ok(value) => Ok(Some(Secret::new(value))),
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -59,12 +88,14 @@ impl SecretStore for KeychainSecretStore {
     }
 
     fn set(&self, name: &str, secret: &Secret) -> Result<(), SecretError> {
+        self.blocked()?;
         entry(&self.service, name)?
             .set_password(secret.expose())
             .map_err(|error| secret_error(&error))
     }
 
     fn delete(&self, name: &str) -> Result<(), SecretError> {
+        self.blocked()?;
         match entry(&self.service, name)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(secret_error(&error)),
@@ -125,6 +156,16 @@ mod tests {
         assert_eq!(SERVICE, "com.dictationapp.desktop");
         assert_eq!(KeychainSecretStore::new().service(), SERVICE);
         assert_eq!(KeychainSecretStore::default().service(), SERVICE);
+    }
+
+    #[test]
+    fn a_disabled_store_and_test_builds_refuse_without_asking_the_os() {
+        let store = KeychainSecretStore::disabled();
+        assert!(store.get("groq-api-key").is_err());
+        assert!(store.set("groq-api-key", &Secret::new("x")).is_err());
+        assert!(store.delete("groq-api-key").is_err());
+        // cfg(test) refuses even a store that wasn't disabled.
+        assert!(KeychainSecretStore::new().get("groq-api-key").is_err());
     }
 
     #[cfg(target_os = "macos")]

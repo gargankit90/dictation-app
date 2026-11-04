@@ -338,6 +338,9 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     let version = app.package_info().version.to_string();
     tracing::info!(version, log_dir = %log_dir.display(), "starting");
     app.manage(LogDir(log_dir));
+    app.manage(diagnostics::AppOpener(Arc::new(
+        dictation_platform::reveal::SystemOpener,
+    )));
 
     build_tray(app).context("could not create the tray icon")?;
 
@@ -811,7 +814,10 @@ fn reveal_log(app: &AppHandle) {
         tracing::warn!("the log folder isn't known yet");
         return;
     };
-    if let Err(error) = dictation_platform::reveal::reveal_folder(&dir.0) {
+    let Some(opener) = app.try_state::<diagnostics::AppOpener>() else {
+        return;
+    };
+    if let Err(error) = opener.0.reveal_folder(&dir.0) {
         tracing::warn!(%error, "could not open the log folder");
     }
 }
