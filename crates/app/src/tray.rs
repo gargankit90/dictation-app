@@ -397,10 +397,22 @@ impl TrayStatus {
         self.runtime_problem().or(self.ambient.problem)
     }
 
+    /// The problem as shown: a dead hotkey while Accessibility is missing is
+    /// the Accessibility problem, whose fix is the grant.
+    fn shown_problem(&self) -> Option<ErrorCode> {
+        let problem = self.problem()?;
+        if problem == ErrorCode::HotkeyUnregistered
+            && self.ambient.problem == Some(ErrorCode::AccessibilityMissing)
+        {
+            return Some(ErrorCode::AccessibilityMissing);
+        }
+        Some(problem)
+    }
+
     /// The fix row's action for the current problem, if there is one.
     #[must_use]
     pub fn fix(&self) -> Option<Fix> {
-        let fix = fix_for(self.problem()?);
+        let fix = fix_for(self.shown_problem()?);
         Some(if self.grant_opened && fix.is_grant() {
             Fix::Relaunch
         } else {
@@ -422,11 +434,18 @@ impl TrayStatus {
         let problem = if download.is_some() {
             None
         } else {
-            self.problem()
+            self.shown_problem()
         };
         let mut entries = Vec::new();
         let tooltip = if let Some(code) = problem {
-            let sentence = problem_sentence(code);
+            let sentence = if code == ErrorCode::HotkeyUnregistered {
+                format!(
+                    "{} isn't working. Choose another key.",
+                    keycap_label(&self.ambient.hotkey)
+                )
+            } else {
+                problem_sentence(code).to_owned()
+            };
             entries.push(Entry::disabled(id::STATUS, format!("! {sentence}")));
             if let Some(fix) = self.fix() {
                 entries.push(Entry::item(fix.id(), fix.label()));
@@ -692,20 +711,21 @@ mod tests {
             });
             let menu = tray.menu();
             let outline = menu.outline();
+            let sentence = if code == ErrorCode::HotkeyUnregistered {
+                "Right ⌥ isn't working. Choose another key.".to_owned()
+            } else {
+                problem_sentence(code).to_owned()
+            };
             assert_eq!(
                 outline[0],
-                ("status".to_owned(), format!("! {}", problem_sentence(code))),
+                ("status".to_owned(), format!("! {sentence}")),
                 "{code}"
             );
             assert_eq!(outline[1], (fix_id.to_owned(), label.to_owned()), "{code}");
             assert_eq!(outline[2].0, "-", "{code}: exactly one fix row");
             assert_eq!(enabled(&menu, fix_id), Some(true), "{code}");
             assert_eq!(menu.icon, TrayIcon::Attention, "{code}");
-            assert_eq!(
-                menu.tooltip,
-                format!("Vocet: {}", problem_sentence(code)),
-                "{code}"
-            );
+            assert_eq!(menu.tooltip, format!("Vocet: {sentence}"), "{code}");
             assert_eq!(Fix::from_id(fix_id), Some(fix_for(code)), "{code}");
         }
     }
@@ -770,6 +790,33 @@ mod tests {
         assert!(tray.on_event(&UiEvent::HotkeyRestored));
         assert_eq!(tray.problem(), None);
         assert!(!tray.on_event(&UiEvent::HotkeyRestored));
+    }
+
+    /// Design Lead: the dead-hotkey fix depends on Accessibility.
+    #[test]
+    fn the_hotkey_fix_is_the_grant_when_accessibility_is_missing() {
+        let mut tray = ready("RightAlt", "Groq");
+        tray.on_event(&error(DictationError::HotkeyFailed));
+        let menu = tray.menu();
+        assert_eq!(
+            label_of(&menu, id::STATUS).as_deref(),
+            Some("! Right ⌥ isn't working. Choose another key.")
+        );
+        assert_eq!(
+            label_of(&menu, id::FIX_KEY).as_deref(),
+            Some("Choose another key…")
+        );
+        tray.set_ambient(Ambient {
+            problem: Some(ErrorCode::AccessibilityMissing),
+            ..ambient("RightAlt", "Groq")
+        });
+        let menu = tray.menu();
+        assert_eq!(tray.fix(), Some(Fix::OpenAccessibilitySettings));
+        assert_eq!(
+            label_of(&menu, id::STATUS).as_deref(),
+            Some("! Accessibility is off for dictation-app.")
+        );
+        assert!(label_of(&menu, id::FIX_KEY).is_none());
     }
 
     #[test]

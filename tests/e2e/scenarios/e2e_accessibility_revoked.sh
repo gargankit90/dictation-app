@@ -44,7 +44,7 @@ AX_TYPE_KEYS="$VM_FIXTURES/type-keys.js"
 # DictationError::HotkeyFailed's text (crates/core) and the tray's title
 # for it (crates/app/src/tray.rs).
 # What the tray's status line and tooltip say (the code table's message).
-AX_HOTKEY_SHOWN="The hotkey isn't working."
+AX_HOTKEY_SHOWN="Accessibility is off for dictation-app."
 # What the log says (DictationError's Display).
 AX_HOTKEY_ERROR="The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself."
 AX_EVIDENCE=""
@@ -221,7 +221,7 @@ e2e_accessibility_revoked() {
   expect "it says the hotkey is off until Accessibility is allowed" \
     wait_for_log "shown to the user error=The dictation hotkey isn.t working" 10
   expect "the tray says the hotkey isn't working, with its fix" \
-    env_tray_fix "Choose another key…" tray_shows "! $AX_HOTKEY_SHOWN" "Vocet: $AX_HOTKEY_SHOWN" 10
+    env_tray_fix "Open Accessibility settings…" tray_shows "! $AX_HOTKEY_SHOWN" "Vocet: $AX_HOTKEY_SHOWN" 10
   expect "typing still reaches TextEdit with the app running unallowed" typed_in_textedit still
 
   # 5. Allowed again: the hotkey comes back by itself (the supervisor), and
