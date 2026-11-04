@@ -1,0 +1,2769 @@
+<!doctype html>
+<html lang="en" class="vc-site">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vocet Dictation — talk instead of type on your Mac</title>
+    <meta
+      name="description"
+      content="Hold one key, say what you mean, let go — the words are typed where your cursor is. Runs on your Mac or with your own Groq or OpenAI key. Free and open source."
+    />
+    <meta property="og:title" content="Vocet Dictation — talk instead of type on your Mac" />
+    <meta
+      property="og:description"
+      content="Hold one key, talk, let go. Free, open-source dictation for Mac."
+    />
+    <meta property="og:url" content="https://vocetlabs.com/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://vocetlabs.com/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://vocetlabs.com/og.png" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Crect x='1' y='1' width='26' height='26' rx='8' fill='%231F4FC9'/%3E%3Cpath d='M9 11v6M14 8v12M19 11v6' stroke='%23fff' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+    <style>
+      /* Source: design-system/tokens.css, DS1 (inlined, no build step). */
+      /* Vocet design tokens, DS1 draft 1 (Design Lead, 2026-11-03).
+   One file for the app (src/) and the website (site/). The app uses the
+   system font; the website adds Inter / Inter Tight for display type.
+   Every text/background pair below meets WCAG 4.5:1 (large text 3:1). */
+
+      :root {
+        color-scheme: light dark;
+
+        /* Brand */
+        --vc-accent: #1f4fc9; /* buttons, links, focus, selection */
+        --vc-accent-hover: #163c9a;
+        --vc-accent-fg: #ffffff; /* text on accent */
+        --vc-accent-soft: #e8eefb; /* selected row, info background */
+
+        /* Neutrals */
+        --vc-ink: #1c1b19; /* primary text */
+        --vc-ink-2: #3b3a36; /* secondary text */
+        --vc-muted: #5c5a55; /* hints, captions */
+        --vc-faint: #6e6b64; /* placeholders (large or non-essential only) */
+        --vc-line: #e4e1d9; /* separators, card borders */
+        --vc-line-strong: #d6d2c8; /* control borders */
+        --vc-bg: #ffffff; /* app window */
+        --vc-bg-grouped: #f5f4f0; /* settings group background, site bands */
+        --vc-bg-site: #fbfaf7; /* website page */
+
+        /* States: always with an icon or word, never colour alone */
+        --vc-ready: #1e7a44; /* ready, success, "Pasted" */
+        --vc-ready-soft: #e6f4ec;
+        --vc-attention: #9a5300; /* needs attention, paused, skipped */
+        --vc-attention-soft: #fdf1e0;
+        --vc-danger: #c4261d; /* errors, destructive */
+        --vc-danger-soft: #fbe9e7;
+        --vc-recording: #e5484d; /* the recording dot only */
+
+        /* Overlay (recording pill): dark in both appearances */
+        --vc-overlay-bg: rgba(28, 27, 25, 0.92);
+        --vc-overlay-fg: #ffffff;
+        --vc-overlay-muted: #c9c6bf;
+        --vc-meter: #ffffff;
+        --vc-meter-idle: rgba(255, 255, 255, 0.28);
+        --vc-overlay-attention: #f2b544; /* warning badge on the dark pill */
+        --vc-overlay-attention-fg: #1c1b19; /* the "!" on that badge */
+        --vc-overlay-ready: #4cc26a; /* "Pasted" check on the dark pill */
+
+        /* Type */
+        --vc-font-ui:
+          -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        --vc-font-display:
+          -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+        --vc-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+        /* App scale (px). Devanagari falls back to the system's Kohinoor/Devanagari MT. */
+        --vc-text-xs: 11px; /* badges */
+        --vc-text-sm: 12px; /* captions, overlay hint */
+        --vc-text-md: 13px; /* body, controls (macOS default) */
+        --vc-text-lg: 15px; /* practice box, overlay label */
+        --vc-text-xl: 17px; /* section titles */
+        --vc-text-2xl: 22px; /* onboarding step titles */
+        --vc-text-3xl: 28px; /* onboarding welcome */
+        --vc-leading: 1.45;
+
+        /* Space: 4 px grid */
+        --vc-space-1: 4px;
+        --vc-space-2: 8px;
+        --vc-space-3: 12px;
+        --vc-space-4: 16px;
+        --vc-space-5: 20px;
+        --vc-space-6: 24px;
+        --vc-space-8: 32px;
+        --vc-space-12: 48px;
+
+        /* Shape */
+        --vc-radius-sm: 6px; /* controls, keycaps */
+        --vc-radius-md: 10px; /* settings groups, cards */
+        --vc-radius-lg: 14px; /* onboarding cards, site cards */
+        --vc-radius-pill: 999px;
+
+        /* Size */
+        --vc-control-h: 28px; /* settings buttons, fields */
+        --vc-control-h-lg: 44px; /* onboarding and website primary actions */
+        --vc-target-min: 44px; /* website touch targets */
+
+        /* Elevation */
+        --vc-shadow-card: 0 1px 2px rgba(28, 27, 25, 0.06);
+        --vc-shadow-pop: 0 12px 32px rgba(28, 27, 25, 0.18);
+
+        /* Motion */
+        --vc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+        --vc-dur-fast: 120ms;
+        --vc-dur: 200ms;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --vc-accent: #7ea2ff;
+          --vc-accent-hover: #a3bdff;
+          --vc-accent-fg: #0b1430;
+          --vc-accent-soft: #1c2747;
+
+          --vc-ink: #f2f1ee;
+          --vc-ink-2: #d9d6cf;
+          --vc-muted: #aaa69e;
+          --vc-faint: #8f8b83;
+          --vc-line: #3a3936;
+          --vc-line-strong: #4a4844;
+          --vc-bg: #1e1e1e;
+          --vc-bg-grouped: #262624;
+          --vc-bg-site: #161614;
+
+          --vc-ready: #4cc26a;
+          --vc-ready-soft: #17301f;
+          --vc-attention: #f2b544;
+          --vc-attention-soft: #33270f;
+          --vc-danger: #ff6b62;
+          --vc-danger-soft: #3a1a17;
+
+          --vc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+          --vc-shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.5);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        :root {
+          --vc-dur-fast: 0ms;
+          --vc-dur: 0ms;
+        }
+      }
+
+      /* Website only: display type */
+      .vc-site {
+        --vc-font-ui: Inter, system-ui, -apple-system, sans-serif;
+        --vc-font-display: "Inter Tight", Inter, system-ui, sans-serif;
+      }
+
+      /* Inter and Inter Tight, served from site/fonts (SIL OFL, see fonts/LICENSE.txt). */
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url("fonts/inter-latin-ext-400-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url("fonts/inter-latin-400-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 500;
+        font-display: swap;
+        src: url("fonts/inter-latin-ext-500-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 500;
+        font-display: swap;
+        src: url("fonts/inter-latin-500-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 600;
+        font-display: swap;
+        src: url("fonts/inter-latin-ext-600-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 600;
+        font-display: swap;
+        src: url("fonts/inter-latin-600-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 700;
+        font-display: swap;
+        src: url("fonts/inter-latin-ext-700-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 700;
+        font-display: swap;
+        src: url("fonts/inter-latin-700-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Inter Tight";
+        font-style: normal;
+        font-weight: 600;
+        font-display: swap;
+        src: url("fonts/inter-tight-latin-ext-600-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter Tight";
+        font-style: normal;
+        font-weight: 600;
+        font-display: swap;
+        src: url("fonts/inter-tight-latin-600-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Inter Tight";
+        font-style: normal;
+        font-weight: 700;
+        font-display: swap;
+        src: url("fonts/inter-tight-latin-ext-700-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter Tight";
+        font-style: normal;
+        font-weight: 700;
+        font-display: swap;
+        src: url("fonts/inter-tight-latin-700-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Inter Tight";
+        font-style: normal;
+        font-weight: 800;
+        font-display: swap;
+        src: url("fonts/inter-tight-latin-ext-800-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter Tight";
+        font-style: normal;
+        font-weight: 800;
+        font-display: swap;
+        src: url("fonts/inter-tight-latin-800-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      /* The site is light-only until a dark site design exists: keep the light
+         values of the tokens it uses when the system is dark. */
+      @media (prefers-color-scheme: dark) {
+        :root.vc-site {
+          color-scheme: light;
+          --vc-accent: #1f4fc9;
+          --vc-accent-hover: #163c9a;
+          --vc-ink: #1c1b19;
+          --vc-ink-2: #3b3a36;
+          --vc-muted: #5c5a55;
+          --vc-faint: #6e6b64;
+          --vc-line: #e4e1d9;
+          --vc-line-strong: #d6d2c8;
+          --vc-bg-grouped: #f5f4f0;
+          --vc-bg-site: #fbfaf7;
+        }
+      }
+      /* The page's own names map to the shared tokens. */
+      :root {
+        --accent: var(--vc-accent);
+        --accent-hover: var(--vc-accent-hover);
+        --ink: var(--vc-ink);
+        --ink-2: var(--vc-ink-2);
+        --muted: var(--vc-ink-2);
+        --soft: var(--vc-muted);
+        --faint: var(--vc-faint);
+        --line: var(--vc-line);
+        --line-2: #ece9e2; /* site-only hairline, no token */
+        --line-3: var(--vc-line-strong);
+        --bg: var(--vc-bg-site);
+        --band: var(--vc-bg-grouped);
+        --white: #fff;
+        --display: var(--vc-font-display);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--vc-font-ui);
+        font-size: 16px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+      a {
+        color: var(--accent);
+      }
+      a:hover {
+        color: var(--accent-hover);
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      .wrap {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding-left: 24px;
+        padding-right: 24px;
+      }
+      .h2 {
+        font-family: var(--display);
+        font-size: clamp(28px, 3.4vw, 40px);
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+      }
+      .skip {
+        position: absolute;
+        left: -9999px;
+        top: 8px;
+        background: var(--ink);
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: 8px;
+        z-index: 10;
+      }
+      .skip:focus {
+        left: 8px;
+      }
+      :focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      /* buttons */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 52px;
+        padding: 0 22px;
+        border-radius: 12px;
+        font-weight: 600;
+        font-size: 17px;
+        text-decoration: none;
+        border: 1px solid transparent;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+        color: #fff;
+      }
+      .btn-secondary {
+        background: var(--white);
+        color: var(--ink);
+        border-color: var(--line-3);
+        padding: 0 18px;
+      }
+      .btn-secondary:hover {
+        color: var(--ink);
+        border-color: var(--ink);
+      }
+
+      /* header */
+      .site-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+        padding-top: 18px;
+        padding-bottom: 18px;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        text-decoration: none;
+        color: var(--ink);
+      }
+      .brand-name {
+        font-family: var(--display);
+        font-weight: 800;
+        font-size: 20px;
+      }
+      .brand-tag {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--ink-2);
+        background: #efece4;
+        border-radius: 999px;
+        padding: 4px 10px;
+      }
+      .nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 18px;
+        align-items: center;
+        font-size: 15px;
+      }
+      .nav a {
+        color: var(--ink-2);
+        text-decoration: none;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+      }
+      .nav a:hover {
+        color: var(--ink);
+      }
+      .nav .nav-cta {
+        background: var(--ink);
+        color: #fff;
+        padding: 0 16px;
+        border-radius: 10px;
+        font-weight: 600;
+      }
+      .nav .nav-cta:hover {
+        color: #fff;
+        background: #000;
+      }
+
+      /* hero */
+      .hero {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 48px;
+        align-items: center;
+        padding-top: 40px;
+        padding-bottom: 64px;
+      }
+      .hero-copy {
+        flex: 1 1 400px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .hero h1 {
+        font-family: var(--display);
+        font-size: clamp(38px, 5.2vw, 62px);
+        line-height: 1.02;
+        letter-spacing: -0.03em;
+      }
+      .lede {
+        font-size: 19px;
+        line-height: 1.55;
+        color: var(--muted);
+      }
+      .ctas {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      .fine {
+        font-size: 14px;
+        color: var(--soft);
+      }
+      .hero-demo {
+        flex: 1 1 520px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .demo-window {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 24px 60px rgba(28, 27, 25, 0.1);
+        overflow: hidden;
+      }
+      .demo-bar {
+        padding: 12px 16px;
+        border-bottom: 1px solid #eeebe4;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--ink-2);
+      }
+      .demo-body {
+        padding: 20px 22px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        font-size: 15px;
+      }
+      .msg {
+        display: flex;
+        gap: 10px;
+      }
+      .avatar-sq {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        background: #e7e2d7;
+        flex-shrink: 0;
+      }
+      .msg p {
+        margin-top: 2px;
+        color: var(--ink-2);
+      }
+      .composer {
+        border: 2px solid var(--accent);
+        border-radius: 12px;
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .composer-text {
+        font-size: 16px;
+        line-height: 1.5;
+        min-height: 24px;
+      }
+      .caret {
+        display: inline-block;
+        width: 2px;
+        height: 18px;
+        background: var(--accent);
+        vertical-align: -3px;
+        margin-left: 1px;
+        animation: blink 1.1s steps(1) infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+      .composer-foot {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+        background: var(--ink);
+        border-radius: 999px;
+        padding: 6px 12px;
+      }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #3dbe6b;
+      }
+      .composer-hint {
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .avatar-sq {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 700;
+        color: #5c5a55;
+      }
+      .composer.demo {
+        position: relative;
+      }
+      .composer .composer-text {
+        min-height: 48px;
+      }
+      .keyhint {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .keyhint kbd {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        background: #f1eee7;
+        border: 1px solid var(--line-3);
+        border-bottom-width: 3px;
+        border-radius: 6px;
+        padding: 2px 8px;
+        color: var(--ink);
+        transition:
+          background 0.15s,
+          transform 0.15s;
+      }
+      .demo[data-state="listening"] .keyhint kbd,
+      .demo[data-state="transcribing"] .keyhint kbd {
+        background: var(--ink);
+        color: #fff;
+        border-color: var(--ink);
+        transform: translateY(1px);
+      }
+      .demo[data-state="idle"] .keyhint-label::after {
+        content: "Hold to talk";
+      }
+      .demo[data-state="listening"] .keyhint-label::after {
+        content: "Held — speaking";
+      }
+      .demo[data-state="transcribing"] .keyhint-label::after {
+        content: "Released";
+      }
+      .demo[data-state="pasted"] .keyhint-label::after {
+        content: "Released";
+      }
+      .phone-only {
+        display: none;
+      }
+      .linkbtn {
+        background: none;
+        border: 0;
+        padding: 0;
+        font: inherit;
+        color: var(--accent);
+        text-decoration: underline;
+        cursor: pointer;
+        min-height: 44px;
+      }
+
+      /* uses */
+      .band-white {
+        background: #fff;
+        border-top: 1px solid var(--line-2);
+        border-bottom: 1px solid var(--line-2);
+      }
+      .section {
+        padding-top: 72px;
+        padding-bottom: 72px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .tab {
+        min-height: 44px;
+        padding: 0 16px;
+        border-radius: 999px;
+        border: 1px solid var(--line-3);
+        background: #fff;
+        color: var(--ink);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .tab[aria-selected="true"] {
+        background: var(--ink);
+        border-color: var(--ink);
+        color: #fff;
+      }
+      .use-row {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .illo {
+        width: 100%;
+        min-width: 0;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        box-shadow: 0 18px 44px rgba(28, 27, 25, 0.08);
+        overflow: hidden;
+      }
+      .illo-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px;
+        border-bottom: 1px solid #eeebe4;
+        background: var(--bg);
+        font-size: 14px;
+      }
+      .dots {
+        display: inline-flex;
+        gap: 6px;
+      }
+      .dots span {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--line);
+      }
+      .illo-where {
+        color: var(--faint);
+      }
+      .panel {
+        height: 340px;
+      }
+      .pill {
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 600;
+        color: #fff;
+        background: var(--ink);
+        border-radius: 999px;
+        padding: 5px 11px;
+      }
+      .use-caption {
+        order: -1;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 4px 14px;
+      }
+      .use-caption h3 {
+        font-size: 22px;
+      }
+      .use-caption p {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      /* chat */
+      .chat {
+        background: #eef1fa;
+        padding: 20px 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .bubble-row {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+      }
+      .av {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        font-size: 13px;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .bubble {
+        max-width: 75%;
+        background: #fff;
+        border-radius: 14px 14px 14px 4px;
+        padding: 9px 13px;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+      .bubble strong {
+        font-size: 13px;
+      }
+      .spacer {
+        flex: 1;
+      }
+      .mine {
+        align-self: flex-end;
+        max-width: 82%;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 8px;
+      }
+      .mine .bubble {
+        max-width: none;
+        border: 2px solid var(--accent);
+        border-radius: 14px 14px 4px 14px;
+        padding: 10px 14px;
+        font-size: 15px;
+        line-height: 1.5;
+      }
+      .mine-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      /* animated demo states (shared) */
+      .demo {
+        position: relative;
+      }
+      .demo .ph {
+        color: #8a877f;
+      }
+      .demo .d-text {
+        white-space: pre-line;
+      }
+      .demo[data-state="pasted"] .ph {
+        display: none;
+      }
+      .demo:not([data-state="pasted"]) .d-text {
+        display: none;
+      }
+      .demo[data-state="pasted"] .d-text {
+        animation: land 0.9s ease-out;
+      }
+      @keyframes land {
+        0% {
+          background: #dce6fb;
+        }
+        100% {
+          background: transparent;
+        }
+      }
+      .dict-pill {
+        position: absolute;
+        right: 12px;
+        top: -18px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--ink);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        border-radius: 999px;
+        padding: 6px 12px 6px 10px;
+        box-shadow: 0 6px 16px rgba(28, 27, 25, 0.22);
+        transition:
+          opacity 0.2s,
+          transform 0.2s;
+      }
+      .demo[data-state="idle"] .dict-pill {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+      .wave {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        height: 14px;
+      }
+      .wave i {
+        display: block;
+        width: 3px;
+        height: 4px;
+        border-radius: 2px;
+        background: #e5484d;
+      }
+      .demo[data-state="listening"] .wave i {
+        animation: wave 0.9s ease-in-out infinite;
+      }
+      .demo[data-state="listening"] .wave i:nth-child(2) {
+        animation-delay: 0.12s;
+      }
+      .demo[data-state="listening"] .wave i:nth-child(3) {
+        animation-delay: 0.24s;
+      }
+      .demo[data-state="listening"] .wave i:nth-child(4) {
+        animation-delay: 0.36s;
+      }
+      .demo[data-state="listening"] .wave i:nth-child(5) {
+        animation-delay: 0.48s;
+      }
+      @keyframes wave {
+        0%,
+        100% {
+          height: 4px;
+        }
+        50% {
+          height: 14px;
+        }
+      }
+      .demo[data-state="transcribing"] .wave i {
+        background: #f2b544;
+        height: 6px;
+      }
+      .demo[data-state="pasted"] .wave {
+        display: none;
+      }
+      .demo[data-state="pasted"] .d-label::before {
+        content: "✓ ";
+      }
+      .demo[data-state="listening"] .c-input,
+      .demo[data-state="transcribing"] .c-input {
+        opacity: 0.85;
+      }
+
+      /* chat app */
+      .chatapp {
+        display: flex;
+        background: #fff;
+      }
+      .rail {
+        width: 44px;
+        flex-shrink: 0;
+        background: #26251f;
+        padding: 12px 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+      }
+      .ws {
+        width: 26px;
+        height: 26px;
+        border-radius: 7px;
+        background: #fff;
+        color: #26251f;
+        font-size: 12px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .ws-off {
+        background: #3d3c35;
+      }
+      .channels {
+        width: 150px;
+        flex-shrink: 0;
+        background: #f3f1eb;
+        padding: 12px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 13px;
+        color: var(--ink-2);
+      }
+      .ch-team {
+        font-weight: 700;
+        font-size: 14px;
+        padding: 2px 8px 8px;
+        color: var(--ink);
+      }
+      .ch-group {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        color: var(--faint);
+        padding: 10px 8px 4px;
+        text-transform: uppercase;
+      }
+      .ch {
+        padding: 5px 8px;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .ch-on {
+        background: var(--ink);
+        color: #fff;
+        font-weight: 600;
+      }
+      .dot-on {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #3dbe6b;
+        display: inline-block;
+      }
+      .chat-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .chat-top {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 10px 16px;
+        border-bottom: 1px solid #eeebe4;
+        font-size: 14px;
+      }
+      .chat-top span {
+        font-size: 12px;
+        color: var(--faint);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .feed {
+        flex: 1;
+        padding: 12px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+      .post {
+        display: flex;
+        gap: 10px;
+      }
+      .pav {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .who {
+        font-weight: 700;
+        font-size: 13px;
+      }
+      .who span {
+        font-weight: 400;
+        color: var(--faint);
+        font-size: 12px;
+        margin-left: 4px;
+      }
+      .composer2 {
+        margin: 0 14px 14px;
+        border: 2px solid var(--accent);
+        border-radius: 10px;
+        padding: 10px 12px 8px;
+      }
+      .composer2 .c-input {
+        font-size: 14px;
+        line-height: 1.5;
+        min-height: 42px;
+      }
+      .c-tools {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 6px;
+      }
+      .tools {
+        display: inline-flex;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .tools b {
+        font-weight: 700;
+      }
+      .sendbtn {
+        width: 26px;
+        height: 26px;
+        border-radius: 6px;
+        background: var(--accent);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      /* mail app */
+      .mailapp {
+        position: relative;
+        background: #fbfaf7;
+        overflow: hidden;
+      }
+      .inbox2 {
+        position: absolute;
+        inset: 0;
+        padding: 6px 0;
+        font-size: 13px;
+        color: var(--ink-2);
+      }
+      .inbox2 .row {
+        display: grid;
+        grid-template-columns: 120px 1fr 64px;
+        gap: 10px;
+        padding: 10px 16px;
+        border-bottom: 1px solid #eeebe4;
+        opacity: 0.7;
+      }
+      .inbox2 .row:first-child {
+        opacity: 1;
+        background: #fff;
+      }
+      .inbox2 .s {
+        grid-column: 2;
+        grid-row: 1;
+        color: var(--faint);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .inbox2 .t {
+        grid-column: 3;
+        text-align: right;
+        color: var(--faint);
+        font-size: 12px;
+      }
+      .compose2 {
+        position: absolute;
+        right: 16px;
+        bottom: 0;
+        width: min(78%, 440px);
+        height: 268px;
+        background: #fff;
+        border-radius: 12px 12px 0 0;
+        box-shadow: 0 -4px 30px rgba(28, 27, 25, 0.18);
+        display: flex;
+        flex-direction: column;
+        font-size: 13px;
+      }
+      .cw-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #26251f;
+        color: #fff;
+        font-weight: 600;
+        padding: 9px 14px;
+        border-radius: 12px 12px 0 0;
+      }
+      .cw-ctrl {
+        display: inline-flex;
+        gap: 8px;
+      }
+      .cw-ctrl i {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        border: 1.5px solid #b5b1a8;
+        display: block;
+      }
+      .cw-field {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 14px;
+        border-bottom: 1px solid #eeebe4;
+      }
+      .cw-field .lbl {
+        color: var(--faint);
+        width: 48px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #efece4;
+        border-radius: 999px;
+        padding: 2px 10px 2px 2px;
+        font-weight: 600;
+      }
+      .chip-av {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #c9d3f0;
+        color: #2b3a66;
+        font-size: 11px;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .cw-body {
+        flex: 1;
+        margin: 10px 14px 0;
+        padding: 8px 10px;
+        border: 2px solid var(--accent);
+        border-radius: 8px;
+      }
+      .cw-body .c-input {
+        font-size: 14px;
+        line-height: 1.55;
+      }
+      .cw-body .dict-pill {
+        top: auto;
+        bottom: -14px;
+      }
+      .cw-foot {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 14px;
+      }
+      .send2 {
+        background: var(--accent);
+        color: #fff;
+        font-weight: 600;
+        border-radius: 999px;
+        padding: 6px 16px;
+      }
+
+      /* doc app */
+      .docapp {
+        display: flex;
+        flex-direction: column;
+        background: #fff;
+      }
+      .doc-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 14px;
+        border-bottom: 1px solid #eeebe4;
+      }
+      .doc-ico {
+        width: 20px;
+        height: 26px;
+        border-radius: 3px;
+        background: #3b7a57;
+        flex-shrink: 0;
+        box-shadow: inset 0 -8px 0 #2f6446;
+      }
+      .doc-meta {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        font-size: 13px;
+        line-height: 1.3;
+      }
+      .doc-menu {
+        font-size: 11px;
+        color: var(--faint);
+      }
+      .share {
+        font-size: 12px;
+        font-weight: 600;
+        color: #fff;
+        background: var(--ink);
+        border-radius: 999px;
+        padding: 5px 14px;
+      }
+      .doc-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 6px 14px;
+        background: #f7f6f2;
+        border-bottom: 1px solid #eeebe4;
+        font-size: 12px;
+        color: var(--ink-2);
+      }
+      .doc-toolbar b {
+        font-weight: 700;
+      }
+      .doc-toolbar .sep {
+        width: 1px;
+        height: 14px;
+        background: var(--line-3);
+      }
+      .doc-canvas {
+        flex: 1;
+        min-height: 0;
+        background: #eaf3ee;
+        padding: 14px 28px 0;
+        display: flex;
+        justify-content: center;
+      }
+      .page2 {
+        width: 100%;
+        max-width: 560px;
+        background: #fff;
+        border-radius: 6px 6px 0 0;
+        box-shadow: 0 2px 12px rgba(28, 27, 25, 0.08);
+        padding: 18px 30px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .page2 ul {
+        margin: 0;
+        padding-left: 18px;
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--ink-2);
+      }
+      .doc-ins {
+        border: 2px solid transparent;
+        border-radius: 6px;
+        padding: 4px 6px;
+        margin: 0 -8px;
+        transition: border-color 0.2s;
+      }
+      .doc-ins:not([data-state="pasted"]) {
+        border-color: var(--accent);
+      }
+      .doc-ins .c-input {
+        font-size: 14px;
+        line-height: 1.6;
+        min-height: 46px;
+      }
+      .doc-ins {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .doc-ins .dict-pill {
+        position: static;
+        margin-top: 8px;
+      }
+
+      /* ai app (dark) */
+      .aiapp {
+        display: flex;
+        background: #1c1b19;
+        color: #edebe6;
+      }
+      .ai-side {
+        width: 160px;
+        flex-shrink: 0;
+        background: #24231e;
+        padding: 12px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        font-size: 12px;
+        color: #b5b1a8;
+      }
+      .new-chat {
+        border: 1px solid #3d3c35;
+        border-radius: 8px;
+        padding: 7px 10px;
+        color: #edebe6;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+      .ai-group {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #8a877f;
+        padding: 6px 8px 2px;
+      }
+      .ai-row {
+        padding: 6px 8px;
+        border-radius: 6px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ai-row-on {
+        background: #33322c;
+        color: #fff;
+      }
+      .ai-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        padding: 16px 18px 16px;
+      }
+      .ai-msgs {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .ai-user {
+        align-self: flex-end;
+        max-width: 80%;
+        background: #33322c;
+        border-radius: 14px;
+        padding: 8px 13px;
+      }
+      .ai-bot {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+      }
+      .ai-bot p {
+        color: #d9d6ce;
+      }
+      .bot-ico {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        border: 1.5px solid #8a877f;
+        background: radial-gradient(circle at 50% 50%, #b5b1a8 0 3px, transparent 3.5px);
+      }
+      .ai-input {
+        background: #2a2925;
+        border: 2px solid #9db7ff;
+        border-radius: 18px;
+        padding: 12px 14px 10px;
+      }
+      .ai-input .c-input {
+        font-size: 14px;
+        line-height: 1.55;
+        color: #fff;
+        min-height: 44px;
+      }
+      .ai-input .ph {
+        color: #8a877f;
+      }
+      .ai-input .caret {
+        background: #9db7ff;
+      }
+      .ai-tools {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 6px;
+      }
+      .ai-tools .tools {
+        color: #b5b1a8;
+      }
+      .sendc {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .aiapp .dict-pill {
+        background: #fff;
+        color: var(--ink);
+      }
+      .aiapp .demo[data-state="pasted"] .d-text {
+        animation: land-dark 0.9s ease-out;
+      }
+      @keyframes land-dark {
+        0% {
+          background: rgba(157, 183, 255, 0.28);
+        }
+        100% {
+          background: transparent;
+        }
+      }
+
+      /* email */
+      .mail {
+        display: flex;
+        background: #faf3ea;
+      }
+      .inbox {
+        width: 190px;
+        flex-shrink: 0;
+        border-right: 1px solid #eadfcf;
+        display: flex;
+        flex-direction: column;
+        font-size: 13px;
+      }
+      .inbox div {
+        padding: 12px 14px;
+        border-bottom: 1px solid #eadfcf;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .inbox div:first-child {
+        background: #fff;
+      }
+      .inbox div:last-child {
+        border-bottom: 0;
+      }
+      .inbox span {
+        color: var(--faint);
+      }
+      .compose-wrap {
+        flex: 1;
+        min-width: 0;
+        padding: 16px;
+      }
+      .compose {
+        height: 100%;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(28, 27, 25, 0.1);
+        padding: 4px 16px 14px;
+        display: flex;
+        flex-direction: column;
+        font-size: 14px;
+      }
+      .field {
+        display: flex;
+        gap: 10px;
+        padding: 9px 0;
+        border-bottom: 1px solid #eeebe4;
+      }
+      .field span:first-child {
+        color: var(--faint);
+        width: 54px;
+      }
+      .dictated {
+        outline: 2px solid var(--accent);
+        outline-offset: 4px;
+        border-radius: 4px;
+        font-size: 15px;
+        line-height: 1.6;
+      }
+      .compose .dictated {
+        margin-top: 12px;
+        white-space: pre-line;
+      }
+      .compose-foot {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .send {
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+        background: var(--accent);
+        border-radius: 8px;
+        padding: 7px 16px;
+      }
+      /* doc */
+      .doc {
+        background: #eaf3ee;
+        padding: 14px 28px 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        background: #fff;
+        border-radius: 8px;
+        padding: 6px 14px;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--ink-2);
+      }
+      .toolbar .sep {
+        width: 1px;
+        height: 14px;
+        background: var(--line-3);
+      }
+      .page {
+        flex: 1;
+        width: 100%;
+        max-width: 540px;
+        background: #fff;
+        border-radius: 10px 10px 0 0;
+        box-shadow: 0 4px 16px rgba(28, 27, 25, 0.06);
+        padding: 22px 28px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .page-title {
+        font-family: var(--display);
+        font-size: 21px;
+        font-weight: 700;
+      }
+      .page-sec {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--faint);
+        letter-spacing: 0.04em;
+      }
+      .page ul {
+        margin: 0;
+        padding-left: 18px;
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--ink-2);
+      }
+      .page .pill {
+        align-self: flex-start;
+        margin-top: 4px;
+      }
+      /* ai */
+      .ai {
+        background: var(--ink);
+        color: #edebe6;
+        padding: 22px 28px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .ai-reply {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+      }
+      .ai-reply p {
+        font-size: 14px;
+        color: #d9d6ce;
+      }
+      .skel {
+        display: block;
+        height: 8px;
+        border-radius: 4px;
+        background: #3a3933;
+        margin-top: 8px;
+      }
+      .prompt {
+        background: #2a2925;
+        border: 2px solid #9db7ff;
+        border-radius: 18px;
+        padding: 14px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .prompt p {
+        font-size: 15px;
+        line-height: 1.55;
+        color: #fff;
+      }
+      .prompt .caret {
+        background: #9db7ff;
+        height: 17px;
+      }
+      .prompt-foot {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .pill-light {
+        color: var(--ink);
+        background: #fff;
+      }
+
+      /* engine */
+      .cards-2 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+        gap: 20px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 28px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        background: #fff;
+      }
+      .card h3 {
+        font-size: 22px;
+      }
+      .card p {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+      .card ul {
+        margin: 0;
+        padding-left: 20px;
+        line-height: 1.8;
+        color: var(--ink-2);
+      }
+      .note {
+        color: var(--soft);
+      }
+      .model {
+        color: var(--faint);
+        font-size: 14px;
+      }
+      .compare {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 18px 20px;
+        color: var(--muted);
+        line-height: 1.55;
+        max-width: 880px;
+      }
+      .compare strong {
+        color: var(--ink);
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      /* setup */
+      .setup-steps {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 14px;
+      }
+      .setup-steps li {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .setup-steps .num {
+        font-weight: 700;
+        color: var(--accent);
+      }
+      .setup-steps span:last-child {
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      /* data */
+      .band {
+        background: var(--band);
+      }
+      .data-card {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 28px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+        gap: 28px 40px;
+      }
+      .data-card h3 {
+        font-size: 22px;
+        margin-bottom: 10px;
+      }
+      .data-card p {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+      .data-card ul {
+        margin: 10px 0 0;
+        padding-left: 20px;
+        line-height: 1.8;
+        color: var(--ink-2);
+      }
+
+      /* closing */
+      .closing {
+        padding-top: 72px;
+        padding-bottom: 72px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 28px;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .closing-copy {
+        flex: 1 1 460px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .closing-copy p {
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.55;
+      }
+      .text-link {
+        color: var(--ink);
+        font-weight: 600;
+        min-height: 52px;
+        display: inline-flex;
+        align-items: center;
+        padding: 0 8px;
+      }
+
+      /* footer */
+      .site-footer {
+        background: var(--ink);
+        color: #d9d6ce;
+      }
+      .footer-row {
+        padding-top: 36px;
+        padding-bottom: 36px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        justify-content: space-between;
+        align-items: baseline;
+        font-size: 15px;
+      }
+      .site-footer a {
+        color: #fff;
+      }
+      .site-footer strong {
+        color: #fff;
+      }
+
+      /* Tap targets of at least 44 px (mobile review, U3). */
+      .nav a {
+        min-width: 44px;
+        justify-content: center;
+      }
+      .brand {
+        min-height: 44px;
+      }
+      .site-footer a,
+      .data-card p a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+        padding: 0 6px;
+      }
+      h1,
+      .h2 {
+        text-wrap: balance;
+      }
+      /* small screens */
+      @media (max-width: 640px) {
+        .hero {
+          padding-top: 16px;
+          gap: 36px;
+        }
+        .phone-only {
+          display: block;
+        }
+        .inbox {
+          display: none;
+        }
+        .rail,
+        .channels {
+          display: none;
+        }
+        .compose2 {
+          left: 10px;
+          right: 10px;
+          width: auto;
+        }
+        .ai-side,
+        .doc-menu {
+          display: none;
+        }
+        .doc-canvas {
+          padding: 10px 10px 0;
+        }
+        .page2 {
+          padding: 14px 16px;
+        }
+        .doc {
+          padding: 14px 16px 0;
+        }
+        .page {
+          padding: 18px;
+        }
+        .toolbar {
+          gap: 12px;
+        }
+        .chat,
+        .ai {
+          padding: 16px;
+        }
+        .panel {
+          height: auto;
+          min-height: 340px;
+        }
+        .btn {
+          font-size: 16px;
+        }
+        /* Mobile review (U3): keep the Pasted badge off the last message line,
+           one nav row (the hero has the call to action), 2x2 tabs. */
+        .chat {
+          padding-bottom: 28px;
+        }
+        .nav .nav-cta {
+          display: none;
+        }
+        .tabs {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+        }
+        .tab {
+          justify-content: center;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+        .caret {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="wrap site-header">
+      <a class="brand" href="/" aria-label="Vocet Dictation home">
+        <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true">
+          <rect x="1" y="1" width="26" height="26" rx="8" fill="#1F4FC9" />
+          <path
+            d="M9 11v6M14 8v12M19 11v6"
+            stroke="#fff"
+            stroke-width="2.2"
+            stroke-linecap="round"
+          />
+        </svg>
+        <span class="brand-name">Vocet</span>
+        <span class="brand-tag">Dictation</span>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a href="#uses">Uses</a>
+        <a href="#setup">Setup</a>
+        <a href="#data">Privacy</a>
+        <a href="https://github.com/gargankit90/dictation-app">GitHub</a>
+        <a
+          class="nav-cta"
+          data-download
+          data-ready-label="Download"
+          href="https://github.com/gargankit90/dictation-app"
+          >Coming soon</a
+        >
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="wrap hero">
+        <div class="hero-copy">
+          <h1>Talk instead of type in every app you use.</h1>
+          <p class="lede">
+            Hold one key, say what you mean, let go — the words are pasted where your cursor is.
+            Runs on your Mac, even offline, or with your own Groq or OpenAI key. Free and open
+            source.
+          </p>
+          <div class="ctas">
+            <a
+              id="download"
+              class="btn btn-primary"
+              data-download
+              data-ready-label="Download for Mac"
+              href="https://github.com/gargankit90/dictation-app"
+              >Alpha coming soon</a
+            >
+            <a class="btn btn-secondary" href="https://github.com/gargankit90/dictation-app">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 6l-5 6 5 6M16 6l5 6-5 6" /></svg
+              >View source on GitHub
+            </a>
+          </div>
+          <p class="fine">
+            <span id="release-version">Alpha in testing</span> · Apple Silicon · macOS 13 or later ·
+            <span id="release-notes" hidden
+              ><a href="https://github.com/gargankit90/dictation-app/releases">Release notes</a> ·
+            </span>
+            Windows is on the roadmap
+          </p>
+          <p class="fine phone-only">
+            On your phone? Vocet runs on a Mac.
+            <button type="button" class="linkbtn" id="copy-link">Copy the link for later</button>
+          </p>
+        </div>
+
+        <div class="hero-demo">
+          <div
+            class="demo-window"
+            role="img"
+            aria-label="Animated illustration: holding one key, speaking, and the words pasted into Slack, Mail and an AI chat in turn"
+          >
+            <div class="illo-bar">
+              <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
+              ><strong id="h-app">Slack</strong
+              ><span class="illo-where" id="h-where">#design-review</span>
+            </div>
+            <div class="demo-body">
+              <div class="msg">
+                <span class="avatar-sq" id="h-av" aria-hidden="true">P</span>
+                <div>
+                  <strong id="h-from">Priya</strong>
+                  <p id="h-msg">Can you look at the onboarding copy before Friday?</p>
+                </div>
+              </div>
+              <div class="composer demo" id="hero-demo" data-state="pasted">
+                <div class="dict-pill">
+                  <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
+                  ><span class="d-label">Pasted</span>
+                </div>
+                <p class="composer-text c-input">
+                  <span class="ph" id="h-ph">Message #design-review</span
+                  ><span class="d-text" id="h-text"
+                    >Yes, I’ll review the onboarding copy tomorrow morning and send notes by
+                    noon.</span
+                  ><span class="caret" aria-hidden="true"></span>
+                </p>
+                <div class="composer-foot">
+                  <span class="keyhint"><kbd>Right ⌥</kbd><span class="keyhint-label"></span></span>
+                  <span class="composer-hint" id="h-hint">Enter to send</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="uses" class="band-white">
+        <div class="wrap section">
+          <h2 class="h2">Wherever you’d type</h2>
+          <div class="tabs" role="tablist" aria-label="Use cases">
+            <button
+              type="button"
+              class="tab"
+              role="tab"
+              id="tab-chat"
+              aria-controls="panel-chat"
+              aria-selected="true"
+            >
+              Slack / Teams
+            </button>
+            <button
+              type="button"
+              class="tab"
+              role="tab"
+              id="tab-mail"
+              aria-controls="panel-mail"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              Gmail / Outlook
+            </button>
+            <button
+              type="button"
+              class="tab"
+              role="tab"
+              id="tab-doc"
+              aria-controls="panel-doc"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              Google Docs / Notion
+            </button>
+            <button
+              type="button"
+              class="tab"
+              role="tab"
+              id="tab-ai"
+              aria-controls="panel-ai"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              ChatGPT / Claude
+            </button>
+          </div>
+
+          <!-- Slack / Teams (animated) -->
+          <div class="use-row" id="panel-chat" role="tabpanel" aria-labelledby="tab-chat">
+            <div
+              class="illo"
+              role="img"
+              aria-label="Animated illustration: holding the key, speaking, and the reply pasted into a team chat message box"
+            >
+              <div class="illo-bar">
+                <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
+                ><strong>Slack · Teams</strong><span class="illo-where">#launch</span>
+              </div>
+              <div class="panel chatapp">
+                <div class="rail" aria-hidden="true">
+                  <span class="ws">A</span><span class="ws ws-off"></span
+                  ><span class="ws ws-off"></span>
+                </div>
+                <div class="channels" aria-hidden="true">
+                  <p class="ch-team">Acme</p>
+                  <span class="ch ch-on"># launch</span><span class="ch"># design</span
+                  ><span class="ch"># general</span>
+                  <p class="ch-group">Direct messages</p>
+                  <span class="ch"><i class="dot-on"></i>Maya Chen</span
+                  ><span class="ch"><i class="dot-on"></i>Daniel Ortiz</span>
+                </div>
+                <div class="chat-main">
+                  <div class="chat-top">
+                    <strong># launch</strong><span>Pricing page and launch prep</span>
+                  </div>
+                  <div class="feed">
+                    <div class="post">
+                      <span class="pav" style="background: #c9d3f0; color: #2b3a66">M</span>
+                      <div>
+                        <p class="who">Maya Chen <span>2:14 PM</span></p>
+                        <p>Is the pricing page ready for review?</p>
+                      </div>
+                    </div>
+                    <div class="post">
+                      <span class="pav" style="background: #f0d9c9; color: #6a3b1e">D</span>
+                      <div>
+                        <p class="who">Daniel Ortiz <span>2:15 PM</span></p>
+                        <p>Same question — sales wants to share it today.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    class="composer2 demo"
+                    data-state="pasted"
+                    data-text="Almost — the copy is final and I’m swapping in the new screenshots now. I’ll post the link here this afternoon."
+                  >
+                    <div class="dict-pill">
+                      <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
+                      ><span class="d-label">Pasted</span>
+                    </div>
+                    <p class="c-input">
+                      <span class="ph">Message #launch</span
+                      ><span class="d-text"
+                        >Almost — the copy is final and I’m swapping in the new screenshots now.
+                        I’ll post the link here this afternoon.</span
+                      ><span class="caret"></span>
+                    </p>
+                    <div class="c-tools">
+                      <span class="tools"><b>+</b><b>Aa</b><b>@</b></span>
+                      <span class="sendbtn"
+                        ><svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="#fff"
+                          stroke-width="2.4"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="M5 12h14M13 6l6 6-6 6" /></svg
+                      ></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="use-caption">
+              <h3>Reply without breaking flow</h3>
+              <p>
+                Hold the key in the message box, talk, let go. The text is pasted, ready to send.
+              </p>
+            </div>
+          </div>
+
+          <!-- Gmail / Outlook (animated) -->
+          <div class="use-row" id="panel-mail" role="tabpanel" aria-labelledby="tab-mail" hidden>
+            <div
+              class="illo"
+              role="img"
+              aria-label="Animated illustration: holding the key, speaking, and a paragraph pasted into an email"
+            >
+              <div class="illo-bar">
+                <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
+                ><strong>Gmail · Outlook</strong><span class="illo-where">Inbox</span>
+              </div>
+              <div class="panel mailapp">
+                <div class="inbox2" aria-hidden="true">
+                  <div class="row">
+                    <strong>Sam Rivera</strong><span class="t">2:02 PM</span
+                    ><span class="s">Quick turnaround on the notes?</span>
+                  </div>
+                  <div class="row">
+                    <strong>Finance team</strong><span class="t">1:40 PM</span
+                    ><span class="s">Offsite budget — draft attached</span>
+                  </div>
+                  <div class="row">
+                    <strong>Priya Nair</strong><span class="t">11:18 AM</span
+                    ><span class="s">Onboarding copy, round two</span>
+                  </div>
+                  <div class="row">
+                    <strong>Jordan Lee</strong><span class="t">9:05 AM</span
+                    ><span class="s">Agenda for our 1:1</span>
+                  </div>
+                  <div class="row">
+                    <strong>Release bot</strong><span class="t">Mon</span
+                    ><span class="s">Build 0.1.0 is ready</span>
+                  </div>
+                </div>
+                <div class="compose2">
+                  <div class="cw-head">
+                    <span>New message</span
+                    ><span class="cw-ctrl" aria-hidden="true"><i></i><i></i><i></i></span>
+                  </div>
+                  <div class="cw-field">
+                    <span class="lbl">To</span
+                    ><span class="chip"><span class="chip-av">S</span>Sam Rivera</span>
+                  </div>
+                  <div class="cw-field">
+                    <span class="lbl">Subject</span><span>Re: Quick turnaround on the notes?</span>
+                  </div>
+                  <div
+                    class="cw-body demo"
+                    data-state="pasted"
+                    data-text="Hi Sam,&#10;Thanks for the quick turnaround. I’ve attached the notes from today; the two open questions are at the top."
+                  >
+                    <p class="c-input">
+                      <span class="ph">Compose your reply</span
+                      ><span class="d-text"
+                        >Hi Sam, Thanks for the quick turnaround. I’ve attached the notes from
+                        today; the two open questions are at the top.</span
+                      ><span class="caret"></span>
+                    </p>
+                    <div class="dict-pill">
+                      <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
+                      ><span class="d-label">Pasted</span>
+                    </div>
+                  </div>
+                  <div class="cw-foot">
+                    <span class="send2">Send</span
+                    ><span class="tools"><b>A</b><b>⌘</b><b>⧉</b></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="use-caption">
+              <h3>Paragraphs, not just phrases</h3>
+              <p>Dictate a whole paragraph in one hold.</p>
+            </div>
+          </div>
+
+          <!-- Google Docs / Notion -->
+          <div class="use-row" id="panel-doc" role="tabpanel" aria-labelledby="tab-doc" hidden>
+            <div
+              class="illo"
+              role="img"
+              aria-label="Animated illustration: holding the key, speaking, and a paragraph pasted into a document"
+            >
+              <div class="illo-bar">
+                <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
+                ><strong>Google Docs · Notion</strong><span class="illo-where">Editing</span>
+              </div>
+              <div class="panel docapp">
+                <div class="doc-top" aria-hidden="true">
+                  <span class="doc-ico"></span>
+                  <div class="doc-meta">
+                    <strong>Next quarter — draft</strong
+                    ><span class="doc-menu"
+                      >File&nbsp;&nbsp;Edit&nbsp;&nbsp;View&nbsp;&nbsp;Insert&nbsp;&nbsp;Format</span
+                    >
+                  </div>
+                  <span class="share">Share</span>
+                </div>
+                <div class="doc-toolbar" aria-hidden="true">
+                  <b>B</b><b style="font-style: italic">I</b
+                  ><b style="text-decoration: underline">U</b><span class="sep"></span><b>H1</b
+                  ><b>H2</b><span class="sep"></span><b>• List</b><b>Link</b>
+                </div>
+                <div class="doc-canvas">
+                  <div class="page2">
+                    <p class="page-sec">GOALS</p>
+                    <ul>
+                      <li>Fewer choices before the first dictation</li>
+                      <li>Clearer help when a permission fails</li>
+                    </ul>
+                    <p class="page-sec">WHY THIS QUARTER</p>
+                    <div
+                      class="doc-ins demo"
+                      data-state="pasted"
+                      data-text="The main goal next quarter is helping new users reach their first dictation faster. Three ideas follow, ranked by effort."
+                    >
+                      <p class="c-input">
+                        <span class="ph">Type or dictate…</span
+                        ><span class="d-text"
+                          >The main goal next quarter is helping new users reach their first
+                          dictation faster. Three ideas follow, ranked by effort.</span
+                        ><span class="caret"></span>
+                      </p>
+                      <div class="dict-pill">
+                        <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
+                        ><span class="d-label">Pasted</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="use-caption">
+              <h3>Talk through a first draft</h3>
+              <p>Get the shape of a document down, then edit with the keyboard.</p>
+            </div>
+          </div>
+
+          <!-- ChatGPT / Claude -->
+          <div class="use-row" id="panel-ai" role="tabpanel" aria-labelledby="tab-ai" hidden>
+            <div
+              class="illo"
+              role="img"
+              aria-label="Animated illustration: holding the key, speaking, and a prompt pasted into an AI chat"
+            >
+              <div class="illo-bar">
+                <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
+                ><strong>ChatGPT · Claude</strong><span class="illo-where">New chat</span>
+              </div>
+              <div class="panel aiapp">
+                <div class="ai-side" aria-hidden="true">
+                  <span class="new-chat">+ New chat</span>
+                  <p class="ai-group">Recent</p>
+                  <span class="ai-row ai-row-on">Onboarding test plan</span>
+                  <span class="ai-row">Pricing page copy</span>
+                  <span class="ai-row">Launch checklist</span>
+                  <span class="ai-row">Bug triage notes</span>
+                </div>
+                <div class="ai-main">
+                  <div class="ai-msgs">
+                    <div class="ai-user">I need a test plan for our onboarding.</div>
+                    <div class="ai-bot">
+                      <span class="bot-ico"></span>
+                      <p>Sure. What should the test plan cover?</p>
+                    </div>
+                  </div>
+                  <div
+                    class="ai-input demo"
+                    data-state="pasted"
+                    data-text="Write a short test plan for the onboarding flow: one happy path, then what happens when the microphone is denied."
+                  >
+                    <div class="dict-pill">
+                      <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
+                      ><span class="d-label">Pasted</span>
+                    </div>
+                    <p class="c-input">
+                      <span class="ph">Ask anything</span
+                      ><span class="d-text"
+                        >Write a short test plan for the onboarding flow: one happy path, then what
+                        happens when the microphone is denied.</span
+                      ><span class="caret"></span>
+                    </p>
+                    <div class="ai-tools">
+                      <span class="tools"><b>+</b><b>Tools</b></span
+                      ><span class="sendc"
+                        ><svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="#1C1B19"
+                          stroke-width="2.6"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="M12 19V5M6 11l6-6 6 6" /></svg
+                      ></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="use-caption">
+              <h3>Explain the task out loud</h3>
+              <p>Spoken prompts tend to carry more context than typed ones.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="engine" class="wrap section" style="padding-bottom: 0; gap: 28px">
+        <h2 class="h2">Choose where your speech is turned into text</h2>
+        <div class="cards-2">
+          <div class="card">
+            <h3>On this Mac</h3>
+            <p>
+              A speech model runs on your Mac. Download it once; after that dictation works offline
+              and audio never leaves your computer.
+            </p>
+            <ul>
+              <li>
+                English: fast, a one-time 477 MB download <span class="model">(Parakeet)</span>
+              </li>
+              <li>Other languages: a multilingual model <span class="model">(Qwen3-ASR)</span></li>
+              <li>No API key needed</li>
+              <li>Needs disk space and an Apple Silicon Mac</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Your own cloud key</h3>
+            <p>
+              Paste a Groq or OpenAI API key. Audio goes straight from your Mac to that provider —
+              never through a server of ours.
+            </p>
+            <ul>
+              <li>Key stored in your macOS Keychain</li>
+              <li>The provider may charge for usage on your account</li>
+              <li>Needs internet</li>
+            </ul>
+          </div>
+        </div>
+        <p class="note">You can switch between the two any time in Settings.</p>
+        <p class="compare">
+          <strong>How is this different from the Mac’s built-in dictation?</strong> You choose the
+          speech model — one on your Mac, or your own Groq or OpenAI key — you dictate by holding a
+          single key, and every line of the code is open to check.
+        </p>
+      </section>
+
+      <section id="setup" class="wrap section">
+        <h2 class="h2">Setup ends with a test dictation</h2>
+        <ol class="setup-steps">
+          <li>
+            <span class="num">1</span><strong>Allow two permissions</strong
+            ><span
+              >Microphone, and Accessibility to paste at your cursor — it doesn’t read your
+              screen.</span
+            >
+          </li>
+          <li>
+            <span class="num">2</span><strong>Choose how speech becomes text</strong
+            ><span
+              >Paste a Groq or OpenAI key, or use the model on your Mac (download it once in
+              Settings).</span
+            >
+          </li>
+          <li>
+            <span class="num">3</span><strong>Try your key</strong
+            ><span
+              >Right Option (⌥) by default, or record a different one. Hold it, say a sentence, and
+              let go.</span
+            >
+          </li>
+        </ol>
+      </section>
+
+      <section id="data" class="band">
+        <div class="wrap section" style="gap: 22px">
+          <h2 class="h2">Where your data goes</h2>
+          <div class="data-card">
+            <div>
+              <h3>Usage and error events are on by default</h3>
+              <p>
+                Anonymous usage events go to PostHog and error reports to Sentry, so we can see
+                where setup and dictation break. They carry a random install ID, not your name or
+                account. Turn them off any time in Settings → Privacy; one switch covers both.
+              </p>
+              <p>
+                <a href="https://github.com/gargankit90/dictation-app/blob/main/docs/privacy.md"
+                  >See the full list of what's sent</a
+                >
+              </p>
+            </div>
+            <div>
+              <strong>Never sent</strong>
+              <ul>
+                <li>Audio</li>
+                <li>Transcripts or anything you type</li>
+                <li>API keys</li>
+                <li>Names or window titles of the apps you use</li>
+                <li>File paths and your user name</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="wrap closing">
+        <div class="closing-copy">
+          <h2 class="h2">Free, open source, and yours to inspect</h2>
+          <p>Read every line, report a problem or send a pull request. MIT licence.</p>
+          <p class="fine">Download only from vocetlabs.com or the project’s GitHub releases.</p>
+        </div>
+        <div class="ctas">
+          <a
+            class="btn btn-primary"
+            data-download
+            data-ready-label="Download for Mac"
+            href="https://github.com/gargankit90/dictation-app"
+            >Alpha coming soon</a
+          >
+          <a class="btn btn-secondary" href="https://github.com/gargankit90/dictation-app"
+            ><svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M8 6l-5 6 5 6M16 6l5 6-5 6" /></svg
+            >View source</a
+          >
+          <a class="text-link" href="https://github.com/gargankit90/dictation-app/issues"
+            >Report an issue</a
+          >
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-row">
+        <span
+          ><strong>Vocet Labs</strong> — Dictation for Mac today; Windows is on the roadmap.</span
+        >
+        <span
+          >© 2026 Vocet Labs · MIT ·
+          <a href="https://github.com/gargankit90/dictation-app">GitHub</a> ·
+          <a href="#data">Privacy</a></span
+        >
+      </div>
+    </footer>
+
+    <script>
+      (function () {
+        // Download buttons: until a stable release with a Mac installer exists they say
+        // "coming soon" and link to the repository. Once GitHub's "latest" release (which
+        // skips drafts and pre-releases) has a .dmg, they point straight at it and take
+        // their data-ready-label text. If the lookup fails, they stay as they are.
+        var REPO = "gargankit90/dictation-app";
+        fetch("https://api.github.com/repos/" + REPO + "/releases/latest", {
+          headers: { Accept: "application/vnd.github+json" },
+        })
+          .then(function (r) {
+            return r.ok ? r.json() : Promise.reject(r.status);
+          })
+          .then(function (rel) {
+            var dmg =
+              (rel.assets || []).filter(function (a) {
+                return /_aarch64\.dmg$/.test(a.name);
+              })[0] ||
+              (rel.assets || []).filter(function (a) {
+                return /\.dmg$/.test(a.name);
+              })[0];
+            if (!dmg) return;
+            document.querySelectorAll("[data-download]").forEach(function (a) {
+              a.href = dmg.browser_download_url;
+              a.setAttribute("download", "");
+              if (a.dataset.readyLabel) a.textContent = a.dataset.readyLabel;
+            });
+            var notes = document.getElementById("release-notes");
+            if (notes) notes.hidden = false;
+            var v = document.getElementById("release-version");
+            if (v && rel.tag_name) v.textContent = "Alpha " + rel.tag_name;
+          })
+          .catch(function () {
+            /* keep the "coming soon" link to the repository */
+          });
+
+        // Hero: one composer that changes app on every loop
+        var scenes = [
+          {
+            app: "Slack",
+            where: "#design-review",
+            av: "P",
+            from: "Priya",
+            msg: "Can you look at the onboarding copy before Friday?",
+            ph: "Message #design-review",
+            hint: "Enter to send",
+            text: "Yes, I’ll review the onboarding copy tomorrow morning and send notes by noon.",
+          },
+          {
+            app: "Mail",
+            where: "Reply to Sam",
+            av: "S",
+            from: "Sam Rivera",
+            msg: "Could you send the notes from today’s review?",
+            ph: "Write your reply",
+            hint: "⌘ Enter to send",
+            text: "Hi Sam, attached are today’s notes. The two open questions are at the top — can we settle them on Thursday?",
+          },
+          {
+            app: "ChatGPT · Claude",
+            where: "New chat",
+            av: "AI",
+            from: "Assistant",
+            msg: "What would you like to work on?",
+            ph: "Ask anything",
+            hint: "Enter to send",
+            text: "Turn these meeting notes into three action items, each with an owner and a due date.",
+          },
+        ];
+        var heroDemo = document.getElementById("hero-demo");
+        var sceneIdx = -1;
+        function setText(id, v) {
+          var el = document.getElementById(id);
+          if (el) el.textContent = v;
+        }
+        if (heroDemo) {
+          heroDemo._next = function () {
+            sceneIdx = (sceneIdx + 1) % scenes.length;
+            var s = scenes[sceneIdx];
+            setText("h-app", s.app);
+            setText("h-where", s.where);
+            setText("h-av", s.av);
+            setText("h-from", s.from);
+            setText("h-msg", s.msg);
+            setText("h-ph", s.ph);
+            setText("h-text", s.text);
+            setText("h-hint", s.hint);
+          };
+        }
+
+        // Phone visitors: copy the link to open on a Mac later
+        var copyBtn = document.getElementById("copy-link");
+        if (copyBtn)
+          copyBtn.addEventListener("click", function () {
+            var url = "https://vocetlabs.com/";
+            function done() {
+              copyBtn.textContent = "Link copied";
+            }
+            if (navigator.share) {
+              navigator.share({ title: "Vocet Dictation for Mac", url: url }).catch(function () {});
+              return;
+            }
+            if (navigator.clipboard) {
+              navigator.clipboard.writeText(url).then(done, function () {});
+            }
+          });
+
+        // Animated demos: idle -> listening -> transcribing -> pasted, looping like a GIF
+        var reduce =
+          window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        var labels = {
+          idle: "",
+          listening: "Listening…",
+          transcribing: "Transcribing…",
+          pasted: "Pasted",
+        };
+        function setState(d, s) {
+          d.dataset.state = s;
+          var l = d.querySelector(".d-label");
+          if (l) l.textContent = labels[s];
+        }
+        function stop(d) {
+          (d._timers || []).forEach(clearTimeout);
+          d._timers = [];
+        }
+        function play(d) {
+          stop(d);
+          if (reduce) {
+            setState(d, "pasted");
+            return;
+          }
+          if (d._next) d._next();
+          setState(d, "idle");
+          d._timers = [
+            setTimeout(function () {
+              setState(d, "listening");
+            }, 700),
+            setTimeout(function () {
+              setState(d, "transcribing");
+            }, 3000),
+            setTimeout(function () {
+              setState(d, "pasted");
+            }, 3800),
+            setTimeout(function () {
+              play(d);
+            }, 9000),
+          ];
+        }
+        var demos = Array.prototype.slice.call(document.querySelectorAll(".demo"));
+        function refreshDemos() {
+          demos.forEach(function (d) {
+            var panel = d.closest('[role="tabpanel"]');
+            var shown = !panel || !panel.hidden;
+            if (shown && d._inView) {
+              if (!d._timers || !d._timers.length) play(d);
+            } else {
+              stop(d);
+              setState(d, "pasted");
+            }
+          });
+        }
+        if ("IntersectionObserver" in window) {
+          var io = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (e) {
+                e.target._inView = e.isIntersecting;
+              });
+              refreshDemos();
+            },
+            { threshold: 0.4 },
+          );
+          demos.forEach(function (d) {
+            io.observe(d);
+          });
+        } else {
+          demos.forEach(function (d) {
+            d._inView = true;
+          });
+          refreshDemos();
+        }
+
+        // Use-case tabs (with arrow-key support)
+        var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+        function select(tab) {
+          tabs.forEach(function (t) {
+            var on = t === tab;
+            t.setAttribute("aria-selected", on ? "true" : "false");
+            t.tabIndex = on ? 0 : -1;
+            document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
+          });
+          demos.forEach(function (d) {
+            stop(d);
+          });
+          setTimeout(refreshDemos, 30);
+        }
+        tabs.forEach(function (tab, i) {
+          tab.addEventListener("click", function () {
+            select(tab);
+          });
+          tab.addEventListener("keydown", function (e) {
+            var next = null;
+            if (e.key === "ArrowRight") next = tabs[(i + 1) % tabs.length];
+            if (e.key === "ArrowLeft") next = tabs[(i - 1 + tabs.length) % tabs.length];
+            if (e.key === "Home") next = tabs[0];
+            if (e.key === "End") next = tabs[tabs.length - 1];
+            if (next) {
+              e.preventDefault();
+              select(next);
+              next.focus();
+            }
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

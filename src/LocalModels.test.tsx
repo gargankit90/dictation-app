@@ -16,6 +16,7 @@ function model(id: string, extra: Partial<LocalModelInfo_Serialize>): LocalModel
   return {
     id,
     name: parakeet ? "Parakeet Unified 0.6B" : "Qwen3-ASR 0.6B",
+    language_codes: parakeet ? ["en"] : ["en", "de", "hi", "fr"],
     languages: parakeet ? "English only" : "30 languages, including English and Hindi",
     size_bytes: parakeet ? 477_274_496 : 589_560_480,
     downloaded_bytes: 0,
@@ -114,7 +115,7 @@ describe("the engine choice", () => {
     expect(screen.queryByLabelText("Provider")).toBeNull();
     expect(screen.getByText(/No key needed/)).toBeTruthy();
     await screen.findByRole("radio", { name: /Parakeet Unified 0.6B \(recommended\)/ });
-    expect(screen.getByText(/English only/)).toBeTruthy();
+    expect(screen.getByText(/\(recommended\) — English only/)).toBeTruthy();
     expect(screen.getByText(/including English and Hindi/)).toBeTruthy();
   });
 
@@ -232,4 +233,84 @@ describe("the model picker", () => {
 it("rounds megabytes up", () => {
   expect(megabytes(477_274_496)).toBe("478 MB");
   expect(megabytes(0)).toBe("0 MB");
+});
+
+describe("U2: the language picker follows the engine", () => {
+  const language = () => screen.getByLabelText<HTMLInputElement>("Language");
+  const optionNames = () => screen.getAllByRole("option").map((o) => o.textContent);
+
+  it("offers only the selected model's languages, and re-filters when the model changes", async () => {
+    backend.settings = { ...backend.settings, transcription: "local" };
+    await open();
+    await screen.findByRole("radio", { name: /Parakeet/ });
+    fireEvent.focus(language());
+    await waitFor(() => {
+      expect(optionNames()).toEqual(["Detect automatically", "English"]);
+    });
+    fireEvent.blur(language());
+
+    fireEvent.click(screen.getByRole("radio", { name: /Qwen3-ASR/ }));
+    fireEvent.focus(language());
+    expect(optionNames()).toEqual([
+      "Detect automatically",
+      "English",
+      "French (Français)",
+      "German (Deutsch)",
+      "Hindi (हिन्दी)",
+    ]);
+  });
+
+  it("shows the helper line and link with the English-only model, and the link switches model", async () => {
+    backend.settings = { ...backend.settings, transcription: "local" };
+    await open();
+    await screen.findByText(
+      /The English model understands English only\. For Hindi and other languages,/,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "choose the multilingual model" }));
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: /Qwen3-ASR/ }).checked).toBe(true);
+    expect(screen.queryByText(/understands English only/)).toBeNull();
+  });
+
+  it("keeps and flags a saved language the model can't do; saving doesn't change it", async () => {
+    backend.settings = { ...backend.settings, transcription: "local", language: "de" };
+    await open();
+    await waitFor(() => {
+      expect(language().value).toBe("German, not supported by the English model");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Settings saved.");
+    expect(backend.settings.language).toBe("de");
+
+    // Switching to the multilingual model clears the flag.
+    fireEvent.click(screen.getByRole("radio", { name: /Qwen3-ASR/ }));
+    expect(language().value).toBe("German (Deutsch)");
+  });
+
+  it("offers Groq's full Whisper set (Bengali, Telugu) and keeps them for either provider", async () => {
+    backend.settings = { ...backend.settings, language: "bn" };
+    await open();
+    expect(language().value).toBe("Bengali (বাংলা)");
+    cleanup();
+    backend.settings = { ...backend.settings, provider: "openai", language: "te" };
+    await open();
+    expect(language().value).toBe("Telugu (తెలుగు)");
+  });
+
+  it("switching from Groq to OpenAI flags a saved Cantonese as unsupported and keeps it", async () => {
+    backend.settings = { ...backend.settings, language: "yue" };
+    await open();
+    expect(language().value).toBe("Cantonese (粵語)");
+    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+    expect(language().value).toBe("Cantonese, not supported by OpenAI");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Settings saved.");
+    expect(backend.settings.language).toBe("yue");
+    expect(backend.settings.provider).toBe("openai");
+  });
+
+  it("flags a code that isn't a Whisper language, without changing it", async () => {
+    backend.settings = { ...backend.settings, language: "fil" };
+    await open();
+    expect(language().value).toBe("Filipino, not supported by Groq");
+  });
 });

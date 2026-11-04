@@ -140,6 +140,20 @@ const keyBox = () => screen.getByLabelText<HTMLInputElement>(/API key/);
 const type = (label: string | RegExp, value: string) => {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 };
+const LANGUAGE_WORDS: Record<string, string> = {
+  "": "Detect",
+  de: "German",
+  en: "English",
+  es: "Spanish",
+  fr: "French",
+};
+/** Chooses a language the way a person does: search by name, press Enter. */
+const pick = (code: string) => {
+  const box = screen.getByLabelText("Language");
+  fireEvent.focus(box);
+  fireEvent.change(box, { target: { value: LANGUAGE_WORDS[code] ?? code } });
+  fireEvent.keyDown(box, { key: "Enter" });
+};
 const click = (name: string) => {
   fireEvent.click(screen.getByRole("button", { name }));
 };
@@ -175,17 +189,14 @@ describe("loading", () => {
 
     expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("openai");
     expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F5");
-    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("de");
+    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("German (Deutsch)");
     expect(screen.getByLabelText(/OpenAI API key/)).toBeTruthy();
   });
 
   it("shows the defaults without a language as 'detect'", async () => {
     await open();
 
-    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("");
-    expect(screen.getByLabelText<HTMLInputElement>("Language").placeholder).toBe(
-      "Detect automatically",
-    );
+    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("Detect automatically");
   });
 
   it("says Key saved only when the app says a key is stored", async () => {
@@ -220,9 +231,8 @@ describe("loading", () => {
 });
 
 describe("criterion 1: the form validates input", () => {
-  it("refuses a bad language, hotkey and key without calling the app", async () => {
+  it("refuses a bad hotkey and key without calling the app", async () => {
     await open();
-    type("Language", "english");
     type("Or type it", "Ctrl+");
     type(/API key/, "two words");
     click("Save");
@@ -230,7 +240,6 @@ describe("criterion 1: the form validates input", () => {
     expect((await screen.findAllByRole("alert")).map((alert) => alert.textContent)).toEqual([
       "A key has no spaces; check what you pasted.",
       "Write the hotkey as keys joined by +, such as Ctrl+Shift+Space.",
-      "Use a two or three letter language code such as en, or leave it empty to detect.",
     ]);
     expect(backend.named("set_api_key")).toEqual([]);
     expect(backend.named("save_settings")).toEqual([]);
@@ -274,7 +283,7 @@ describe("criterion 1: the form validates input", () => {
 
   it("an empty key is fine when saving the other settings", async () => {
     await open();
-    type("Language", "fr");
+    pick("fr");
     click("Save");
 
     expect((await screen.findByRole("status")).textContent).toBe("Settings saved.");
@@ -427,7 +436,7 @@ describe("criterion 2: settings save and reload", () => {
     });
     type(/API key/, ` ${KEY} `);
     type("Or type it", " Ctrl+Shift+Space ");
-    type("Language", " DE ");
+    pick("de");
     click("Save");
 
     expect((await screen.findByRole("status")).textContent).toBe("Settings saved.");
@@ -458,7 +467,7 @@ describe("criterion 2: settings save and reload", () => {
     await open();
     type("Provider", "openai");
     type("Or type it", "F6");
-    type("Language", "es");
+    pick("es");
     click("Save");
     await screen.findByText("Settings saved.");
     cleanup();
@@ -467,13 +476,13 @@ describe("criterion 2: settings save and reload", () => {
 
     expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("openai");
     expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F6");
-    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("es");
+    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("Spanish (Español)");
   });
 
   it("clearing the language saves 'detect' (null)", async () => {
     backend.settings = { ...backend.settings, language: "en" };
     await open();
-    type("Language", "");
+    pick("");
     click("Save");
     await screen.findByText("Settings saved.");
 
@@ -558,7 +567,7 @@ describe("criterion 2: settings save and reload", () => {
     await open();
     const hold = gate();
     backend.holdSetHotkey = hold.closed;
-    type("Language", "de");
+    pick("de");
     click("Record a different key");
     keyDown("F6");
     await waitFor(() => {
@@ -639,7 +648,7 @@ describe("criterion 2: settings save and reload", () => {
     keyDown("MetaRight");
     keyUp("MetaRight");
     await screen.findByText("Dictation key saved.");
-    type("Language", "fr");
+    pick("fr");
     click("Save");
     await screen.findByText("Settings saved.");
     expect(backend.settings.hotkey).toBe("RightCmd");
@@ -673,7 +682,7 @@ describe("criterion 2: settings save and reload", () => {
     backend.failing.set("set_api_key", "keychain access was denied");
     await open();
     type(/API key/, KEY);
-    type("Language", "fr");
+    pick("fr");
     click("Save");
 
     expect((await screen.findByRole("alert")).textContent).toBe("keychain access was denied");
@@ -757,7 +766,7 @@ describe("review round 1", () => {
     it("saving another field leaves a non-default model alone", async () => {
       backend.settings = { ...backend.settings, model: "whisper-large-v3", language: null };
       await open();
-      type("Language", "de");
+      pick("de");
       click("Save");
       await screen.findByText("Settings saved.");
 
@@ -789,7 +798,7 @@ describe("review round 1", () => {
       backend.settings = { ...backend.settings, model: "whisper-custom" };
       cleanup();
       await open();
-      type("Language", "fr");
+      pick("fr");
       click("Save");
       await screen.findByText("Settings saved.");
       expect(backend.settings.model).toBe("whisper-custom");
@@ -877,14 +886,16 @@ describe("review round 1", () => {
       // changes nothing.
       type("Provider", "openai");
       type(/API key/, OTHER_KEY);
-      type("Language", "de");
+      pick("de");
       hold.open();
       await screen.findByText("Settings saved.");
 
       expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("groq");
       expect(backend.settings.provider).toBe("groq");
       expect(backend.settings.language).toBeNull();
-      expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("");
+      expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe(
+        "Detect automatically",
+      );
       expect(screen.getByLabelText(/Groq API key/)).toBeTruthy();
       expect(screen.getByText("Key saved")).toBeTruthy();
       expect(backend.keys).toEqual({ groq: true, openai: false });
@@ -914,7 +925,7 @@ describe("review round 1", () => {
         return handle(command, payload);
       });
       type(/API key/, KEY);
-      type("Language", "fr");
+      pick("fr");
       click("Save");
       await screen.findByRole("button", { name: "Saving…" });
       expect(locked(keyBox())).toBe(true);
@@ -1114,7 +1125,7 @@ describe("launch at login", () => {
     await open();
     // On in System Settings; this window has not seen a focus event yet.
     backend.settings = { ...backend.settings, launch_at_login: true };
-    type("Language", "de");
+    pick("de");
     click("Save");
     await screen.findByText("Settings saved.");
     expect(backend.named("set_launch_at_login")).toHaveLength(0);
@@ -1158,7 +1169,7 @@ describe("T2: settings edges", () => {
   it("partial_save_keeps_saved_key_status_and_allows_retry", async () => {
     await open();
     type(/API key/, KEY);
-    type("Language", "de");
+    pick("de");
     // The key is stored; the settings file then can't be written.
     backend.failing.set("save_settings", "could not write the settings file: disk full");
     click("Save");
@@ -1170,7 +1181,7 @@ describe("T2: settings edges", () => {
     expect(keyBox().value).toBe("");
     expect(screen.queryByText("Settings saved.")).toBeNull();
     // The rest is still the user's, ready to retry.
-    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("de");
+    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("German (Deutsch)");
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Save" }).disabled).toBe(false);
 
     backend.failing.delete("save_settings");
@@ -1204,7 +1215,7 @@ describe("T2: settings edges", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F6");
     expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("openai");
     expect(screen.queryByText(/default model/)).toBeNull();
-    type("Language", "fr");
+    pick("fr");
     click("Save");
     await waitFor(() => {
       expect(backend.named("save_settings")).toHaveLength(2);
@@ -1237,7 +1248,7 @@ describe("T2: settings edges", () => {
   it("a hotkey the app couldn't switch to is not reported as saved", async () => {
     await open();
     type("Or type it", "F6");
-    type("Language", "de");
+    pick("de");
     backend.failing.set(
       "set_hotkey",
       "Couldn't switch the hotkey to F6 (hotkey unavailable: busy). RightAlt still works.",
@@ -1275,7 +1286,7 @@ describe("T2: settings edges", () => {
     backend.holdTest = test.closed;
     click("Test key");
     await screen.findByRole("button", { name: "Testing…" });
-    type("Language", "de");
+    pick("de");
     fireEvent.submit(form());
     await flush();
     expect(backend.named("save_settings")).toHaveLength(1);
