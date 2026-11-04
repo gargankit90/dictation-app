@@ -20,10 +20,11 @@ download_wait() {
     if VM_TERMINAL_TIMEOUT=90 ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" Downloaded 60; then
       return 0
     fi
-    if ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Paused at" 2 ||
-      ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Not downloaded" 2; then
-      log "  the download stopped part way; pressing Download to continue it"
-      ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Download || true
+    # Only "Paused at": "Not downloaded" is also what the other models' rows say.
+    if ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Paused at" 2; then
+      # The paused model's button says "Resume download" (the others "Download").
+      log "  the download stopped part way; pressing Resume download"
+      ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Resume download" || true
     fi
   done
   return 1
