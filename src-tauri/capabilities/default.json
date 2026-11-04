@@ -11,6 +11,7 @@
     "allow-test-api-key",
     "allow-get-onboarding",
     "allow-request-permission",
+    "allow-open-setup",
     "allow-set-onboarding-step",
     "allow-finish-onboarding",
     "allow-relaunch-app",
@@ -27,7 +28,8 @@
     "allow-build-report",
     "allow-save-report",
     "allow-open-issue",
-    "allow-take-troubleshoot-request",
+    "allow-take-window-request",
+    "allow-reveal-log-file",
     "allow-dictation-progress",
     "allow-launch-notice"
   ]

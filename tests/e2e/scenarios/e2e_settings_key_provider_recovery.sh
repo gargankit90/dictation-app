@@ -86,7 +86,7 @@ e2e_settings_key_provider_recovery() {
   expect "TextEdit got nothing (read back exactly)" textedit_is ""
   expect "the clipboard is untouched" test "$(clipboard)" = "$PROVIDER_SENTINEL"
   expect "the tray shows the error, and still fits in the menu bar (#151)" \
-    tray_shows "$TRAY_ERROR_TITLE" "$TRAY_TOOLTIP: Your API key was rejected. Open Settings → Transcription to fix it."
+    env_tray_fix "Open Speech settings…" tray_shows "! Your API key was rejected." "Vocet: Your API key was rejected."
   expect "the wrong key wasn't retried" provider_requests_are 1
 
   # Fix it in Settings, as a user would.

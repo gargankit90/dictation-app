@@ -108,6 +108,8 @@ pub trait Shell: Send + Sync {
     fn hide_window(&self);
     /// Quits and starts the app again.
     fn restart(&self);
+    /// Shows the window on its first-run steps.
+    fn show_onboarding_window(&self);
 }
 
 /// The app, for the onboarding commands.
@@ -721,6 +723,31 @@ pub async fn get_onboarding(
     Ok(onboarding.status(&*permissions.0))
 }
 
+/// Settings, Help, "Set up dictation…" (U5): opens the first-run steps at
+/// the step the user was on, now that the tray's "Resume setup…" is hidden
+/// once setup is done. The key is read (bounded) off the async runtime.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_setup(
+    shell: State<'_, AppShell>,
+    onboarding: State<'_, Arc<Onboarding>>,
+    permissions: State<'_, OsPermissions>,
+    config: State<'_, AppConfig>,
+    live: State<'_, LiveEngine>,
+) -> Result<(), String> {
+    let (onboarding, os) = (Arc::clone(&onboarding), Arc::clone(&permissions.0));
+    let (config, live) = (Arc::clone(&config.0), live.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let readiness = onboarding::readiness(&*os, true, || onboarding::key_saved(&config, &live));
+        let step = onboarding.open(readiness);
+        tracing::info!(?step, "onboarding opened from Settings");
+    })
+    .await
+    .map_err(|_| "the setup task crashed".to_owned())?;
+    shell.0.show_onboarding_window();
+    Ok(())
+}
+
 /// Asks macOS for `permission`: its prompt while it hasn't been asked,
 /// System Settings at the permission's page once refused (Accessibility:
 /// both). Returns at once; `get_onboarding` shows the answer once the user
@@ -830,6 +857,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         test_api_key,
         get_onboarding,
         request_permission,
+        open_setup,
         set_onboarding_step,
         finish_onboarding,
         relaunch_app,
@@ -846,7 +874,8 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::build_report,
         crate::diagnostics::save_report,
         crate::diagnostics::open_issue,
-        crate::diagnostics::take_troubleshoot_request,
+        crate::diagnostics::take_window_request,
+        crate::diagnostics::reveal_log_file,
         crate::diagnostics::dictation_progress,
         launch_notice,
         crate::overlay::get_overlay_level,
@@ -901,6 +930,7 @@ mod tests {
         fn restart(&self) {
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
+        fn show_onboarding_window(&self) {}
     }
 
     /// M5.7 criterion 2: the tray's Relaunch restarts the app once, through
@@ -934,6 +964,7 @@ mod tests {
             "testApiKey",
             "getOnboarding",
             "requestPermission",
+            "openSetup",
             "setOnboardingStep",
             "finishOnboarding",
             "relaunchApp",
@@ -950,7 +981,8 @@ mod tests {
             "buildReport",
             "saveReport",
             "openIssue",
-            "takeTroubleshootRequest",
+            "takeWindowRequest",
+            "revealLogFile",
             "dictationProgress",
             "launchNotice",
         ] {
@@ -961,7 +993,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 26,
+            commands, 28,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -2579,6 +2611,7 @@ mod capability_tests {
         app.manage(super::AppShell(std::sync::Arc::new(NoShell)));
         app.manage(crate::usage::Usage::disabled());
         app.manage(crate::diagnostics::Diagnostics::default());
+        app.manage(crate::LogDir(dir.join("logs")));
         app.manage(super::LaunchNotice(None));
         app.manage(crate::overlay::OverlayLevel::default());
         let windows = labels
@@ -2638,6 +2671,7 @@ mod capability_tests {
     impl super::Shell for NoShell {
         fn hide_window(&self) {}
         fn restart(&self) {}
+        fn show_onboarding_window(&self) {}
     }
 
     fn invoke(
@@ -2753,9 +2787,11 @@ mod capability_tests {
                 },
                 // F1: it must succeed, through the fake opener.
                 "open_issue" => invoke(main, command, args(command)).map(|_| ()),
-                "run_checks" | "test_connection" | "build_report" | "take_troubleshoot_request" => {
-                    invoke(main, command, args(command)).map(|_| ())
-                }
+                "run_checks"
+                | "test_connection"
+                | "build_report"
+                | "take_window_request"
+                | "reveal_log_file" => invoke(main, command, args(command)).map(|_| ()),
                 // No keychain, network or OS prompt: the onboarding ones
                 // run on fakes (granted permissions, no shell).
                 "get_settings" | "save_settings" | "get_onboarding" | "finish_onboarding"
@@ -2776,7 +2812,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 26);
+        assert_eq!(COMMAND_NAMES.len(), 28);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");
@@ -2785,7 +2821,27 @@ mod capability_tests {
             "{}",
             urls[0]
         );
-        assert!(fixture.opener.folders().is_empty());
+        // U5: the only folder opened is the log folder, by "Show log file",
+        // and through the fake: no Finder window.
+        assert_eq!(fixture.opener.folders().len(), 1);
+    }
+
+    /// U5 criterion 6: Troubleshoot's "Show log file" opens the log folder
+    /// through the opener port, and a failing launcher is reported.
+    #[test]
+    fn criterion_6_show_log_file_goes_through_the_opener() {
+        let fixture = app_with_windows(&[MAIN]);
+        let main = &fixture.windows[0];
+        invoke(main, "reveal_log_file", args("reveal_log_file")).unwrap();
+        let folders = fixture.opener.folders();
+        assert_eq!(folders.len(), 1, "{folders:?}");
+        assert!(folders[0].ends_with("logs"), "{folders:?}");
+        fixture.opener.fail_from_now_on();
+        let error = invoke(main, "reveal_log_file", args("reveal_log_file")).unwrap_err();
+        assert!(
+            error.to_string().contains("Couldn't open the log folder"),
+            "{error}"
+        );
     }
 
     /// F1: a failing launcher is reported, not swallowed.
