@@ -52,6 +52,7 @@ pub mod commands;
 pub mod diagnostics;
 pub mod engine;
 mod flags;
+mod history;
 mod key_writes;
 mod logging;
 pub mod models;
@@ -68,8 +69,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Context as _;
 use dictation_pipeline::debug_audio::SavingAudio;
+use dictation_pipeline::history::{History, Recording};
 use dictation_pipeline::hotkey_setting::{self, ConfigurableHotkey, HotkeyControl};
-use dictation_pipeline::last_dictation::{LastDictation, Remembering};
 use dictation_pipeline::pipeline::{Config, CursorReader, Pipeline, Ports, UiEvent};
 use dictation_pipeline::stand_ins::{GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
@@ -88,6 +89,7 @@ use dictation_platform::secrets::KeychainSecretStore;
 use dictation_platform::single_instance::{self, Instance, Launch, Message, Rejected};
 use dictation_ports::{
     AudioSource, EngineKind, Permission, PermissionError, PermissionStatus, Permissions,
+    TextInserter,
 };
 use dictation_transcribe::engine::{Engine, Transcribers};
 use dictation_transcribe::mock::MockTranscriber;
@@ -154,6 +156,16 @@ impl Permissions for ShellPermissions {
 /// The audio source for this launch's flags: the microphone, or (debug
 /// builds, `--debug-audio-file`) a WAV file; with `--debug-save-audio`
 /// (debug builds) every recording is also saved under `recordings`.
+/// The real inserter, or the failing one of `--debug-fail-paste`.
+fn shell_inserter(launch: &flags::LaunchFlags) -> Box<dyn TextInserter> {
+    if launch.fail_paste {
+        tracing::info!("test hook: every paste fails");
+        Box::new(dictation_pipeline::test_hooks::FailingPaste)
+    } else {
+        Box::new(SystemInserter::new())
+    }
+}
+
 fn shell_audio(
     launch: &flags::LaunchFlags,
     recordings: &Path,
@@ -333,9 +345,6 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         dictation_platform::reveal::SystemOpener,
     )));
 
-    let last_dictation = LastDictation::default();
-    tray_menu::build(app, last_dictation.clone()).context("could not create the tray icon")?;
-
     let argv: Vec<String> = std::env::args().collect();
     let launch = flags::parse(&argv, flags::TEST_FLAGS);
     // Settings and API keys for the commands (M3.3), used by the settings UI
@@ -346,6 +355,22 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         dictation_platform::secrets::KeychainSecretStore::new(),
     ));
     tracing::info!(path = %config.path().display(), "settings file");
+    // Recent dictations (U7). Settings that can't be read mean the user's
+    // choice isn't known: nothing is saved or deleted until it is.
+    let history = Arc::new(History::open(
+        dictation_platform::history_file::HistoryFile::new(
+            app.path()
+                .app_data_dir()
+                .context("no data directory")?
+                .join(dictation_pipeline::history::HISTORY_FILE),
+        ),
+        config
+            .settings()
+            .ok()
+            .map(|settings| settings.history_limit),
+    ));
+    app.manage(history::AppHistory(Arc::clone(&history)));
+    tray_menu::build(app, Arc::clone(&history)).context("could not create the tray icon")?;
     // The saved hotkey (a file read; the keychain isn't touched).
     let (hotkey, hotkey_control, injector) =
         shell_hotkey(hotkey_setting::startup_spec(config.settings()));
@@ -431,7 +456,10 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         hotkey,
         audio,
         transcriber: transcribers.clone(),
-        inserter: Remembering::new(SystemInserter::new(), last_dictation),
+        inserter: Recording::new(shell_inserter(&launch), history, {
+            let config = Arc::clone(&config);
+            move || tray_menu::engine_name(&config.settings().unwrap_or_default())
+        }),
         permissions,
         clock: SystemClock::new(),
     };

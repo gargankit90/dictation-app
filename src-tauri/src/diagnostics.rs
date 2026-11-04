@@ -51,6 +51,8 @@ pub enum WindowRequest {
     Speech,
     /// Settings, on the dictation key.
     Shortcut,
+    /// Settings, on the recent dictations (U7).
+    History,
 }
 
 impl WindowRequest {
@@ -62,6 +64,7 @@ impl WindowRequest {
             Self::Report => "report",
             Self::Speech => "speech",
             Self::Shortcut => "shortcut",
+            Self::History => "history",
         }
     }
 }
@@ -132,7 +135,7 @@ impl Diagnostics {
         lock(&self.0.wanted).take()
     }
 
-    fn recent(&self) -> Vec<LoggedError> {
+    pub(crate) fn recent(&self) -> Vec<LoggedError> {
         lock(&self.0.log).recent()
     }
 }
@@ -754,7 +757,7 @@ pub async fn dictation_progress(
 }
 
 /// What the tray asked the window to show since the window last asked, as
-/// `"troubleshoot"`, `"report"`, `"speech"` or `"shortcut"`; empty if
+/// `"troubleshoot"`, `"report"`, `"speech"`, `"shortcut"` or `"history"`; empty if
 /// nothing. Asking clears it.
 #[tauri::command]
 #[specta::specta]

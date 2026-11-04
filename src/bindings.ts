@@ -24,8 +24,10 @@ export const commands = {
 	 *  [`set_share_usage_events`] changes it, so a Save can never undo a newer
 	 *  opt-out (A1 review, round 1). The same goes for the hotkey, which only
 	 *  [`set_hotkey`] changes (K1 review, round 1): a form loaded before the key
-	 *  was recorded can't switch it back, and for `launch_at_login`, which only
-	 *  [`set_launch_at_login`] changes (S1).
+	 *  was recorded can't switch it back, for `launch_at_login`, which only
+	 *  [`set_launch_at_login`] changes (S1), and for `history_limit`, which only
+	 *  [`crate::history::set_history_limit`] changes (U7), since lowering it
+	 *  deletes entries only after the user confirms.
 	 */
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, string>(__TAURI_INVOKE("save_settings", { settings })),
 	/**  Stores `key` as `provider`'s API key in the keychain. Write-only. */
@@ -135,7 +137,7 @@ export const commands = {
 	openIssue: () => typedError<null, string>(__TAURI_INVOKE("open_issue")),
 	/**
 	 *  What the tray asked the window to show since the window last asked, as
-	 *  `"troubleshoot"`, `"report"`, `"speech"` or `"shortcut"`; empty if
+	 *  `"troubleshoot"`, `"report"`, `"speech"`, `"shortcut"` or `"history"`; empty if
 	 *  nothing. Asking clears it.
 	 */
 	takeWindowRequest: () => typedError<string, string>(__TAURI_INVOKE("take_window_request")),
@@ -192,6 +194,23 @@ export const commands = {
 	getAppInfo: () => typedError<AppInfo_Serialize, string>(__TAURI_INVOKE("get_app_info")),
 	/**  Checks for updates as the tray's item does: a dialog says what it found. */
 	checkForUpdates: () => typedError<null, string>(__TAURI_INVOKE("check_for_updates")),
+	/**  The recent dictations, newest first. History is in memory, so no blocking. */
+	listHistory: () => typedError<HistoryRow[], string>(__TAURI_INVOKE("list_history")),
+	/**
+	 *  Puts an entry's full text on the clipboard, with the same privacy markers
+	 *  as the menu's "Copy last dictation", so clipboard managers skip it.
+	 */
+	copyHistoryEntry: (id: string) => typedError<null, string>(__TAURI_INVOKE("copy_history_entry", { id })),
+	/**  Deletes one entry. */
+	deleteHistoryEntry: (id: string) => typedError<null, string>(__TAURI_INVOKE("delete_history_entry", { id })),
+	/**  Deletes every entry. The window has already asked the user. */
+	clearHistory: () => typedError<null, string>(__TAURI_INVOKE("clear_history")),
+	/**
+	 *  Sets how many dictations are kept, and nothing else, then trims to it at
+	 *  once; 0 (Off) deletes them all. The window has already asked the user if
+	 *  that deletes anything.
+	 */
+	setHistoryLimit: (limit: number) => typedError<null, string>(__TAURI_INVOKE("set_history_limit", { limit })),
 	/**
 	 *  The newest input level, in dBFS, for the overlay's meter; silence when
 	 *  nothing records. Only the overlay window may call it
@@ -460,6 +479,18 @@ export type FixAction =
 /**  Nothing to click: the next dictation is the retry. */
 "try_again";
 
+/**  One row of Settings → History. Deliberately no `Debug`: it holds the text. */
+export type HistoryRow = {
+	/**  The entry's id, as text (a 64-bit number doesn't fit a JS number). */
+	id: string,
+	/**  The whole text; the window shows two lines of it. */
+	text: string,
+	/**  When it finished, in milliseconds since the Unix epoch. */
+	created_at: number | null,
+	/**  Whether the paste worked. */
+	pasted: boolean,
+};
+
 /**  Why a key test failed. Never contains the key. */
 export type KeyTestError = {
 	/**  The category. */
@@ -652,6 +683,11 @@ export type Settings_Deserialize = {
 	 *  On by default; a file without it loads with `true`.
 	 */
 	share_usage_events?: boolean,
+	/**
+	 *  How many recent dictations are kept, one of [`HISTORY_LIMITS`] (U7).
+	 *  A file without it loads with [`DEFAULT_HISTORY_LIMIT`].
+	 */
+	history_limit?: number,
 };
 
 /**  What the user can set. Never holds the API key. */
@@ -688,6 +724,11 @@ export type Settings_Serialize = {
 	 *  On by default; a file without it loads with `true`.
 	 */
 	share_usage_events: boolean,
+	/**
+	 *  How many recent dictations are kept, one of [`HISTORY_LIMITS`] (U7).
+	 *  A file without it loads with [`DEFAULT_HISTORY_LIMIT`].
+	 */
+	history_limit: number,
 };
 
 /**  One onboarding step, in order. */

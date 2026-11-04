@@ -270,6 +270,8 @@ pub enum SettingName {
     LaunchAtLogin,
     /// Sharing usage events.
     ShareUsageEvents,
+    /// How many recent dictations are kept (never how many that is).
+    HistoryLimit,
 }
 
 /// What can be recorded. Serialises as `{"event": name, "properties": {…}}`.
