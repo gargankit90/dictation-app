@@ -109,14 +109,16 @@ login_box_shows() {
 }
 
 # login_box_save <on|off>: sets the box like a user and saves; "Settings
-# saved." must show.
+# saved." must show. Turning the item off can take 40 s (#238): the notice
+# is waited for 45 s, inside an outer Terminal-job bound of 60 polls (each
+# poll takes at least a second), not the default 30.
 login_box_save() {
   local want=checked
   [ "$1" = on ] || want=unchecked
   login_box_ready &&
     job_says "$want" ax check-set "$APP_NAME" "$SETTINGS_WINDOW" launch-at-login "$1" &&
     ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Save &&
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 45
+    VM_TERMINAL_TIMEOUT=60 ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 45
 }
 
 # login_item_is <enabled|disabled>: what the OS says.
