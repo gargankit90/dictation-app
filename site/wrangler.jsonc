@@ -1,0 +1,15 @@
+// Cloudflare Workers Builds deploys this folder to vocetlabs.com when a
+// change under site/ reaches the default branch (see README.md).
+{
+  "name": "vocetlabs",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": ".",
+  },
+  "routes": [
+    { "pattern": "vocetlabs.com", "custom_domain": true },
+    { "pattern": "www.vocetlabs.com", "custom_domain": true },
+  ],
+  "workers_dev": true,
+  "preview_urls": false,
+}

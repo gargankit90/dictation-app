@@ -1,0 +1,5 @@
+# Files in site/ that must not be published on vocetlabs.com.
+README.md
+wrangler.jsonc
+.assetsignore
+.wrangler
