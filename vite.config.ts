@@ -20,9 +20,9 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // Process stylesheets so tokens.test.ts can read their text (?raw).
+    css: { include: /.+/ },
     include: ["src/**/*.test.{ts,tsx}"],
     setupFiles: ["src/testSetup.ts"],
-    // The overlay test reads its stylesheet as text (U4: Reduce Motion).
-    css: { include: [/overlay\.css/] },
   },
 });
