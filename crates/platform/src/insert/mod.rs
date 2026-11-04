@@ -310,6 +310,45 @@ impl SystemInserter {
     }
 }
 
+/// This OS's clipboard, for the menu's "Copy last dictation" (U5): text
+/// only, written as if the user had copied it. Elsewhere (until M-W.2) the
+/// write fails with [`ClipboardError::Unavailable`].
+#[derive(Default)]
+pub struct SystemClipboard {
+    #[cfg(target_os = "macos")]
+    inner: MacPasteboard,
+}
+
+impl SystemClipboard {
+    /// The system clipboard.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            #[cfg(target_os = "macos")]
+            inner: MacPasteboard::new(),
+        }
+    }
+
+    /// Replaces the clipboard's contents with `text`, with no markers.
+    ///
+    /// # Errors
+    ///
+    /// [`ClipboardError::Unavailable`] if it can't be written.
+    pub fn copy(&self, text: &str) -> Result<(), ClipboardError> {
+        #[cfg(target_os = "macos")]
+        {
+            self.inner.write_text(text)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = text;
+            Err(ClipboardError::Unavailable(
+                "no clipboard adapter for this OS yet".into(),
+            ))
+        }
+    }
+}
+
 impl Default for SystemInserter {
     fn default() -> Self {
         Self::new()
