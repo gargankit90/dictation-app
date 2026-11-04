@@ -13,6 +13,9 @@ interface Props {
 
 type Checks = { state: "loading" } | { state: "ready"; checks: Check[] } | { state: "error" };
 
+/** When the relaunch command itself can't be reached: what to do instead. */
+const RELAUNCH_FAILED = "Couldn't relaunch Vocet. Quit it from the menu bar and open it again.";
+
 /**
  * Troubleshoot (E1): live checks with a ✓ or ✗ and a fix button each, a
  * "Test connection" button that is the only thing that contacts the
@@ -27,6 +30,8 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
   const [report, setReport] = useState<string | null>(null);
   const [reportNotice, setReportNotice] = useState<Notice | null>(null);
   const [building, setBuilding] = useState(false);
+  // Why Relaunch Vocet did nothing, with what to do instead.
+  const [relaunchError, setRelaunchError] = useState<string | null>(null);
   // Bumped to run the checks again.
   const [round, setRound] = useState(0);
   const load = useCallback(() => {
@@ -111,6 +116,16 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
     } finally {
       setTesting(false);
       load();
+    }
+  }
+
+  async function relaunch() {
+    setRelaunchError(null);
+    try {
+      const result = await commands.relaunchApp();
+      if (result.status === "error") setRelaunchError(messageOf(result.error));
+    } catch {
+      setRelaunchError(RELAUNCH_FAILED);
     }
   }
 
@@ -215,7 +230,7 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
                   <button
                     type="button"
                     onClick={() => {
-                      void commands.relaunchApp();
+                      void relaunch();
                     }}
                   >
                     Relaunch Vocet
@@ -225,6 +240,12 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
             );
           })}
         </ul>
+      ) : null}
+
+      {relaunchError !== null ? (
+        <p role="alert" className="notice error">
+          {relaunchError}
+        </p>
       ) : null}
 
       <div className="row">

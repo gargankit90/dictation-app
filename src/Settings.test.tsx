@@ -181,11 +181,11 @@ const checks = (provider: Provider) =>
 describe("loading", () => {
   it("U1: says what to expect from the Keychain on the first launch after the rename", async () => {
     backend.launchNotice =
-      "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow; your key never leaves your Mac.";
+      "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to your speech provider (Groq or OpenAI).";
     await open();
     const notice = await screen.findByTestId("launch-notice");
     expect(notice.textContent).toContain("Choose Always Allow");
-    expect(notice.textContent).toContain("never leaves your Mac");
+    expect(notice.textContent).toContain("sent only to your speech provider (Groq or OpenAI)");
   });
 
   it("U1: says nothing about the Keychain on any other launch", async () => {

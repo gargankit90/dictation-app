@@ -12,7 +12,7 @@ use std::path::Path;
 pub const APP_NAME_MARKER: &str = "last-run-app-name";
 
 /// What Settings says on the first launch after the rename.
-pub const KEYCHAIN_NOTICE: &str = "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow; your key never leaves your Mac.";
+pub const KEYCHAIN_NOTICE: &str = "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to your speech provider (Groq or OpenAI).";
 
 /// Whether this is the first launch under `app_name` of an install that ran
 /// under another name (or, with no name remembered, one that has settings:
@@ -81,6 +81,7 @@ mod tests {
     #[test]
     fn the_notice_says_what_to_do_and_that_the_key_stays() {
         assert!(KEYCHAIN_NOTICE.contains("Always Allow"));
-        assert!(KEYCHAIN_NOTICE.contains("never leaves your Mac"));
+        assert!(KEYCHAIN_NOTICE.contains("sent only to your speech provider (Groq or OpenAI)"));
+        assert!(!KEYCHAIN_NOTICE.contains("never leaves"));
     }
 }

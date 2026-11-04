@@ -139,9 +139,7 @@ You install from the DMG once. After that, Vocet updates itself:
   key and permissions carry over. To get the new file name, install
   `Vocet.app` from the DMG and drag `dictation-app.app` to the Trash; it is
   the same app to macOS, so permissions stay.
-- **After this update, macOS may ask once whether Vocet can use the key
-  saved in your Keychain. Choose Always Allow; your key never leaves your
-  Mac.** The prompt reads "Vocet wants to access key
+- **After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to your speech provider (Groq or OpenAI).** The prompt reads "Vocet wants to access key
   com.dictationapp.desktop"; enter your Mac password. Until you answer,
   Vocet can't read the key and says so. It can come back after any update
   of this build, not only this one.

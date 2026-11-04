@@ -212,6 +212,39 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
     });
   });
 
+  it("U1 round 4: a failed relaunch shows the error with its next step", async () => {
+    checks = MIC_DENIED;
+    const failing = (command: string, payload: unknown): unknown => {
+      if (command === "relaunch_app") {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw "Couldn't prepare the relaunch. Quit Vocet from the menu bar and open it again.";
+      }
+      return backend(command, payload);
+    };
+    mockIPC(failing);
+    view();
+    await screen.findByRole("list", { name: "Checks" });
+    fireEvent.click(screen.getByRole("button", { name: "Relaunch Vocet" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(
+      "Couldn't prepare the relaunch. Quit Vocet from the menu bar and open it again.",
+    );
+  });
+
+  it("U1 round 4: a relaunch that can't be reached says what to do instead", async () => {
+    checks = MIC_DENIED;
+    mockIPC((command, payload) => {
+      if (command === "relaunch_app") throw new Error("the bridge is gone");
+      return backend(command, payload);
+    });
+    view();
+    await screen.findByRole("list", { name: "Checks" });
+    fireEvent.click(screen.getByRole("button", { name: "Relaunch Vocet" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Quit it from the menu bar and open it again",
+    );
+  });
+
   it("U1 criterion 8: still offers Test connection for a cloud provider", async () => {
     view();
     await screen.findByRole("list", { name: "Checks" });
