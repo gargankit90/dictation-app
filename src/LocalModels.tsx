@@ -35,6 +35,8 @@ interface Props {
   onSelect: (id: string) => void;
   /** The form is saving. */
   disabled: boolean;
+  /** Called with the list each time it is read (the language picker filters by it). */
+  onModels?: (models: LocalModelInfo_Serialize[]) => void;
 }
 
 /**
@@ -42,7 +44,7 @@ interface Props {
  * see its status. Downloads start at once (not on Save) and keep going while
  * the window is hidden; the list is polled while one runs.
  */
-export function LocalModels({ selected, onSelect, disabled }: Props) {
+export function LocalModels({ selected, onSelect, disabled, onModels }: Props) {
   const [models, setModels] = useState<LocalModelInfo_Serialize[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Only the newest reply counts.
@@ -59,10 +61,11 @@ export function LocalModels({ selected, onSelect, disabled }: Props) {
         return;
       }
       setModels(result.data);
+      onModels?.(result.data);
     } catch {
       if (run === read.current) setError(BROKEN);
     }
-  }, []);
+  }, [onModels]);
 
   useEffect(() => {
     // The first read; the interval below takes over while a download runs.

@@ -1012,6 +1012,7 @@ mod tests {
                 "id",
                 "name",
                 "languages",
+                "language_codes",
                 "size_bytes",
                 "downloaded_bytes",
                 "state",
