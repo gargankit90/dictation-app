@@ -94,8 +94,10 @@ e2e_pill_states() {
   textedit_fresh
   mark=$(pill_log_mark)
   launch --press
-  expect "the pill renders Listening" overlay_shows "$OVERLAY_RECORDING"
-  expect "then No sound with its hint" overlay_shows "$OVERLAY_NO_SOUND" 5
+  # Listening by the log: reading the overlay starts a Terminal job, which
+  # on a busy VM can take longer than the 1.5 s before No sound.
+  expect "the pill shows Listening first" wait_for_log 'overlay shown state="?recording' 5
+  expect "then renders No sound with its hint" overlay_shows "$OVERLAY_NO_SOUND" 5
   screenshot e2e_pill_states.no_sound
   gap=$(log_gap_ms 'overlay shown state="?recording' 'overlay (hidden|shown)') || gap=""
   log "  No sound came ${gap:-?} ms after Listening by the log"
