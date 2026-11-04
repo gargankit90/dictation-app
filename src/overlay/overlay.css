@@ -59,8 +59,8 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: var(--vc-attention-soft);
-  color: var(--vc-attention);
+  background: var(--vc-overlay-attention);
+  color: var(--vc-overlay-attention-fg);
   font-weight: 700;
 }
 

@@ -157,6 +157,7 @@ export function LocalModels({ selected, onSelect, disabled }: Props) {
               {(model.state === "ready" || model.state === "partial") && (
                 <button
                   type="button"
+                  className="destructive"
                   disabled={disabled}
                   onClick={() => void act(() => commands.deleteLocalModel(model.id))}
                 >
