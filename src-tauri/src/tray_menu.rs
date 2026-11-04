@@ -163,15 +163,16 @@ pub fn build(app: &App, last: LastDictation) -> tauri::Result<()> {
 
 /// Makes the menu follow the app: refreshes at once and then every second.
 pub fn start(app: &AppHandle) {
-    if let Some(hub) = app.try_state::<TrayHub>() {
-        if let Some((models, shown)) = lock(&hub.pending).take() {
-            let handle = app.clone();
-            let spawned = std::thread::Builder::new()
-                .name("tray-applier".into())
-                .spawn(move || run_applier(&models, Some(shown), &mut TauriApplier(handle)));
-            if let Err(error) = spawned {
-                tracing::error!(%error, "could not start the tray updater");
-            }
+    let pending = app
+        .try_state::<TrayHub>()
+        .and_then(|hub| lock(&hub.pending).take());
+    if let Some((models, shown)) = pending {
+        let handle = app.clone();
+        let spawned = std::thread::Builder::new()
+            .name("tray-applier".into())
+            .spawn(move || run_applier(&models, Some(shown), &mut TauriApplier(handle)));
+        if let Err(error) = spawned {
+            tracing::error!(%error, "could not start the tray updater");
         }
     }
     refresh(app);
@@ -587,8 +588,10 @@ mod tests {
     }
 
     /// A fake native tray: records each model, and can be held mid-update.
+    type Shown = Arc<Mutex<Vec<(MenuModel, Option<TrayIcon>)>>>;
+
     struct Recording {
-        shown: Arc<Mutex<Vec<(MenuModel, Option<TrayIcon>)>>>,
+        shown: Shown,
         gate: Option<Receiver<()>>,
     }
 
