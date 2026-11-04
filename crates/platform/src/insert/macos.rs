@@ -524,16 +524,52 @@ fn current_chord() -> PasteChord {
 /// notification, delivered on the main queue). The paste only reads the
 /// cache.
 pub(super) mod layout {
-    use std::ptr::NonNull;
     use std::sync::Once;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    use block2::RcBlock;
-    use objc2_foundation::{
-        NSDistributedNotificationCenter, NSNotification, NSOperationQueue, NSString,
-    };
+    use objc2::rc::Retained;
+    use objc2_foundation::NSString;
 
     use super::{Os, c_void, on_main_async, paste_chord};
+
+    type CfNotificationCenterRef = *const c_void;
+
+    /// `CFNotificationSuspensionBehaviorDeliverImmediately`: delivered even
+    /// while the app is inactive, which a menu-bar app always is (the
+    /// default behaviour holds distributed notifications until the app is
+    /// activated, so a layout switch would go unseen).
+    const DELIVER_IMMEDIATELY: isize = 4;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFNotificationCenterGetDistributedCenter() -> CfNotificationCenterRef;
+        fn CFNotificationCenterAddObserver(
+            center: CfNotificationCenterRef,
+            observer: *const c_void,
+            callback: extern "C" fn(
+                CfNotificationCenterRef,
+                *mut c_void,
+                *const c_void,
+                *const c_void,
+                *const c_void,
+            ),
+            name: *const c_void,
+            object: *const c_void,
+            suspension_behavior: isize,
+        );
+    }
+
+    /// The input source changed: runs on the main thread's run loop (where
+    /// it was registered).
+    extern "C" fn source_changed(
+        _center: CfNotificationCenterRef,
+        _observer: *mut c_void,
+        _name: *const c_void,
+        _object: *const c_void,
+        _user_info: *const c_void,
+    ) {
+        refresh();
+    }
 
     /// The distributed notification TIS posts when the user switches the
     /// keyboard input source (`kTISNotifySelectedKeyboardInputSourceChanged`).
@@ -564,21 +600,24 @@ pub(super) mod layout {
         WATCH.call_once(|| {
             on_main_async(|| {
                 refresh();
-                // SAFETY: the name is a valid NSString; no object filter;
-                // the main queue runs the block on the main thread, where
-                // `refresh` may call the TIS APIs; the block only calls
-                // `refresh`, which is Send-safe (it touches an atomic).
-                let observer = unsafe {
-                    NSDistributedNotificationCenter::defaultCenter()
-                        .addObserverForName_object_queue_usingBlock(
-                            Some(&NSString::from_str(SOURCE_CHANGED)),
-                            None,
-                            Some(&NSOperationQueue::mainQueue()),
-                            &RcBlock::new(|_: NonNull<NSNotification>| refresh()),
-                        )
-                };
-                // Observes for the life of the app.
-                std::mem::forget(observer);
+                // Kept for the life of the app (the center may hold it).
+                let name = Retained::into_raw(NSString::from_str(SOURCE_CHANGED));
+                // SAFETY: on the main thread, so the callback runs on its
+                // run loop, where `refresh` may call the TIS APIs. The
+                // distributed center is a process-wide singleton (Get
+                // rule). `name` is a valid CFString (NSString is toll-free
+                // bridged) leaked above; no observer pointer or object
+                // filter. The observation lasts for the life of the app.
+                unsafe {
+                    CFNotificationCenterAddObserver(
+                        CFNotificationCenterGetDistributedCenter(),
+                        std::ptr::null(),
+                        source_changed,
+                        name.cast(),
+                        std::ptr::null(),
+                        DELIVER_IMMEDIATELY,
+                    );
+                }
             });
         });
     }
@@ -591,7 +630,9 @@ pub(super) mod layout {
             table.get(usize::from(code)).copied().flatten()
         });
         set_cached_key_code(chord.key_code);
-        tracing::debug!(
+        // A key code, nothing typed: fine at info, and the layout e2e
+        // scenario reads it.
+        tracing::info!(
             key_code = chord.key_code,
             "paste key for the keyboard layout"
         );

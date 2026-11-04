@@ -64,10 +64,6 @@ objc2-core-graphics = { workspace = true, features = [
 ] }
 objc2-foundation = { workspace = true, features = [
     "std",
-    "block2",
-    "NSDistributedNotificationCenter",
-    "NSNotification",
-    "NSOperation",
     "NSArray",
     "NSData",
     "NSError",
