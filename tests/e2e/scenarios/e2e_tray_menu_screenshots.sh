@@ -43,7 +43,37 @@ tms_states() {
   expect "the app quits" quit_from_tray
 }
 
+# Copy last dictation: disabled before any dictation, enabled after one, copies
+# exactly the dictated text, and disabled again after a relaunch (memory only).
+tms_copy_last() {
+  fresh_app_state
+  launch_full
+  expect "copy-last: the app starts" wait_for_log 'INFO .*ready'
+  expect "copy-last: disabled before a dictation" \
+    sh -c "printf '%s' \"\$1\" | grep -qF '(off) Copy last dictation'" _ "$(tray_menu)"
+  textedit_fresh
+  expect "copy-last: a dictation ends Idle" dictate_once 1
+  expect "copy-last: it pasted" test "$(textedit_trimmed)" = "$MOCK_TEXT"
+  sleep 2
+  expect "copy-last: enabled after a dictation" \
+    sh -c "printf '%s' \"\$1\" | grep -qE '^Copy last dictation\$'" _ "$(tray_menu)"
+  set_clipboard "something else"
+  expect "copy-last: pressed in the tray" ax_ok tray-click "$APP_NAME" "Copy last dictation"
+  sleep 1
+  expect "copy-last: the clipboard holds exactly the dictation" test "$(clipboard)" = "$MOCK_TEXT"
+  expect "copy-last: the log never holds the text" \
+    sh -c "! printf '%s' \"\$1\" | grep -qF \"\$2\"" _ "$(app_log)" "$MOCK_TEXT"
+  textedit_close
+  expect "the app quits" quit_from_tray
+  launch_full
+  expect "copy-last: the app is back" wait_for_log 'INFO .*ready'
+  expect "copy-last: disabled again after a relaunch" \
+    sh -c "printf '%s' \"\$1\" | grep -qF '(off) Copy last dictation'" _ "$(tray_menu)"
+  expect "the app quits" quit_from_tray
+}
+
 e2e_tray_menu_screenshots() {
+  tms_copy_last
   tms_states light
   tms_states dark
   tms_appearance false || true

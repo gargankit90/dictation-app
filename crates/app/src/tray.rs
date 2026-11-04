@@ -153,6 +153,10 @@ pub const fn fix_for(code: ErrorCode) -> Fix {
     }
 }
 
+/// The status line while Accessibility was just granted but the key may
+/// still be dead until Vocet relaunches.
+pub const RELAUNCH_SENTENCE: &str = "Relaunch Vocet to finish turning on Accessibility";
+
 /// The one sentence the status line gives for `code`.
 #[must_use]
 pub fn problem_sentence(code: ErrorCode) -> &'static str {
@@ -347,6 +351,11 @@ pub struct TrayStatus {
     grant_opened: bool,
     /// Whether a recording is in progress.
     recording: bool,
+    /// Whether Accessibility was missing at some point in this run and no
+    /// recording has started since. macOS often leaves a hotkey tap made
+    /// before the grant dead, so once the grant shows up the menu can't say
+    /// Ready until a recording proves the key works, or the app relaunches.
+    lacked_accessibility: bool,
     /// Whether a dictation succeeded in this run.
     has_last: bool,
     ambient: Ambient,
@@ -374,15 +383,24 @@ impl TrayStatus {
         match event {
             UiEvent::Error(DictationError::HotkeyFailed) => {
                 self.hotkey_down = true;
+                self.lacked_accessibility = true;
                 self.error = None;
             }
-            UiEvent::Error(error) => self.error = Some(ErrorCode::of(error)),
+            UiEvent::Error(error) => {
+                let code = ErrorCode::of(error);
+                if code == ErrorCode::AccessibilityMissing {
+                    self.lacked_accessibility = true;
+                }
+                self.error = Some(code);
+            }
             UiEvent::HotkeyRestored => self.hotkey_down = false,
             UiEvent::StateChanged(phase) => {
                 self.recording = *phase == Phase::Recording;
                 if self.recording {
-                    // The microphone and the rest work after all.
+                    // The microphone and the rest work after all, and the
+                    // key demonstrably does.
                     self.error = None;
+                    self.lacked_accessibility = false;
                 }
             }
         }
@@ -399,6 +417,9 @@ impl TrayStatus {
         }
         // The user changed the engine, its key or its model, or started a
         // download: an error from the old setup no longer holds. Others stay.
+        if ambient.problem == Some(ErrorCode::AccessibilityMissing) {
+            self.lacked_accessibility = true;
+        }
         let reconfigured = ambient.engine_generation != self.ambient.engine_generation
             || ambient.engine != self.ambient.engine
             || (ambient.download.is_some() && self.ambient.download.is_none());
@@ -446,9 +467,20 @@ impl TrayStatus {
         Some(problem)
     }
 
+    /// Whether the menu must ask for a relaunch: Accessibility is granted
+    /// now, but was missing earlier in this run, and no recording has
+    /// shown the key works.
+    #[must_use]
+    pub fn relaunch_needed(&self) -> bool {
+        self.lacked_accessibility && self.shown_problem().is_none()
+    }
+
     /// The fix row's action for the current problem, if there is one.
     #[must_use]
     pub fn fix(&self) -> Option<Fix> {
+        if self.relaunch_needed() {
+            return Some(Fix::Relaunch);
+        }
         let fix = fix_for(self.shown_problem()?);
         Some(if self.grant_opened && fix.is_grant() {
             Fix::Relaunch
@@ -488,6 +520,13 @@ impl TrayStatus {
                 entries.push(Entry::item(fix.id(), fix.label()));
             }
             format!("{APP_NAME}: {sentence}")
+        } else if self.relaunch_needed() {
+            entries.push(Entry::disabled(
+                id::STATUS,
+                format!("! {RELAUNCH_SENTENCE}"),
+            ));
+            entries.push(Entry::item(Fix::Relaunch.id(), Fix::Relaunch.label()));
+            format!("{APP_NAME}: {RELAUNCH_SENTENCE}")
         } else if let Some(download) = download {
             let text = format!("↓ Downloading {}, {}%", download.name, download.percent);
             entries.push(Entry::disabled(id::STATUS, text));
@@ -529,7 +568,7 @@ impl TrayStatus {
         // after, if the problem remains.
         let icon = if self.recording {
             TrayIcon::Recording
-        } else if problem.is_some() {
+        } else if problem.is_some() || self.relaunch_needed() {
             TrayIcon::Attention
         } else {
             TrayIcon::Normal
@@ -987,6 +1026,60 @@ mod tests {
                 .starts_with("✓ Ready")
         );
         assert_eq!(tray.menu().icon, TrayIcon::Normal);
+    }
+
+    /// Tester run 1: after Accessibility is re-granted the menu must not say
+    /// Ready (a tap made before the grant may be dead) until a recording
+    /// proves the key works, or the app relaunches.
+    #[test]
+    fn ready_is_not_shown_after_a_regrant_until_a_recording_or_relaunch() {
+        let mut tray = ready("RightAlt", "Groq");
+        assert!(!tray.relaunch_needed());
+        // Revoked: the hotkey dies, Accessibility is missing.
+        tray.on_event(&error(DictationError::HotkeyFailed));
+        tray.set_ambient(Ambient {
+            problem: Some(ErrorCode::AccessibilityMissing),
+            ..ambient("RightAlt", "Groq")
+        });
+        assert_eq!(tray.fix(), Some(Fix::OpenAccessibilitySettings));
+        // Granted again: the supervisor restarts the listener.
+        tray.set_ambient(ambient("RightAlt", "Groq"));
+        tray.on_event(&UiEvent::HotkeyRestored);
+        let menu = tray.menu();
+        assert_eq!(
+            label_of(&menu, id::STATUS).as_deref(),
+            Some("! Relaunch Vocet to finish turning on Accessibility")
+        );
+        assert_eq!(
+            label_of(&menu, id::FIX_RELAUNCH).as_deref(),
+            Some("Relaunch Vocet")
+        );
+        assert_eq!(menu.icon, TrayIcon::Attention);
+        assert_eq!(
+            menu.tooltip,
+            "Vocet: Relaunch Vocet to finish turning on Accessibility"
+        );
+        // A recording proves the key works: Ready again.
+        tray.on_event(&UiEvent::StateChanged(Phase::Recording));
+        tray.on_event(&UiEvent::StateChanged(Phase::Idle));
+        assert!(
+            label_of(&tray.menu(), id::STATUS)
+                .unwrap()
+                .starts_with("✓ Ready")
+        );
+    }
+
+    #[test]
+    fn a_grant_that_was_never_missing_needs_no_relaunch() {
+        let mut tray = ready("RightAlt", "Groq");
+        tray.on_event(&UiEvent::StateChanged(Phase::Recording));
+        tray.on_event(&UiEvent::StateChanged(Phase::Idle));
+        assert!(!tray.relaunch_needed());
+        assert!(
+            label_of(&tray.menu(), id::STATUS)
+                .unwrap()
+                .starts_with("✓ Ready")
+        );
     }
 
     #[test]
