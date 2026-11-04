@@ -1,19 +1,16 @@
-Reviewer: CHANGES REQUESTED
+Reviewer: APPROVED
 
 # SITE-235 review, round 1
 
-PR: #235 at e097cc6 (full reviewed head recorded by the PR), stacked on #234 at 3ba9fa1d2541c9c009dd90013038447d381b1a4b.
+PR: #235 at 78208760f60c337113e01fa7c9c9440e2635a13c, stacked on #234.
 App reference: origin/main b7ae67e6ad2dc807b38b3ce12830a4a26834e6a7.
-Reviewed the incremental copy diff and the combined page. No merge performed.
+Reviewed the incremental copy diff, the new fix, and the combined page. No merge performed.
 
 ## Findings
 
-| # | Severity | Location | Finding and suggested fix |
-| - | - | - | - |
-| 1 | major | site/index.html:2130 | The combined page still promises “The model downloads meanwhile” during permission setup. origin/main src/Onboarding.tsx:470 directs local users to download in Settings; default cloud onboarding instead requests an API key. Replace the promised automatic download with the actual engine/key/model preparation step. This is inherited from #234, but the final page still overstates shipped functionality. |
-| 2 | major | site/og.png (referenced at site/index.html:18) | The unchanged social-preview image still says “Works offline” without the local-model qualification. The improved HTML does not fix the independently shared image. Update its copy to say offline with a downloaded local model. |
+No open blocker, major or minor findings. Two inherited majors were identified in the initial combined page at e097cc6: setup promised automatic model downloads during permission setup, and og.png claimed offline operation without a local-model qualification. Both are fixed in 7820876: setup now directs model downloading in Settings and describes the key/model preparation step; the social image now says “On your Mac or with your own key”. I inspected the changed image and re-ran the 390 px/all-tabs and initial axe checks successfully after the fix.
 
-Verified fixes: app-name telemetry and first-screen privacy-switch claims removed; Settings Privacy opt-out is real. All three download buttons honestly say coming soon and target the repository when latest-release lookup fails (404, no published releases). HTML distinguishes local/offline and cloud/BYOK operation. These corrections should be retained. No blocker or minor findings; two majors remain in the combined result.
+Also verified: false app-name telemetry and first-screen privacy-switch claims removed; actual Settings Privacy opt-out retained. All three download buttons say coming soon and target the repository on the current latest-release 404. HTML distinguishes local/offline and cloud/BYOK operation. Two majors found, two fixed, zero open; zero minors or tech-debt issues.
 
 ## Fact check and external requests
 
@@ -26,8 +23,8 @@ Verified fixes: app-name telemetry and first-screen privacy-switch claims remove
 ## Verification and checklist
 
 1. Scope: static snapshot matches PR scope; copy must still be accurate before publication (findings above).
-2. Correctness: real links/buttons; all local fragment targets resolve. Both heads rendered at 390 px with document scrollWidth 390; all four tabs worked without overflow. #234's broken download fallback reproduced; #235's three coming-soon links verified.
-3. Security/privacy: offline qualification in finding 2; external requests inventoried above. No secrets or external scripts introduced.
+2. Correctness: real links/buttons; all local fragment targets resolve. Both heads rendered at 390 px with document scrollWidth 390; all four tabs worked without overflow. #234's original broken download fallback reproduced; #235's three coming-soon links verified.
+3. Security/privacy: OK after offline qualification fixes; external requests inventoried above. No secrets or external scripts introduced.
 4. Architecture: OK; static site only, no crate changes.
 5. Rust/TypeScript practice: not applicable; inline JavaScript uses textContent for release tags, no HTML injection.
 6. Licences/reuse: no suspicious copied code or distinctive borrowed paragraphs identified; README credits internal design. Spot searches of the headline/setup phrase found no evidence of verbatim third-party copying; this is not proof of provenance.
