@@ -22,14 +22,15 @@
 //! [`DictationError`](dictation_core::error::DictationError)'s user-facing
 //! text, which never contains the transcript or an API key.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use dictation_core::coordinator::Phase;
 use dictation_core::diagnostics::ErrorCode;
 use dictation_core::error::DictationError;
 pub use dictation_core::level::NO_SOUND_AFTER;
-use dictation_core::level::SilenceWatch;
+use dictation_core::level::{LEVEL_FLOOR_DBFS, SilenceWatch};
 use tokio::time::Instant;
 
 use crate::pipeline::{LevelReceiver, UiEvent};
@@ -215,83 +216,47 @@ impl OverlayModel {
     }
 }
 
-/// Bounds how many input levels wait on their way to the page (U4 review).
+/// The newest input level, for the overlay page to read (U4 round 2).
 ///
-/// Each level the shell hands the webview becomes a script on the webview's
-/// event loop, and the watch before [`run_with_levels`] can't take back one
-/// already handed over: a slow webview would pile up stale levels, and a
-/// hide would wait behind them. So the shell sends levels through this:
+/// The page asks for the level (the `get_overlay_level` command) about 20
+/// times a second while the pill shows Listening or No sound, instead of
+/// the app pushing each level into the webview: a stalled page then asks
+/// for nothing, and nothing piles up anywhere. This holds only the newest
+/// value, in one atomic: [`set`](Self::set) and [`get`](Self::get) never
+/// block and never queue. A level is a number only; it is never logged,
+/// stored or sent.
 ///
-/// - [`offer`](Self::offer) keeps only the newest level and says whether a
-///   delivery must be scheduled. At most one is scheduled at a time; while
-///   it waits, newer levels just replace the pending one.
-/// - The scheduled delivery, running where it hands the level over (the
-///   shell: on the main thread, the webview's event loop), calls
-///   [`take`](Self::take) for the newest level and ends the delivery, so the
-///   next offer schedules the next one. A level handed over is queued ahead
-///   of that next delivery, so at most one level and one delivery wait.
-/// - [`close`](Self::close), when the recording view goes, drops the pending
-///   level; a delivery still scheduled then delivers nothing.
-///   [`open`](Self::open) starts taking levels again.
-///
-/// Clones share the state.
-#[derive(Debug, Clone, Default)]
-pub struct LevelDispatch(Arc<Mutex<Dispatch>>);
+/// Clones share the value.
+#[derive(Debug, Clone)]
+pub struct LatestLevel(Arc<AtomicU32>);
 
-#[derive(Debug, Default)]
-struct Dispatch {
-    /// The newest level not handed over yet.
-    pending: Option<f32>,
-    /// A delivery is scheduled and hasn't run.
-    scheduled: bool,
-    /// A recording view shows, so levels are wanted.
-    open: bool,
+impl Default for LatestLevel {
+    fn default() -> Self {
+        Self(Arc::new(AtomicU32::new(LEVEL_FLOOR_DBFS.to_bits())))
+    }
 }
 
-impl LevelDispatch {
-    /// A closed dispatch: no level is wanted yet.
+impl LatestLevel {
+    /// Silence ([`LEVEL_FLOOR_DBFS`]) until the first level.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    fn lock(&self) -> MutexGuard<'_, Dispatch> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    /// Replaces the level with `dbfs`.
+    pub fn set(&self, dbfs: f32) {
+        self.0.store(dbfs.to_bits(), Ordering::Relaxed);
     }
 
-    /// A recording view shows: levels are wanted.
-    pub fn open(&self) {
-        self.lock().open = true;
+    /// Back to silence: the recording ended, so the next one starts flat.
+    pub fn clear(&self) {
+        self.set(LEVEL_FLOOR_DBFS);
     }
 
-    /// The recording view went: the pending level is dropped, and a
-    /// delivery still scheduled delivers nothing.
-    pub fn close(&self) {
-        let mut dispatch = self.lock();
-        dispatch.open = false;
-        dispatch.pending = None;
-    }
-
-    /// Offers the newest level. Returns whether the caller must schedule a
-    /// delivery (which calls [`take`](Self::take)): only when none is
-    /// scheduled yet and levels are wanted.
+    /// The newest level, in dBFS.
     #[must_use]
-    pub fn offer(&self, dbfs: f32) -> bool {
-        let mut dispatch = self.lock();
-        if !dispatch.open {
-            return false;
-        }
-        dispatch.pending = Some(dbfs);
-        !std::mem::replace(&mut dispatch.scheduled, true)
-    }
-
-    /// In the scheduled delivery: the newest level to hand over, if any is
-    /// still wanted. Ends the delivery either way.
-    #[must_use]
-    pub fn take(&self) -> Option<f32> {
-        let mut dispatch = self.lock();
-        dispatch.scheduled = false;
-        dispatch.pending.take().filter(|_| dispatch.open)
+    pub fn get(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
     }
 }
 
@@ -303,8 +268,8 @@ pub trait OverlaySurface {
 
     /// Shows an input level, in dBFS, on the meter of the recording view
     /// showing now (U4). Called about 20 times a second while recording,
-    /// so it must not log the level at info level, and must not queue
-    /// levels without bound for a slow page: see [`LevelDispatch`]. Does
+    /// so it must not log the level at info level, block or queue: the
+    /// shell stores it in a [`LatestLevel`] that the page reads. Does
     /// nothing by default.
     fn level(&mut self, dbfs: f32) {
         let _ = dbfs;
@@ -410,6 +375,7 @@ async fn expiry(deadline: Option<Instant>) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
 
     use super::*;
     use crate::ui_events::{UI_ERRORS_QUEUED, UI_EVENTS_QUEUED, ui_channel};
@@ -806,116 +772,50 @@ mod tests {
         }
     }
 
-    /// U4 review finding 2: a consumer that never runs its deliveries (a
-    /// stalled webview) holds at most one, however many levels come.
+    /// U4 round 2: the reader gets the newest level, silence before any
+    /// and after a clear.
     #[test]
-    fn a_stalled_consumer_holds_one_delivery_and_gets_the_newest_level() {
-        let dispatch = LevelDispatch::new();
-        dispatch.open();
-        let mut scheduled = 0;
-        for step in 0..6_000_u16 {
-            if dispatch.offer(-f32::from(step % 60)) {
-                scheduled += 1;
-            }
+    fn the_latest_level_is_the_newest_one() {
+        let level = LatestLevel::new();
+        assert_eq!(level.get(), LEVEL_FLOOR_DBFS);
+        let writer = level.clone();
+        for dbfs in [-60.0, -35.5, -12.25] {
+            writer.set(dbfs);
         }
-        assert_eq!(scheduled, 1);
-        // It runs at last: the newest level only, then it's done.
-        assert_eq!(dispatch.take(), Some(-f32::from(5_999_u16 % 60)));
-        assert_eq!(dispatch.take(), None);
-        // The next level schedules the next delivery.
-        assert!(dispatch.offer(-20.0));
-        assert!(!dispatch.offer(-21.0));
-        assert_eq!(dispatch.take(), Some(-21.0));
+        assert_eq!(level.get(), -12.25);
+        writer.clear();
+        assert_eq!(level.get(), LEVEL_FLOOR_DBFS);
     }
 
-    /// Stopping drops the pending level: the delivery still scheduled
-    /// delivers nothing, and levels after it are refused until reopened.
+    /// The reader never waits on the writer: a writer storing as fast as
+    /// it can doesn't hold up a thousand reads, and every read is a level
+    /// that was written (never a torn value).
     #[test]
-    fn closing_drops_the_pending_level() {
-        let dispatch = LevelDispatch::new();
-        assert!(!dispatch.offer(-20.0), "closed until a recording shows");
-        dispatch.open();
-        assert!(dispatch.offer(-20.0));
-        dispatch.close();
-        assert!(!dispatch.offer(-10.0));
-        assert_eq!(dispatch.take(), None);
-        // The next recording.
-        dispatch.open();
-        assert!(dispatch.offer(-30.0));
-        assert_eq!(dispatch.take(), Some(-30.0));
-    }
-
-    /// A surface like the shell's: levels go through a [`LevelDispatch`]
-    /// to deliveries a test consumer runs when it likes.
-    #[derive(Clone, Default)]
-    struct SlowPage {
-        dispatch: LevelDispatch,
-        /// Scheduled deliveries not run yet.
-        queued: Arc<Mutex<usize>>,
-        most_queued: Arc<Mutex<usize>>,
-        views: Arc<Mutex<Vec<OverlayView>>>,
-    }
-
-    impl SlowPage {
-        /// Runs the queued deliveries: the levels they hand over.
-        fn deliver(&self) -> Vec<f32> {
-            let queued = std::mem::take(&mut *self.queued.lock().unwrap());
-            (0..queued).filter_map(|_| self.dispatch.take()).collect()
+    fn reading_the_level_never_blocks() {
+        let level = LatestLevel::new();
+        let writer = level.clone();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writing = {
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                let mut n = 0_u16;
+                while !stop.load(Ordering::Relaxed) {
+                    writer.set(-f32::from(n % 60));
+                    n = n.wrapping_add(1);
+                }
+            })
+        };
+        let started = std::time::Instant::now();
+        for _ in 0..1_000 {
+            let dbfs = level.get();
+            assert!(
+                dbfs == LEVEL_FLOOR_DBFS || (-59.0..=0.0).contains(&dbfs),
+                "{dbfs}"
+            );
         }
-    }
-
-    impl OverlaySurface for SlowPage {
-        fn show(&mut self, view: &OverlayView) {
-            if matches!(view, OverlayView::Recording | OverlayView::NoSound { .. }) {
-                self.dispatch.open();
-            } else {
-                self.dispatch.close();
-            }
-            self.views.lock().unwrap().push(view.clone());
-        }
-
-        fn level(&mut self, dbfs: f32) {
-            if self.dispatch.offer(dbfs) {
-                let mut queued = self.queued.lock().unwrap();
-                *queued += 1;
-                let mut most = self.most_queued.lock().unwrap();
-                *most = (*most).max(*queued);
-            }
-        }
-    }
-
-    /// Five minutes of levels at 20 a second into a page that never runs a
-    /// delivery: one waits at a time; after the hide it delivers nothing;
-    /// the next recording's levels flow again.
-    #[tokio::test(start_paused = true)]
-    async fn criterion_u4_2_a_stalled_page_never_piles_up_levels() {
-        let (tx, rx) = ui_channel();
-        let (levels_tx, levels) = tokio::sync::watch::channel(None);
-        let page = SlowPage::default();
-        let task = tokio::spawn(run_with_levels(rx, levels, page.clone(), VISIBLE));
-        tx.send(UiEvent::StateChanged(Phase::Recording));
-        tokio::time::sleep(ms(10)).await;
-        for step in 0..6_000_u16 {
-            levels_tx.send_replace(reading(if step % 2 == 0 { -30.0 } else { -25.0 }));
-            tokio::time::sleep(ms(50)).await;
-        }
-        assert_eq!(*page.most_queued.lock().unwrap(), 1);
-
-        // Released: the pending level is dropped.
-        tx.send(UiEvent::StateChanged(Phase::Transcribing));
-        levels_tx.send_replace(None);
-        tokio::time::sleep(ms(10)).await;
-        assert_eq!(page.deliver(), Vec::<f32>::new());
-
-        // The next recording: levels reach the page again.
-        tx.send(UiEvent::StateChanged(Phase::Recording));
-        tokio::time::sleep(ms(10)).await;
-        levels_tx.send_replace(reading(-20.0));
-        tokio::time::sleep(ms(10)).await;
-        assert_eq!(page.deliver(), [-20.0]);
-        drop(tx);
-        task.await.unwrap();
-        assert_eq!(*page.most_queued.lock().unwrap(), 1);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        stop.store(true, Ordering::Relaxed);
+        writing.join().unwrap();
     }
 
     /// Records views and levels in the order the surface got them.

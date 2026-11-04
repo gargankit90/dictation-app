@@ -1,8 +1,9 @@
 /**
  * What the overlay window shows (M5.1, U4: the recording pill). The Rust side
  * sends one of these as the payload of {@link OVERLAY_EVENT}
- * (`src-tauri/src/overlay.rs`, whose tests pin the same JSON), and the input
- * level while recording as {@link OVERLAY_LEVEL_EVENT}. An error carries only
+ * (`src-tauri/src/overlay.rs`, whose tests pin the same JSON). The page reads
+ * the input level itself with {@link LEVEL_COMMAND} while it shows Listening
+ * or No sound. An error carries only
  * the user-facing message, never a code, the transcript or a key.
  */
 export type OverlayView =
@@ -17,11 +18,16 @@ export type OverlayView =
 export const OVERLAY_EVENT = "overlay-view";
 
 /**
- * The input level event while recording, about 20 a second: `{ dbfs }`
- * (`LEVEL_EVENT` in `src-tauri/src/overlay.rs`). A number only; the page
- * never stores or sends it.
+ * The one command the overlay may call (U4 round 2; `get_overlay_level` in
+ * `src-tauri/src/overlay.rs`, granted only by `capabilities/overlay.json`):
+ * the newest input level in dBFS, a number only. The page asks for it,
+ * rather than the app pushing every level, so a stalled page asks for
+ * nothing and nothing queues. The page never stores or sends it.
  */
-export const OVERLAY_LEVEL_EVENT = "overlay-level";
+export const LEVEL_COMMAND = "get_overlay_level";
+
+/** At most one level read this often while the meter shows: 20 a second. */
+export const LEVEL_POLL_MS = 50;
 
 /**
  * The document title the overlay sets once its listeners are registered, with
@@ -67,13 +73,9 @@ export function parseView(payload: unknown): OverlayView {
   }
 }
 
-/** Reads a level payload: its dBFS, or `null` if it isn't one. */
-export function parseLevel(payload: unknown): number | null {
-  if (typeof payload !== "object" || payload === null || !("dbfs" in payload)) {
-    return null;
-  }
-  const { dbfs } = payload;
-  return typeof dbfs === "number" && Number.isFinite(dbfs) ? dbfs : null;
+/** Reads {@link LEVEL_COMMAND}'s answer: its dBFS, or `null` if it isn't one. */
+export function parseLevel(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /** Bars in the meter. */

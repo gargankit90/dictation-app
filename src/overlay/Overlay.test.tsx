@@ -2,7 +2,7 @@
 // (Listening with the level meter, No sound, Transcribing, Paste sent, Error) and
 // nothing while hidden; it follows the events the Rust side sends.
 
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { emit } from "@tauri-apps/api/event";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -15,7 +15,8 @@ import {
   LISTENING_TITLE,
   METER_BARS,
   OVERLAY_EVENT,
-  OVERLAY_LEVEL_EVENT,
+  LEVEL_COMMAND,
+  LEVEL_POLL_MS,
   SILENT_LEVELS,
   barHeight,
   parseLevel,
@@ -163,10 +164,20 @@ describe("criterion_u4_3 the meter", () => {
 });
 
 describe("criterion_m5_1_1 criterion_u4_2 Overlay follows the overlay events", () => {
+  /** What the app answers to the level command, and how often it was asked. */
+  let answer: () => unknown;
+  let reads: number;
+
   beforeEach(() => {
-    // No commands: the overlay only listens (criterion 2).
+    answer = () => -100;
+    reads = 0;
+    // One command: the level (U4 round 2). Anything else fails the test.
     mockIPC(
       (command) => {
+        if (command === LEVEL_COMMAND) {
+          reads += 1;
+          return answer();
+        }
         throw new Error(`the overlay must not call ${command}`);
       },
       { shouldMockEvents: true },
@@ -179,9 +190,10 @@ describe("criterion_m5_1_1 criterion_u4_2 Overlay follows the overlay events", (
     });
   }
 
-  async function level(dbfs: unknown) {
+  /** Lets the page run for `ms` (its animation frames and reads). */
+  async function run(ms: number) {
     await act(async () => {
-      await emit(OVERLAY_LEVEL_EVENT, { dbfs });
+      await new Promise((resolve) => setTimeout(resolve, ms));
     });
   }
 
@@ -211,32 +223,85 @@ describe("criterion_m5_1_1 criterion_u4_2 Overlay follows the overlay events", (
     expect(container.innerHTML).toBe("");
   });
 
-  it("draws the levels it hears while recording", async () => {
+  it("reads the level while the meter shows and draws it", async () => {
     render(<Overlay />);
+    expect(reads).toBe(0);
+    answer = () => -35;
     await send({ state: "recording" });
-    for (const dbfs of [-60, -35, -10]) {
-      await level(dbfs);
-    }
-    expect(barHeights()).toEqual([4, 4, 4, 4, 4, 11, 18]);
-    // Junk is ignored.
-    await level("loud");
-    await level(Number.NaN);
-    expect(barHeights()).toEqual([4, 4, 4, 4, 4, 11, 18]);
-
-    // No sound keeps the meter, now idle, and keeps following the level.
+    await waitFor(() => {
+      expect(barHeights().at(-1)).toBe(11);
+    });
+    answer = () => -10;
+    await waitFor(() => {
+      expect(barHeights().at(-1)).toBe(18);
+    });
+    // No sound keeps the meter, now idle, and keeps reading.
     await send({ state: "no_sound" });
-    await level(-90);
-    expect(barHeights()).toEqual([4, 4, 4, 4, 11, 18, 4]);
+    answer = () => -90;
+    await waitFor(() => {
+      expect(barHeights().at(-1)).toBe(4);
+    });
   });
 
-  it("ignores levels outside a recording and starts each recording flat", async () => {
+  it("reads at most 20 times a second", async () => {
+    expect(LEVEL_POLL_MS).toBe(50);
     render(<Overlay />);
-    await level(-10);
     await send({ state: "recording" });
+    await run(500);
+    // About 10 in 500 ms; frames are 16 ms apart, so allow a little over.
+    expect(reads).toBeGreaterThanOrEqual(3);
+    expect(reads).toBeLessThanOrEqual(12);
+  });
+
+  it("stops reading when the meter goes: Transcribing, an error, hidden, unmounted", async () => {
+    const { unmount } = render(<Overlay />);
+    for (const next of [
+      { state: "transcribing" },
+      { state: "error", message: MESSAGE },
+      { state: "hidden" },
+    ]) {
+      await send({ state: "recording" });
+      await waitFor(() => {
+        expect(reads).toBeGreaterThan(0);
+      });
+      await send(next);
+      await run(20);
+      const before = reads;
+      await run(200);
+      expect(reads, JSON.stringify(next)).toBe(before);
+      reads = 0;
+    }
+    await send({ state: "recording" });
+    await waitFor(() => {
+      expect(reads).toBeGreaterThan(0);
+    });
+    unmount();
+    await run(20);
+    const before = reads;
+    await run(200);
+    expect(reads).toBe(before);
+  });
+
+  it("asks nothing more while a read is unanswered (a stalled app)", async () => {
+    answer = () => new Promise(() => undefined);
+    render(<Overlay />);
+    await send({ state: "recording" });
+    await run(300);
+    expect(reads).toBe(1);
+  });
+
+  it("ignores answers that aren't a level and starts each recording flat", async () => {
+    answer = () => "loud";
+    render(<Overlay />);
+    await send({ state: "recording" });
+    await run(200);
     expect(barHeights()).toEqual(Array.from({ length: METER_BARS }, () => 4));
-    await level(-10);
+    answer = () => -10;
+    await waitFor(() => {
+      expect(barHeights().at(-1)).toBe(18);
+    });
     await send({ state: "transcribing" });
-    await level(-10);
+    answer = () => new Promise(() => undefined);
     await send({ state: "recording" });
     expect(barHeights()).toEqual(Array.from({ length: METER_BARS }, () => 4));
   });
@@ -253,11 +318,9 @@ describe("criterion_m5_1_1 criterion_u4_2 Overlay follows the overlay events", (
     });
     const title = document.title;
     expect(title.startsWith(`${LISTENING_TITLE} `)).toBe(true);
-    // And it does listen by then, to both events.
+    // And it does listen by then.
     await send({ state: "recording" });
-    await level(-10);
     expect(screen.getByRole("status").dataset.state).toBe("recording");
-    expect(barHeights().at(-1)).toBe(18);
     first.unmount();
 
     render(<Overlay />);
@@ -283,7 +346,6 @@ describe("criterion_m5_1_1 criterion_u4_2 Overlay follows the overlay events", (
     await send({ state: "recording" });
     unmount();
     await send({ state: "transcribing" });
-    await level(-10);
     expect(container.innerHTML).toBe("");
   });
 });
@@ -326,12 +388,12 @@ describe("parseView", () => {
 
 describe("parseLevel", () => {
   const cases: [unknown, number | null][] = [
-    [{ dbfs: -32.5 }, -32.5],
-    [{ dbfs: -100 }, -100],
-    [{ dbfs: "loud" }, null],
-    [{ dbfs: Number.POSITIVE_INFINITY }, null],
-    [{}, null],
-    [-20, null],
+    [-32.5, -32.5],
+    [-100, -100],
+    ["loud", null],
+    [Number.POSITIVE_INFINITY, null],
+    [Number.NaN, null],
+    [{ dbfs: -20 }, null],
     [null, null],
   ];
   it.each(cases)("%j -> %j", (payload, expected) => {

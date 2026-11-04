@@ -466,7 +466,11 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         tracing::error!(%error, "could not start reading the API key");
     }
     // Dictation still works without the overlay.
-    let overlay = overlay::start(app.handle(), levels)
+    // The overlay's meter reads the newest level (U4); managed before the
+    // window exists, so the command always finds it.
+    let overlay_level = overlay::OverlayLevel::default();
+    app.manage(overlay_level.clone());
+    let overlay = overlay::start(app.handle(), levels, &overlay_level)
         .inspect_err(|error| tracing::error!(%error, "could not create the overlay"))
         .ok();
     let diagnostics = diagnostics::Diagnostics::default();

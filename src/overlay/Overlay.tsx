@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   HIDDEN,
+  LEVEL_COMMAND,
+  LEVEL_POLL_MS,
   OVERLAY_EVENT,
-  OVERLAY_LEVEL_EVENT,
   SILENT_LEVELS,
   announceListening,
   barHeight,
@@ -23,40 +25,77 @@ function metered(view: OverlayView): boolean {
 }
 
 /**
- * The overlay window's content: follows {@link OVERLAY_EVENT}, and the input
- * level ({@link OVERLAY_LEVEL_EVENT}) while recording. The window itself is
- * shown and hidden from Rust; this only draws the state, and draws nothing
- * while hidden. Once it listens it says so through the document title
+ * Reads the input level for the meter while `on` (U4 round 2): on animation
+ * frames, at most once per {@link LEVEL_POLL_MS}, and never while a read is
+ * still out, so a page that stalls (or an app that doesn't answer) asks for
+ * nothing more. Stops as soon as `on` goes false or the page goes; a late
+ * answer is dropped. Each recording starts flat.
+ */
+function useLevels(on: boolean): readonly number[] {
+  const [levels, setLevels] = useState<readonly number[]>(SILENT_LEVELS);
+
+  useEffect(() => {
+    if (!on) {
+      return;
+    }
+    let active = true;
+    let waiting = false;
+    let last = Number.NEGATIVE_INFINITY;
+    let frame = 0;
+    const tick = (now: number) => {
+      if (!active) {
+        return;
+      }
+      if (!waiting && now - last >= LEVEL_POLL_MS) {
+        waiting = true;
+        last = now;
+        invoke<unknown>(LEVEL_COMMAND).then(
+          (value) => {
+            waiting = false;
+            const dbfs = parseLevel(value);
+            if (active && dbfs !== null) {
+              setLevels((levels) => pushLevel(levels, dbfs));
+            }
+          },
+          () => {
+            waiting = false;
+          },
+        );
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => {
+      active = false;
+      cancelAnimationFrame(frame);
+      // The meter went: the next recording starts flat.
+      setLevels(SILENT_LEVELS);
+    };
+  }, [on]);
+
+  return levels;
+}
+
+/**
+ * The overlay window's content: follows {@link OVERLAY_EVENT}, and reads the
+ * input level ({@link LEVEL_COMMAND}) while it shows the meter. The window
+ * itself is shown and hidden from Rust; this only draws the state, and draws
+ * nothing while hidden. Once it listens it says so through the document title
  * ({@link announceListening}), and the app sends the current state again.
  */
 export function Overlay() {
   const [view, setView] = useState<OverlayView>(HIDDEN);
-  const [levels, setLevels] = useState<readonly number[]>(SILENT_LEVELS);
-  const current = useRef<OverlayView>(HIDDEN);
+  const levels = useLevels(metered(view));
 
   useEffect(() => {
     let active = true;
     const views = listen<unknown>(OVERLAY_EVENT, (event) => {
-      if (!active) {
-        return;
-      }
-      const next = parseView(event.payload);
-      // A new recording starts with a flat meter.
-      if (metered(next) && !metered(current.current)) {
-        setLevels(SILENT_LEVELS);
-      }
-      current.current = next;
-      setView(next);
-    });
-    const meter = listen<unknown>(OVERLAY_LEVEL_EVENT, (event) => {
-      const dbfs = parseLevel(event.payload);
-      if (active && dbfs !== null && metered(current.current)) {
-        setLevels((levels) => pushLevel(levels, dbfs));
+      if (active) {
+        setView(parseView(event.payload));
       }
     });
-    const subscribed = Promise.all([views, meter]);
     // Anything sent before now was lost: ask for the current view (#119).
-    subscribed.then(
+    views.then(
       () => {
         if (active) {
           announceListening();
@@ -66,14 +105,12 @@ export function Overlay() {
     );
     return () => {
       active = false;
-      for (const listener of [views, meter]) {
-        listener.then(
-          (unlisten) => {
-            unlisten();
-          },
-          () => undefined,
-        );
-      }
+      views.then(
+        (unlisten) => {
+          unlisten();
+        },
+        () => undefined,
+      );
     };
   }, []);
 
