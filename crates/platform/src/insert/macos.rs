@@ -21,7 +21,7 @@ use objc2_core_graphics::{
 };
 use objc2_foundation::{NSArray, NSData, NSString};
 
-use super::{ChordModifier, Os, PasteChord, PasteKeys, paste_chord};
+use super::{ANSI_V_KEY_CODE, ChordModifier, Os, PasteChord, PasteKeys, paste_chord};
 use crate::permissions::macos::is_accessibility_trusted;
 
 /// The `org.nspasteboard` markers clipboard managers honour
@@ -437,6 +437,9 @@ impl MacPasteKeys {
     /// The key sender.
     #[must_use]
     pub fn new() -> Self {
+        // Works the paste key out on the main thread now and on every
+        // input source change, so no paste ever waits for it.
+        layout::watch();
         Self
     }
 
@@ -489,7 +492,7 @@ impl PasteKeys for MacPasteKeys {
             if !is_accessibility_trusted() {
                 return Err(InsertError::PermissionDenied);
             }
-            let chord = paste_chord(Os::MacOs, layout::command_char_lookup());
+            let chord = current_chord();
             if blocked() {
                 return Err(InsertError::SecureInput);
             }
@@ -499,9 +502,100 @@ impl PasteKeys for MacPasteKeys {
     }
 }
 
-/// The current keyboard layout's characters under ⌘.
-mod layout {
-    use super::{c_void, on_main};
+/// The paste chord now: ⌘ plus the key code cached for the current
+/// keyboard layout ([`layout::cached_key_code`]), or the ANSI V key until
+/// the cache is filled. Never waits for the main thread: a paste in flight
+/// at Quit, when the main thread is blocked in the shutdown, must not need
+/// it (#241 round 4: that was a deadlock).
+fn current_chord() -> PasteChord {
+    PasteChord {
+        modifier: ChordModifier::Command,
+        key_code: layout::cached_key_code().unwrap_or(ANSI_V_KEY_CODE),
+    }
+}
+
+/// The current keyboard layout's characters under ⌘, and the paste key
+/// code cached from them.
+///
+/// The TIS APIs must run on the main thread, so the key code is worked out
+/// there ahead of time, never during a paste: once when the key sender is
+/// made ([`watch`]), and again each time the selected input source changes
+/// (the `TISNotifySelectedKeyboardInputSourceChanged` distributed
+/// notification, delivered on the main queue). The paste only reads the
+/// cache.
+pub(super) mod layout {
+    use std::ptr::NonNull;
+    use std::sync::Once;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use block2::RcBlock;
+    use objc2_foundation::{
+        NSDistributedNotificationCenter, NSNotification, NSOperationQueue, NSString,
+    };
+
+    use super::{Os, c_void, on_main_async, paste_chord};
+
+    /// The distributed notification TIS posts when the user switches the
+    /// keyboard input source (`kTISNotifySelectedKeyboardInputSourceChanged`).
+    const SOURCE_CHANGED: &str = "com.apple.Carbon.TISNotifySelectedKeyboardInputSourceChanged";
+
+    /// No key code cached yet.
+    const UNKNOWN: u32 = u32::MAX;
+
+    /// The paste key code for the current layout, or [`UNKNOWN`].
+    static KEY_CODE: AtomicU32 = AtomicU32::new(UNKNOWN);
+
+    static WATCH: Once = Once::new();
+
+    /// The cached paste key code, if worked out yet.
+    pub(crate) fn cached_key_code() -> Option<u16> {
+        u16::try_from(KEY_CODE.load(Ordering::Acquire)).ok()
+    }
+
+    /// Sets the cache (what [`refresh`] does on the main thread).
+    pub(crate) fn set_cached_key_code(code: u16) {
+        KEY_CODE.store(u32::from(code), Ordering::Release);
+    }
+
+    /// Starts keeping the cache up to date: works it out now and on every
+    /// input source change, on the main thread. Never blocks: called off
+    /// the main thread, it queues the work there. Once per process.
+    pub(crate) fn watch() {
+        WATCH.call_once(|| {
+            on_main_async(|| {
+                refresh();
+                // SAFETY: the name is a valid NSString; no object filter;
+                // the main queue runs the block on the main thread, where
+                // `refresh` may call the TIS APIs; the block only calls
+                // `refresh`, which is Send-safe (it touches an atomic).
+                let observer = unsafe {
+                    NSDistributedNotificationCenter::defaultCenter()
+                        .addObserverForName_object_queue_usingBlock(
+                            Some(&NSString::from_str(SOURCE_CHANGED)),
+                            None,
+                            Some(&NSOperationQueue::mainQueue()),
+                            &RcBlock::new(|_: NonNull<NSNotification>| refresh()),
+                        )
+                };
+                // Observes for the life of the app.
+                std::mem::forget(observer);
+            });
+        });
+    }
+
+    /// Works the paste key code out from the current layout and caches it.
+    /// Main thread only (the TIS APIs).
+    fn refresh() {
+        let table = command_chars();
+        let chord = paste_chord(Os::MacOs, |code| {
+            table.get(usize::from(code)).copied().flatten()
+        });
+        set_cached_key_code(chord.key_code);
+        tracing::debug!(
+            key_code = chord.key_code,
+            "paste key for the keyboard layout"
+        );
+    }
 
     type TisInputSourceRef = *const c_void;
     type CfDataRef = *const c_void;
@@ -551,14 +645,15 @@ mod layout {
         }
     }
 
-    /// Each key code's character under ⌘ in the current layout, read once
-    /// (on the main thread, where the TIS APIs must run). An empty table
-    /// if the layout has no Unicode data (some input methods); the chord
-    /// then falls back to the ANSI V key.
+    /// Each key code's character under ⌘ in the current layout. Main
+    /// thread only, where the TIS APIs must run (see [`refresh`]). An empty
+    /// table if the layout has no Unicode data (some input methods); the
+    /// chord then falls back to the ANSI V key.
     fn command_chars() -> [Option<char>; 128] {
-        on_main(|| {
+        {
             let mut table = [None; 128];
-            // SAFETY: on the main thread (on_main). The source follows the
+            // SAFETY: on the main thread (only `refresh` calls this, from
+            // `on_main_async` or the main queue). The source follows the
             // Create rule and InputSource releases it.
             let source = InputSource(unsafe { TISCopyCurrentKeyboardLayoutInputSource() });
             if source.0.is_null() {
@@ -605,15 +700,7 @@ mod layout {
                 }
             }
             table
-        })
-        .unwrap_or([None; 128])
-    }
-
-    /// A lookup for [`paste_chord`](super::paste_chord) over the current
-    /// layout.
-    pub(super) fn command_char_lookup() -> impl Fn(u16) -> Option<char> {
-        let table = command_chars();
-        move |code| table.get(usize::from(code)).copied().flatten()
+        }
     }
 }
 
@@ -625,7 +712,7 @@ struct DispatchQueue {
 unsafe extern "C" {
     /// The main queue (`dispatch_get_main_queue()` is a macro over this).
     static _dispatch_main_q: DispatchQueue;
-    fn dispatch_sync_f(
+    fn dispatch_async_f(
         queue: *const DispatchQueue,
         context: *mut c_void,
         work: extern "C" fn(*mut c_void),
@@ -633,34 +720,29 @@ unsafe extern "C" {
     fn pthread_main_np() -> i32;
 }
 
-/// Runs `f` on the main thread and returns its result: directly if this is
-/// the main thread, else through the main dispatch queue (which the app's
-/// event loop drains). `None` only if the queue didn't run it, which
-/// `dispatch_sync_f` doesn't allow. `f` must not panic: a panic can't cross
-/// the C call.
-fn on_main<R: Send, F: FnOnce() -> R + Send>(f: F) -> Option<R> {
+/// Runs `f` on the main thread without waiting for it: directly if this
+/// is the main thread, else queued on the main dispatch queue (which the
+/// app's event loop drains). Never blocks the caller, so it can't deadlock
+/// with a main thread that is waiting on the caller. `f` must not panic: a
+/// panic can't cross the C call.
+fn on_main_async<F: FnOnce() + Send + 'static>(f: F) {
     // SAFETY: no arguments; reports whether this is the main thread.
     if unsafe { pthread_main_np() } != 0 {
-        return Some(f());
+        f();
+        return;
     }
-    extern "C" fn trampoline<R, F: FnOnce() -> R>(context: *mut c_void) {
-        // SAFETY: context is the &mut (Option<F>, Option<R>) passed below,
-        // alive for the whole synchronous dispatch.
-        let slot = unsafe { &mut *context.cast::<(Option<F>, Option<R>)>() };
-        slot.1 = slot.0.take().map(|f| f());
+    extern "C" fn trampoline<F: FnOnce()>(context: *mut c_void) {
+        // SAFETY: context is the Box<F> leaked below, handed over once.
+        let f = unsafe { Box::from_raw(context.cast::<F>()) };
+        f();
     }
-    let mut slot: (Option<F>, Option<R>) = (Some(f), None);
-    // SAFETY: dispatch_sync_f runs trampoline on the main queue and returns
-    // only after it finished, so the pointer to slot stays valid; the main
-    // queue is a static that lives as long as the process.
+    let context = Box::into_raw(Box::new(f));
+    // SAFETY: dispatch_async_f calls trampoline once with context, which
+    // owns the leaked box until then; the main queue is a static that lives
+    // as long as the process.
     unsafe {
-        dispatch_sync_f(
-            &raw const _dispatch_main_q,
-            (&raw mut slot).cast(),
-            trampoline::<R, F>,
-        );
+        dispatch_async_f(&raw const _dispatch_main_q, context.cast(), trampoline::<F>);
     }
-    slot.1
 }
 
 #[cfg(test)]
@@ -1046,10 +1128,50 @@ mod tests {
     }
 
     #[test]
-    fn on_main_runs_inline_on_the_main_thread_only() {
+    fn on_main_async_runs_inline_on_the_main_thread_only() {
         // Test threads aren't the main thread and no run loop drains the
         // main queue here, so only check the predicate.
         // SAFETY: no arguments.
         assert_eq!(unsafe { pthread_main_np() }, 0);
+    }
+
+    /// Runs `f` on a new thread and fails if it doesn't return in time. A
+    /// test thread isn't the main thread, and nothing drains the main
+    /// queue in a test process, so anything that waits on the main thread
+    /// hangs here.
+    fn returns_without_the_main_thread<R: Send + 'static>(
+        f: impl FnOnce() -> R + Send + 'static,
+    ) -> R {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("waited on the main thread")
+    }
+
+    // #241 round 4: the paste's chord comes from the cache, never from a
+    // main-queue dispatch, so an insert in flight at Quit can't deadlock
+    // with the main thread waiting on the shutdown.
+    #[test]
+    fn the_chord_uses_the_cached_key_code_without_the_main_thread() {
+        let before = returns_without_the_main_thread(current_chord);
+        assert_eq!(before.modifier, ChordModifier::Command);
+        assert_eq!(
+            before.key_code, ANSI_V_KEY_CODE,
+            "nothing cached yet: the ANSI V key"
+        );
+        // Dvorak's V key, as `refresh` would cache it.
+        layout::set_cached_key_code(47);
+        let after = returns_without_the_main_thread(current_chord);
+        assert_eq!(after.key_code, 47);
+        assert_eq!(layout::cached_key_code(), Some(47));
+    }
+
+    // Starting the watch off the main thread only queues the work there.
+    #[test]
+    fn watching_the_layout_never_waits_for_the_main_thread() {
+        returns_without_the_main_thread(layout::watch);
+        returns_without_the_main_thread(MacPasteKeys::new);
     }
 }

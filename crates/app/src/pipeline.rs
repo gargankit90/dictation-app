@@ -656,7 +656,15 @@ struct Runner<H, T, I, P, C> {
     /// Events produced while carrying out commands, fed before the next
     /// outside event.
     pending: VecDeque<Event>,
+    /// How long the shutdown waits for the inserter to finish its
+    /// clipboard work ([`FINISH_BOUND`]).
+    finish_bound: Duration,
 }
+
+/// How long the shutdown waits for [`TextInserter::finish`]: the restore
+/// delay (1.5 s) plus some room. The shell's main thread waits on the
+/// shutdown, so this keeps Quit and Relaunch from ever hanging on it.
+pub const FINISH_BOUND: Duration = Duration::from_secs(2);
 
 impl<H, T, I, P, C> Runner<H, T, I, P, C>
 where
@@ -696,6 +704,7 @@ where
             captured: None,
             job: 0,
             pending: VecDeque::new(),
+            finish_bound: FINISH_BOUND,
         }
     }
 
@@ -734,12 +743,18 @@ where
         // The user's clipboard may still be owed from the last paste (it
         // goes back a moment after the chord, on a timer the exit would
         // kill): finish it before the app exits (#241).
+        // Bounded: the shell's main thread is blocked on this shutdown, so
+        // nothing here may wait on it for long. If the bound passes, the
+        // quit goes on and that one restore may be skipped.
         let inserter = Arc::clone(&self.inserter);
-        if task::spawn_blocking(move || inserter.finish())
-            .await
-            .is_err()
-        {
-            tracing::warn!("finishing the clipboard restore failed");
+        let finish = task::spawn_blocking(move || inserter.finish());
+        match tokio::time::timeout(self.finish_bound, finish).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => tracing::warn!("finishing the clipboard restore failed"),
+            Err(_) => tracing::warn!(
+                bound = ?self.finish_bound,
+                "the clipboard restore didn't finish in time; quitting without it"
+            ),
         }
     }
 
@@ -1104,6 +1119,76 @@ mod tests {
             tokio::time::interval(Duration::from_millis(250)),
         );
         (runner, shutdown)
+    }
+
+    /// An inserter whose `finish` never returns on its own: an insert in
+    /// flight that needs a main-queue callback while the main thread waits
+    /// on this shutdown (#241 round 4's deadlock). `release` lets it go at
+    /// the end of the test.
+    #[derive(Clone)]
+    struct StuckFinish {
+        entered: Arc<std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>>,
+        release: Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>,
+    }
+
+    impl TextInserter for StuckFinish {
+        fn insert(&self, _: &str) -> Result<(), InsertError> {
+            Ok(())
+        }
+
+        fn finish(&self) {
+            if let Some(entered) = self.entered.lock().unwrap().take() {
+                let _ = entered.send(());
+            }
+            // Waits for a "main-queue callback" that can't come while the
+            // main thread is blocked in the shutdown.
+            let _ = self.release.lock().unwrap().recv();
+        }
+    }
+
+    /// #241 round 4: the shutdown's wait on `finish` is bounded, so a stuck
+    /// clipboard restore can't hang Quit or Relaunch.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shutdown_does_not_hang_on_a_stuck_finish() {
+        let (entered_tx, entered) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let inserter = StuckFinish {
+            entered: Arc::new(std::sync::Mutex::new(Some(entered_tx))),
+            release: Arc::new(std::sync::Mutex::new(release_rx)),
+        };
+        let (ui, _) = ui_channel();
+        let (shutdown, shutdown_rx) = watch::channel(false);
+        let (audio, failures) = AudioWorker::spawn(BurstAudio(false));
+        let mut runner = Runner::new(
+            FakeHotkey::new(),
+            audio,
+            SilentTranscriber,
+            inserter,
+            FakePermissions::all_granted(),
+            Arc::new(FakeClock::new()),
+            ui,
+            shutdown_rx,
+            tokio::time::interval(Duration::from_millis(250)),
+        );
+        assert_eq!(runner.finish_bound, FINISH_BOUND);
+        assert_eq!(FINISH_BOUND, Duration::from_secs(2));
+        runner.finish_bound = Duration::from_millis(100);
+        let (_keys_tx, keys_rx) = mpsc::channel(KEYS_QUEUED);
+        let keys = Keys {
+            rx: keys_rx,
+            overflow: Arc::new(Overflow::default()),
+        };
+        let started = std::time::Instant::now();
+        let task = tokio::spawn(runner.run(keys, failures));
+        shutdown.send(true).unwrap();
+        // Ends after the bound, though `finish` is still stuck.
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("the shutdown hung on finish")
+            .unwrap();
+        assert!(entered.try_recv().is_ok(), "finish was called");
+        assert!(started.elapsed() >= Duration::from_millis(100));
+        release.send(()).unwrap();
     }
 
     /// #241 round 3: a Quit (or a relaunch) right after a dictation must
