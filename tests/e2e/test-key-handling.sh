@@ -137,7 +137,7 @@ check "so did the VM password" has "$PW_SENTINEL" "$tmp/ok/stdin"
 check "neither secret is in the output or in a VM command's arguments" no_secret_outside_stdin ok
 check "the key is removed once, not again by the exit cleanup" test "$(deletes ok)" = 1
 check "the key is stored by the app's own hook, not the security tool" \
-  has "Contents/MacOS/Vocet --debug-set-api-key-stdin" "$tmp/ok/args"
+  has "Contents/MacOS/dictation-app --debug-set-api-key-stdin" "$tmp/ok/args"
 check "and removed by the app's hook" has "--debug-delete-api-key" "$tmp/ok/args"
 check "the security tool never touches the key" lacks "generic-password" "$tmp/ok/args"
 

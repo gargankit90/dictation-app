@@ -9,7 +9,11 @@ VM_USER=lume
 # The app is called Vocet (the .app and the process); its log files keep their
 # old prefix, so settings, the saved key and logs carry over an update (U1).
 APP_NAME=Vocet
+# The executable inside the bundle and the log files keep the crate name.
+PROC_NAME=dictation-app
 LOG_PREFIX=dictation-app
+# The name before the rename, still on the golden image.
+OLD_APP_NAME=dictation-app
 # Where the app lives in the VM, and where it logs (Tauri's app_log_dir).
 VM_APP="/Users/$VM_USER/Applications/$APP_NAME.app"
 VM_LOG_DIR="/Users/$VM_USER/Library/Logs/com.dictationapp.desktop"
@@ -132,8 +136,15 @@ install_app() {
   local app=$1
   log "installing $(basename "$app") in the VM"
   vm "mkdir -p ~/Applications && rm -rf $(q "$VM_APP")"
+  # The golden image still holds the app under its old name (dictation-app.app,
+  # same bundle id). Two copies would let System Settings and Launch Services
+  # name the app after the old one, so remove it (U1).
+  vm "rm -rf \"\$HOME/Applications/$OLD_APP_NAME.app\""
   tar -C "$(dirname "$app")" -cf - "$(basename "$app")" |
     VM_CMD_TIMEOUT=600 vm "tar -C ~/Applications -xf -"
+  # Launch Services must know the bundle id for `tccutil reset` to accept it
+  # (it knew it from the old copy, which is gone).
+  vm "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f $(q "$VM_APP")" || true
   vm "codesign --verify --deep $(q "$VM_APP")" || die "the app's signature didn't survive the copy"
 }
 
@@ -152,7 +163,7 @@ install_fixtures() {
 # after the KILL, so a scenario can't go on against a stale app.
 fresh_app_state() {
   local name i
-  name=$(q "$APP_NAME")
+  name=$(q "$PROC_NAME")
   vm "pkill -x $name; sleep 1; pkill -9 -x $name; rm -rf $(q "$VM_LOG_DIR")" || true
   for i in 1 2 3 4 5; do
     [ "$(app_count)" = 0 ] && return 0
@@ -195,7 +206,7 @@ launch() {
 }
 
 app_count() {
-  vm "pgrep -x $(q "$APP_NAME") | wc -l" | tr -d ' '
+  vm "pgrep -x $(q "$PROC_NAME") | wc -l" | tr -d ' '
 }
 
 # The app's log so far (all rotated files, oldest first).
