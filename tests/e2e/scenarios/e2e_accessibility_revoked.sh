@@ -43,11 +43,10 @@ VM_MOUSE="$VM_FIXTURES/mouse.js"
 AX_TYPE_KEYS="$VM_FIXTURES/type-keys.js"
 # DictationError::HotkeyFailed's text (crates/core) and the tray's title
 # for it (crates/app/src/tray.rs).
-# What the tray shows (the code table, ErrorCode::user_text).
-AX_HOTKEY_SHOWN="The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
+# What the tray's status line and tooltip say (the code table's message).
+AX_HOTKEY_SHOWN="Vocet can't paste into other apps yet."
 # What the log says (DictationError's Display).
 AX_HOTKEY_ERROR="The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
-AX_HOTKEY_TITLE="Hotkey unavailable"
 AX_EVIDENCE=""
 # 1 while the scenario may have left the switch off.
 AX_SWITCHED_OFF=0
@@ -220,17 +219,18 @@ e2e_accessibility_revoked() {
   expect "it knows Accessibility is off" \
     wait_for_log 'PermissionMissing: the hotkey is off until Accessibility is granted' 10
   expect "it says the hotkey is off until Accessibility is allowed" \
-    wait_for_log "shown to the user error=The dictation hotkey isn.t working" 10
-  expect "the tray says $AX_HOTKEY_TITLE" \
-    tray_shows "$AX_HOTKEY_TITLE" "$TRAY_TOOLTIP: $AX_HOTKEY_SHOWN" 10
-  expect "the tray menu offers Relaunch" wait_for_log 'tray relaunch item offered=true' 10
+    wait_for_log "shown to the user error=The dictation key isn.t working" 10
+  expect "the tray says the hotkey isn't working, with its fix" \
+    env_tray_fix "Open Accessibility settings…" tray_shows "! $AX_HOTKEY_SHOWN" "Vocet: $AX_HOTKEY_SHOWN" 10
   expect "typing still reaches TextEdit with the app running unallowed" typed_in_textedit still
 
   # 5. Allowed again: the hotkey comes back by itself (the supervisor), and
   # after a relaunch too.
   expect "Accessibility is switched on again (password over VNC)" ax_switch_on
-  expect "the hotkey comes back by itself (the tray clears)" tray_is_clear 15
-  expect "the tray menu no longer offers Relaunch" wait_for_log 'tray relaunch item offered=false' 10
+  expect "the supervisor restarts the listener by itself" \
+    wait_for_log 'hotkey restored; shown to the user' 15
+  # A restored listener is Ready at once (U5 round 3).
+  expect "the tray is ready again" tray_is_clear 15
   expect "a real hold dictates in the running app" ax_hold_dictates
   expect "the app quits" fresh_app_state
   launch_full

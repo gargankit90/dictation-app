@@ -497,6 +497,57 @@ impl SystemInserter {
     }
 }
 
+/// Puts `text` on `clipboard` marked transient, concealed and auto-generated
+/// (the markers every dictation write carries), so clipboard managers don't
+/// keep a transcript. The previous contents are not restored.
+///
+/// # Errors
+///
+/// [`ClipboardError::Unavailable`] if it can't be written.
+pub fn copy_marked(clipboard: &dyn Clipboard, text: &str) -> Result<(), ClipboardError> {
+    clipboard.write_dictation(text).map(|_| ())
+}
+
+/// This OS's clipboard, for the menu's "Copy last dictation" (U5): the text,
+/// with the privacy markers ([`copy_marked`]). Elsewhere (until M-W.2) the
+/// write fails with [`ClipboardError::Unavailable`].
+#[derive(Default)]
+pub struct SystemClipboard {
+    #[cfg(target_os = "macos")]
+    inner: MacPasteboard,
+}
+
+impl SystemClipboard {
+    /// The system clipboard.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            #[cfg(target_os = "macos")]
+            inner: MacPasteboard::new(),
+        }
+    }
+
+    /// Replaces the clipboard's contents with `text`, with the privacy
+    /// markers.
+    ///
+    /// # Errors
+    ///
+    /// [`ClipboardError::Unavailable`] if it can't be written.
+    pub fn copy(&self, text: &str) -> Result<(), ClipboardError> {
+        #[cfg(target_os = "macos")]
+        {
+            copy_marked(&self.inner, text)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = text;
+            Err(ClipboardError::Unavailable(
+                "no clipboard adapter for this OS yet".into(),
+            ))
+        }
+    }
+}
+
 impl Default for SystemInserter {
     fn default() -> Self {
         Self::new()
@@ -1136,6 +1187,24 @@ mod tests {
         let started = std::time::Instant::now();
         ThreadSettle.settle(Duration::from_millis(1));
         assert!(started.elapsed() >= Duration::from_millis(1));
+    }
+
+    /// U5 round 2: Copy last dictation marks the clipboard transient,
+    /// concealed and auto-generated, so clipboard managers skip it.
+    #[test]
+    fn copy_last_dictation_carries_the_privacy_markers() {
+        let clipboard = crate::fakes::MemClipboard::with_text("the user's own text");
+        copy_marked(&clipboard, "the last dictation").unwrap();
+        assert_eq!(
+            clipboard.read_text().unwrap().as_deref(),
+            Some("the last dictation")
+        );
+        let markers = clipboard.markers();
+        assert!(markers.transient && markers.concealed && markers.auto_generated);
+        assert_eq!(markers, dictation_ports::ClipboardMarkers::DICTATION);
+        // A clipboard that can't be written is an error, not a silent copy.
+        clipboard.set_unavailable(true);
+        assert!(copy_marked(&clipboard, "x").is_err());
     }
 
     // --- P1 round 3: a fixed RESTORE_DELAY on a timer ----------------------

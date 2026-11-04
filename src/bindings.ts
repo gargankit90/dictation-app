@@ -52,6 +52,12 @@ export const commands = {
 	 */
 	requestPermission: (permission: AppPermission) => typedError<OnboardingStatus, string>(__TAURI_INVOKE("request_permission", { permission })),
 	/**
+	 *  Settings, Help, "Set up dictation…" (U5): opens the first-run steps at
+	 *  the step the user was on, now that the tray's "Resume setup…" is hidden
+	 *  once setup is done. The key is read (bounded) off the async runtime.
+	 */
+	openSetup: () => typedError<null, string>(__TAURI_INVOKE("open_setup")),
+	/**
 	 *  Moves onboarding to `step`, if every step before it is done (the key is
 	 *  read from the keychain only to move to the last step). An error says
 	 *  which step comes first; the user stays where they were.
@@ -128,10 +134,13 @@ export const commands = {
 	 */
 	openIssue: () => typedError<null, string>(__TAURI_INVOKE("open_issue")),
 	/**
-	 *  Whether the tray asked for Troubleshoot since the window last asked;
-	 *  asking clears it.
+	 *  What the tray asked the window to show since the window last asked, as
+	 *  `"troubleshoot"`, `"report"`, `"speech"` or `"shortcut"`; empty if
+	 *  nothing. Asking clears it.
 	 */
-	takeTroubleshootRequest: () => typedError<boolean, string>(__TAURI_INVOKE("take_troubleshoot_request")),
+	takeWindowRequest: () => typedError<string, string>(__TAURI_INVOKE("take_window_request")),
+	/**  Shows the log folder in the file manager, through the opener port. */
+	revealLogFile: () => typedError<null, string>(__TAURI_INVOKE("reveal_log_file")),
 	/**
 	 *  What the last dictation got through: onboarding's Try it shows success
 	 *  only when `completed` grows while its step is open.

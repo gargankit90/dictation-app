@@ -21,12 +21,6 @@ use tauri::{AppHandle, Builder, Runtime};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-/// The tray item's id.
-pub const CHECK_ID: &str = "check-updates";
-
-/// The tray item's label.
-pub const CHECK_LABEL: &str = "Check for updates…";
-
 /// What a check found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {

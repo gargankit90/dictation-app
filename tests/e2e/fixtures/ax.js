@@ -15,6 +15,11 @@
 //   trusted                          "trusted" or "untrusted" (no <app>)
 //   tray-info <app>                  count=, title=, help= (the tooltip) and
 //                                    description= of the app's first status item
+//   tray-menu <app>                  opens the status item's menu and lists its
+//                                    items, one per line, "-" for a separator,
+//                                    "(off) " before a disabled one; closes it
+//   tray-open <app> / tray-close <app>  open the menu and leave it open (for a
+//                                    screenshot) / close it with Escape
 //   tray-click <app> <item>          opens the status item's menu and presses
 //                                    the item whose title starts with <item>
 //   menu-click <app> <menu> <item>   the same in the app's main menu bar
@@ -272,6 +277,28 @@ function clickTray(appEl, pid, itemTitle) {
     delay(0.5);
   }
   return pressMenuItem(appEl, item, itemTitle);
+}
+
+// Opens the tray's menu like clickTray, lists it and closes it again.
+function listTray(appEl, pid) {
+  const item = trayItem(appEl).item;
+  let items = [];
+  for (let attempt = 0; attempt < 4; attempt++) {
+    click(statusItemCenter(pid));
+    items = openMenuItems(appEl, item, 10);
+    if (items.length > 0) break;
+    postKey(KEY_ESCAPE, 0);
+    delay(0.5);
+  }
+  const lines = items.map((entry) => {
+    const title = text(entry, "AXTitle");
+    if (title === "") return "-";
+    const enabled = get(entry, "AXEnabled");
+    return (enabled !== undefined && ObjC.unwrap(enabled) === false ? "(off) " : "") + title;
+  });
+  postKey(KEY_ESCAPE, 0);
+  if (lines.length === 0) fail("the tray's menu did not open");
+  return lines.join("\n");
 }
 
 function trayItem(appEl) {
@@ -545,6 +572,21 @@ function run(argv) {
         "description=" + text(item, "AXDescription"),
       ].join("\n");
     }
+    case "tray-menu":
+      return listTray(appEl, pidOf(app));
+    case "tray-open": {
+      const item = trayItem(appEl).item;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        click(statusItemCenter(pidOf(app)));
+        if (openMenuItems(appEl, item, 10).length > 0) return "open";
+        postKey(KEY_ESCAPE, 0);
+        delay(0.5);
+      }
+      return fail("the tray's menu did not open");
+    }
+    case "tray-close":
+      postKey(KEY_ESCAPE, 0);
+      return "closed";
     case "tray-click":
       return clickTray(appEl, pidOf(app), rest[0]);
     case "menu-click":

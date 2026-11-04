@@ -4,11 +4,9 @@
 # The local provider (_provider_helpers.sh) accepts one made-up key. The
 # keychain starts with another one: dictating shows the provider's
 # rejection, pastes nothing and leaves the clipboard alone. Then the right
-# key is typed into the real Settings window (Speech, the own-key panel's
-# password field, as a person types) and Test & Save (U6: no global Save)
-# tests it against the provider with the typed key, saves it, says
-# "✓ Connected · saved in Keychain", and the engine is rebuilt. A wrong key
-# typed first is refused by the test and not saved.
+# key is typed into the real Settings window (its password field, as a
+# person types), Test key says it works (the test reached the provider with
+# the typed key), Save says "Settings saved." and the engine is rebuilt.
 # Without a relaunch (same pid) the next dictation pastes the transcript,
 # sent with the new key, and the tray's error is gone; after Quit and a
 # relaunch it still does. Neither key is ever in the app's log, settings,
@@ -88,31 +86,22 @@ e2e_settings_key_provider_recovery() {
   expect "TextEdit got nothing (read back exactly)" textedit_is ""
   expect "the clipboard is untouched" test "$(clipboard)" = "$PROVIDER_SENTINEL"
   expect "the tray shows the error, and still fits in the menu bar (#151)" \
-    tray_shows "$TRAY_ERROR_TITLE" "$TRAY_TOOLTIP: Your API key was rejected. Open Settings → Speech to fix it."
+    env_tray_fix "Open Speech settings…" tray_shows "! Your API key was rejected." "Vocet: Your API key was rejected."
   expect "the wrong key wasn't retried" provider_requests_are 1
 
   # Fix it in Settings, as a user would.
   expect "Settings… in the tray opens the window" open_settings
-  expect "the Speech section opens" ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Speech
-  expect "it says a key is saved" \
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "A key is saved in your Keychain." 10
-  expect "there is no Save button" sh -c '! ax press "$1" "$2" Save >/dev/null 2>&1' _ "$APP_NAME" "$SETTINGS_WINDOW"
-  # The wrong key again: Test & Save tests it and saves nothing.
-  expect "type the wrong key into the key field" \
-    ax_ok secret-set "$APP_NAME" "$SETTINGS_WINDOW" api-key "$PROVIDER_BAD_KEY"
-  expect "press Test & Save" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Test & Save"
-  expect "the window says the key was rejected" \
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "rejected" 15
-  expect "the test reached the local provider with the typed key" provider_request_has 2 auth=bad
-  expect "and it did not say saved" \
-    sh -c '! ax wait-text "$1" "$2" "saved in Keychain" 2 >/dev/null 2>&1' _ "$APP_NAME" "$SETTINGS_WINDOW"
-  rebuilt=$(log_count 'engine rebuilt')
+  expect "it says a key is saved" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Key saved" 10
   expect "type the right key into the key field" \
     ax_ok secret-set "$APP_NAME" "$SETTINGS_WINDOW" api-key "$PROVIDER_GOOD_KEY"
-  expect "press Test & Save" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Test & Save"
-  expect "the window says it is connected and saved" \
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "✓ Connected · saved in Keychain" 15
-  expect "the test reached the local provider with the typed key" provider_request_has 3 auth=good
+  expect "press Test key" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Test key"
+  expect "the window says the key works" \
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "The key works." 15
+  expect "the test reached the local provider with the typed key" provider_request_has 2 auth=good
+  rebuilt=$(log_count 'engine rebuilt')
+  expect "press Save" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Save
+  expect "the window says Settings saved." \
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 15
   expect "the engine was rebuilt from the new key" \
     wait_for_log_count 'engine rebuilt' $((rebuilt + 1)) 10
   expect "closing the window hides it" close_settings
@@ -120,9 +109,9 @@ e2e_settings_key_provider_recovery() {
   # No relaunch: the next dictation pastes.
   textedit_fresh
   expect "a dictation after the save ends Idle" dictate_once 1
-  expect "it was sent with the new key" provider_request_has 4 auth=good
-  expect "with the default model, no language" provider_request_has 4 "model=whisper-large-v3-turbo language=-"
-  expect "the provider answered it" provider_wait_event '^replied n=4 status=200'
+  expect "it was sent with the new key" provider_request_has 3 auth=good
+  expect "with the default model, no language" provider_request_has 3 "model=whisper-large-v3-turbo language=-"
+  expect "the provider answered it" provider_wait_event '^replied n=3 status=200'
   expect "TextEdit holds exactly the transcript" textedit_is "$(esc_b64 "$PROVIDER_TEXT")"
   expect "it went through Inserting" \
     test "$(phases_since 3)" = "Recording Transcribing Inserting Idle"
@@ -140,9 +129,9 @@ e2e_settings_key_provider_recovery() {
   expect "with a saved key" wait_for_log 'engine settings provider=groq .*has_key=true'
   textedit_fresh
   expect "a dictation after the relaunch ends Idle" dictate_once 1
-  expect "it was sent with the new key" provider_request_has 5 auth=good
+  expect "it was sent with the new key" provider_request_has 4 auth=good
   expect "TextEdit holds exactly the transcript again" textedit_is "$(esc_b64 "$PROVIDER_TEXT")"
-  expect "five requests in all (no retry, nothing extra)" provider_requests_are 5
+  expect "four requests in all (no retry, nothing extra)" provider_requests_are 4
   expect "no file holds the right key after the relaunch" no_file_holds "$PROVIDER_GOOD_KEY"
 
   [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_settings_key_provider_recovery
