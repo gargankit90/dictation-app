@@ -71,6 +71,10 @@ impl Step {
 }
 
 /// What the app has of what dictation needs.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "four independent facts, each read from its own place"
+)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Readiness {
     /// The user has continued past Welcome.
@@ -197,6 +201,10 @@ impl SetupProgress {
 mod tests {
     use super::*;
 
+    #[allow(
+        clippy::fn_params_excessive_bools,
+        reason = "a table of the four facts reads best in the tests"
+    )]
     fn readiness(
         welcome_passed: bool,
         speech_chosen: bool,
