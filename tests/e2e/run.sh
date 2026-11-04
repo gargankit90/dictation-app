@@ -47,6 +47,7 @@ ALL_SCENARIOS=(
   e2e_accessibility_revoked
   e2e_local_model
   e2e_first_paste_after_launch e2e_quit_right_after_paste e2e_tray_menu_screenshots
+  e2e_history
 )
 # Scenarios that need something the VM may lack (a microphone, a Groq key):
 # they may SKIP. Any other scenario that SKIPs fails the run.

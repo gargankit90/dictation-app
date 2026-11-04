@@ -43,6 +43,9 @@
 //                                    checks only that it holds as many
 //                                    characters; prints "typed"
 //   press <app> <window> <button>    presses a button
+//   press-first <app> <window> <start>  presses the first button whose name
+//                                    starts with <start> (a row's button, whose
+//                                    name holds a time)
 //   radio-press <app> <window> <label>  presses a radio button by its label
 //   check-get <app> <window> <box>   "checked" or "unchecked" (a checkbox,
 //                                    matched like a field)
@@ -414,6 +417,17 @@ function findField(window, field) {
   return found;
 }
 
+function findButtonStarting(window, start) {
+  const want = start.toLowerCase();
+  const found = walk(window, (element) => {
+    if (text(element, "AXRole") !== "AXButton") return false;
+    const names = [text(element, "AXTitle"), text(element, "AXDescription")];
+    return names.some((name) => name.trim().toLowerCase().startsWith(want));
+  });
+  if (found === undefined) fail("no button starting " + JSON.stringify(start));
+  return found;
+}
+
 function findButton(window, title) {
   const want = title.toLowerCase();
   const found = walk(window, (element) => {
@@ -635,6 +649,11 @@ function run(argv) {
     }
     case "press": {
       const err = press(findButton(findWindow(appEl, rest[0]), rest[1]), 5.0);
+      if (err !== 0) fail("pressing " + rest[1] + " failed (AX error " + err + ")");
+      return "pressed " + rest[1];
+    }
+    case "press-first": {
+      const err = press(findButtonStarting(findWindow(appEl, rest[0]), rest[1]), 5.0);
       if (err !== 0) fail("pressing " + rest[1] + " failed (AX error " + err + ")");
       return "pressed " + rest[1];
     }
