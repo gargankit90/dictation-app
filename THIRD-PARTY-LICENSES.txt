@@ -130,6 +130,13 @@ The code adapted from Handy (above) is used under this licence:
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
   SOFTWARE.
 
+Inter and Inter Tight 5.3.0 (https://github.com/rsms/inter, https://github.com/rsms/inter-tight)
+  Website fonts served from site/fonts (WOFF2, Latin and Latin-ext, via the
+  fontsource packages), so the page makes no request to Google. Licence:
+  site/fonts/LICENSE.txt.
+  SIL Open Font License 1.1, Copyright 2016 The Inter Project Authors (Inter),
+  Copyright 2022 The Inter Project Authors (Inter Tight)
+
 The licence files of the vendored crates stay with them:
 third_party/handy-keys/LICENSE, third_party/coreaudio-rs/LICENSE-MIT and
 third_party/coreaudio-rs/LICENSE-APACHE.

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="vc-site">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -24,28 +24,319 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Crect x='1' y='1' width='26' height='26' rx='8' fill='%231F4FC9'/%3E%3Cpath d='M9 11v6M14 8v12M19 11v6' stroke='%23fff' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E"
     />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@600;700;800&display=swap"
-      rel="stylesheet"
-    />
     <style>
+      /* Source: design-system/tokens.css, DS1 (inlined, no build step). */
+      /* Vocet design tokens, DS1 draft 1 (Design Lead, 2026-11-03).
+   One file for the app (src/) and the website (site/). The app uses the
+   system font; the website adds Inter / Inter Tight for display type.
+   Every text/background pair below meets WCAG 4.5:1 (large text 3:1). */
+
       :root {
-        --accent: #1f4fc9;
-        --accent-hover: #163c9a;
-        --ink: #1c1b19;
-        --ink-2: #3b3a36;
-        --muted: #4a4843;
-        --soft: #5c5a55;
-        --faint: #6e6b64;
-        --line: #e4e1d9;
-        --line-2: #ece9e2;
-        --line-3: #d6d2c8;
-        --bg: #fbfaf7;
-        --band: #f3f1eb;
+        color-scheme: light dark;
+
+        /* Brand */
+        --vc-accent: #1f4fc9; /* buttons, links, focus, selection */
+        --vc-accent-hover: #163c9a;
+        --vc-accent-fg: #ffffff; /* text on accent */
+        --vc-accent-soft: #e8eefb; /* selected row, info background */
+
+        /* Neutrals */
+        --vc-ink: #1c1b19; /* primary text */
+        --vc-ink-2: #3b3a36; /* secondary text */
+        --vc-muted: #5c5a55; /* hints, captions */
+        --vc-faint: #6e6b64; /* placeholders (large or non-essential only) */
+        --vc-line: #e4e1d9; /* separators, card borders */
+        --vc-line-strong: #d6d2c8; /* control borders */
+        --vc-bg: #ffffff; /* app window */
+        --vc-bg-grouped: #f5f4f0; /* settings group background, site bands */
+        --vc-bg-site: #fbfaf7; /* website page */
+
+        /* States: always with an icon or word, never colour alone */
+        --vc-ready: #1e7a44; /* ready, success, "Pasted" */
+        --vc-ready-soft: #e6f4ec;
+        --vc-attention: #9a5300; /* needs attention, paused, skipped */
+        --vc-attention-soft: #fdf1e0;
+        --vc-danger: #c4261d; /* errors, destructive */
+        --vc-danger-soft: #fbe9e7;
+        --vc-recording: #e5484d; /* the recording dot only */
+
+        /* Overlay (recording pill): dark in both appearances */
+        --vc-overlay-bg: rgba(28, 27, 25, 0.92);
+        --vc-overlay-fg: #ffffff;
+        --vc-overlay-muted: #c9c6bf;
+        --vc-meter: #ffffff;
+        --vc-meter-idle: rgba(255, 255, 255, 0.28);
+
+        /* Type */
+        --vc-font-ui:
+          -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        --vc-font-display:
+          -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+        --vc-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+        /* App scale (px). Devanagari falls back to the system's Kohinoor/Devanagari MT. */
+        --vc-text-xs: 11px; /* badges */
+        --vc-text-sm: 12px; /* captions, overlay hint */
+        --vc-text-md: 13px; /* body, controls (macOS default) */
+        --vc-text-lg: 15px; /* practice box, overlay label */
+        --vc-text-xl: 17px; /* section titles */
+        --vc-text-2xl: 22px; /* onboarding step titles */
+        --vc-text-3xl: 28px; /* onboarding welcome */
+        --vc-leading: 1.45;
+
+        /* Space: 4 px grid */
+        --vc-space-1: 4px;
+        --vc-space-2: 8px;
+        --vc-space-3: 12px;
+        --vc-space-4: 16px;
+        --vc-space-5: 20px;
+        --vc-space-6: 24px;
+        --vc-space-8: 32px;
+        --vc-space-12: 48px;
+
+        /* Shape */
+        --vc-radius-sm: 6px; /* controls, keycaps */
+        --vc-radius-md: 10px; /* settings groups, cards */
+        --vc-radius-lg: 14px; /* onboarding cards, site cards */
+        --vc-radius-pill: 999px;
+
+        /* Size */
+        --vc-control-h: 28px; /* settings buttons, fields */
+        --vc-control-h-lg: 44px; /* onboarding and website primary actions */
+        --vc-target-min: 44px; /* website touch targets */
+
+        /* Elevation */
+        --vc-shadow-card: 0 1px 2px rgba(28, 27, 25, 0.06);
+        --vc-shadow-pop: 0 12px 32px rgba(28, 27, 25, 0.18);
+
+        /* Motion */
+        --vc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+        --vc-dur-fast: 120ms;
+        --vc-dur: 200ms;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --vc-accent: #7ea2ff;
+          --vc-accent-hover: #a3bdff;
+          --vc-accent-fg: #0b1430;
+          --vc-accent-soft: #1c2747;
+
+          --vc-ink: #f2f1ee;
+          --vc-ink-2: #d9d6cf;
+          --vc-muted: #aaa69e;
+          --vc-faint: #8f8b83;
+          --vc-line: #3a3936;
+          --vc-line-strong: #4a4844;
+          --vc-bg: #1e1e1e;
+          --vc-bg-grouped: #262624;
+          --vc-bg-site: #161614;
+
+          --vc-ready: #4cc26a;
+          --vc-ready-soft: #17301f;
+          --vc-attention: #f2b544;
+          --vc-attention-soft: #33270f;
+          --vc-danger: #ff6b62;
+          --vc-danger-soft: #3a1a17;
+
+          --vc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+          --vc-shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.5);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        :root {
+          --vc-dur-fast: 0ms;
+          --vc-dur: 0ms;
+        }
+      }
+
+      /* Website only: display type */
+      .vc-site {
+        --vc-font-ui: Inter, system-ui, -apple-system, sans-serif;
+        --vc-font-display: "Inter Tight", Inter, system-ui, sans-serif;
+      }
+
+      /* Inter and Inter Tight, served from site/fonts (SIL OFL, see fonts/LICENSE.txt). */
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url("fonts/inter-latin-ext-400-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url("fonts/inter-latin-400-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 500;
+        font-display: swap;
+        src: url("fonts/inter-latin-ext-500-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 500;
+        font-display: swap;
+        src: url("fonts/inter-latin-500-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 600;
+        font-display: swap;
+        src: url("fonts/inter-latin-ext-600-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 600;
+        font-display: swap;
+        src: url("fonts/inter-latin-600-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 700;
+        font-display: swap;
+        src: url("fonts/inter-latin-ext-700-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter";
+        font-style: normal;
+        font-weight: 700;
+        font-display: swap;
+        src: url("fonts/inter-latin-700-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Inter Tight";
+        font-style: normal;
+        font-weight: 600;
+        font-display: swap;
+        src: url("fonts/inter-tight-latin-ext-600-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter Tight";
+        font-style: normal;
+        font-weight: 600;
+        font-display: swap;
+        src: url("fonts/inter-tight-latin-600-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Inter Tight";
+        font-style: normal;
+        font-weight: 700;
+        font-display: swap;
+        src: url("fonts/inter-tight-latin-ext-700-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter Tight";
+        font-style: normal;
+        font-weight: 700;
+        font-display: swap;
+        src: url("fonts/inter-tight-latin-700-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: "Inter Tight";
+        font-style: normal;
+        font-weight: 800;
+        font-display: swap;
+        src: url("fonts/inter-tight-latin-ext-800-normal.woff2") format("woff2");
+        unicode-range:
+          U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+          U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+          U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: "Inter Tight";
+        font-style: normal;
+        font-weight: 800;
+        font-display: swap;
+        src: url("fonts/inter-tight-latin-800-normal.woff2") format("woff2");
+        unicode-range:
+          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+          U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      /* The site is light-only until a dark site design exists: keep the light
+         values of the tokens it uses when the system is dark. */
+      @media (prefers-color-scheme: dark) {
+        :root.vc-site {
+          color-scheme: light;
+          --vc-accent: #1f4fc9;
+          --vc-accent-hover: #163c9a;
+          --vc-ink: #1c1b19;
+          --vc-ink-2: #3b3a36;
+          --vc-muted: #5c5a55;
+          --vc-faint: #6e6b64;
+          --vc-line: #e4e1d9;
+          --vc-line-strong: #d6d2c8;
+          --vc-bg-grouped: #f5f4f0;
+          --vc-bg-site: #fbfaf7;
+        }
+      }
+      /* The page's own names map to the shared tokens. */
+      :root {
+        --accent: var(--vc-accent);
+        --accent-hover: var(--vc-accent-hover);
+        --ink: var(--vc-ink);
+        --ink-2: var(--vc-ink-2);
+        --muted: var(--vc-ink-2);
+        --soft: var(--vc-muted);
+        --faint: var(--vc-faint);
+        --line: var(--vc-line);
+        --line-2: #ece9e2; /* site-only hairline, no token */
+        --line-3: var(--vc-line-strong);
+        --bg: var(--vc-bg-site);
+        --band: var(--vc-bg-grouped);
         --white: #fff;
-        --display: "Inter Tight", system-ui, sans-serif;
+        --display: var(--vc-font-display);
       }
       * {
         box-sizing: border-box;
@@ -60,11 +351,7 @@
         margin: 0;
         background: var(--bg);
         color: var(--ink);
-        font-family:
-          Inter,
-          system-ui,
-          -apple-system,
-          sans-serif;
+        font-family: var(--vc-font-ui);
         font-size: 16px;
         line-height: 1.5;
         -webkit-font-smoothing: antialiased;
@@ -1397,7 +1684,7 @@
       /* engine */
       .cards-2 {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
         gap: 20px;
       }
       .card {
@@ -1481,7 +1768,7 @@
         border-radius: 16px;
         padding: 28px;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
         gap: 28px 40px;
       }
       .data-card h3 {
@@ -1552,6 +1839,25 @@
         color: #fff;
       }
 
+      /* Tap targets of at least 44 px (mobile review, U3). */
+      .nav a {
+        min-width: 44px;
+        justify-content: center;
+      }
+      .brand {
+        min-height: 44px;
+      }
+      .site-footer a,
+      .data-card p a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+        padding: 0 6px;
+      }
+      h1,
+      .h2 {
+        text-wrap: balance;
+      }
       /* small screens */
       @media (max-width: 640px) {
         .hero {
@@ -1602,6 +1908,21 @@
         }
         .btn {
           font-size: 16px;
+        }
+        /* Mobile review (U3): keep the Pasted badge off the last message line,
+           one nav row (the hero has the call to action), 2x2 tabs. */
+        .chat {
+          padding-bottom: 28px;
+        }
+        .nav .nav-cta {
+          display: none;
+        }
+        .tabs {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+        }
+        .tab {
+          justify-content: center;
         }
       }
       @media (prefers-reduced-motion: reduce) {

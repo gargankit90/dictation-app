@@ -11,3 +11,7 @@ extend-exclude = [
     # Licence texts from the crates and packages we ship, as published.
     "THIRD-PARTY-LICENSES.txt",
 ]
+
+[default]
+# Unicode ranges in the website font-face rules (site/index.html).
+extend-ignore-re = ["U\\+[0-9A-Fa-f]{4}(-[0-9A-Fa-f]{4})?"]

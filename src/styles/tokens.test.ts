@@ -10,6 +10,18 @@ const sources = import.meta.glob<string>(
   { query: "?raw", import: "default", eager: true },
 );
 
+const site = import.meta.glob<string>("/site/index.html", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+const fontFiles = import.meta.glob("/site/fonts/*.woff2");
+const fontLicence = import.meta.glob<string>("/site/fonts/LICENSE.txt", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+
 // In stylesheets any #rgb/#rrggbb/#rrggbbaa; in TS only quoted colour literals.
 const CSS_HEX = /#[0-9a-fA-F]{3,8}\b/;
 const TS_HEX = /["'`]#[0-9a-fA-F]{3,8}["'`]/;
@@ -34,6 +46,27 @@ describe("design tokens", () => {
       .filter(([path, text]) => (path.endsWith(".css") ? CSS_HEX : TS_HEX).test(text))
       .map(([path]) => path);
     expect(offenders).toEqual([]);
+  });
+
+  it("keeps the website on the same tokens, with fonts served from site/fonts", () => {
+    const html = site["/site/index.html"] ?? "";
+    expect(html).toMatch(/<html[^>]*class="vc-site"/);
+    expect(html).toContain("Source: design-system/tokens.css, DS1");
+    expect(html).toContain("--accent: var(--vc-accent)");
+    // No third-party requests except the release lookup.
+    expect(html).not.toMatch(/fonts\.(googleapis|gstatic)\.com/);
+    const hosts = [
+      ...html.matchAll(/<(?:link|script|img|iframe)\b[^>]*\b(?:src|href)="(https?:\/\/[^"/]+)/g),
+    ].map((m) => m[1] ?? "");
+    expect(hosts.filter((h) => !h.includes("vocetlabs.com"))).toEqual([]);
+    // Every self-hosted font file the CSS names exists, and the OFL is credited.
+    const files = [...html.matchAll(/url\("fonts\/([^"]+)"\)/g)].map(
+      (m) => `/site/fonts/${m[1] ?? ""}`,
+    );
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) expect(Object.keys(fontFiles), f).toContain(f);
+    expect(html).toMatch(/font-display:\s*swap/);
+    expect(fontLicence["/site/fonts/LICENSE.txt"]).toContain("SIL OPEN FONT LICENSE");
   });
 
   it("styles app sheets with --vc-* variables only (no legacy names)", () => {
