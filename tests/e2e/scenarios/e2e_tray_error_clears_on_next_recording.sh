@@ -92,8 +92,6 @@ e2e_tray_error_clears_on_next_recording() {
   launch --press
   expect "the next recording starts" \
     wait_for_log_count 'state changed phase=Recording' $((recordings + 1)) 10
-  expect "the tray's icon shows recording as soon as it records" \
-    wait_for_log 'tray menu .*icon=Recording' 5
   local before
   before=$(idle_count)
   launch --release

@@ -74,8 +74,10 @@ e2e_onboarding_first_run() {
   expect "the tray has no Resume setup once setup is done" \
     sh -c "! printf '%s' \"\$1\" | grep -q 'Resume setup'" _ "$(tray_menu)"
   expect "Settings… in the tray opens the window" open_settings
+  expect "Settings shows Help, Set up dictation…" \
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Set up dictation" 10
   expect "Set up dictation… in Settings, Help, opens it again" \
-    ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Set up dictation"
+    ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Set up dictation…"
   expect "its window is on screen" ax_ok wait-window "$APP_NAME" "$ONBOARDING_WINDOW" 10
   expect "at the test dictation" ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Try it" 10
   expect "closing it hides it" ax_ok close "$APP_NAME" "$ONBOARDING_WINDOW"
