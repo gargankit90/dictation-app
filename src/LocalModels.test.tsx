@@ -263,7 +263,9 @@ describe("U2: the language picker follows the engine", () => {
   it("shows the helper line and link with the English-only model, and the link switches model", async () => {
     backend.settings = { ...backend.settings, transcription: "local" };
     await open();
-    await screen.findByText(/understands English only\. For Hindi and other languages,/);
+    await screen.findByText(
+      /The English model understands English only\. For Hindi and other languages,/,
+    );
     fireEvent.click(screen.getByRole("button", { name: "choose the multilingual model" }));
     expect(screen.getByRole<HTMLInputElement>("radio", { name: /Qwen3-ASR/ }).checked).toBe(true);
     expect(screen.queryByText(/understands English only/)).toBeNull();
@@ -273,7 +275,7 @@ describe("U2: the language picker follows the engine", () => {
     backend.settings = { ...backend.settings, transcription: "local", language: "de" };
     await open();
     await waitFor(() => {
-      expect(language().value).toBe("German, not supported by Parakeet Unified 0.6B");
+      expect(language().value).toBe("German, not supported by the English model");
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByText("Settings saved.");
@@ -284,9 +286,19 @@ describe("U2: the language picker follows the engine", () => {
     expect(language().value).toBe("German (Deutsch)");
   });
 
-  it("flags a code the cloud engine doesn't know, without changing it", async () => {
-    backend.settings = { ...backend.settings, language: "yue" };
+  it("offers Groq's full Whisper set (Bengali, Telugu) and keeps them for either provider", async () => {
+    backend.settings = { ...backend.settings, language: "bn" };
     await open();
-    expect(language().value).toBe("Cantonese, not supported by Groq");
+    expect(language().value).toBe("Bengali (বাংলা)");
+    cleanup();
+    backend.settings = { ...backend.settings, provider: "openai", language: "te" };
+    await open();
+    expect(language().value).toBe("Telugu (తెలుగు)");
+  });
+
+  it("flags a code that isn't a Whisper language, without changing it", async () => {
+    backend.settings = { ...backend.settings, language: "fil" };
+    await open();
+    expect(language().value).toBe("Filipino, not supported by Groq");
   });
 });

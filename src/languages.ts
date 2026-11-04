@@ -1,3 +1,5 @@
+import type { Provider } from "./bindings";
+
 // Language names for the picker (U2). Settings still stores the ISO code (or
 // `null` for "detect"); the names exist only for display and search.
 
@@ -62,68 +64,171 @@ const NAMES: Readonly<Record<string, readonly [english: string, native: string]>
   vi: ["Vietnamese", "Tiếng Việt"],
   yue: ["Cantonese", "粵語"],
   zh: ["Chinese", "中文"],
+  la: ["Latin", "Latina"],
+  ml: ["Malayalam", "മലയാളം"],
+  te: ["Telugu", "తెలుగు"],
+  bn: ["Bengali", "বাংলা"],
+  br: ["Breton", "Brezhoneg"],
+  eu: ["Basque", "Euskara"],
+  mn: ["Mongolian", "Монгол"],
+  sq: ["Albanian", "Shqip"],
+  pa: ["Punjabi", "ਪੰਜਾਬੀ"],
+  si: ["Sinhala", "සිංහල"],
+  km: ["Khmer", "ភាសាខ្មែរ"],
+  sn: ["Shona", "chiShona"],
+  yo: ["Yoruba", "Yorùbá"],
+  so: ["Somali", "Soomaali"],
+  oc: ["Occitan", "Occitan"],
+  ka: ["Georgian", "ქართული"],
+  tg: ["Tajik", "Тоҷикӣ"],
+  sd: ["Sindhi", "سنڌي"],
+  gu: ["Gujarati", "ગુજરાતી"],
+  am: ["Amharic", "አማርኛ"],
+  yi: ["Yiddish", "ייִדיש"],
+  lo: ["Lao", "ລາວ"],
+  uz: ["Uzbek", "Oʻzbekcha"],
+  fo: ["Faroese", "Føroyskt"],
+  ht: ["Haitian Creole", "Kreyòl ayisyen"],
+  ps: ["Pashto", "پښتو"],
+  tk: ["Turkmen", "Türkmençe"],
+  nn: ["Nynorsk", "Nynorsk"],
+  mt: ["Maltese", "Malti"],
+  sa: ["Sanskrit", "संस्कृतम्"],
+  lb: ["Luxembourgish", "Lëtzebuergesch"],
+  my: ["Burmese", "မြန်မာ"],
+  bo: ["Tibetan", "བོད་ཡིག"],
+  mg: ["Malagasy", "Malagasy"],
+  as: ["Assamese", "অসমীয়া"],
+  tt: ["Tatar", "Татарча"],
+  haw: ["Hawaiian", "ʻŌlelo Hawaiʻi"],
+  ln: ["Lingala", "Lingála"],
+  ha: ["Hausa", "Hausa"],
+  ba: ["Bashkir", "Башҡортса"],
+  jw: ["Javanese", "Basa Jawa"],
+  su: ["Sundanese", "Basa Sunda"],
 };
 
-/** The languages Groq's and OpenAI's Whisper models accept. */
-export const CLOUD_LANGUAGES: readonly string[] = [
-  "af",
-  "ar",
-  "hy",
-  "az",
-  "be",
-  "bs",
-  "bg",
-  "ca",
-  "zh",
-  "hr",
-  "cs",
-  "da",
-  "nl",
+/**
+ * The languages Whisper accepts: the 99-language table of the upstream
+ * model (openai/whisper, `whisper/tokenizer.py` LANGUAGES, plus `yue` added
+ * for large-v3). Groq documents these 99+ languages for both
+ * `whisper-large-v3` and `whisper-large-v3-turbo`:
+ * https://console.groq.com/docs/model/whisper-large-v3-turbo
+ * OpenAI's `whisper-1` takes the same ISO codes; its docs only list the
+ * subset with good quality, but every code in the table is accepted.
+ */
+const WHISPER_LANGUAGES: readonly string[] = [
   "en",
-  "et",
-  "fi",
-  "fr",
-  "gl",
+  "zh",
   "de",
-  "el",
-  "he",
-  "hi",
-  "hu",
-  "is",
-  "id",
-  "it",
-  "ja",
-  "kn",
-  "kk",
-  "ko",
-  "lv",
-  "lt",
-  "mk",
-  "ms",
-  "mr",
-  "mi",
-  "ne",
-  "no",
-  "fa",
-  "pl",
-  "pt",
-  "ro",
-  "ru",
-  "sr",
-  "sk",
-  "sl",
   "es",
-  "sw",
-  "sv",
-  "tl",
-  "ta",
-  "th",
+  "ru",
+  "ko",
+  "fr",
+  "ja",
+  "pt",
   "tr",
-  "uk",
-  "ur",
+  "pl",
+  "ca",
+  "nl",
+  "ar",
+  "sv",
+  "it",
+  "id",
+  "hi",
+  "fi",
   "vi",
+  "he",
+  "uk",
+  "el",
+  "ms",
+  "cs",
+  "ro",
+  "da",
+  "hu",
+  "ta",
+  "no",
+  "th",
+  "ur",
+  "hr",
+  "bg",
+  "lt",
+  "la",
+  "mi",
+  "ml",
   "cy",
+  "sk",
+  "te",
+  "fa",
+  "lv",
+  "bn",
+  "sr",
+  "az",
+  "sl",
+  "kn",
+  "et",
+  "mk",
+  "br",
+  "eu",
+  "is",
+  "hy",
+  "ne",
+  "mn",
+  "bs",
+  "kk",
+  "sq",
+  "sw",
+  "gl",
+  "mr",
+  "pa",
+  "si",
+  "km",
+  "sn",
+  "yo",
+  "so",
+  "af",
+  "oc",
+  "ka",
+  "be",
+  "tg",
+  "sd",
+  "gu",
+  "am",
+  "yi",
+  "lo",
+  "uz",
+  "fo",
+  "ht",
+  "ps",
+  "tk",
+  "nn",
+  "mt",
+  "sa",
+  "lb",
+  "my",
+  "bo",
+  "tl",
+  "mg",
+  "as",
+  "tt",
+  "haw",
+  "ln",
+  "ha",
+  "ba",
+  "jw",
+  "su",
+  "yue",
 ];
+
+const BY_PROVIDER: Readonly<Record<Provider, readonly string[]>> = {
+  groq: WHISPER_LANGUAGES,
+  openai: WHISPER_LANGUAGES,
+};
+
+/** The languages a cloud provider's Whisper models accept. */
+export function cloudLanguages(provider: Provider): readonly string[] {
+  return BY_PROVIDER[provider];
+}
 
 /** "Detect automatically": the option that stores no language. */
 export const AUTO_LABEL = "Detect automatically";
@@ -146,16 +251,28 @@ export function englishName(code: string): string {
 }
 
 /**
- * Whether `query` finds `code`: it starts a word of either name,
- * case-insensitive ("hin" finds Hindi, not Chinese).
+ * Lowercase with accents and combining marks removed, so "francais" finds
+ * Français and the displayed Devanagari name compares equal to itself. Both
+ * the query and the names go through this, so marks never split a word.
+ */
+function fold(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase();
+}
+
+/**
+ * Whether `query` finds `code`: it starts a word of either name
+ * ("hin" finds Hindi, not Chinese). Case, accents and Unicode normal form
+ * don't matter.
  */
 export function languageMatches(code: string, query: string): boolean {
-  const q = query.trim().toLowerCase();
+  const q = fold(query.trim());
   if (q === "") return true;
   const names = NAMES[code] ?? [languageLabel(code)];
   return names.some((name) =>
-    name
-      .toLowerCase()
+    fold(name)
       .split(/[^\p{L}\p{N}]+/u)
       .some((word) => word.startsWith(q)),
   );

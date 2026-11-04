@@ -10,7 +10,7 @@ import type {
 import { BROKEN, messageOf, testKey as runKeyTest } from "./keyTest";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { LanguagePicker } from "./LanguagePicker";
-import { CLOUD_LANGUAGES } from "./languages";
+import { cloudLanguages } from "./languages";
 import { LocalModels } from "./LocalModels";
 import type { Notice } from "./keyTest";
 import { PROVIDERS, providerInfo } from "./providers";
@@ -157,8 +157,17 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
   const selectedModel = catalogue?.find((model) => model.id === localModel);
   const onDevice = transcription === "local";
   const languageChoices: readonly string[] =
-    onDevice && selectedModel !== undefined ? selectedModel.language_codes : CLOUD_LANGUAGES;
-  const languageEngine = onDevice ? (selectedModel?.name ?? null) : info.name;
+    onDevice && selectedModel !== undefined
+      ? selectedModel.language_codes
+      : cloudLanguages(provider);
+  // Plain words, not catalogue names (those belong in Speech details).
+  const languageEngine = onDevice
+    ? selectedModel === undefined
+      ? null
+      : selectedModel.language_codes.join() === "en"
+        ? "the English model"
+        : "the multilingual model"
+    : info.name;
   const englishOnlyModel =
     onDevice && selectedModel?.language_codes.join() === "en" ? selectedModel : undefined;
   const englishOnly = englishOnlyModel !== undefined;
@@ -581,8 +590,8 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
               invalid={errors.language !== undefined}
             />
             <p id="language-hint" className="hint">
-              {englishOnlyModel !== undefined
-                ? `${englishOnlyModel.name} understands English only. For Hindi and other languages, `
+              {englishOnly
+                ? `The English model understands English only. For Hindi and other languages, `
                 : "Choose the language you speak, or let the app detect it."}
               {englishOnly && (
                 <button

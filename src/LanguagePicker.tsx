@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { AUTO_LABEL, englishName, languageLabel, languageMatches, sortedByName } from "./languages";
 
@@ -64,6 +64,12 @@ export function LanguagePicker({
       return languageMatches(option.value, q);
     });
   }, [supported, unsupported, value, selectedLabel, query]);
+
+  // Keep the keyboard-active option visible in the scrollable list.
+  useEffect(() => {
+    if (!open) return;
+    document.getElementById(`${listId}-${String(active)}`)?.scrollIntoView({ block: "nearest" });
+  }, [open, active, listId, options]);
 
   function close() {
     setOpen(false);
