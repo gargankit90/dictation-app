@@ -18,7 +18,11 @@ SETTINGS_WINDOW=Settings
 hr_settings_reset() { vm "rm -f $(q "$SETTINGS_FILE_VM")"; }
 hr_file_has() { vm "cat $(q "$SETTINGS_FILE_VM")" | grep -Eq "\"hotkey\"[[:space:]]*:[[:space:]]*\"$1\""; }
 hr_text() { ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "$1" "${2:-10}"; }
-hr_open() { ax_ok tray-click "$APP_NAME" Settings && ax_ok wait-window "$APP_NAME" "$SETTINGS_WINDOW" 10; }
+# U6: the recorder is in Settings' Dictation section.
+hr_open() {
+  ax_ok tray-click "$APP_NAME" Settings && ax_ok wait-window "$APP_NAME" "$SETTINGS_WINDOW" 10 &&
+    ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Dictation
+}
 hr_record() { ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Record a different key" && hr_text "Press a key" 5; }
 
 # hr_hold_dictates <key>: a hold gives one dictation, pasted into TextEdit.
