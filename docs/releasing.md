@@ -126,7 +126,7 @@ scripts/updater-test.sh serve     # leave running
 ```
 
 In the Lume VM (reachable from the VM at `192.168.64.1`, the default `HOST`):
-copy `target/updater-test/old/dictation-app.app` to `~/Applications`, open it,
+copy `target/updater-test/old/Vocet.app` to `~/Applications`, open it,
 menu-bar icon > **Check for updates…** > **Install and restart**. The app
 restarts as 0.1.1 (the log says `starting version="0.1.1"`).
 `tests/e2e/scenarios/e2e_update_keeps_permissions.sh` does all of this in the

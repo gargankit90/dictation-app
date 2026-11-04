@@ -12,7 +12,7 @@
 VM_TYPE_KEYS="$VM_FIXTURES/type-keys.js"
 VM_KEYS="$VM_FIXTURES/keys.js"
 SETTINGS_FILE_VM="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/settings.json"
-# Text in the settings window's title ("dictation-app Settings").
+# Text in the settings window's title ("Vocet Settings").
 SETTINGS_WINDOW=Settings
 
 hr_settings_reset() { vm "rm -f $(q "$SETTINGS_FILE_VM")"; }

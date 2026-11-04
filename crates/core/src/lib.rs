@@ -9,6 +9,7 @@ pub mod diagnostics;
 pub mod error;
 pub mod events;
 pub mod hotkey_spec;
+pub mod level;
 pub mod local_models;
 pub mod onboarding;
 pub mod redact;

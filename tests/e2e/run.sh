@@ -38,17 +38,19 @@ ALL_SCENARIOS=(
   e2e_focus_switch_during_transcription e2e_unicode_multiline_selection_paste
   e2e_quit_during_transcription_then_relaunch
   e2e_error_bad_key e2e_real_groq
-  e2e_overlay_focus e2e_overlay_rendered_states_and_error
+  e2e_overlay_focus e2e_overlay_rendered_states_and_error e2e_pill_states
   e2e_smart_space e2e_password_field_not_read e2e_layout_paste e2e_image_clipboard_restore
-  e2e_dmg_install e2e_update_keeps_permissions
+  e2e_dmg_install e2e_update_keeps_permissions e2e_update_from_dictation_app
+  e2e_update_keychain_control
   e2e_launch_at_login
   e2e_hotkey_shortcuts e2e_no_words_transcript e2e_hotkey_recorder
   e2e_accessibility_revoked
-  e2e_local_model e2e_tray_menu_screenshots
+  e2e_local_model
+  e2e_first_paste_after_launch e2e_quit_right_after_paste e2e_tray_menu_screenshots
 )
 # Scenarios that need something the VM may lack (a microphone, a Groq key):
 # they may SKIP. Any other scenario that SKIPs fails the run.
-OPTIONAL_SCENARIOS=(e2e_real_mic e2e_real_groq e2e_tray_menu_screenshots)
+OPTIONAL_SCENARIOS=(e2e_real_mic e2e_real_groq e2e_update_keychain_control e2e_tray_menu_screenshots)
 APP_PATH=target/debug/bundle/macos/$APP_NAME.app
 build=1
 reset=1

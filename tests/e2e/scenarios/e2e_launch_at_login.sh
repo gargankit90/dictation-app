@@ -1,11 +1,12 @@
 # M5.3 criterion 3 and T4b (#123): launch at login, turned on and off the way
-# a user does it (the Settings window's checkbox and Save), across two
+# a user does it (the Settings window's checkbox, with Save pressed), across two
 # reboots of the VM.
 #
 # 1. The login item is off (the OS's state, read by the debug flag
 #    --debug-launch-at-login-status, which runs the code behind Settings).
 # 2. The app is started; in Settings (from the tray) the box is unchecked; it
-#    is checked and saved ("Settings saved."); the window is closed and
+#    is checked (it applies at once, "Applying…" until the OS answers), Save
+#    shows "Settings saved." within 5 s whatever the OS is doing; the window is closed and
 #    reopened and the box shows the OS's state, checked, and the OS says
 #    enabled. Quit from the tray.
 # 3. macOS restarts (System Events `restart`, boot time checked): exactly one
@@ -108,17 +109,22 @@ login_box_shows() {
     job_says "$1" ax check-get "$APP_NAME" "$SETTINGS_WINDOW" launch-at-login
 }
 
-# login_box_save <on|off>: sets the box like a user and saves; "Settings
-# saved." must show. Turning the item off can take 40 s (#238): the notice
-# is waited for 45 s, inside an outer Terminal-job bound of 60 polls (each
-# poll takes at least a second), not the default 30.
+# login_box_save <on|off>: sets the box like a user. The change applies at
+# once and the OS may need tens of seconds for it (#238): Save must not wait
+# for it ("Settings saved." within 5 s, S1), and "Applying…" goes away once
+# the OS has answered (waited for 150 s, inside an outer Terminal-job bound of
+# 180 polls, each taking at least a second).
 login_box_save() {
-  local want=checked
+  local want=checked started
   [ "$1" = on ] || want=unchecked
   login_box_ready &&
     job_says "$want" ax check-set "$APP_NAME" "$SETTINGS_WINDOW" launch-at-login "$1" &&
     ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Save &&
-    VM_TERMINAL_TIMEOUT=60 ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 45
+    started=$SECONDS &&
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 5 &&
+    log "  Settings saved. took at most $((SECONDS - started + 1))s after Save" &&
+    VM_TERMINAL_TIMEOUT=180 ax_ok wait-no-text "$APP_NAME" "$SETTINGS_WINDOW" "Applying…" 150 &&
+    log "  the OS answered after $((SECONDS - started))s"
 }
 
 # login_item_is <enabled|disabled>: what the OS says.
@@ -160,6 +166,8 @@ e2e_launch_at_login() {
   expect "the app starts" wait_for_log 'INFO .*ready'
   login_setting on
   expect "Quit from the tray ends the app" quit_from_tray
+  # Kept for the timings of the OS calls (#238).
+  collect_log e2e_launch_at_login.on
   clear_app_log
   vm "sync"
 
@@ -193,6 +201,7 @@ posted up" hold_escape_release
   # 4. Off through Settings.
   login_setting off
   expect "Quit from the tray ends the app" quit_from_tray
+  collect_log e2e_launch_at_login.off
   clear_app_log
   vm "sync"
 

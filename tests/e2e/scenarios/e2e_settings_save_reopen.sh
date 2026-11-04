@@ -17,7 +17,7 @@
 # is removed) so no later scenario starts with this hotkey.
 
 SETTINGS_FILE_VM="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/settings.json"
-# Text in the settings window's title ("dictation-app Settings").
+# Text in the settings window's title ("Vocet Settings").
 SETTINGS_WINDOW=Settings
 
 settings_reset() {
@@ -95,8 +95,9 @@ e2e_settings_save_reopen() {
   # Change and save.
   expect "Settings… in the tray opens the window" open_settings
   expect "it shows the default hotkey" field_shows hotkey RightAlt
-  expect "and no language" field_shows language ""
-  expect "type de as the language" ax_ok field-set "$APP_NAME" "$SETTINGS_WINDOW" language de
+  expect "and detects the language automatically" field_shows language "Detect automatically"
+  expect "pick German in the language popup" \
+    ax_ok combo-pick "$APP_NAME" "$SETTINGS_WINDOW" language german "German (Deutsch)"
   expect "type leftalt as the hotkey" ax_ok field-set "$APP_NAME" "$SETTINGS_WINDOW" hotkey leftalt
   expect "press Save" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Save
   expect "the window says Settings saved." \
@@ -110,7 +111,7 @@ e2e_settings_save_reopen() {
   expect "closing the window hides it" close_settings
   expect "the app keeps running" app_count_is 1
   expect "Settings… opens it again" open_settings
-  expect "it shows the saved language" field_shows language de
+  expect "it shows the saved language" field_shows language "German (Deutsch)"
   expect "and the saved hotkey" field_shows hotkey LeftAlt
   expect "closing it again hides it" close_settings
 

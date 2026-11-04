@@ -122,17 +122,17 @@ const fn row(
     }
 }
 
-/// The longest [`ErrorCode::user_text`], in characters: the overlay shows two
-/// lines of about 55 characters.
-pub const USER_TEXT_MAX_CHARS: usize = 105;
+/// The longest [`ErrorCode::user_text`], in characters: the overlay shows three
+/// lines of about 52 characters.
+pub const USER_TEXT_MAX_CHARS: usize = 150;
 
 /// The table: every code once. A code missing here fails
 /// `every_code_has_one_row_in_order`.
 const TABLE: [CodeInfo; 17] = [
     row(
         ErrorCode::MicDenied,
-        "Microphone is off for dictation-app.",
-        "Allow it in Privacy & Security, then relaunch.",
+        "Vocet can't use the microphone.",
+        "Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet.",
         FixAction::OpenMicrophoneSettings,
     ),
     row(
@@ -143,38 +143,38 @@ const TABLE: [CodeInfo; 17] = [
     ),
     row(
         ErrorCode::AccessibilityMissing,
-        "Accessibility is off for dictation-app.",
-        "Allow it in Privacy & Security, Accessibility.",
+        "Vocet can't paste into other apps yet.",
+        "Allow it in System Settings → Privacy & Security → Accessibility.",
         FixAction::OpenAccessibilitySettings,
     ),
     row(
         ErrorCode::HotkeyUnregistered,
-        "The hotkey isn't working.",
-        "Allow Accessibility; it comes back by itself.",
+        "The dictation key isn't working.",
+        "Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself.",
         FixAction::OpenAccessibilitySettings,
     ),
     row(
         ErrorCode::KeyMissing,
-        "No API key is saved.",
-        "Add one in Settings, or use a model on this Mac.",
+        "No API key saved.",
+        "Add one in Settings → Transcription, or use the model on this Mac.",
         FixAction::OpenSettings,
     ),
     row(
         ErrorCode::KeyRejected,
-        "The provider rejected your API key.",
-        "Check or re-enter it in Settings.",
+        "Your API key was rejected.",
+        "Open Settings → Transcription to fix it.",
         FixAction::OpenSettings,
     ),
     row(
         ErrorCode::KeyUnreadable,
-        "Couldn't read your key from the Keychain.",
-        "Unlock it, or enter the key again in Settings.",
+        "Vocet couldn't read your saved key.",
+        "Unlock your Keychain, or enter the key again in Settings.",
         FixAction::OpenSettings,
     ),
     row(
         ErrorCode::NetworkUnreachable,
-        "The provider couldn't be reached.",
-        "Check your internet, or use a model on this Mac.",
+        "Vocet couldn't reach the provider.",
+        "Check your internet, or use the model on this Mac.",
         FixAction::TryAgain,
     ),
     row(
@@ -186,25 +186,25 @@ const TABLE: [CodeInfo; 17] = [
     row(
         ErrorCode::ProviderRedirect,
         "The provider sent a redirect.",
-        "Check the provider in Settings.",
+        "Check the provider in Settings → Transcription.",
         FixAction::OpenSettings,
     ),
     row(
         ErrorCode::ModelMissing,
-        "The on-device model isn't downloaded.",
-        "Download one in Settings.",
+        "The model on this Mac isn't downloaded.",
+        "Download it in Settings → Transcription.",
         FixAction::OpenSettings,
     ),
     row(
         ErrorCode::ModelLoading,
-        "The on-device model is still loading.",
+        "The model on this Mac is still loading.",
         "Try again in a moment.",
         FixAction::TryAgain,
     ),
     row(
         ErrorCode::ModelLoadingFailed,
-        "The on-device model couldn't be loaded.",
-        "Pick or download another model in Settings.",
+        "The model on this Mac couldn't be loaded.",
+        "Pick or download another in Settings → Transcription.",
         FixAction::OpenSettings,
     ),
     row(
@@ -222,7 +222,7 @@ const TABLE: [CodeInfo; 17] = [
     row(
         ErrorCode::PasteFailed,
         "The text couldn't be pasted.",
-        "Check Accessibility, then dictate again.",
+        "It's on the clipboard: press ⌘V. If it keeps happening, check Accessibility.",
         FixAction::OpenAccessibilitySettings,
     ),
     row(
@@ -483,10 +483,75 @@ mod tests {
         }
     }
 
+    /// U1 criterion 5: the sentence a person sees (overlay, tray) names the
+    /// fix in their terms, says Vocet, and never shows the code.
+    #[test]
+    fn every_user_facing_sentence_names_a_fix_and_no_code() {
+        // How a next step starts: an instruction a person can follow.
+        let verbs = [
+            "Allow",
+            "Add",
+            "Open",
+            "Unlock",
+            "Check",
+            "Download",
+            "Pick",
+            "Wait",
+            "Try",
+            "Speak",
+            "Click",
+            "It's on the clipboard",
+        ];
+        for code in ErrorCode::ALL {
+            let info = code.info();
+            let text = code.user_text();
+            assert!(
+                verbs.iter().any(|verb| info.next_step.starts_with(verb)),
+                "{code}: the next step doesn't start with an instruction: {}",
+                info.next_step
+            );
+            assert!(!text.contains(code.as_str()), "{code}: {text}");
+            assert!(!text.contains('_'), "{code}: {text}");
+            assert!(!text.contains("dictation-app"), "{code}: {text}");
+        }
+        assert_eq!(
+            ErrorCode::KeyRejected.user_text(),
+            "Your API key was rejected. Open Settings → Transcription to fix it."
+        );
+        assert_eq!(
+            ErrorCode::MicDenied.user_text(),
+            "Vocet can't use the microphone. Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet."
+        );
+        assert!(
+            ErrorCode::KeyMissing
+                .user_text()
+                .starts_with("No API key saved. Add one in Settings")
+        );
+    }
+
+    /// U1 round 2: macOS doesn't tell a running app about a microphone grant
+    /// (`docs/ENGINEERING.md`), so the microphone's sentence must say to
+    /// relaunch; paths use arrows, never commas.
+    #[test]
+    fn the_microphone_sentence_says_to_relaunch_and_paths_use_arrows() {
+        let text = ErrorCode::MicDenied.user_text();
+        assert!(text.contains("then relaunch Vocet"), "{text}");
+        assert!(text.contains("System Settings → Privacy & Security → Microphone"));
+        for code in ErrorCode::ALL {
+            let text = code.user_text();
+            assert!(!text.contains("Settings, Privacy"), "{code}: {text}");
+            assert!(!text.contains("Security, "), "{code}: {text}");
+        }
+        assert_eq!(
+            ErrorCode::HotkeyUnregistered.user_text(),
+            "The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
+        );
+    }
+
     #[test]
     fn the_examples_from_the_issue_read_well() {
         let info = ErrorCode::MicDenied.info();
-        assert_eq!(info.message, "Microphone is off for dictation-app.");
+        assert_eq!(info.message, "Vocet can't use the microphone.");
         assert_eq!(info.action, FixAction::OpenMicrophoneSettings);
         assert_eq!(
             ErrorCode::KeyRejected.info().action,

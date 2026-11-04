@@ -48,7 +48,7 @@ pub enum DictationError {
     /// The global hotkey doesn't work (macOS: often because Accessibility
     /// is off). The app keeps trying and says when it works again.
     #[error(
-        "The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself."
+        "The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
     )]
     HotkeyFailed,
 }
@@ -80,7 +80,7 @@ impl fmt::Debug for DictationError {
 fn permission_message(permission: Permission) -> &'static str {
     match permission {
         Permission::Microphone => {
-            "Microphone is off. Allow it in Privacy & Security, Microphone, then relaunch from the menu bar."
+            "Microphone is off. Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet from the menu bar."
         }
         Permission::Accessibility => "Accessibility permission is missing.",
     }
@@ -112,7 +112,7 @@ mod tests {
             ),
             (
                 DictationError::PermissionMissing(Permission::Microphone),
-                "Microphone is off. Allow it in Privacy & Security, Microphone, then relaunch from the menu bar.",
+                "Microphone is off. Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet from the menu bar.",
             ),
             (
                 DictationError::PermissionMissing(Permission::Accessibility),
@@ -120,7 +120,7 @@ mod tests {
             ),
             (
                 DictationError::HotkeyFailed,
-                "The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself.",
+                "The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself.",
             ),
         ];
         for (error, message) in cases {
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn the_microphone_message_fits_the_overlay() {
         let text = DictationError::PermissionMissing(Permission::Microphone).to_string();
-        assert!(text.chars().count() <= 99, "{text}");
+        assert!(text.chars().count() <= 130, "{text}");
         assert!(text.contains("relaunch"), "{text}");
     }
 

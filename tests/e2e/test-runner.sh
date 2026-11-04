@@ -76,7 +76,7 @@ case $script in
   *ax.js)
     [ "${STUB_AX_STATUS:-0}" = 0 ] || exit "$STUB_AX_STATUS"
     case $1 in
-      tray-click) echo "clicked $3 dictation-app" ;;
+      tray-click) echo "clicked $3 Vocet" ;;
       *) echo "fake ax: $*" ;;
     esac
     ;;
@@ -303,13 +303,14 @@ job_gone() { # case: true once no job of the case runs, within 30 s
 }
 check "and the job is killed" job_gone term_deadline
 
-# The launch-at-login scenario waits up to 45 s for a slow save (#238): a job
-# that ends after 35 s, between the default bound (30 polls) and that wait, is
-# lost at the default and answered with the scenario's 60.
+# The launch-at-login scenario waits up to 60 s for the OS to finish a slow
+# change (#238): a job that ends after 35 s, between the default bound (30
+# polls) and that wait, is lost at the default and answered with a longer one
+# (60 here; the scenario sets 180).
 run_case term_slow_save 's=0; VM_TERMINAL_TIMEOUT=30 vm_terminal "/bin/sleep 35; echo saved" >/dev/null || s=$?; echo "$s"; VM_TERMINAL_TIMEOUT=60 vm_terminal "/bin/sleep 35; echo saved"' STUB_TERMINAL=async
 check "a 35 s job outlasts the default 30-poll bound (124)" test "$(head -1 "$(stdout term_slow_save)")" = 124
 check "and is answered within the 60-poll bound the scenario sets" test "$(tail -1 "$(stdout term_slow_save)")" = saved
-check "launch-at-login sets that bound on its saved-notice wait" grep -q "VM_TERMINAL_TIMEOUT=60 ax_ok wait-text.*Settings saved" tests/e2e/scenarios/e2e_launch_at_login.sh
+check "launch-at-login sets a longer bound on its wait for the OS" grep -q "VM_TERMINAL_TIMEOUT=180 ax_ok wait-no-text.*Applying" tests/e2e/scenarios/e2e_launch_at_login.sh
 
 run_case term_stale 'vm_terminal "echo the real job"' STUB_TERMINAL=stale
 check "a done file with another job's token is refused (125)" test "$(status_of term_stale)" = 125

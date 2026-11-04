@@ -9,6 +9,15 @@ the release is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- The app is now called **Vocet** (menu, windows, prompts). Your settings,
+  saved key, permissions and login item carry over; the file in Applications
+  may keep the name `dictation-app.app` after an in-app update.
+- Errors are one plain sentence that names the fix, with no error code.
+  The codes stay in Troubleshoot and the report.
+- After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to your speech provider (Groq or OpenAI).
+
 ## [0.1.0] — [date set at release]
 
 The first release for testers. Hold a key, speak, let go, and your words are

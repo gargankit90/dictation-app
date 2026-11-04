@@ -8,7 +8,7 @@
 // copy-during-paste waits (up to `timeout` seconds, default 30) for the app's
 // dictation write: the item carrying its private com.dictationapp.session
 // type, with a session token that wasn't there when it started. Then it waits `wait` seconds (default 0.15: after the paste's key
-// events, well inside the 300 ms the app waits before it restores the
+// events, well inside the 1.5 s the app waits before it restores the
 // clipboard), says whether the dictation's item is still there (so the
 // restore hasn't run yet), and copies <text> as plain text, like a user's
 // Cmd-C. Progress goes to stderr as it happens ("armed" first, so the caller

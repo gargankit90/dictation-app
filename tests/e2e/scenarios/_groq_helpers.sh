@@ -27,7 +27,7 @@
 GROQ_KEYCHAIN_FILE='$HOME/Library/Keychains/login.keychain-db'
 # The app's executable in the VM, run directly (not through `open`) so its
 # stdin is the ssh session's.
-GROQ_VM_APP_BINARY="$VM_APP/Contents/MacOS/$APP_NAME"
+GROQ_VM_APP_BINARY="$VM_APP/Contents/MacOS/$PROC_NAME"
 # Whether a key may be in the VM's keychain because this run put it there.
 GROQ_KEY_STORED=0
 

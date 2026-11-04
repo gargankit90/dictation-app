@@ -691,6 +691,25 @@ mod tests {
         assert!(lock(&shown).is_empty());
     }
 
+    /// U1 + U5: the tray never has a text title (it crowds the menu bar);
+    /// only the icon and the tooltip change. The shell's tray code must not
+    /// call the title setter or builder.
+    #[test]
+    fn the_tray_title_is_never_set() {
+        let setter = concat!("set_", "title");
+        let builder = concat!(".ti", "tle(");
+        for (file, source) in [
+            ("tray_menu.rs", include_str!("tray_menu.rs")),
+            ("lib.rs", include_str!("lib.rs")),
+        ] {
+            assert!(!source.contains(setter), "{file} calls {setter}");
+            assert!(!source.contains(builder), "{file} sets a builder title");
+        }
+        // And the model has nothing to show as one: icon and tooltip only.
+        let menu = TrayStatus::new(true).menu();
+        assert!(menu.tooltip.starts_with("Vocet"));
+    }
+
     #[test]
     fn the_download_percent_is_clamped() {
         assert_eq!(percent(0.0, 0.0), 0);

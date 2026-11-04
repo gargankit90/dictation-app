@@ -16,8 +16,7 @@ export const commands = {
 	 */
 	getSettings: () => typedError<Settings_Serialize, string>(__TAURI_INVOKE("get_settings")),
 	/**
-	 *  Validates and saves the settings, applies the launch-at-login choice to
-	 *  the OS and switches to the saved hotkey. An error means something didn't
+	 *  Validates and saves the settings and switches to the saved hotkey. An error means something didn't
 	 *  take effect; its text says what was saved and what wasn't.
 	 * 
 	 *  The "share anonymous usage events" field of `settings` is ignored: the
@@ -25,7 +24,8 @@ export const commands = {
 	 *  [`set_share_usage_events`] changes it, so a Save can never undo a newer
 	 *  opt-out (A1 review, round 1). The same goes for the hotkey, which only
 	 *  [`set_hotkey`] changes (K1 review, round 1): a form loaded before the key
-	 *  was recorded can't switch it back.
+	 *  was recorded can't switch it back, and for `launch_at_login`, which only
+	 *  [`set_launch_at_login`] changes (S1).
 	 */
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, string>(__TAURI_INVOKE("save_settings", { settings })),
 	/**  Stores `key` as `provider`'s API key in the keychain. Write-only. */
@@ -100,6 +100,17 @@ export const commands = {
 	 */
 	setHotkeyRecording: (recording: boolean) => typedError<null, string>(__TAURI_INVOKE("set_hotkey_recording", { recording })),
 	/**
+	 *  Turns launch at login on or off, and nothing else. It returns at once
+	 *  with the OS's answer for the latest choice: the OS can take 40 s to
+	 *  unregister the login item (#238), so the window must not wait on it and
+	 *  Settings shows "Applying…" until this resolves. The change runs on a
+	 *  thread of its own, one at a time; if the user toggles again meanwhile,
+	 *  every call resolves with the outcome of the last choice. The result is
+	 *  whether the app starts at login now; an error says why not, and what to
+	 *  do (the user may have to approve it in System Settings).
+	 */
+	setLaunchAtLogin: (enabled: boolean) => typedError<boolean, string>(__TAURI_INVOKE("set_launch_at_login", { enabled })),
+	/**
 	 *  The live checks. Reads permissions and the key; records nothing and
 	 *  contacts nobody.
 	 */
@@ -130,6 +141,23 @@ export const commands = {
 	takeWindowRequest: () => typedError<string, string>(__TAURI_INVOKE("take_window_request")),
 	/**  Shows the log folder in the file manager, through the opener port. */
 	revealLogFile: () => typedError<null, string>(__TAURI_INVOKE("reveal_log_file")),
+	/**
+	 *  What the last dictation got through: onboarding's Try it shows success
+	 *  only when `completed` grows while its step is open.
+	 */
+	dictationProgress: () => typedError<DictationProgressView_Serialize, string>(__TAURI_INVOKE("dictation_progress")),
+	/**
+	 *  The notice for this launch only: macOS may ask once to let Vocet use the
+	 *  saved key. `None` on every other launch.
+	 */
+	launchNotice: () => typedError<string | null, string>(__TAURI_INVOKE("launch_notice")),
+	/**
+	 *  The newest input level, in dBFS, for the overlay's meter; silence when
+	 *  nothing records. Only the overlay window may call it
+	 *  (`capabilities/overlay.json`), and it returns a number only. Never
+	 *  blocks: one atomic read.
+	 */
+	getOverlayLevel: () => __TAURI_INVOKE<number | null>("get_overlay_level"),
 };
 
 /* Types */
@@ -175,6 +203,13 @@ export type Check_Deserialize = {
 	fix?: FixAction | null,
 	/**  That button's label. */
 	fix_label?: string | null,
+	/**
+	 *  Only on the engine row when the engine is the model on this Mac: a
+	 *  short readiness line (downloaded, loading, ready, error). Troubleshoot
+	 *  shows it instead of "Test connection", which has nothing to test then
+	 *  (U1).
+	 */
+	local_model?: string | null,
 };
 
 /**  One row of Troubleshoot. */
@@ -193,6 +228,13 @@ export type Check_Serialize = {
 	fix: FixAction | null,
 	/**  That button's label. */
 	fix_label: string | null,
+	/**
+	 *  Only on the engine row when the engine is the model on this Mac: a
+	 *  short readiness line (downloaded, loading, ready, error). Troubleshoot
+	 *  shows it instead of "Test connection", which has nothing to test then
+	 *  (U1).
+	 */
+	local_model: string | null,
 };
 
 /**  What "Test connection" found. */
@@ -217,6 +259,55 @@ export type ConnectionResult_Serialize = {
 	/**  One plain sentence. */
 	message: string,
 };
+
+/**
+ *  What the last dictation got through (U1). Counts only grow, so a window
+ *  compares them with what it saw when it opened. No transcript, no code.
+ */
+export type DictationProgressView = DictationProgressView_Serialize | DictationProgressView_Deserialize;
+
+/**
+ *  What the last dictation got through (U1). Counts only grow, so a window
+ *  compares them with what it saw when it opened. No transcript, no code.
+ */
+export type DictationProgressView_Deserialize = {
+	/**  Dictations started since launch. */
+	started: number,
+	/**  Dictations that ended pasted with no error. */
+	completed: number,
+	/**  Errors shown. */
+	errors: number,
+	/**  The stages the current or last dictation got through, in order. */
+	stages: DictationStage[],
+	/**  The latest error's sentence, until the next recording starts. */
+	error?: string | null,
+};
+
+/**
+ *  What the last dictation got through (U1). Counts only grow, so a window
+ *  compares them with what it saw when it opened. No transcript, no code.
+ */
+export type DictationProgressView_Serialize = {
+	/**  Dictations started since launch. */
+	started: number,
+	/**  Dictations that ended pasted with no error. */
+	completed: number,
+	/**  Errors shown. */
+	errors: number,
+	/**  The stages the current or last dictation got through, in order. */
+	stages: DictationStage[],
+	/**  The latest error's sentence, until the next recording starts. */
+	error: string | null,
+};
+
+/**  A stage of a dictation, as onboarding's Try it names them. */
+export type DictationStage = 
+/**  Recorded. */
+"recorded" | 
+/**  Transcribed. */
+"transcribed" | 
+/**  Pasted. */
+"pasted";
 
 /**
  *  A stable name for a way dictation can fail. The `snake_case` text
@@ -306,6 +397,8 @@ export type LocalModelInfo_Deserialize = {
 	name: string,
 	/**  Its languages in words ("English only"). */
 	languages: string,
+	/**  The ISO codes it transcribes, so the language picker offers only these. */
+	language_codes: string[],
 	/**  The download's size in bytes (a number: sizes fit a double exactly). */
 	size_bytes: number | null,
 	/**  Bytes on disk so far (the size when ready, 0 when missing). */
@@ -326,6 +419,8 @@ export type LocalModelInfo_Serialize = {
 	name: string,
 	/**  Its languages in words ("English only"). */
 	languages: string,
+	/**  The ISO codes it transcribes, so the language picker offers only these. */
+	language_codes: string[],
 	/**  The download's size in bytes (a number: sizes fit a double exactly). */
 	size_bytes: number | null,
 	/**  Bytes on disk so far (the size when ready, 0 when missing). */

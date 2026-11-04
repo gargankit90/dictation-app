@@ -160,12 +160,7 @@ pub const RELAUNCH_SENTENCE: &str = "Relaunch Vocet to finish turning on Accessi
 /// The one sentence the status line gives for `code`.
 #[must_use]
 pub fn problem_sentence(code: ErrorCode) -> &'static str {
-    // The table still names the old app (U1 renames it); the menu says Vocet.
-    match code {
-        ErrorCode::AccessibilityMissing => "Vocet needs Accessibility to hear your key.",
-        ErrorCode::MicDenied => "Vocet needs the microphone to hear you.",
-        _ => code.info().message,
-    }
+    code.info().message
 }
 
 /// Whether `code` comes from the engine, key or model, so changing any of
@@ -837,7 +832,7 @@ mod tests {
         let menu = tray.menu();
         assert_eq!(
             label_of(&menu, id::STATUS).as_deref(),
-            Some("! The provider rejected your API key.")
+            Some("! Your API key was rejected.")
         );
         assert_eq!(menu.icon, TrayIcon::Attention);
         // Idle doesn't clear it; the next recording does.
@@ -903,7 +898,7 @@ mod tests {
         assert_eq!(tray.fix(), Some(Fix::OpenAccessibilitySettings));
         assert_eq!(
             label_of(&menu, id::STATUS).as_deref(),
-            Some("! Vocet needs Accessibility to hear your key.")
+            Some("! Vocet can't paste into other apps yet.")
         );
         assert!(label_of(&menu, id::FIX_KEY).is_none());
     }
@@ -916,7 +911,7 @@ mod tests {
         }
         assert_eq!(
             problem_sentence(ErrorCode::AccessibilityMissing),
-            "Vocet needs Accessibility to hear your key."
+            "Vocet can't paste into other apps yet."
         );
     }
 

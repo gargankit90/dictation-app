@@ -39,6 +39,8 @@ class Backend {
   holdTest: Promise<void> | null = null;
   /** Holds `set_share_usage_events` until released. */
   holdShare: Promise<void> | null = null;
+  /** Holds `set_launch_at_login` until released: the OS being slow (#238). */
+  holdLaunch: Promise<void> | null = null;
   /** Holds `set_hotkey` until released, to test the form while a key is saved. */
   holdSetHotkey: Promise<void> | null = null;
   /** Holds `set_api_key` until released, to test the form while a save runs. */
@@ -48,6 +50,8 @@ class Backend {
    * when the call arrives, but delivered only when the promise settles.
    */
   holdKeyCheck = new Map<Provider, Promise<void>>();
+  /** What `launch_notice` says: the first launch after the rename (U1). */
+  launchNotice: string | null = null;
 
   handle = async (command: string, payload: unknown): Promise<unknown> => {
     const args = (payload ?? {}) as Record<string, unknown>;
@@ -57,6 +61,8 @@ class Backend {
     // eslint-disable-next-line @typescript-eslint/only-throw-error
     if (failure !== undefined) throw failure;
     switch (command) {
+      case "launch_notice":
+        return this.launchNotice;
       case "get_settings":
         return this.settings;
       case "save_settings":
@@ -66,6 +72,8 @@ class Backend {
           ...(args.settings as Settings_Serialize),
           share_usage_events: this.settings.share_usage_events,
           hotkey: this.settings.hotkey,
+          // And never the login item, which only `set_launch_at_login` changes.
+          launch_at_login: this.settings.launch_at_login,
         };
         return null;
       case "set_hotkey":
@@ -74,6 +82,10 @@ class Backend {
         return null;
       case "set_hotkey_recording":
         return null;
+      case "set_launch_at_login":
+        if (this.holdLaunch) await this.holdLaunch;
+        this.settings = { ...this.settings, launch_at_login: args.enabled as boolean };
+        return args.enabled;
       case "set_share_usage_events":
         this.settings = { ...this.settings, share_usage_events: args.share as boolean };
         // The write is done; the reply is what waits.
@@ -132,6 +144,20 @@ const keyBox = () => screen.getByLabelText<HTMLInputElement>(/API key/);
 const type = (label: string | RegExp, value: string) => {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 };
+const LANGUAGE_WORDS: Record<string, string> = {
+  "": "Detect",
+  de: "German",
+  en: "English",
+  es: "Spanish",
+  fr: "French",
+};
+/** Chooses a language the way a person does: search by name, press Enter. */
+const pick = (code: string) => {
+  const box = screen.getByLabelText("Language");
+  fireEvent.focus(box);
+  fireEvent.change(box, { target: { value: LANGUAGE_WORDS[code] ?? code } });
+  fireEvent.keyDown(box, { key: "Enter" });
+};
 const click = (name: string) => {
   fireEvent.click(screen.getByRole("button", { name }));
 };
@@ -161,23 +187,34 @@ const checks = (provider: Provider) =>
   backend.named("has_api_key").filter((call) => call.args.provider === provider).length;
 
 describe("loading", () => {
+  it("U1: says what to expect from the Keychain on the first launch after the rename", async () => {
+    backend.launchNotice =
+      "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to your speech provider (Groq or OpenAI).";
+    await open();
+    const notice = await screen.findByTestId("launch-notice");
+    expect(notice.textContent).toContain("Choose Always Allow");
+    expect(notice.textContent).toContain("sent only to your speech provider (Groq or OpenAI)");
+  });
+
+  it("U1: says nothing about the Keychain on any other launch", async () => {
+    await open();
+    expect(screen.queryByTestId("launch-notice")).toBeNull();
+  });
+
   it("shows the saved settings", async () => {
     backend.settings = { ...backend.settings, provider: "openai", language: "de", hotkey: "F5" };
     await open();
 
     expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("openai");
     expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F5");
-    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("de");
+    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("German (Deutsch)");
     expect(screen.getByLabelText(/OpenAI API key/)).toBeTruthy();
   });
 
   it("shows the defaults without a language as 'detect'", async () => {
     await open();
 
-    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("");
-    expect(screen.getByLabelText<HTMLInputElement>("Language").placeholder).toBe(
-      "Detect automatically",
-    );
+    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("Detect automatically");
   });
 
   it("says Key saved only when the app says a key is stored", async () => {
@@ -212,9 +249,8 @@ describe("loading", () => {
 });
 
 describe("criterion 1: the form validates input", () => {
-  it("refuses a bad language, hotkey and key without calling the app", async () => {
+  it("refuses a bad hotkey and key without calling the app", async () => {
     await open();
-    type("Language", "english");
     type("Or type it", "Ctrl+");
     type(/API key/, "two words");
     click("Save");
@@ -222,7 +258,6 @@ describe("criterion 1: the form validates input", () => {
     expect((await screen.findAllByRole("alert")).map((alert) => alert.textContent)).toEqual([
       "A key has no spaces; check what you pasted.",
       "Write the hotkey as keys joined by +, such as Ctrl+Shift+Space.",
-      "Use a two or three letter language code such as en, or leave it empty to detect.",
     ]);
     expect(backend.named("set_api_key")).toEqual([]);
     expect(backend.named("save_settings")).toEqual([]);
@@ -266,7 +301,7 @@ describe("criterion 1: the form validates input", () => {
 
   it("an empty key is fine when saving the other settings", async () => {
     await open();
-    type("Language", "fr");
+    pick("fr");
     click("Save");
 
     expect((await screen.findByRole("status")).textContent).toBe("Settings saved.");
@@ -419,7 +454,7 @@ describe("criterion 2: settings save and reload", () => {
     });
     type(/API key/, ` ${KEY} `);
     type("Or type it", " Ctrl+Shift+Space ");
-    type("Language", " DE ");
+    pick("de");
     click("Save");
 
     expect((await screen.findByRole("status")).textContent).toBe("Settings saved.");
@@ -450,7 +485,7 @@ describe("criterion 2: settings save and reload", () => {
     await open();
     type("Provider", "openai");
     type("Or type it", "F6");
-    type("Language", "es");
+    pick("es");
     click("Save");
     await screen.findByText("Settings saved.");
     cleanup();
@@ -459,13 +494,13 @@ describe("criterion 2: settings save and reload", () => {
 
     expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("openai");
     expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F6");
-    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("es");
+    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("Spanish (Español)");
   });
 
   it("clearing the language saves 'detect' (null)", async () => {
     backend.settings = { ...backend.settings, language: "en" };
     await open();
-    type("Language", "");
+    pick("");
     click("Save");
     await screen.findByText("Settings saved.");
 
@@ -550,7 +585,7 @@ describe("criterion 2: settings save and reload", () => {
     await open();
     const hold = gate();
     backend.holdSetHotkey = hold.closed;
-    type("Language", "de");
+    pick("de");
     click("Record a different key");
     keyDown("F6");
     await waitFor(() => {
@@ -631,7 +666,7 @@ describe("criterion 2: settings save and reload", () => {
     keyDown("MetaRight");
     keyUp("MetaRight");
     await screen.findByText("Dictation key saved.");
-    type("Language", "fr");
+    pick("fr");
     click("Save");
     await screen.findByText("Settings saved.");
     expect(backend.settings.hotkey).toBe("RightCmd");
@@ -665,7 +700,7 @@ describe("criterion 2: settings save and reload", () => {
     backend.failing.set("set_api_key", "keychain access was denied");
     await open();
     type(/API key/, KEY);
-    type("Language", "fr");
+    pick("fr");
     click("Save");
 
     expect((await screen.findByRole("alert")).textContent).toBe("keychain access was denied");
@@ -711,6 +746,7 @@ describe("criterion 3: the key is never rendered back", () => {
     expect([...used].sort()).toEqual([
       "get_settings",
       "has_api_key",
+      "launch_notice",
       "save_settings",
       "set_api_key",
     ]);
@@ -749,7 +785,7 @@ describe("review round 1", () => {
     it("saving another field leaves a non-default model alone", async () => {
       backend.settings = { ...backend.settings, model: "whisper-large-v3", language: null };
       await open();
-      type("Language", "de");
+      pick("de");
       click("Save");
       await screen.findByText("Settings saved.");
 
@@ -781,7 +817,7 @@ describe("review round 1", () => {
       backend.settings = { ...backend.settings, model: "whisper-custom" };
       cleanup();
       await open();
-      type("Language", "fr");
+      pick("fr");
       click("Save");
       await screen.findByText("Settings saved.");
       expect(backend.settings.model).toBe("whisper-custom");
@@ -869,14 +905,16 @@ describe("review round 1", () => {
       // changes nothing.
       type("Provider", "openai");
       type(/API key/, OTHER_KEY);
-      type("Language", "de");
+      pick("de");
       hold.open();
       await screen.findByText("Settings saved.");
 
       expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("groq");
       expect(backend.settings.provider).toBe("groq");
       expect(backend.settings.language).toBeNull();
-      expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("");
+      expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe(
+        "Detect automatically",
+      );
       expect(screen.getByLabelText(/Groq API key/)).toBeTruthy();
       expect(screen.getByText("Key saved")).toBeTruthy();
       expect(backend.keys).toEqual({ groq: true, openai: false });
@@ -906,7 +944,7 @@ describe("review round 1", () => {
         return handle(command, payload);
       });
       type(/API key/, KEY);
-      type("Language", "fr");
+      pick("fr");
       click("Save");
       await screen.findByRole("button", { name: "Saving…" });
       expect(locked(keyBox())).toBe(true);
@@ -1009,7 +1047,7 @@ describe("review round 1", () => {
 });
 
 describe("launch at login", () => {
-  const box = () => screen.getByLabelText<HTMLInputElement>("Launch at login");
+  const box = () => screen.getByLabelText<HTMLInputElement>(/^Launch at login/u);
 
   it("shows what the OS says, off by default", async () => {
     await open();
@@ -1020,34 +1058,63 @@ describe("launch at login", () => {
     expect(box().checked).toBe(true);
   });
 
-  it("sends the choice with the other settings when saved", async () => {
+  it("applies the choice at once, with Applying… until the OS answers, and Save is not involved", async () => {
     await open();
+    const slow = gate();
+    backend.holdLaunch = slow.closed;
     fireEvent.click(box());
     expect(box().checked).toBe(true);
-    // Nothing is sent until Save.
+    expect((await screen.findByRole("status")).textContent).toContain("Applying…");
+    expect(backend.named("set_launch_at_login")[0]?.args.enabled).toBe(true);
     expect(backend.named("save_settings")).toHaveLength(0);
+    // Saving the rest does not wait for the login item.
+    pick("de");
     click("Save");
     await screen.findByText("Settings saved.");
-    const saved = backend.named("save_settings");
-    expect(saved).toHaveLength(1);
-    expect((saved[0]?.args.settings as Settings_Serialize).launch_at_login).toBe(true);
-    expect(backend.settings.launch_at_login).toBe(true);
+    expect(screen.getByText(/Applying…/u)).toBeTruthy();
+    expect(backend.settings.language).toBe("de");
+    slow.open();
+    await waitFor(() => {
+      expect(screen.queryByText(/Applying…/u)).toBeNull();
+    });
     expect(box().checked).toBe(true);
+    expect(backend.settings.launch_at_login).toBe(true);
   });
 
-  it("shows the real state again when the app could not change it", async () => {
+  it("shows the real state and the next step when macOS refuses", async () => {
     await open();
-    fireEvent.click(box());
     backend.failing.set(
-      "save_settings",
-      "Launch at login needs your approval: open System Settings, General, Login Items, and allow dictation-app.",
+      "set_launch_at_login",
+      "Launch at login needs your approval: open System Settings → General → Login Items, and allow Vocet.",
     );
-    click("Save");
-    expect((await screen.findByRole("alert")).textContent).toContain("needs your approval");
+    fireEvent.click(box());
+    expect((await screen.findByRole("alert")).textContent).toContain("General → Login Items");
     // The app still has it off, so the box goes back to off.
     await waitFor(() => {
       expect(box().checked).toBe(false);
     });
+    expect(screen.queryByText(/Applying…/u)).toBeNull();
+  });
+
+  it("ends on the last choice when toggled again while the OS is busy", async () => {
+    await open();
+    const slow = gate();
+    backend.holdLaunch = slow.closed;
+    fireEvent.click(box());
+    fireEvent.click(box());
+    fireEvent.click(box());
+    expect(box().checked).toBe(true);
+    slow.open();
+    await waitFor(() => {
+      expect(screen.queryByText(/Applying…/u)).toBeNull();
+    });
+    expect(box().checked).toBe(true);
+    expect(backend.settings.launch_at_login).toBe(true);
+    expect(backend.named("set_launch_at_login").map((call) => call.args.enabled)).toEqual([
+      true,
+      false,
+      true,
+    ]);
   });
 
   /** The window comes back to the front, as when the tray shows it again. */
@@ -1077,34 +1144,33 @@ describe("launch at login", () => {
     await open();
     // On in System Settings; this window has not seen a focus event yet.
     backend.settings = { ...backend.settings, launch_at_login: true };
-    type("Language", "de");
+    pick("de");
     click("Save");
     await screen.findByText("Settings saved.");
-    const saved = backend.named("save_settings");
-    expect((saved[0]?.args.settings as Settings_Serialize).launch_at_login).toBe(true);
+    expect(backend.named("set_launch_at_login")).toHaveLength(0);
     expect(backend.settings.launch_at_login).toBe(true);
-    expect(box().checked).toBe(true);
   });
 
-  it("keeps the user's own change when the window regains focus", async () => {
+  it("keeps the user's own change while the OS applies it, when the window regains focus", async () => {
     await open();
+    const slow = gate();
+    backend.holdLaunch = slow.closed;
     fireEvent.click(box());
     backend.settings = { ...backend.settings, launch_at_login: false };
     refocus();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(box().checked).toBe(true);
-    click("Save");
-    await screen.findByText("Settings saved.");
-    const saved = backend.named("save_settings");
-    expect((saved[0]?.args.settings as Settings_Serialize).launch_at_login).toBe(true);
+    slow.open();
+    await waitFor(() => {
+      expect(screen.queryByText(/Applying…/u)).toBeNull();
+    });
   });
 
   it("keeps a typed hotkey when the login item could not change", async () => {
     await open();
+    backend.failing.set("set_launch_at_login", "Couldn't change launch at login: no bundle");
     fireEvent.click(box());
     type("Or type it", "F5");
-    backend.failing.set("save_settings", "Couldn't change launch at login: no bundle");
-    click("Save");
     await screen.findByText(/no bundle/);
     expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F5");
   });
@@ -1122,7 +1188,7 @@ describe("T2: settings edges", () => {
   it("partial_save_keeps_saved_key_status_and_allows_retry", async () => {
     await open();
     type(/API key/, KEY);
-    type("Language", "de");
+    pick("de");
     // The key is stored; the settings file then can't be written.
     backend.failing.set("save_settings", "could not write the settings file: disk full");
     click("Save");
@@ -1134,7 +1200,7 @@ describe("T2: settings edges", () => {
     expect(keyBox().value).toBe("");
     expect(screen.queryByText("Settings saved.")).toBeNull();
     // The rest is still the user's, ready to retry.
-    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("de");
+    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toBe("German (Deutsch)");
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Save" }).disabled).toBe(false);
 
     backend.failing.delete("save_settings");
@@ -1168,46 +1234,12 @@ describe("T2: settings edges", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F6");
     expect(screen.getByLabelText<HTMLSelectElement>("Provider").value).toBe("openai");
     expect(screen.queryByText(/default model/)).toBeNull();
-    type("Language", "fr");
+    pick("fr");
     click("Save");
     await waitFor(() => {
       expect(backend.named("save_settings")).toHaveLength(2);
     });
     expect(backend.settings.model).toBe("whisper-1");
-
-    // A save that didn't take, then a re-read that failed: the box isn't
-    // passed off as the OS's state, so the choice is sent again on retry.
-    cleanup();
-    backend = new Backend();
-    mockIPC((command, payload) => backend.handle(command, payload));
-    await open();
-    const box = screen.getByLabelText<HTMLInputElement>("Launch at login");
-    fireEvent.click(box);
-    backend.failing.set("save_settings", "Couldn't change launch at login: refused");
-    const failingHandle = backend.handle;
-    mockIPC(async (command, payload) => {
-      if (command === "get_settings" && backend.named("save_settings").length > 0) {
-        // eslint-disable-next-line @typescript-eslint/only-throw-error
-        throw "the settings file is busy";
-      }
-      return failingHandle(command, payload);
-    });
-    click("Save");
-    await screen.findByText(/refused/);
-    await flush();
-    // A focus would re-read a box that "follows the OS"; this one is the
-    // user's pending choice, so it isn't overwritten.
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
-    await flush();
-    expect(box.checked).toBe(true);
-    backend.failing.delete("save_settings");
-    mockIPC((command, payload) => backend.handle(command, payload));
-    click("Save");
-    await screen.findByText("Settings saved.");
-    const sent = backend.named("save_settings").map((call) => call.args.settings);
-    expect((sent[1] as Settings_Serialize).launch_at_login).toBe(true);
   });
 
   it("late_provider_test_result_is_ignored", async () => {
@@ -1235,7 +1267,7 @@ describe("T2: settings edges", () => {
   it("a hotkey the app couldn't switch to is not reported as saved", async () => {
     await open();
     type("Or type it", "F6");
-    type("Language", "de");
+    pick("de");
     backend.failing.set(
       "set_hotkey",
       "Couldn't switch the hotkey to F6 (hotkey unavailable: busy). RightAlt still works.",
@@ -1273,7 +1305,7 @@ describe("T2: settings edges", () => {
     backend.holdTest = test.closed;
     click("Test key");
     await screen.findByRole("button", { name: "Testing…" });
-    type("Language", "de");
+    pick("de");
     fireEvent.submit(form());
     await flush();
     expect(backend.named("save_settings")).toHaveLength(1);

@@ -103,6 +103,10 @@ fn state_of(status: SMAppServiceStatus) -> LaunchAtLoginState {
     }
 }
 
+fn elapsed_ms(started: std::time::Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
 fn os_error(action: &str, error: &ServiceError) -> LaunchAtLoginError {
     LaunchAtLoginError::Os(format!(
         "macOS could not {action} the login item: {} (code {})",
@@ -112,15 +116,29 @@ fn os_error(action: &str, error: &ServiceError) -> LaunchAtLoginError {
 
 impl LaunchAtLogin for MacLaunchAtLogin {
     fn state(&self) -> Result<LaunchAtLoginState, LaunchAtLoginError> {
-        Ok(state_of(self.service.status()))
+        let started = std::time::Instant::now();
+        let state = state_of(self.service.status());
+        tracing::info!(
+            elapsed_ms = elapsed_ms(started),
+            ?state,
+            "login item: SMAppService status"
+        );
+        Ok(state)
     }
 
     fn set_enabled(&self, enabled: bool) -> Result<(), LaunchAtLoginError> {
+        let started = std::time::Instant::now();
         let result = if enabled {
             self.service.register()
         } else {
             self.service.unregister()
         };
+        tracing::info!(
+            elapsed_ms = elapsed_ms(started),
+            enabled,
+            ok = result.is_ok(),
+            "login item: SMAppService register/unregister"
+        );
         match result {
             Ok(()) => Ok(()),
             // Registering twice, or unregistering what isn't registered, is

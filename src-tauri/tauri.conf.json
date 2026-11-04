@@ -1,6 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "dictation-app",
+  "productName": "Vocet",
+  "mainBinaryName": "Vocet",
   "version": "0.1.0",
   "identifier": "com.dictationapp.desktop",
   "build": {
@@ -13,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "dictation-app Settings",
+        "title": "Vocet Settings",
         "width": 480,
         "height": 640,
         "center": true,

@@ -18,10 +18,10 @@
 # e2e_tray_error_clears_on_next_recording.sh (every scenario file is sourced
 # first).
 
-# The tray while the hotkey doesn't work: the code table's message in the
-# status line and the tooltip, "Choose another key…" as the one fix (U5).
+# The tray while the hotkey doesn't work: the status line and the tooltip,
+# "Choose another key…" as the one fix (U5).
 TRAY_HOTKEY_SHOWN="Right ⌥ isn't working. Choose another key."
-TRAY_HOTKEY_ERROR="The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself."
+TRAY_HOTKEY_ERROR="The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
 
 e2e_hotkey_listener_recovers() {
   arm_key_cleanup e2e_hotkey_listener_recovers

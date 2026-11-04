@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SyntheticEvent } from "react";
 import { commands } from "./bindings";
-import type { Provider, Settings_Serialize, Transcription } from "./bindings";
+import type {
+  LocalModelInfo_Serialize,
+  Provider,
+  Settings_Serialize,
+  Transcription,
+} from "./bindings";
 import { BROKEN, messageOf, testKey as runKeyTest } from "./keyTest";
 import { HotkeyRecorder } from "./HotkeyRecorder";
+import { LanguagePicker } from "./LanguagePicker";
+import { cloudLanguages } from "./languages";
 import { LocalModels } from "./LocalModels";
 import type { Notice } from "./keyTest";
 import { PROVIDERS, providerInfo } from "./providers";
@@ -54,14 +61,19 @@ export function Settings({
   const [provider, setProvider] = useState<Provider>("groq");
   const [transcription, setTranscription] = useState<Transcription>("cloud");
   const [localModel, setLocalModel] = useState("");
+  // The on-device catalogue, once LocalModels has read it.
+  const [catalogue, setCatalogue] = useState<LocalModelInfo_Serialize[] | null>(null);
   const [language, setLanguage] = useState("");
   const [hotkey, setHotkey] = useState("");
   // What the OS says about the login item, as the app last reported it.
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
-  // Whether the user has changed the checkbox since. Until then the box
-  // follows the OS, and a save leaves the login item alone: the user may have
-  // changed it in System Settings while this window was hidden.
-  const [launchEdited, setLaunchEdited] = useState(false);
+  // Whether the OS is still applying the user's last choice (it can take
+  // tens of seconds, #238). Saving doesn't wait for it; the box shows
+  // "Applying…" and follows the OS again once it has answered.
+  const [launchPending, setLaunchPending] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  // Counts the choices, so an answer to an older one is ignored.
+  const launchChoice = useRef(0);
   const [keyInput, setKeyInput] = useState("");
   const [keyStatus, setKeyStatus] = useState<KeyStatus>(CHECKING);
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -106,6 +118,19 @@ export function Settings({
     if (run === keyCheck.current) setKeyStatus(status);
   }, []);
 
+  // The first launch after the rename says something about the Keychain.
+  const [launchNotice, setLaunchNotice] = useState<string | null>(null);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const result = await commands.launchNotice();
+        if (result.status === "ok") setLaunchNotice(result.data);
+      } catch {
+        // No notice is the same as nothing to say.
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     // An object, not a `let`, so the checks after each `await` see changes.
     const state = { cancelled: false };
@@ -138,7 +163,7 @@ export function Settings({
   // loaded. Whenever it comes back, read the login item again, unless the
   // user is in the middle of changing it. Nothing else in the form is touched.
   useEffect(() => {
-    if (launchEdited) return;
+    if (launchPending) return;
     const state = { cancelled: false };
     const refresh = () => {
       if (document.visibilityState === "hidden") return;
@@ -160,9 +185,29 @@ export function Settings({
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [launchEdited]);
+  }, [launchPending]);
 
   const info = providerInfo(provider);
+  // The languages the active engine offers (U2). Before the on-device list
+  // has been read, nothing is filtered or flagged.
+  const selectedModel = catalogue?.find((model) => model.id === localModel);
+  const onDevice = transcription === "local";
+  const languageChoices: readonly string[] =
+    onDevice && selectedModel !== undefined
+      ? selectedModel.language_codes
+      : cloudLanguages(provider);
+  // Plain words, not catalogue names (those belong in Speech details).
+  const languageEngine = onDevice
+    ? selectedModel === undefined
+      ? null
+      : selectedModel.language_codes.join() === "en"
+        ? "the English model"
+        : "the multilingual model"
+    : info.name;
+  const englishOnlyModel =
+    onDevice && selectedModel?.language_codes.join() === "en" ? selectedModel : undefined;
+  const englishOnly = englishOnlyModel !== undefined;
+  const multilingual = catalogue?.find((model) => model.language_codes.length > 1);
 
   // The form is locked while a save runs, so what it shows is what gets saved.
   // (The fieldset disables the controls; these guards cover anything else.)
@@ -268,13 +313,6 @@ export function Settings({
         keyCheck.current += 1; // any lookup still running predates this key
         setKeyStatus({ state: "saved" });
       }
-      // An untouched checkbox follows the OS, so ask it once more: a save of
-      // only the language must not undo a change made in System Settings.
-      let launch = launchAtLogin;
-      if (!launchEdited) {
-        const current = await commands.getSettings();
-        if (current.status === "ok") launch = current.data.launch_at_login;
-      }
       const toSave: Settings_Serialize = {
         ...loaded,
         provider,
@@ -282,7 +320,6 @@ export function Settings({
         // new provider's default (the form says so).
         model: provider === loaded.provider ? loaded.model : info.defaultModel,
         language: normalizeLanguage(language),
-        launch_at_login: launch,
         transcription,
         local_model: localModel,
       };
@@ -295,19 +332,10 @@ export function Settings({
         if (change.error !== null) saved = { status: "error", error: change.error };
       }
       if (saved.status === "error") {
-        // Something didn't take effect: the login item (the OS can refuse,
-        // or want the user's approval) or the hotkey (the old one keeps
-        // working). The message says which. The typed values stay, so the
+        // Something didn't take effect: the hotkey (the old one keeps
+        // working). The message says what. The typed values stay, so the
         // user can retry.
         setNotice({ kind: "error", text: messageOf(saved.error) });
-        // Show what the login item really is. If the app can't say, the box
-        // stays the user's own unapplied choice rather than claiming to be
-        // the OS's state.
-        const actual = await commands.getSettings();
-        if (actual.status === "ok") {
-          setLaunchAtLogin(actual.data.launch_at_login);
-          setLaunchEdited(false);
-        }
         return;
       }
       // Reload, so the form shows what was stored (the canonical hotkey). If
@@ -320,8 +348,6 @@ export function Settings({
       setLocalModel(stored.local_model);
       setLanguage(stored.language ?? "");
       setHotkey(stored.hotkey);
-      setLaunchAtLogin(stored.launch_at_login);
-      setLaunchEdited(false);
       await checkKeySaved(stored.provider);
       setNotice({ kind: "ok", text: "Settings saved." });
     } catch {
@@ -329,6 +355,42 @@ export function Settings({
     } finally {
       setSaving(false);
     }
+  }
+
+  /**
+   * Turns launch at login on or off at once, without the Save button: the OS
+   * can take tens of seconds, so the box shows "Applying…" meanwhile and
+   * nothing else waits for it. If the user toggles again, only the answer to
+   * the last choice counts. An error says why and what to do; the box then
+   * shows what the OS really has.
+   */
+  async function changeLaunch(want: boolean) {
+    const choice = ++launchChoice.current;
+    setLaunchAtLogin(want);
+    setLaunchPending(true);
+    setLaunchError(null);
+    let actual: boolean | null = null;
+    let error: string | null = null;
+    try {
+      const result = await commands.setLaunchAtLogin(want);
+      if (result.status === "ok") actual = result.data;
+      else error = messageOf(result.error);
+    } catch {
+      error = BROKEN;
+    }
+    if (choice !== launchChoice.current) return;
+    if (actual === null) {
+      try {
+        const current = await commands.getSettings();
+        if (current.status === "ok") actual = current.data.launch_at_login;
+      } catch {
+        // Keep the user's choice shown; the error says it may not have applied.
+      }
+      if (choice !== launchChoice.current) return;
+    }
+    if (actual !== null) setLaunchAtLogin(actual);
+    setLaunchError(error);
+    setLaunchPending(false);
   }
 
   /**
@@ -373,6 +435,11 @@ export function Settings({
   return (
     <main className="settings">
       <h1>Settings</h1>
+      {launchNotice !== null ? (
+        <p role="status" className="notice ok" data-testid="launch-notice">
+          {launchNotice}
+        </p>
+      ) : null}
       <form onSubmit={(event) => void save(event)} noValidate>
         <fieldset disabled={saving}>
           <fieldset className="field choice">
@@ -423,6 +490,7 @@ export function Settings({
                   setNotice(null);
                 }}
                 disabled={saving}
+                onModels={setCatalogue}
               />
               {notice !== null && (
                 <p
@@ -565,23 +633,37 @@ export function Settings({
 
           <div className="field">
             <label htmlFor="language">Language</label>
-            <input
+            <LanguagePicker
               id="language"
-              type="text"
               value={language}
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="Detect automatically"
-              aria-invalid={errors.language !== undefined}
-              aria-describedby="language-hint language-error"
-              onChange={(event) => {
+              onChange={(code) => {
                 if (saving) return;
-                setLanguage(event.target.value);
+                setLanguage(code);
                 setErrors((current) => ({ ...current, language: undefined }));
               }}
+              supported={languageChoices}
+              engineName={languageEngine}
+              disabled={saving}
+              describedBy="language-hint language-error"
+              invalid={errors.language !== undefined}
             />
             <p id="language-hint" className="hint">
-              A code such as en, de or fr. Leave it empty to detect the language.
+              {englishOnly
+                ? `The English model understands English only. For Hindi and other languages, `
+                : "Choose the language you speak, or let the app detect it."}
+              {englishOnly && (
+                <button
+                  type="button"
+                  className="link"
+                  disabled={saving || multilingual === undefined}
+                  onClick={() => {
+                    if (multilingual !== undefined) setLocalModel(multilingual.id);
+                  }}
+                >
+                  choose the multilingual model
+                </button>
+              )}
+              {englishOnly && "."}
             </p>
             <p id="language-error" role={errors.language ? "alert" : undefined} className="error">
               {errors.language}
@@ -595,18 +677,22 @@ export function Settings({
                 type="checkbox"
                 checked={launchAtLogin}
                 aria-describedby="launch-at-login-hint"
-                onChange={(event) => {
-                  if (saving) return;
-                  setLaunchAtLogin(event.target.checked);
-                  setLaunchEdited(true);
-                  setNotice(null);
-                }}
+                onChange={(event) => void changeLaunch(event.target.checked)}
               />
               Launch at login
+              {launchPending && (
+                <span role="status" className="hint">
+                  {" "}
+                  Applying…
+                </span>
+              )}
             </label>
             <p id="launch-at-login-hint" className="hint">
-              Starts dictation-app in the menu bar when you log in. Takes effect when you save. You
-              can also change it in System Settings, General, Login Items.
+              Starts Vocet in the menu bar when you log in. Applies as soon as you change it,
+              without Save. You can also change it in System Settings → General → Login Items.
+            </p>
+            <p role={launchError ? "alert" : undefined} className="error">
+              {launchError}
             </p>
           </div>
 

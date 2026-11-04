@@ -4,7 +4,7 @@
 //
 //   osascript -l JavaScript ax.js <command> <app> [args...]
 //
-// <app> is a process id or an app's name ("dictation-app", "Terminal"). It
+// <app> is a process id or an app's name ("Vocet", "Terminal"). It
 // calls the AX functions directly, not System Events, so the only grant it
 // needs is Accessibility for the process that runs it (Terminal in the VM);
 // an ssh session has none. Each command prints what it found or did and
@@ -33,6 +33,11 @@
 //                                    (focus, empty it, the keys; lowercase
 //                                    letters and digits only), as a person
 //                                    would; prints "typed"
+//   combo-pick <app> <window> <field> <search> <label>  chooses an option in
+//                                    a searchable popup (the language
+//                                    picker): focus, type <search>, press
+//                                    Return, then checks the field shows
+//                                    <label>; prints "picked"
 //   secret-set <app> <window> <field> <value>  field-set for a password
 //                                    field, whose value can't be read back:
 //                                    checks only that it holds as many
@@ -45,6 +50,7 @@
 //                                    isn't already so, then waits (5 s) until
 //                                    it is; prints "checked" or "unchecked"
 //   wait-text <app> <window> <text> <secs>  until some element shows <text>
+//   wait-no-text <app> <window> <text> <secs>  until no element shows <text>
 //   close <app> <window>             presses the window's close button
 //   alert-press <app> <text> <button> <secs>  until a window of the app shows
 //                                    <text> (untitled alerts, such as
@@ -86,6 +92,7 @@ const AX_ACTION_UNSUPPORTED = -25206;
 const MAX_NODES = 4000;
 const KEY_A = 0;
 const KEY_DELETE = 51;
+const KEY_RETURN = 36;
 const KEY_ESCAPE = 53;
 const COMMAND = 0x100000;
 // The ANSI (US layout, as in the VM) key code of each character is its
@@ -487,7 +494,7 @@ function charCount(field) {
   return text(field, "AXValue").length;
 }
 
-function typeInto(appEl, window, field, value, secret = false) {
+function typeInto(appEl, window, field, value, secret = false, pick = null) {
   const keys = [];
   for (const ch of value) {
     if (!/^[a-z0-9]$/.test(ch)) {
@@ -517,6 +524,15 @@ function typeInto(appEl, window, field, value, secret = false) {
   }
   for (const code of keys) postKey(code, 0);
   delay(0.5);
+  // A popup: Return takes the first match, which then shows in the field.
+  if (pick !== null) {
+    postKey(KEY_RETURN, 0);
+    delay(0.5);
+    const shown = text(field, "AXValue");
+    if (shown !== pick)
+      fail("searched " + JSON.stringify(value) + " but the field shows " + JSON.stringify(shown));
+    return "picked";
+  }
   if (secret) {
     const count = charCount(field);
     if (count !== value.length)
@@ -609,6 +625,10 @@ function run(argv) {
       const window = findWindow(appEl, rest[0]);
       return typeInto(appEl, window, findField(window, rest[1]), rest[2] || "");
     }
+    case "combo-pick": {
+      const window = findWindow(appEl, rest[0]);
+      return typeInto(appEl, window, findField(window, rest[1]), rest[2] || "", false, rest[3]);
+    }
     case "secret-set": {
       const window = findWindow(appEl, rest[0]);
       return typeInto(appEl, window, findField(window, rest[1]), rest[2] || "", true);
@@ -640,6 +660,15 @@ function run(argv) {
       const window = findWindow(appEl, rest[0]);
       waitFor(Number(rest[2] || 10), JSON.stringify(rest[1]), () => showsText(window, rest[1]));
       return "shown " + rest[1];
+    }
+    case "wait-no-text": {
+      const window = findWindow(appEl, rest[0]);
+      waitFor(
+        Number(rest[2] || 10),
+        "no " + JSON.stringify(rest[1]),
+        () => !showsText(window, rest[1]),
+      );
+      return "gone " + rest[1];
     }
     case "alert-press": {
       let target;

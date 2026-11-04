@@ -1,6 +1,6 @@
 # M5.9 criterion 6 (#173): turning Accessibility off while the app runs
 # must never freeze the Mac. On the owner's Mac it did: with the app's
-# hotkey listening, switching dictation-app off in System Settings ›
+# hotkey listening, switching Vocet off in System Settings ›
 # Privacy & Security › Accessibility stopped all keyboard input and the Mac
 # had to be forced off. In the VM, before the fix, typed keys stopped
 # reaching TextEdit the moment Accessibility was revoked, and the app never
@@ -44,9 +44,9 @@ AX_TYPE_KEYS="$VM_FIXTURES/type-keys.js"
 # DictationError::HotkeyFailed's text (crates/core) and the tray's title
 # for it (crates/app/src/tray.rs).
 # What the tray's status line and tooltip say (the code table's message).
-AX_HOTKEY_SHOWN="Vocet needs Accessibility to hear your key."
+AX_HOTKEY_SHOWN="Vocet can't paste into other apps yet."
 # What the log says (DictationError's Display).
-AX_HOTKEY_ERROR="The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself."
+AX_HOTKEY_ERROR="The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
 AX_EVIDENCE=""
 # 1 while the scenario may have left the switch off.
 AX_SWITCHED_OFF=0

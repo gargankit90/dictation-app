@@ -22,12 +22,15 @@
     "allow-set-share-usage-events",
     "allow-set-hotkey",
     "allow-set-hotkey-recording",
+    "allow-set-launch-at-login",
     "allow-run-checks",
     "allow-test-connection",
     "allow-build-report",
     "allow-save-report",
     "allow-open-issue",
     "allow-take-window-request",
-    "allow-reveal-log-file"
+    "allow-reveal-log-file",
+    "allow-dictation-progress",
+    "allow-launch-notice"
   ]
 }

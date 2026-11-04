@@ -12,7 +12,7 @@
 # The error of a dictation with no key (DictationError's text around
 # TranscribeError::MissingKey's user message).
 # What the tray's status line says (the code table's message).
-TRAY_NO_KEY_SHOWN="No API key is saved."
+TRAY_NO_KEY_SHOWN="No API key saved."
 # What the log says (DictationError's Display).
 TRAY_NO_KEY_ERROR="Transcription failed: Add your API key in Settings."
 # The tray's tooltip, with nothing wrong, and its status line.

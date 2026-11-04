@@ -10,6 +10,7 @@ struct State {
     /// What `set_enabled(true)` leaves behind instead of `Enabled`.
     enabling_gives: LaunchAtLoginState,
     fail: Option<LaunchAtLoginError>,
+    delay: std::time::Duration,
     calls: Vec<bool>,
 }
 
@@ -27,6 +28,7 @@ impl Default for FakeLaunchAtLogin {
                 state: LaunchAtLoginState::Disabled,
                 enabling_gives: LaunchAtLoginState::Enabled,
                 fail: None,
+                delay: std::time::Duration::ZERO,
                 calls: Vec::new(),
             })),
         }
@@ -57,6 +59,12 @@ impl FakeLaunchAtLogin {
         lock(&self.state).fail = Some(error);
     }
 
+    /// Makes every later `set_enabled` take `delay` before it answers, as
+    /// the real login item does (up to 40 s, #238).
+    pub fn delay_changes(&self, delay: std::time::Duration) {
+        lock(&self.state).delay = delay;
+    }
+
     /// The `enabled` arguments of the `set_enabled` calls so far.
     #[must_use]
     pub fn calls(&self) -> Vec<bool> {
@@ -74,8 +82,14 @@ impl LaunchAtLogin for FakeLaunchAtLogin {
     }
 
     fn set_enabled(&self, enabled: bool) -> Result<(), LaunchAtLoginError> {
+        let delay = {
+            let mut state = lock(&self.state);
+            state.calls.push(enabled);
+            state.delay
+        };
+        // Not holding the lock, so `state()` still answers meanwhile.
+        std::thread::sleep(delay);
         let mut state = lock(&self.state);
-        state.calls.push(enabled);
         if let Some(error) = &state.fail {
             return Err(error.clone());
         }

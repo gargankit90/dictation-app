@@ -61,6 +61,10 @@ Handy (https://github.com/cjpais/Handy), src-tauri/src/input.rs at commit
   layout (crates/platform/src/insert/macos.rs, module `layout`).
   MIT License, Copyright (c) 2025 CJ Pais
 
+Ideas only, no code: Handy (MIT), src-tauri/src/paste_tx/ at commit
+9e57a0d, for keeping a paste's original clipboard pending until it is
+safe to restore and settling it when the next paste starts.
+
 objc2-app-kit, objc2-foundation, objc2-core-graphics
 (https://github.com/madsmtm/objc2)
   NSPasteboard access and the paste key events
@@ -129,6 +133,13 @@ The code adapted from Handy (above) is used under this licence:
   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
   SOFTWARE.
+
+Inter and Inter Tight 5.3.0 (https://github.com/rsms/inter, https://github.com/rsms/inter-tight)
+  Website fonts served from site/fonts (WOFF2, Latin and Latin-ext, via the
+  fontsource packages), so the page makes no request to Google. Licence:
+  site/fonts/LICENSE.txt.
+  SIL Open Font License 1.1, Copyright 2016 The Inter Project Authors (Inter),
+  Copyright 2022 The Inter Project Authors (Inter Tight)
 
 The licence files of the vendored crates stay with them:
 third_party/handy-keys/LICENSE, third_party/coreaudio-rs/LICENSE-MIT and

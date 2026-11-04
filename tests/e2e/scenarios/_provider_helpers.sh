@@ -152,7 +152,7 @@ provider_cleanup() {
 
 # The pid of the one running copy of the app.
 app_pid() {
-  vm "pgrep -x $(q "$APP_NAME")" | tr -d ' '
+  vm "pgrep -x $(q "$PROC_NAME") || pgrep -x $OLD_PROC_NAME" | tr -d ' '
 }
 
 # The phases logged after the first <n>, space-separated.
