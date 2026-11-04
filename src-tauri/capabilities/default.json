@@ -11,6 +11,7 @@
     "allow-test-api-key",
     "allow-get-onboarding",
     "allow-request-permission",
+    "allow-open-setup",
     "allow-set-onboarding-step",
     "allow-finish-onboarding",
     "allow-relaunch-app",

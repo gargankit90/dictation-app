@@ -38,9 +38,12 @@ interface FieldErrors {
  */
 export function Settings({
   onTroubleshoot,
+  onSetup,
   focus = null,
 }: {
   onTroubleshoot?: () => void;
+  /** Opens the first-run steps again (the tray hides "Resume setup…" once done). */
+  onSetup?: () => void;
   /** The tray asked for this field: the speech engine or the dictation key. */
   focus?: { target: "speech" | "shortcut"; id: number } | null;
 } = {}) {
@@ -665,6 +668,14 @@ export function Settings({
                   Check the microphone, Accessibility, hotkey and engine, and report a problem.
                 </p>
               </div>
+              {onSetup === undefined ? null : (
+                <div className="field">
+                  <button type="button" onClick={onSetup}>
+                    Set up dictation…
+                  </button>
+                  <p className="hint">Go through the first-run steps again.</p>
+                </div>
+              )}
             </>
           )}
 

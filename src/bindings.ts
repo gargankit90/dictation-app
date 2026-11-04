@@ -52,6 +52,12 @@ export const commands = {
 	 */
 	requestPermission: (permission: AppPermission) => typedError<OnboardingStatus, string>(__TAURI_INVOKE("request_permission", { permission })),
 	/**
+	 *  Settings, Help, "Set up dictation…" (U5): opens the first-run steps at
+	 *  the step the user was on, now that the tray's "Resume setup…" is hidden
+	 *  once setup is done. The key is read (bounded) off the async runtime.
+	 */
+	openSetup: () => typedError<null, string>(__TAURI_INVOKE("open_setup")),
+	/**
 	 *  Moves onboarding to `step`, if every step before it is done (the key is
 	 *  read from the keychain only to move to the last step). An error says
 	 *  which step comes first; the user stays where they were.

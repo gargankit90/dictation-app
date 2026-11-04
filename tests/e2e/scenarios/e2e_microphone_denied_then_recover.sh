@@ -42,7 +42,9 @@ MIC_SHOWN="Microphone is off for dictation-app. Allow it in Privacy & Security, 
 # What the log says (DictationError's Display).
 MIC_ERROR="Microphone is off. Allow it in Privacy & Security, Microphone, then relaunch from the menu bar."
 # The tray menu's item while the microphone is denied (src-tauri).
-MIC_RELAUNCH="Relaunch dictation-app"
+MIC_RELAUNCH="Relaunch Vocet"
+# The tray's status sentence for it (the code table's message).
+MIC_STATUS="Microphone is off for dictation-app."
 MIC_PROMPT_APP=UserNotificationCenter
 MIC_PROMPT_TEXT="would like to access the microphone"
 MIC_SETTINGS_URL='x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'
@@ -97,16 +99,24 @@ mic_prompt_showing() {
   ax_ok wait-text "$MIC_PROMPT_APP" "" "$MIC_PROMPT_TEXT" 15 >/dev/null
 }
 
-# The tray menu has no Relaunch item: ax.js lists the items it found
-# instead.
+# The tray's status line isn't a problem (it doesn't start with "!").
+tray_has_no_problem() {
+  local menu
+  menu=$(tray_menu) || return 1
+  case $(printf '%s' "$menu" | sed -n 1p) in
+    "!"*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# The tray menu has no Relaunch item (U5: it is only ever the fix row).
 tray_has_no_relaunch() {
-  local said status=0
-  said=$(ax tray-click "$APP_NAME" "Relaunch" 2>&1) || status=$?
-  log "  tray: $said"
-  [ "$status" != 0 ] || return 1
-  case $said in
-    *"no menu item starting with"*"Quit dictation-app"*) return 0 ;;
-    *) return 1 ;;
+  local menu
+  menu=$(tray_menu) || return 1
+  log "  tray menu: $(printf '%s' "$menu" | paste -sd '|' -)"
+  case $menu in
+    *Relaunch*) return 1 ;;
+    *) return 0 ;;
   esac
 }
 
@@ -218,8 +228,8 @@ e2e_microphone_denied_then_recover() {
   expect "no error is shown while the prompt is up" \
     test "$(log_count 'shown to the user error=')" = 0
   expect "the overlay shows nothing" overlay_shows "$OVERLAY_HIDDEN"
-  expect "the tray shows no error" tray_shows "" "$TRAY_TOOLTIP"
-  expect "and offers no Relaunch" test "$(log_count 'tray relaunch item')" = 0
+  expect "the tray shows no error" tray_has_no_problem
+  expect "and offers no Relaunch" tray_has_no_relaunch
   expect "the app stayed Idle (no phase logged)" test -z "$(logged_phases)"
   expect "macOS asks, and Don’t Allow is pressed" mic_prompt_answer "Don’t Allow"
   expect "the app got the refusal (the denial stage was reached)" \
@@ -243,8 +253,8 @@ e2e_microphone_denied_then_recover() {
     wait_for_log_count "shown to the user error=$MIC_ERROR" 1 10
   expect "the overlay renders it" overlay_shows "shown: $MIC_SHOWN mic_denied"
   screenshot e2e_microphone_denied_then_recover.error
-  expect "and the tray's tooltip has it" tray_shows "$TRAY_ERROR_TITLE" "$TRAY_TOOLTIP: $MIC_SHOWN (mic_denied)"
-  expect "the tray menu offers Relaunch" wait_for_log 'tray relaunch item offered=true' 5
+  expect "and the tray says it, with Open Microphone settings… as the fix" \
+    env_tray_fix "Open Microphone settings…" tray_shows "! $MIC_STATUS" "Vocet: $MIC_STATUS" 10
   expect "macOS doesn't ask again" no_mic_prompt
   launch --release
   sleep 2
@@ -278,8 +288,15 @@ e2e_microphone_denied_then_recover() {
     log "  without a relaunch the app recorded (macOS told it this time)"
     mic_evidence "grant without a relaunch: took effect"
   fi
-  # Relaunch from the tray: the same arguments (the mock), a new process.
+  # The fix row went to System Settings; now it offers the relaunch that
+  # picks the grant up. Relaunch from the tray: the same arguments (the
+  # mock), a new process.
   ready=$(log_count 'INFO .*ready')
+  expect "the fix row opens System Settings (the grant was made there)" \
+    ax_ok tray-click "$APP_NAME" "Open Microphone settings"
+  quit_system_settings
+  expect "the tray now offers Relaunch Vocet" \
+    env_tray_fix "Relaunch Vocet" tray_shows "! $MIC_STATUS" "Vocet: $MIC_STATUS" 10
   expect "Relaunch is pressed in the tray menu" \
     job_says "clicked $MIC_RELAUNCH" ax tray-click "$APP_NAME" "Relaunch"
   expect "the app relaunches" wait_for_log 'relaunching from the tray' 10

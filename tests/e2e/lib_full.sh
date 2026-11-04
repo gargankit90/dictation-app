@@ -317,6 +317,12 @@ tray_info() {
   ax tray-info "$APP_NAME"
 }
 
+# The tray's menu, one item per line ("-" for a separator, "(off) " before a
+# disabled item): the first line is the status.
+tray_menu() {
+  ax tray-menu "$APP_NAME"
+}
+
 # tray_field <name> <tray_info output>: one field's value.
 tray_field() {
   printf '%s\n' "$2" | sed -n "s/^$1=//p"

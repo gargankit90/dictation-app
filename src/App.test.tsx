@@ -149,4 +149,48 @@ describe("App", () => {
     expect(await screen.findByLabelText("Report")).toBeTruthy();
     expect(seen.filter((command) => command === "build_report")).toHaveLength(1);
   });
+
+  // U5 criterion 6: "Resume setup…" leaves the tray once setup is done; setup
+  // stays reachable from Settings, Help.
+  it("opens the first-run steps from Settings, Help", async () => {
+    let view = "settings";
+    const seen: string[] = [];
+    mockIPC((command) => {
+      seen.push(command);
+      switch (command) {
+        case "get_onboarding":
+          return {
+            view,
+            step: "microphone",
+            microphone: "granted",
+            accessibility: "granted",
+          };
+        case "open_setup":
+          view = "onboarding";
+          return null;
+        case "take_window_request":
+          return "";
+        case "get_settings":
+          return {
+            version: 2,
+            provider: "groq",
+            model: "whisper-large-v3-turbo",
+            language: null,
+            hotkey: "RightAlt",
+            launch_at_login: false,
+            transcription: "cloud",
+            local_model: "parakeet-unified-en-0.6b-q4_k_m",
+            share_usage_events: true,
+          };
+        default:
+          return false;
+      }
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Set up dictation…" }));
+    await waitFor(() => {
+      expect(seen).toContain("open_setup");
+      expect(screen.queryByRole("button", { name: "Set up dictation…" })).toBeNull();
+    });
+  });
 });

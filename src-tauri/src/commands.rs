@@ -62,6 +62,8 @@ pub trait Shell: Send + Sync {
     fn hide_window(&self);
     /// Quits and starts the app again.
     fn restart(&self);
+    /// Shows the window on its first-run steps.
+    fn show_onboarding_window(&self);
 }
 
 /// The app, for the onboarding commands.
@@ -672,6 +674,31 @@ pub async fn get_onboarding(
     Ok(onboarding.status(&*permissions.0))
 }
 
+/// Settings, Help, "Set up dictation…" (U5): opens the first-run steps at
+/// the step the user was on, now that the tray's "Resume setup…" is hidden
+/// once setup is done. The key is read (bounded) off the async runtime.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_setup(
+    shell: State<'_, AppShell>,
+    onboarding: State<'_, Arc<Onboarding>>,
+    permissions: State<'_, OsPermissions>,
+    config: State<'_, AppConfig>,
+    live: State<'_, LiveEngine>,
+) -> Result<(), String> {
+    let (onboarding, os) = (Arc::clone(&onboarding), Arc::clone(&permissions.0));
+    let (config, live) = (Arc::clone(&config.0), live.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let readiness = onboarding::readiness(&*os, true, || onboarding::key_saved(&config, &live));
+        let step = onboarding.open(readiness);
+        tracing::info!(?step, "onboarding opened from Settings");
+    })
+    .await
+    .map_err(|_| "the setup task crashed".to_owned())?;
+    shell.0.show_onboarding_window();
+    Ok(())
+}
+
 /// Asks macOS for `permission`: its prompt while it hasn't been asked,
 /// System Settings at the permission's page once refused (Accessibility:
 /// both). Returns at once; `get_onboarding` shows the answer once the user
@@ -782,6 +809,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         test_api_key,
         get_onboarding,
         request_permission,
+        open_setup,
         set_onboarding_step,
         finish_onboarding,
         relaunch_app,
@@ -850,6 +878,7 @@ mod tests {
         fn restart(&self) {
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
+        fn show_onboarding_window(&self) {}
     }
 
     /// M5.7 criterion 2: the tray's Relaunch restarts the app once, through
@@ -883,6 +912,7 @@ mod tests {
             "testApiKey",
             "getOnboarding",
             "requestPermission",
+            "openSetup",
             "setOnboardingStep",
             "finishOnboarding",
             "relaunchApp",
@@ -908,7 +938,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 24,
+            commands, 25,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -2616,6 +2646,7 @@ mod capability_tests {
     impl super::Shell for NoShell {
         fn hide_window(&self) {}
         fn restart(&self) {}
+        fn show_onboarding_window(&self) {}
     }
 
     fn invoke(
@@ -2741,7 +2772,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 24);
+        assert_eq!(COMMAND_NAMES.len(), 25);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

@@ -18,11 +18,9 @@
 # e2e_tray_error_clears_on_next_recording.sh (every scenario file is sourced
 # first).
 
-# The tray while the hotkey doesn't work: HOTKEY_UNAVAILABLE in
-# crates/app/src/tray.rs, and DictationError::HotkeyFailed in the tooltip.
-TRAY_HOTKEY_TITLE="Hotkey unavailable"
-# What the tray shows (the code table, ErrorCode::user_text).
-TRAY_HOTKEY_SHOWN="The hotkey isn't working. Allow Accessibility; it comes back by itself."
+# The tray while the hotkey doesn't work: the code table's message in the
+# status line and the tooltip, "Choose another key…" as the one fix (U5).
+TRAY_HOTKEY_SHOWN="The hotkey isn't working."
 TRAY_HOTKEY_ERROR="The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself."
 
 e2e_hotkey_listener_recovers() {
@@ -46,8 +44,8 @@ posted up" real_key_hold 1.5
     wait_for_log 'test hook outage command=Begin from="a second launch"'
   expect "the app says the hotkey isn't working" \
     wait_for_log "shown to the user error=The dictation hotkey isn.t working"
-  expect "the tray says Hotkey unavailable" \
-    tray_shows "$TRAY_HOTKEY_TITLE" "$TRAY_TOOLTIP: $TRAY_HOTKEY_SHOWN (hotkey_unregistered)" 10
+  expect "the tray says the hotkey isn't working, with its fix" \
+    env_tray_fix "Choose another key…" tray_shows "! $TRAY_HOTKEY_SHOWN" "Vocet: $TRAY_HOTKEY_SHOWN" 10
   expect "the supervisor is retrying (Accessibility looks missing)" \
     wait_for_log 'PermissionMissing: the hotkey is off until Accessibility is granted; it starts by itself then' 10
 
@@ -66,7 +64,7 @@ posted up" real_key_hold 1.5
   expect "the hotkey listens again by itself, within a few seconds" \
     wait_for_log 'the hotkey listens again' 10
   expect "the app says it is restored" wait_for_log 'hotkey restored; shown to the user'
-  expect "the tray's title clears" tray_is_clear 10
+  expect "the tray is ready again" tray_is_clear 10
 
   textedit_fresh
   before=$(idle_count)

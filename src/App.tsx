@@ -90,6 +90,17 @@ export function App() {
   return (
     <Settings
       focus={focus}
+      onSetup={() => {
+        void (async () => {
+          try {
+            await commands.openSetup();
+            const status = await commands.getOnboarding();
+            if (status.status === "ok" && status.data.view === "onboarding") setView("onboarding");
+          } catch {
+            // Stay on Settings.
+          }
+        })();
+      }}
       onTroubleshoot={() => {
         setPage("troubleshoot");
       }}

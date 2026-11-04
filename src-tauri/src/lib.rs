@@ -511,6 +511,10 @@ impl commands::Shell for TauriShell {
         window::hide(&self.0);
     }
 
+    fn show_onboarding_window(&self) {
+        window::show(&self.0, onboarding::View::Onboarding);
+    }
+
     fn restart(&self) {
         // Quits as Quit does (the pipeline stops and the single-instance
         // hold is released in `shut_down`), then Tauri starts the app again
