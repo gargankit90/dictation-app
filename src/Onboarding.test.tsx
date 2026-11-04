@@ -467,7 +467,7 @@ describe("Speech", () => {
   });
 
   it("criterion 3: a bad key keeps Continue locked, and saves nothing", async () => {
-    backend.testResult = { kind: "rejected", message: "Groq rejected this API key." };
+    backend.testResult = { kind: "invalid_key", message: "Groq rejected this API key." };
     const field = await chooseOwnKey();
     fireEvent.change(field, { target: { value: KEY } });
     fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
@@ -491,7 +491,7 @@ describe("Speech", () => {
 
   it("criterion 3: a key saved earlier is tested before moving on", async () => {
     backend.keys.groq = true;
-    backend.testResult = { kind: "rejected", message: "Groq rejected this API key." };
+    backend.testResult = { kind: "invalid_key", message: "Groq rejected this API key." };
     await chooseOwnKey();
     await waitFor(() => {
       expect(primary("Continue").disabled).toBe(false);
@@ -784,7 +784,7 @@ describe("Try it", () => {
   it("criterion 5: while the model downloads, practice is blocked with progress", async () => {
     const model = backend.model(PARAKEET.id);
     model.state = "downloading";
-    model.downloaded_bytes = PARAKEET.size_bytes * 0.82;
+    model.downloaded_bytes = 477_000_000 * 0.82;
     const box = await stepOpen();
     expect(box.disabled).toBe(true);
     await screen.findByText("Getting the model ready: 82%");
@@ -915,7 +915,7 @@ describe("Ready", () => {
   it("criterion 6: while the model isn't ready it doesn't say Ready", async () => {
     const model = backend.model(PARAKEET.id);
     model.state = "downloading";
-    model.downloaded_bytes = PARAKEET.size_bytes / 2;
+    model.downloaded_bytes = 477_000_000 / 2;
     show();
     await screen.findByText("On this Mac · Parakeet English · Getting the model ready: 50%");
   });
