@@ -355,13 +355,21 @@ fn work(
                 });
             }
         }
+        // All state is final before anyone is told (S1 review, R3): a caller
+        // woken by its answer must see no change running.
+        let idle = {
+            let mut pending = lock(shared);
+            let idle = pending.wanted.is_none();
+            if idle {
+                pending.running = false;
+                pending.applying = None;
+            }
+            idle
+        };
         for waiter in waiters {
             let _ = waiter.send(outcome.clone());
         }
-        let mut pending = lock(shared);
-        if pending.wanted.is_none() {
-            pending.running = false;
-            pending.applying = None;
+        if idle {
             return;
         }
     }
@@ -536,6 +544,21 @@ mod tests {
         assert_eq!(sync.pending(), None);
         assert_eq!(stored.lock().unwrap().as_slice(), [outcome]);
         assert_eq!(login.state(), Ok(LaunchAtLoginState::Disabled));
+    }
+
+    /// S1 review, R3: whoever is woken by an answer sees the final state,
+    /// never a change still "pending", and can start the next one at once.
+    #[tokio::test]
+    async fn an_answered_caller_sees_the_idle_state() {
+        let login = FakeLaunchAtLogin::new();
+        let (sync, stored) = synced(&login);
+        for round in 0..300 {
+            let wanted = round % 2 == 0;
+            let outcome = sync.request(wanted).await.unwrap();
+            assert_eq!(outcome.enabled, wanted);
+            assert_eq!(sync.pending(), None, "round {round}");
+            assert_eq!(stored.lock().unwrap().len(), round + 1, "stored first");
+        }
     }
 
     #[tokio::test]
