@@ -341,20 +341,64 @@ pre.report {
 /* Keycap (shared with U2). */
 .keycap {
   display: inline-block;
-  min-width: 56px;
   margin-bottom: var(--vc-space-2);
-  padding: var(--vc-space-2) var(--vc-space-3);
+  padding: 2px var(--vc-space-2);
   border: 1px solid var(--vc-line-strong);
   border-bottom-width: 3px;
   border-radius: var(--vc-radius-sm);
-  background: var(--vc-bg);
+  background: var(--vc-bg-grouped);
   color: var(--vc-ink);
   font: inherit;
-  font-size: var(--vc-text-lg);
+  font-size: var(--vc-text-sm);
+  font-weight: 600;
   text-align: center;
 }
 
 .keycap.recording {
   border-color: var(--vc-accent);
   color: var(--vc-muted);
+}
+
+.language-picker {
+  position: relative;
+}
+
+.language-list {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  margin: 2px 0 0;
+  padding: var(--vc-space-1);
+  overflow: auto;
+  list-style: none;
+  border: 1px solid var(--vc-line-strong);
+  border-radius: var(--vc-radius-sm);
+  background: var(--vc-bg);
+}
+
+.language-option,
+.language-empty {
+  padding: var(--vc-space-1) var(--vc-space-2);
+  border-radius: var(--vc-radius-sm);
+}
+
+.language-option.active {
+  background: var(--vc-accent);
+  color: var(--vc-accent-fg);
+}
+
+.language-empty {
+  color: var(--vc-muted);
+}
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vc-accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
