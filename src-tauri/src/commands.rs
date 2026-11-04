@@ -246,7 +246,9 @@ fn settings_write() -> std::sync::MutexGuard<'static, ()> {
 /// The "share anonymous usage events" field of `settings` is ignored: the
 /// stored choice stays, whatever the form held when it was loaded. Only
 /// [`set_share_usage_events`] changes it, so a Save can never undo a newer
-/// opt-out (A1 review, round 1).
+/// opt-out (A1 review, round 1). The same goes for the hotkey, which only
+/// [`set_hotkey`] changes (K1 review, round 1): a form loaded before the key
+/// was recorded can't switch it back.
 #[tauri::command]
 #[specta::specta]
 pub async fn save_settings(
@@ -271,8 +273,8 @@ pub async fn save_settings(
     saved.problem().map_or(Ok(()), Err)
 }
 
-/// [`save_with_login`] with the stored sharing choice kept, and the usage
-/// change it made, if the stored settings could be read first.
+/// [`save_with_login`] with the stored sharing choice and hotkey kept, and
+/// the usage change it made, if the stored settings could be read first.
 fn save_keeping_sharing<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
@@ -284,13 +286,95 @@ fn save_keeping_sharing<S: SecretStore + 'static>(
     let before = config.settings().ok();
     if let Some(before) = &before {
         settings.share_usage_events = before.share_usage_events;
+        settings.hotkey.clone_from(&before.hotkey);
     }
+    save_locked(config, live, login, hotkey, settings, before)
+}
+
+/// Like [`save_keeping_sharing`], but `hotkey` is the key to switch to and
+/// everything else is what is stored: the one writer of the dictation key.
+/// Fails if the stored settings can't be read.
+fn write_hotkey<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    live: &LiveEngine,
+    login: &dyn LaunchAtLogin,
+    control: &HotkeyControl,
+    hotkey: &str,
+) -> Result<(Option<usage::SettingsChange>, Saved), SaveFailed> {
+    let _writing = settings_write();
+    let before = config.settings()?;
+    let mut settings = before.clone();
+    hotkey.clone_into(&mut settings.hotkey);
+    save_locked(config, live, login, control, settings, Some(before))
+}
+
+/// The save, with [`settings_write`] already held by the caller.
+fn save_locked<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    live: &LiveEngine,
+    login: &dyn LaunchAtLogin,
+    hotkey: &HotkeyControl,
+    settings: Settings,
+    before: Option<Settings>,
+) -> Result<(Option<usage::SettingsChange>, Saved), SaveFailed> {
     let after = settings.clone();
     let saved = save_with_login(config, live, login, hotkey, settings)?;
     Ok((
         before.map(|before| usage::settings_change(&before, &after)),
         saved,
     ))
+}
+
+/// How long a "choosing a key" pause lasts without being renewed. The
+/// Settings window renews it while it records and ends it when done; if it
+/// never does (closed, crashed) the hotkey comes back by itself.
+const RECORDING_LEASE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Sets the dictation key and nothing else: the one writer of it (K1).
+/// The key listens at once; if it can't, the old one keeps listening, and
+/// the error says why. It never ends the pause [`set_hotkey_recording`]
+/// began: only the recorder ending does, so a Save can't make the real
+/// hotkey live while the user is still choosing (K1 review, round 2).
+#[tauri::command]
+#[specta::specta]
+pub async fn set_hotkey(
+    state: State<'_, AppConfig>,
+    engine: State<'_, LiveEngine>,
+    login: State<'_, LoginItem>,
+    hotkey: State<'_, ActiveHotkey>,
+    usage: State<'_, Usage>,
+    spec: String,
+) -> Result<(), String> {
+    let live = engine.inner().clone();
+    let login = Arc::clone(&login.0);
+    let control = hotkey.0.clone();
+    let result = on_config(&state, move |config| {
+        write_hotkey(config, &live, &*login, &control, &spec)
+    })
+    .await;
+    let (change, saved) = result?;
+    if let Some(change) = change {
+        usage::settings_saved(&usage, change);
+    }
+    saved.problem().map_or(Ok(()), Err)
+}
+
+/// While the user is choosing a new dictation key, pressing the current one
+/// must not dictate: `recording` pauses the hotkey (renewed by calling it
+/// again, and ended by `false` or by itself after
+/// [`RECORDING_LEASE`]).
+#[tauri::command]
+#[specta::specta]
+pub fn set_hotkey_recording(
+    hotkey: State<'_, ActiveHotkey>,
+    recording: bool,
+) -> Result<(), String> {
+    if recording {
+        hotkey.0.pause(RECORDING_LEASE);
+    } else {
+        hotkey.0.resume();
+    }
+    Ok(())
 }
 
 /// Turns sharing anonymous usage events on or off, and nothing else. Off
@@ -706,6 +790,8 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::models::cancel_local_model_download,
         crate::models::delete_local_model,
         set_share_usage_events,
+        set_hotkey,
+        set_hotkey_recording,
         crate::diagnostics::run_checks,
         crate::diagnostics::test_connection,
         crate::diagnostics::build_report,
@@ -804,6 +890,8 @@ mod tests {
             "cancelLocalModelDownload",
             "deleteLocalModel",
             "setShareUsageEvents",
+            "setHotkey",
+            "setHotkeyRecording",
             "runChecks",
             "testConnection",
             "buildReport",
@@ -818,7 +906,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 21,
+            commands, 23,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1015,6 +1103,86 @@ mod tests {
             )
             .unwrap();
             assert!(stored(&config), "the stored choice (on) stays");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    /// K1: the dictation key has one writer, `set_hotkey`; the form's save
+    /// keeps the stored key, so neither can undo the other.
+    mod recorded_hotkey {
+        use dictation_platform::fakes::{FakeLaunchAtLogin, MemSecretStore};
+
+        use super::super::*;
+        use super::hotkey::listening;
+
+        fn config(tag: &str) -> (Arc<Config<MemSecretStore>>, std::path::PathBuf) {
+            let dir = std::env::temp_dir()
+                .join(format!("dictation-k1-test-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            (Arc::new(Config::new(&dir, MemSecretStore::new())), dir)
+        }
+
+        #[test]
+        fn writing_the_key_changes_only_the_key() {
+            let (config, dir) = config("k1-only-key");
+            let (hotkey, _keys) = listening();
+            config
+                .save_settings(&Settings {
+                    language: Some("de".into()),
+                    ..Settings::default()
+                })
+                .unwrap();
+            let (_, saved) = write_hotkey(
+                &config,
+                &LiveEngine::fixed(),
+                &FakeLaunchAtLogin::new(),
+                &hotkey,
+                "RightCmd",
+            )
+            .unwrap();
+            assert_eq!(saved.problem(), None);
+            let stored = config.settings().unwrap();
+            assert_eq!(stored.hotkey, "RightCmd");
+            assert_eq!(stored.language.as_deref(), Some("de"));
+            assert_eq!(hotkey.spec(), "RightCmd".parse().unwrap());
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// A form loaded before the key was recorded, saved after: its old
+        /// key must not switch the hotkey back, and its other fields save.
+        #[test]
+        fn a_save_with_a_stale_hotkey_keeps_the_recorded_one() {
+            let (config, dir) = config("k1-stale-key");
+            let (hotkey, _keys) = listening();
+            let (login, live) = (FakeLaunchAtLogin::new(), LiveEngine::fixed());
+            write_hotkey(&config, &live, &login, &hotkey, "RightCmd").unwrap();
+            let stale = Settings {
+                hotkey: "RightAlt".into(),
+                language: Some("fr".into()),
+                ..Settings::default()
+            };
+            save_keeping_sharing(&config, &live, &login, &hotkey, stale).unwrap();
+            let stored = config.settings().unwrap();
+            assert_eq!(stored.hotkey, "RightCmd", "the recorded key was undone");
+            assert_eq!(stored.language.as_deref(), Some("fr"), "the rest saved");
+            assert_eq!(hotkey.spec(), "RightCmd".parse().unwrap());
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        #[test]
+        fn a_key_that_cannot_work_is_refused_and_the_old_one_stays() {
+            let (config, dir) = config("k1-refused");
+            let (hotkey, _keys) = listening();
+            let result = write_hotkey(
+                &config,
+                &LiveEngine::fixed(),
+                &FakeLaunchAtLogin::new(),
+                &hotkey,
+                "Escape",
+            );
+            assert!(result.is_err());
+            assert_eq!(config.settings().unwrap().hotkey, "RightAlt");
+            assert_eq!(hotkey.spec(), "RightAlt".parse().unwrap());
             let _ = std::fs::remove_dir_all(dir);
         }
     }
@@ -2477,6 +2645,7 @@ mod capability_tests {
             "request_permission" => serde_json::json!({ "permission": "microphone" }),
             "set_onboarding_step" => serde_json::json!({ "step": "microphone" }),
             "set_share_usage_events" => serde_json::json!({ "share": true }),
+            "set_hotkey_recording" => serde_json::json!({ "recording": false }),
             _ => serde_json::json!({}),
         }
     }
@@ -2567,7 +2736,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 21);
+        assert_eq!(COMMAND_NAMES.len(), 23);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

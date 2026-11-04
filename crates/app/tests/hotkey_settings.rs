@@ -749,3 +749,76 @@ async fn a_new_key_that_fails_as_it_starts_reports_it_at_the_handoff() {
     assert!(app.inserter.inserted().is_empty());
     app.pipeline.shutdown().await;
 }
+
+/// K1 (#170): while the user is choosing a new key in Settings, pressing the
+/// current one must not record, transcribe or paste anything; afterwards it
+/// dictates as before.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_paused_hotkey_dictates_nothing_and_comes_back_on_resume() {
+    let dir = TempDir::new("pause");
+    let file = dir.settings_file();
+    let mut app = App::start(&file);
+    let key = app.keyboard.key(HotkeySpec::default());
+
+    app.control.pause(Duration::from_secs(30));
+    assert!(key.emit(HotkeyEvent::Pressed));
+    app.clock.advance(Duration::from_millis(500));
+    assert!(key.emit(HotkeyEvent::Released));
+    assert!(key.emit(HotkeyEvent::CancelPressed));
+    app.assert_quiet().await;
+    assert!(app.inserter.inserted().is_empty());
+
+    app.control.resume();
+    app.dictate_with(HotkeySpec::default()).await;
+    app.pipeline.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pausing_in_the_middle_of_a_hold_ends_it_and_drops_its_release() {
+    let dir = TempDir::new("pause-hold");
+    let file = dir.settings_file();
+    let mut app = App::start(&file);
+    let key = app.keyboard.key(HotkeySpec::default());
+    assert!(key.emit(HotkeyEvent::Pressed));
+    assert_eq!(app.next().await, UiEvent::StateChanged(Recording));
+
+    app.control.pause(Duration::from_secs(30));
+    assert_eq!(app.next().await, UiEvent::StateChanged(Idle));
+    // The user lets go after the pause ended: nothing is transcribed.
+    app.control.resume();
+    app.clock.advance(Duration::from_millis(500));
+    assert!(key.emit(HotkeyEvent::Released));
+    app.assert_quiet().await;
+    assert!(app.inserter.inserted().is_empty());
+    app.dictate_with(HotkeySpec::default()).await;
+    app.pipeline.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_held_through_the_end_of_a_pause_does_not_dictate_when_released() {
+    let dir = TempDir::new("pause-held-through");
+    let file = dir.settings_file();
+    let mut app = App::start(&file);
+    let key = app.keyboard.key(HotkeySpec::default());
+    app.control.pause(Duration::from_secs(30));
+    assert!(key.emit(HotkeyEvent::Pressed));
+    app.control.resume();
+    app.clock.advance(Duration::from_millis(500));
+    assert!(key.emit(HotkeyEvent::Released));
+    app.assert_quiet().await;
+    app.dictate_with(HotkeySpec::default()).await;
+    app.pipeline.shutdown().await;
+}
+
+/// A window that is closed or crashes while choosing never says it is done:
+/// the pause ends by itself, so the hotkey can't stay off.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pause_that_is_never_ended_lapses_by_itself() {
+    let dir = TempDir::new("pause-lapses");
+    let file = dir.settings_file();
+    let mut app = App::start(&file);
+    app.control.pause(Duration::from_millis(100));
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    app.dictate_with(HotkeySpec::default()).await;
+    app.pipeline.shutdown().await;
+}

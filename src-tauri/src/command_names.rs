@@ -23,6 +23,8 @@ pub const COMMAND_NAMES: &[&str] = &[
     "cancel_local_model_download",
     "delete_local_model",
     "set_share_usage_events",
+    "set_hotkey",
+    "set_hotkey_recording",
     "run_checks",
     "test_connection",
     "build_report",
