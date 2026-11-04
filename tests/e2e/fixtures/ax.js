@@ -18,6 +18,8 @@
 //   tray-menu <app>                  opens the status item's menu and lists its
 //                                    items, one per line, "-" for a separator,
 //                                    "(off) " before a disabled one; closes it
+//   tray-open <app> / tray-close <app>  open the menu and leave it open (for a
+//                                    screenshot) / close it with Escape
 //   tray-click <app> <item>          opens the status item's menu and presses
 //                                    the item whose title starts with <item>
 //   menu-click <app> <menu> <item>   the same in the app's main menu bar
@@ -556,6 +558,19 @@ function run(argv) {
     }
     case "tray-menu":
       return listTray(appEl, pidOf(app));
+    case "tray-open": {
+      const item = trayItem(appEl).item;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        click(statusItemCenter(pidOf(app)));
+        if (openMenuItems(appEl, item, 10).length > 0) return "open";
+        postKey(KEY_ESCAPE, 0);
+        delay(0.5);
+      }
+      return fail("the tray's menu did not open");
+    }
+    case "tray-close":
+      postKey(KEY_ESCAPE, 0);
+      return "closed";
     case "tray-click":
       return clickTray(appEl, pidOf(app), rest[0]);
     case "menu-click":

@@ -44,11 +44,11 @@ ALL_SCENARIOS=(
   e2e_launch_at_login
   e2e_hotkey_shortcuts e2e_no_words_transcript e2e_hotkey_recorder
   e2e_accessibility_revoked
-  e2e_local_model
+  e2e_local_model e2e_tray_menu_screenshots
 )
 # Scenarios that need something the VM may lack (a microphone, a Groq key):
 # they may SKIP. Any other scenario that SKIPs fails the run.
-OPTIONAL_SCENARIOS=(e2e_real_mic e2e_real_groq)
+OPTIONAL_SCENARIOS=(e2e_real_mic e2e_real_groq e2e_tray_menu_screenshots)
 APP_PATH=target/debug/bundle/macos/$APP_NAME.app
 build=1
 reset=1
