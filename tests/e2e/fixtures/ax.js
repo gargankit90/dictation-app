@@ -40,6 +40,7 @@
 //                                    isn't already so, then waits (5 s) until
 //                                    it is; prints "checked" or "unchecked"
 //   wait-text <app> <window> <text> <secs>  until some element shows <text>
+//   wait-no-text <app> <window> <text> <secs>  until no element shows <text>
 //   close <app> <window>             presses the window's close button
 //   alert-press <app> <text> <button> <secs>  until a window of the app shows
 //                                    <text> (untitled alerts, such as
@@ -598,6 +599,15 @@ function run(argv) {
       const window = findWindow(appEl, rest[0]);
       waitFor(Number(rest[2] || 10), JSON.stringify(rest[1]), () => showsText(window, rest[1]));
       return "shown " + rest[1];
+    }
+    case "wait-no-text": {
+      const window = findWindow(appEl, rest[0]);
+      waitFor(
+        Number(rest[2] || 10),
+        "no " + JSON.stringify(rest[1]),
+        () => !showsText(window, rest[1]),
+      );
+      return "gone " + rest[1];
     }
     case "alert-press": {
       let target;
