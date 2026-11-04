@@ -109,11 +109,10 @@ const NAMES: Readonly<Record<string, readonly [english: string, native: string]>
 };
 
 /**
- * The languages Whisper accepts: the 99-language table of the upstream
- * model (openai/whisper, `whisper/tokenizer.py` LANGUAGES, plus `yue` added
- * for large-v3). Groq documents these 99+ languages for both
- * `whisper-large-v3` and `whisper-large-v3-turbo`:
- * https://console.groq.com/docs/model/whisper-large-v3-turbo
+ * The languages every Whisper model accepts: the upstream table
+ * (openai/whisper, `whisper/tokenizer.py` LANGUAGES, without `yue`). Groq
+ * documents 99+ languages for `whisper-large-v3` and
+ * `whisper-large-v3-turbo`: https://console.groq.com/docs/model/whisper-large-v3-turbo
  * OpenAI's `whisper-1` takes the same ISO codes; its docs only list the
  * subset with good quality, but every code in the table is accepted.
  */
@@ -217,11 +216,17 @@ const WHISPER_LANGUAGES: readonly string[] = [
   "ba",
   "jw",
   "su",
-  "yue",
 ];
 
+/**
+ * Cantonese (`yue`) was added with Whisper large-v3. Groq serves large-v3
+ * models and documents it; OpenAI's `whisper-1` is large-v2, and nothing
+ * says it accepts `yue`, so OpenAI is not offered it.
+ */
+const GROQ_LANGUAGES: readonly string[] = [...WHISPER_LANGUAGES, "yue"];
+
 const BY_PROVIDER: Readonly<Record<Provider, readonly string[]>> = {
-  groq: WHISPER_LANGUAGES,
+  groq: GROQ_LANGUAGES,
   openai: WHISPER_LANGUAGES,
 };
 

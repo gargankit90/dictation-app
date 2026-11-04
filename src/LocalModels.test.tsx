@@ -296,6 +296,18 @@ describe("U2: the language picker follows the engine", () => {
     expect(language().value).toBe("Telugu (తెలుగు)");
   });
 
+  it("switching from Groq to OpenAI flags a saved Cantonese as unsupported and keeps it", async () => {
+    backend.settings = { ...backend.settings, language: "yue" };
+    await open();
+    expect(language().value).toBe("Cantonese (粵語)");
+    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+    expect(language().value).toBe("Cantonese, not supported by OpenAI");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Settings saved.");
+    expect(backend.settings.language).toBe("yue");
+    expect(backend.settings.provider).toBe("openai");
+  });
+
   it("flags a code that isn't a Whisper language, without changing it", async () => {
     backend.settings = { ...backend.settings, language: "fil" };
     await open();

@@ -132,7 +132,10 @@ describe("LanguagePicker", () => {
     expect(groq.length).toBeGreaterThanOrEqual(99);
     expect(new Set(groq).size).toBe(groq.length);
     for (const code of ["bn", "te", "yue", "haw", "su"]) expect(groq).toContain(code);
-    expect(cloudLanguages("openai")).toEqual(groq);
+    // OpenAI's whisper-1 is large-v2: no Cantonese, otherwise the same.
+    const openai = cloudLanguages("openai");
+    expect(openai).not.toContain("yue");
+    expect(groq.filter((code) => code !== "yue")).toEqual(openai);
   });
 
   it("finds Hindi by its full native name, a prefix with vowel signs, and either Unicode form", () => {
