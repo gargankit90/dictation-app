@@ -51,6 +51,8 @@ function actionLabel(action: ModelAction): string {
       return "Download";
     case "cancel":
       return "Cancel";
+    case "resume":
+      return "Resume";
     case "retry":
     case "retry-load":
       return "Retry";

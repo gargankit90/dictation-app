@@ -17,7 +17,8 @@ function mb(bytes: number): string {
 export type ChipTone = "plain" | "info" | "attention" | "ready" | "error";
 
 /** What a row's one action (or two) does. */
-export type ModelAction = "download" | "cancel" | "retry" | "use" | "retry-load" | "delete";
+export type ModelAction =
+  "download" | "cancel" | "resume" | "retry" | "use" | "retry-load" | "delete";
 
 export interface ModelRow {
   chip: { text: string; tone: ChipTone };
@@ -73,14 +74,13 @@ export function modelRow(model: LocalModelInfo_Serialize, context: RowContext): 
       if (model.error !== null && !offline(model.error)) {
         return row("Download failed", "error", ["retry"], { canDelete: true });
       }
-      return row(
-        model.error === null
-          ? `Paused at ${mb(done)} of ${megabytes(size)}`
-          : "Paused: no connection",
-        "attention",
-        ["retry"],
-        { canDelete: true },
-      );
+      // Cancel keeps the part; downloading again continues it.
+      if (model.error === null) {
+        return row(`Download paused, ${mb(done)} of ${megabytes(size)}`, "attention", ["resume"], {
+          canDelete: true,
+        });
+      }
+      return row("Paused: no connection", "attention", ["retry"], { canDelete: true });
     case "missing":
       if (model.error !== null) return row("Download failed", "error", ["retry"]);
       return row(megabytes(size), "plain", ["download"]);

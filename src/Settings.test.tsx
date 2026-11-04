@@ -510,6 +510,16 @@ describe("criterion_u6_4 Speech: exactly one Active engine", () => {
     expect(screen.queryByText("! Needs a key")).toBeNull();
   });
 
+  // Tester run 1 (minor): after Cancel the part is kept, and Resume continues it.
+  it("a cancelled download says it is paused and Resume continues it", async () => {
+    backend.models = [model(ENGLISH, { state: "partial", downloaded_bytes: 212_000_000 })];
+    await open("speech");
+    expect(await screen.findByText("Download paused, 212 of 477 MB")).toBeTruthy();
+    click("Resume");
+    expect(await screen.findByText("↓ 212 of 477 MB")).toBeTruthy();
+    expect(backend.named("download_local_model")[0]?.args).toEqual({ id: ENGLISH });
+  });
+
   it("titles are English and Multilingual, with honest captions", async () => {
     await open("speech");
     expect(await screen.findByText("Multilingual")).toBeTruthy();
