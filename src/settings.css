@@ -553,7 +553,7 @@ input.switch::after {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--vc-accent-fg);
+  background: var(--vc-overlay-fg); /* white in both appearances, as the design's knob */
   box-shadow: var(--vc-shadow-card);
   transition: transform var(--vc-dur) var(--vc-ease);
 }

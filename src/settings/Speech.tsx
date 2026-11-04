@@ -9,7 +9,7 @@ import type {
 import { BROKEN, messageOf } from "../keyTest";
 import { PROVIDERS, providerInfo } from "../providers";
 import { validateKey } from "../validation";
-import { megabytes, modelRow } from "./modelRow";
+import { modelRow } from "./modelRow";
 import type { ModelAction } from "./modelRow";
 import { Chip, Group, Row, SaveStatus, useSave } from "./ui";
 
@@ -66,9 +66,9 @@ function without(record: Record<string, string>, key: string): Record<string, st
   return Object.fromEntries(Object.entries(record).filter(([name]) => name !== key));
 }
 
-/** A plain caption for a model row: languages, size, offline. */
+/** A plain caption for a model row: languages, offline (the chip shows the size). */
 function modelCaption(model: LocalModelInfo_Serialize): string {
-  return `${model.languages} · ${megabytes(model.size_bytes ?? 0)} · works offline, nothing is sent`;
+  return `${model.languages} · works offline, nothing is sent`;
 }
 
 /**
