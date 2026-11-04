@@ -25,6 +25,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "set_share_usage_events",
     "set_hotkey",
     "set_hotkey_recording",
+    "set_launch_at_login",
     "run_checks",
     "test_connection",
     "build_report",
