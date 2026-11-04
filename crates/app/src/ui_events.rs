@@ -262,7 +262,8 @@ mod tests {
     use dictation_core::coordinator::Phase;
 
     use super::*;
-    use crate::tray::{HOTKEY_UNAVAILABLE, TrayStatus};
+    use crate::tray::TrayStatus;
+    use dictation_core::diagnostics::ErrorCode;
 
     fn phase(phase: Phase) -> UiEvent {
         UiEvent::StateChanged(phase)
@@ -409,12 +410,12 @@ mod tests {
     }
 
     /// The tray's title after reading everything queued.
-    fn tray_title_after(rx: &mut UiReceiver) -> Option<String> {
+    fn tray_title_after(rx: &mut UiReceiver) -> Option<ErrorCode> {
         let mut tray = TrayStatus::default();
         for event in drain(rx) {
             tray.on_event(&event);
         }
-        tray.view().title.clone()
+        tray.problem()
     }
 
     fn hotkey_failed() -> UiEvent {
@@ -437,8 +438,8 @@ mod tests {
         assert_eq!(rx.dropped_errors(), 1);
         assert_eq!(rx.queued(), UI_ERRORS_QUEUED);
         assert_eq!(
-            tray_title_after(&mut rx).as_deref(),
-            Some(HOTKEY_UNAVAILABLE)
+            tray_title_after(&mut rx),
+            Some(ErrorCode::HotkeyUnregistered)
         );
     }
 
@@ -493,7 +494,7 @@ mod tests {
             if ends_down {
                 tx.send(hotkey_failed());
             }
-            let expected = ends_down.then(|| HOTKEY_UNAVAILABLE.to_owned());
+            let expected = ends_down.then_some(ErrorCode::HotkeyUnregistered);
             assert_eq!(tray_title_after(&mut rx), expected, "ends_down={ends_down}");
         }
     }
