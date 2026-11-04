@@ -28,6 +28,7 @@ use std::time::Duration;
 
 use dictation_ports::{BeforeCursor, CursorReadError};
 
+use crate::insert::Caret;
 use crate::permissions::macos::is_accessibility_trusted;
 use crate::secure_input::is_secure_input_enabled;
 
@@ -103,6 +104,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     fn CFRelease(cf: CfTypeRef);
     fn CFGetTypeID(cf: CfTypeRef) -> usize;
+    fn CFHash(cf: CfTypeRef) -> usize;
     fn CFStringGetTypeID() -> usize;
     fn CFStringCreateWithBytes(
         allocator: CfTypeRef,
@@ -308,6 +310,26 @@ trait FocusedField {
 /// The focused element, over Accessibility.
 struct AxField(Cf);
 
+impl AxField {
+    /// Its `AXSelectedTextRange`: the selection's start and length.
+    fn selection(&self) -> Result<CfRange, CursorReadError> {
+        let value = copy_attribute(&self.0, "AXSelectedTextRange")?;
+        // SAFETY: value is a valid AXValue (checked first).
+        if !value.is_ax_value() || unsafe { AXValueGetType(value.0) } != AX_VALUE_CF_RANGE_TYPE {
+            return Err(CursorReadError::Unavailable);
+        }
+        let mut range = CfRange::default();
+        // SAFETY: the value holds a CFRange (its type, checked above), and
+        // range is a local CFRange to copy it into.
+        let ok =
+            unsafe { AXValueGetValue(value.0, AX_VALUE_CF_RANGE_TYPE, (&raw mut range).cast()) };
+        if ok == 0 || range.location < 0 || range.length < 0 {
+            return Err(CursorReadError::Unavailable);
+        }
+        Ok(range)
+    }
+}
+
 impl FocusedField for AxField {
     fn subrole(&self) -> Result<Option<Vec<u16>>, CursorReadError> {
         let subrole = match copy_attribute_or_code(&self.0, "AXSubrole")? {
@@ -331,20 +353,7 @@ impl FocusedField for AxField {
     }
 
     fn cursor(&self) -> Result<isize, CursorReadError> {
-        let value = copy_attribute(&self.0, "AXSelectedTextRange")?;
-        // SAFETY: value is a valid AXValue (checked first).
-        if !value.is_ax_value() || unsafe { AXValueGetType(value.0) } != AX_VALUE_CF_RANGE_TYPE {
-            return Err(CursorReadError::Unavailable);
-        }
-        let mut range = CfRange::default();
-        // SAFETY: the value holds a CFRange (its type, checked above), and
-        // range is a local CFRange to copy it into.
-        let ok =
-            unsafe { AXValueGetValue(value.0, AX_VALUE_CF_RANGE_TYPE, (&raw mut range).cast()) };
-        if ok == 0 || range.location < 0 {
-            return Err(CursorReadError::Unavailable);
-        }
-        Ok(range.location)
+        self.selection().map(|range| range.location)
     }
 
     fn string_for_range(&self, range: CfRange) -> Result<Vec<u16>, CursorReadError> {
@@ -390,8 +399,9 @@ fn read_field(field: &impl FocusedField) -> Result<BeforeCursor, CursorReadError
         .ok_or(CursorReadError::Unavailable)
 }
 
-/// See the module docs.
-pub(super) fn char_before_cursor() -> Result<BeforeCursor, CursorReadError> {
+/// The focused element, after the same checks as [`char_before_cursor`]
+/// (Secure Input, Accessibility), with a messaging timeout.
+fn focused_field() -> Result<AxField, CursorReadError> {
     if is_secure_input_enabled() {
         return Err(CursorReadError::SecureField);
     }
@@ -407,7 +417,30 @@ pub(super) fn char_before_cursor() -> Result<BeforeCursor, CursorReadError> {
         return Err(CursorReadError::Unavailable);
     }
     set_timeout(&focused);
-    read_field(&AxField(focused))
+    Ok(AxField(focused))
+}
+
+/// The caret for the paste's landing check (`crate::cursor::caret`): the
+/// selection, and the character before it through [`read_field`], so a
+/// password field is never read and at most two units of text are asked
+/// for. `None` if any of it can't be read.
+pub(super) fn caret() -> Option<Caret> {
+    let field = focused_field().ok()?;
+    let last = read_field(&field).ok()?.preceding();
+    let range = field.selection().ok()?;
+    // SAFETY: a valid AXUIElement (focused_field checked its type).
+    let hash = unsafe { CFHash(field.0.0) };
+    Some(Caret {
+        field: u64::try_from(hash).ok()?,
+        location: usize::try_from(range.location).ok()?,
+        length: usize::try_from(range.length).ok()?,
+        last,
+    })
+}
+
+/// See the module docs.
+pub(super) fn char_before_cursor() -> Result<BeforeCursor, CursorReadError> {
+    read_field(&focused_field()?)
 }
 
 #[cfg(test)]

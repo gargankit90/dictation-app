@@ -5,9 +5,9 @@
 # the key is held once with real key events. The mock's text must land in
 # TextEdit every time. Each try logs one OBS line: landed or not, the
 # clipboard afterwards (the user's must be back), the phases, and how long
-# after the chord TextEdit read the clipboard (the app's `first_read_ms`; the
+# after the chord the paste showed in TextEdit (the app's `landed_ms`; the
 # bug: a target that read later than the old fixed 300 ms pasted the user's
-# old clipboard instead).
+# old clipboard instead). The user's clipboard must be back within 5 s.
 #
 # The hotkey is set in the settings file before each launch (the app reads it
 # at startup); the key cleanup removes the file at the end. Uses helpers
@@ -47,9 +47,16 @@ fp_try() {
   wait_for_idle_count 1 15 || log "  try $n ($key): the dictation didn't get back to Idle"
   sleep 0.5
   text=$(textedit_trimmed)
-  clip=$(clipboard)
+  # A paste the app couldn't confirm (TextEdit too busy to answer for its
+  # caret) leaves the transcript on the clipboard and gives the user's back
+  # UNCONFIRMED_RESTORE (3 s) after the chord: wait up to 5 s for it.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    clip=$(clipboard)
+    [ "$clip" = "$FP_SENTINEL" ] && break
+    sleep 0.5
+  done
   [ "$text" = "$MOCK_TEXT" ] && [ "$clip" = "$FP_SENTINEL" ] && landed=yes
-  log "OBS: first-paste key=$key try=$n landed=$landed textedit=[$text] clipboard=[$clip] frontmost=[$(frontmost_app)] phases=[$(logged_phases | paste -sd ' ' -)] read=[$(app_log | grep -Eo 'first_read_ms=[0-9]+|no app read the paste' | tail -1)]"
+  log "OBS: first-paste key=$key try=$n landed=$landed textedit=[$text] clipboard=[$clip] frontmost=[$(frontmost_app)] phases=[$(logged_phases | paste -sd ' ' -)] read=[$(app_log | grep -Eo "landed_ms=[0-9]+|wasn't seen landing|no readable caret" | tail -1)]"
   if [ "$landed" = no ]; then
     app_log | grep -E 'WARN|ERROR|paste|clipboard' | sed 's/^/    /' >&2 || true
     collect_log "e2e_first_paste_after_launch-$key-$n"

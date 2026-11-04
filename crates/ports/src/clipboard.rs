@@ -201,17 +201,13 @@ pub trait Clipboard: Send + Sync {
         self.restore_if_unchanged(session, previous.text())
     }
 
-    /// How many times an app has read the text of the write that returned
-    /// `session` so far, if this clipboard can tell: a read receipt, so the
-    /// paste can wait until the target app has really read the transcript
-    /// before the user's clipboard goes back (#239). `None` if it can't
-    /// tell (the default), or if the clipboard no longer holds that write.
+    /// Whether the clipboard still holds the write that returned `session`
+    /// (nobody copied since). A paste that couldn't be confirmed (#239)
+    /// leaves the transcript on the clipboard and keeps the user's saved
+    /// contents pending; this says whether they are still owed.
     ///
     /// Threading: may block briefly; call from a blocking task.
-    fn text_reads(&self, session: &SessionMarker) -> Option<u64> {
-        let _ = session;
-        None
-    }
+    fn holds_dictation(&self, session: &SessionMarker) -> bool;
 }
 
 #[cfg(test)]

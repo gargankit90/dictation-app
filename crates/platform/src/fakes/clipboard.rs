@@ -105,6 +105,10 @@ impl Clipboard for MemClipboard {
         })
     }
 
+    fn holds_dictation(&self, session: &SessionMarker) -> bool {
+        lock(&self.state).session.as_ref() == Some(session)
+    }
+
     fn restore_if_unchanged(
         &self,
         session: &SessionMarker,
