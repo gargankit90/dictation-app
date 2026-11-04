@@ -143,6 +143,8 @@ pub fn apply(login: &dyn LaunchAtLogin, settings: &mut Settings) -> Result<(), L
 struct Pending {
     /// The latest choice not yet applied.
     wanted: Option<bool>,
+    /// The choice the OS is being asked for right now.
+    applying: Option<bool>,
     /// Whether the worker thread is running.
     running: bool,
     /// Everyone waiting for the final outcome.
@@ -214,7 +216,7 @@ impl LoginSync {
     #[must_use]
     pub fn pending(&self) -> Option<bool> {
         let pending = lock(&self.pending);
-        pending.running.then_some(pending.wanted).flatten()
+        pending.wanted.or(pending.applying)
     }
 }
 
@@ -236,8 +238,10 @@ fn work(
                 // Decided under the lock a request takes, so a request can't
                 // slip in between "nothing left" and "not running".
                 pending.running = false;
+                pending.applying = None;
                 return;
             };
+            pending.applying = Some(wanted);
             wanted
         };
         let started = std::time::Instant::now();
@@ -256,6 +260,7 @@ fn work(
         // Still holding the lock: a newer request can't overtake the store.
         on_done(&outcome);
         pending.running = false;
+        pending.applying = None;
         for waiter in pending.waiters.drain(..) {
             let _ = waiter.send(outcome.clone());
         }

@@ -445,7 +445,10 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     .context("could not start the pipeline")?;
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
     app.manage(commands::AppConfig(Arc::clone(&config)));
-    app.manage(commands::LoginItem(Arc::new(SystemLaunchAtLogin::new())));
+    app.manage(commands::LoginItem::new(
+        Arc::new(SystemLaunchAtLogin::new()),
+        Arc::clone(&config),
+    ));
     app.manage(commands::ActiveHotkey(hotkey_control.clone()));
     app.manage(commands::ConfigDir(config_dir.clone()));
     app.manage(commands::AppShell(Arc::new(TauriShell(
