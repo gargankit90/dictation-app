@@ -132,6 +132,13 @@ export const commands = {
 	 *  asking clears it.
 	 */
 	takeTroubleshootRequest: () => typedError<boolean, string>(__TAURI_INVOKE("take_troubleshoot_request")),
+	/**
+	 *  The newest input level, in dBFS, for the overlay's meter; silence when
+	 *  nothing records. Only the overlay window may call it
+	 *  (`capabilities/overlay.json`), and it returns a number only. Never
+	 *  blocks: one atomic read.
+	 */
+	getOverlayLevel: () => __TAURI_INVOKE<number | null>("get_overlay_level"),
 };
 
 /* Types */
