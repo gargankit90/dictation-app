@@ -731,6 +731,16 @@ where
         self.jobs.abort_all();
         self.hotkey.stop();
         self.audio.shut_down().await;
+        // The user's clipboard may still be owed from the last paste (it
+        // goes back a moment after the chord, on a timer the exit would
+        // kill): finish it before the app exits (#241).
+        let inserter = Arc::clone(&self.inserter);
+        if task::spawn_blocking(move || inserter.finish())
+            .await
+            .is_err()
+        {
+            tracing::warn!("finishing the clipboard restore failed");
+        }
     }
 
     /// Feeds a key, then a Tick that has come due: keys alone can't hold off
@@ -1094,6 +1104,29 @@ mod tests {
             tokio::time::interval(Duration::from_millis(250)),
         );
         (runner, shutdown)
+    }
+
+    /// #241 round 3: a Quit (or a relaunch) right after a dictation must
+    /// not exit before the user's clipboard is back; the pipeline's
+    /// shutdown has the inserter finish its pending restore.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shutdown_has_the_inserter_finish_its_clipboard_work() {
+        let inserter = FakeInserter::new();
+        let (runner, shutdown) = runner(&inserter);
+        let (_keys_tx, keys_rx) = mpsc::channel(KEYS_QUEUED);
+        let keys = Keys {
+            rx: keys_rx,
+            overflow: Arc::new(Overflow::default()),
+        };
+        let (_failures_tx, failures) = mpsc::channel(1);
+        let task = tokio::spawn(runner.run(keys, failures));
+        assert_eq!(inserter.finished(), 0);
+        shutdown.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(inserter.finished(), 1);
     }
 
     fn key(runner: &mut TestRunner, key: HotkeyEvent, at_ms: u64) {

@@ -37,4 +37,14 @@ pub trait TextInserter: Send + Sync {
     /// Threading: blocks for a few hundred milliseconds; call from a
     /// blocking task.
     fn insert(&self, text: &str) -> Result<(), InsertError>;
+
+    /// Finishes clipboard work still owed from earlier inserts before the
+    /// app exits (#241: the user's clipboard goes back a short delay after
+    /// a paste, on a timer the exit would otherwise kill), then refuses
+    /// further inserts. Called once, when the pipeline shuts down. The
+    /// default has nothing to finish.
+    ///
+    /// Threading: may block up to the implementation's restore delay; call
+    /// from a blocking task.
+    fn finish(&self) {}
 }
