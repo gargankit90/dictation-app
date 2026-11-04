@@ -286,6 +286,7 @@ function SpeechForm({
         <input
           type="radio"
           name="ob-engine"
+          aria-label="Use my own Groq or OpenAI key"
           checked={choice === "key"}
           onChange={() => {
             setPicked("key");
