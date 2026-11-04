@@ -19,7 +19,7 @@ e2e_quit_right_after_paste() {
   expect "the app starts and logs ready" wait_for_log 'INFO .*ready'
   # The quitter: from Terminal (Accessibility is Terminal's), in the
   # background, so the dictation can go on.
-  VM_TERMINAL_TIMEOUT=60 vm_terminal "for i in \$(seq 1 1000); do cat $(q "$VM_LOG_DIR")/$APP_NAME.log* 2>/dev/null | grep -q phase=Inserting && break; sleep 0.02; done; osascript -l JavaScript $(q "$VM_AX") tray-click $(q "$APP_NAME") Quit" \
+  VM_TERMINAL_TIMEOUT=60 vm_terminal "for i in \$(seq 1 1000); do cat $(q "$VM_LOG_DIR")/$LOG_PREFIX.log* 2>/dev/null | grep -q phase=Inserting && break; sleep 0.02; done; osascript -l JavaScript $(q "$VM_AX") tray-click $(q "$APP_NAME") Quit" \
     >"$OUT_DIR/e2e_quit_right_after_paste.quitter.txt" 2>&1 &
   quitter=$!
   sleep 2

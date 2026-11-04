@@ -8,6 +8,13 @@
 
 textedit_has_phrase() { textedit_text | grep -qi "dictation test"; }
 
+# Waits (up to 25 min) for the model to show as downloaded. The Terminal job
+# that runs the wait is killed after VM_TERMINAL_TIMEOUT (30 s by default),
+# so it must outlast the 1500 s wait inside it.
+download_wait() {
+  VM_TERMINAL_TIMEOUT=1560 ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" Downloaded 1500
+}
+
 e2e_local_model() {
   local t0 t1 ms
   fresh_app_state
@@ -21,7 +28,7 @@ e2e_local_model() {
   expect "the models are listed" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Parakeet Unified 0.6B" 15
   expect "press Download (first model)" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Download
   expect "progress is shown" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Downloading" 30
-  expect "the model finishes downloading" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Downloaded" 1500
+  expect "the model finishes downloading" download_wait
   expect "press Save" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Save
   expect "Settings saved." ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 20
   expect "closing hides Settings" close_settings
