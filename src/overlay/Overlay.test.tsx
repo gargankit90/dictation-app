@@ -43,7 +43,8 @@ describe("criterion_m5_1_1 OverlayContent", () => {
     // Even if a payload carried a code, parseView drops it and nothing renders it.
     const view = parseView({ state: "error", message: MESSAGE, code: "mic_denied" });
     render(<OverlayContent view={view} />);
-    expect(screen.getByRole("alert").textContent).toBe(MESSAGE);
+    expect(screen.getByRole("alert").textContent).toBe(`!${MESSAGE}`);
+    expect(screen.queryByText("mic_denied")).toBeNull();
   });
 
   it("shows an error with its message", () => {

@@ -1040,7 +1040,7 @@ describe("launch at login", () => {
     fireEvent.click(box());
     backend.failing.set(
       "save_settings",
-      "Launch at login needs your approval: open System Settings, General, Login Items, and allow dictation-app.",
+      "Launch at login needs your approval: open System Settings, General, Login Items, and allow Vocet.",
     );
     click("Save");
     expect((await screen.findByRole("alert")).textContent).toContain("needs your approval");

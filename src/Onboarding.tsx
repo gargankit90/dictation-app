@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "./bindings";
 import type {
   AppPermission,
+  DictationProgressView,
+  DictationStage,
   OnboardingStatus,
   PermissionState,
   Provider,
@@ -26,6 +28,22 @@ const KEY_PAGES: Record<Provider, string> = {
   groq: "console.groq.com/keys",
   openai: "platform.openai.com/api-keys",
 };
+
+/** How often the Try it step asks the app what the last dictation got through. */
+export const PROGRESS_POLL_MS = 400;
+
+const STAGE_NAMES: Record<DictationStage, string> = {
+  recorded: "recorded",
+  transcribed: "transcribed",
+  pasted: "pasted",
+};
+
+/** "recorded, transcribed and pasted": the stages the app reported, in order. */
+export function stagesText(stages: readonly DictationStage[]): string {
+  const names = stages.map((stage) => STAGE_NAMES[stage]);
+  if (names.length <= 1) return names.join("");
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1] ?? ""}`;
+}
 
 /** The hotkey as a person would name it. */
 export function hotkeyName(hotkey: string): string {
@@ -87,6 +105,13 @@ export function Onboarding({ onFinished }: Props) {
   // The test dictation lands here.
   const [tryText, setTryText] = useState("");
   const tryField = useRef<HTMLTextAreaElement>(null);
+  // What the app says the last dictation got through, and what it said when
+  // this step opened: only a dictation finished after that counts (U1). The
+  // practice box's text never does.
+  const [progress, setProgress] = useState<DictationProgressView | null>(null);
+  const [baseline, setBaseline] = useState<DictationProgressView | null>(null);
+  // "Skip for now" was pressed: Finish then says the test was skipped.
+  const [skipped, setSkipped] = useState(false);
   // What the permission of the step on screen was when last seen, so the
   // step moves on only when it turns granted here, not when the user comes
   // back to a step that was already done.
@@ -222,6 +247,38 @@ export function Onboarding({ onFinished }: Props) {
   useEffect(() => {
     if (step === "try") tryField.current?.focus();
   }, [step]);
+
+  // Try it asks the app what the last dictation got through. The first
+  // answer is the baseline; success is a completed dictation after it.
+  useEffect(() => {
+    if (step !== "try") return;
+    const state = { cancelled: false };
+    const poll = async () => {
+      try {
+        const result = await commands.dictationProgress();
+        if (state.cancelled || result.status !== "ok") return;
+        setProgress(result.data);
+        setBaseline((first) => first ?? result.data);
+      } catch {
+        // The next poll tries again; nothing shows success meanwhile.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), PROGRESS_POLL_MS);
+    return () => {
+      state.cancelled = true;
+      window.clearInterval(timer);
+      // Leaving the step forgets the baseline; coming back takes a new one.
+      setProgress(null);
+      setBaseline(null);
+    };
+  }, [step]);
+
+  // Derived from the app's reports, never from the practice box.
+  const sinceOpen = progress !== null && baseline !== null;
+  const dictated = sinceOpen && progress.completed > baseline.completed;
+  const tryStarted = sinceOpen && progress.started > baseline.started;
+  const tryError = sinceOpen && progress.errors > baseline.errors ? progress.error : null;
 
   async function ask(which: AppPermission) {
     setBusy(true);
@@ -385,7 +442,7 @@ export function Onboarding({ onFinished }: Props) {
       {status.step === "microphone" && (
         <section className="field">
           <h2>Allow the microphone</h2>
-          <p>dictation-app records only while you hold the hotkey.</p>
+          <p>Vocet records only while you hold the hotkey.</p>
           {status.microphone === "granted" ? (
             <p role="status" className="notice ok">
               The microphone is allowed.
@@ -393,8 +450,8 @@ export function Onboarding({ onFinished }: Props) {
           ) : status.microphone === "denied" ? (
             <>
               <p className="hint">
-                The microphone is turned off for dictation-app. Turn it on in System Settings,
-                Privacy &amp; Security, Microphone. This step moves on by itself once it&apos;s on.
+                The microphone is turned off for Vocet. Turn it on in System Settings, Privacy &amp;
+                Security, Microphone. This step moves on by itself once it&apos;s on.
               </p>
               <div className="row">
                 <button type="button" disabled={busy} onClick={() => void ask("microphone")}>
@@ -431,8 +488,8 @@ export function Onboarding({ onFinished }: Props) {
           ) : (
             <>
               <p className="hint">
-                In System Settings, turn on dictation-app under Privacy &amp; Security,
-                Accessibility. This step moves on by itself once it&apos;s on.
+                In System Settings, turn on Vocet under Privacy &amp; Security, Accessibility. This
+                step moves on by itself once it&apos;s on.
               </p>
               <div className="row">
                 <button
@@ -447,8 +504,8 @@ export function Onboarding({ onFinished }: Props) {
               {askedAccessibility && (
                 <>
                   <p className="hint">
-                    Relaunch to finish if you turned it on and this step doesn&apos;t move on.
-                    dictation-app opens again here.
+                    Relaunch to finish if you turned it on and this step doesn&apos;t move on. Vocet
+                    opens again here.
                   </p>
                   <div className="row">
                     <button type="button" disabled={busy} onClick={() => void relaunch()}>
@@ -586,13 +643,27 @@ export function Onboarding({ onFinished }: Props) {
               setTryText(event.target.value);
             }}
           />
-          {tryText.trim() === "" ? (
-            <p className="hint">
-              Nothing yet? If something went wrong, the menu bar icon says what.
+          {dictated ? (
+            <p role="status" className="notice ok">
+              It works: Vocet {stagesText(progress.stages)} your dictation. It pastes wherever your
+              cursor is.
+            </p>
+          ) : tryError !== null ? (
+            <p role="alert" className="notice error">
+              {tryError}
+            </p>
+          ) : skipped ? (
+            <p role="status" className="hint">
+              Test skipped. Vocet is set up, but nobody has checked that dictation works yet.
+            </p>
+          ) : tryStarted ? (
+            <p role="status" className="hint">
+              So far Vocet {stagesText(progress.stages)}. Waiting for the rest…
             </p>
           ) : (
-            <p role="status" className="notice ok">
-              It works. Dictation pastes wherever your cursor is.
+            <p className="hint">
+              Nothing yet. This confirms only after Vocet records, transcribes and pastes your
+              dictation.
             </p>
           )}
         </section>
@@ -638,9 +709,28 @@ export function Onboarding({ onFinished }: Props) {
             Continue
           </button>
         ) : (
-          <button type="button" className="primary" disabled={busy} onClick={() => void finish()}>
-            Done
-          </button>
+          <>
+            {!dictated && (
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy || skipped}
+                onClick={() => {
+                  setSkipped(true);
+                }}
+              >
+                Skip for now
+              </button>
+            )}
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || !(dictated || skipped)}
+              onClick={() => void finish()}
+            >
+              {!dictated && skipped ? "Finish (test skipped)" : "Finish"}
+            </button>
+          </>
         )}
       </div>
     </main>

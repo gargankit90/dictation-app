@@ -32,6 +32,12 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
   const load = useCallback(() => {
     setRound((current) => current + 1);
   }, []);
+  // The model on this Mac: there is no connection to test (U1), so the
+  // engine row's readiness line stands in for the button.
+  const localModel =
+    checks.state === "ready"
+      ? (checks.checks.find((check) => check.id === "engine")?.local_model ?? null)
+      : null;
 
   useEffect(() => {
     const state = { cancelled: false };
@@ -215,20 +221,28 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
         <button type="button" onClick={load}>
           Check again
         </button>
-        <button
-          type="button"
-          disabled={testing}
-          onClick={() => {
-            void testConnection();
-          }}
-        >
-          {testing ? "Testing…" : "Test connection"}
-        </button>
+        {checks.state !== "loading" && localModel === null ? (
+          <button
+            type="button"
+            disabled={testing}
+            onClick={() => {
+              void testConnection();
+            }}
+          >
+            {testing ? "Testing…" : "Test connection"}
+          </button>
+        ) : null}
       </div>
-      <p className="hint">
-        Test connection sends a short silent clip to your provider with your saved key, only when
-        you press it. It does nothing for the model on this Mac.
-      </p>
+      {localModel !== null ? (
+        <p className="hint" data-testid="local-readiness">
+          Model on this Mac. {localModel}
+        </p>
+      ) : (
+        <p className="hint">
+          Test connection sends a short silent clip to your provider with your saved key, only when
+          you press it.
+        </p>
+      )}
       {connection !== null ? (
         <p role="status" className={`notice ${connection.kind}`}>
           {connection.text}

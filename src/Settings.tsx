@@ -585,8 +585,8 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
               Launch at login
             </label>
             <p id="launch-at-login-hint" className="hint">
-              Starts dictation-app in the menu bar when you log in. Takes effect when you save. You
-              can also change it in System Settings, General, Login Items.
+              Starts Vocet in the menu bar when you log in. Takes effect when you save. You can also
+              change it in System Settings, General, Login Items.
             </p>
           </div>
 

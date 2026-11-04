@@ -8,7 +8,7 @@ import type { Check } from "./bindings";
 import { Troubleshoot } from "./Troubleshoot";
 
 const REPORT = [
-  "dictation-app diagnostics report",
+  "Vocet diagnostics report",
   "app_version: 0.1.0",
   "microphone: denied",
   "recent_errors:",
@@ -17,7 +17,15 @@ const REPORT = [
 ].join("\n");
 
 function check(partial: Partial<Check> & Pick<Check, "id" | "label">): Check {
-  return { ok: true, detail: "Allowed.", code: null, fix: null, fix_label: null, ...partial };
+  return {
+    ok: true,
+    detail: "Allowed.",
+    code: null,
+    fix: null,
+    fix_label: null,
+    local_model: null,
+    ...partial,
+  };
 }
 
 const HEALTHY: Check[] = [
@@ -33,7 +41,8 @@ const MIC_DENIED: Check[] = [
     id: "microphone",
     label: "Microphone",
     ok: false,
-    detail: "Microphone is off for dictation-app. Allow it in Privacy & Security.",
+    detail:
+      "Vocet can't use the microphone. Allow it in System Settings → Privacy & Security → Microphone.",
     code: "mic_denied",
     fix: "open_microphone_settings",
     fix_label: "Open Microphone Settings",
@@ -57,7 +66,7 @@ function backend(command: string, payload: unknown): unknown {
     case "build_report":
       return REPORT;
     case "save_report":
-      return "dictation-app-report.txt";
+      return "vocet-report.txt";
     case "request_permission":
       return {
         view: "settings",
@@ -107,7 +116,7 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
     view();
     const list = await screen.findByRole("list", { name: "Checks" });
     expect(within(list).getAllByRole("img", { name: "Problem" })).toHaveLength(1);
-    expect(within(list).getByText(/Microphone is off for dictation-app/).textContent).toContain(
+    expect(within(list).getByText(/Vocet can't use the microphone/).textContent).toContain(
       "(mic_denied)",
     );
     fireEvent.click(within(list).getByRole("button", { name: "Open Microphone Settings" }));
@@ -179,6 +188,32 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
     expect(calls.filter((call) => call === "test_connection")).toHaveLength(1);
   });
 
+  it("U1 criterion 8: hides Test connection for the local model and shows its readiness", async () => {
+    checks = [
+      ...HEALTHY.slice(0, 3),
+      check({
+        id: "engine",
+        label: "Transcription engine",
+        detail: "Ready.",
+        local_model: "Ready: the model is downloaded and loaded.",
+      }),
+      HEALTHY[4],
+    ];
+    view();
+    await screen.findByRole("list", { name: "Checks" });
+    expect(screen.queryByRole("button", { name: "Test connection" })).toBeNull();
+    expect(screen.getByTestId("local-readiness").textContent).toContain(
+      "Ready: the model is downloaded and loaded.",
+    );
+  });
+
+  it("U1 criterion 8: still offers Test connection for a cloud provider", async () => {
+    view();
+    await screen.findByRole("list", { name: "Checks" });
+    expect(screen.getByRole("button", { name: "Test connection" })).toBeTruthy();
+    expect(screen.queryByTestId("local-readiness")).toBeNull();
+  });
+
   it("says when the checks can't run", async () => {
     mockIPC((command) => {
       if (command === "run_checks") throw new Error("the check task crashed");
@@ -213,7 +248,7 @@ describe("criterion_e1_3 Report a problem", () => {
     expect(calls).not.toContain("save_report");
 
     fireEvent.click(screen.getByRole("button", { name: "Save report…" }));
-    expect(await screen.findByText("Saved as dictation-app-report.txt.")).toBeTruthy();
+    expect(await screen.findByText("Saved as vocet-report.txt.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Open a GitHub issue" }));
     await waitFor(() => {

@@ -171,6 +171,13 @@ export type Check_Deserialize = {
 	fix?: FixAction | null,
 	/**  That button's label. */
 	fix_label?: string | null,
+	/**
+	 *  Only on the engine row when the engine is the model on this Mac: a
+	 *  short readiness line (downloaded, loading, ready, error). Troubleshoot
+	 *  shows it instead of "Test connection", which has nothing to test then
+	 *  (U1).
+	 */
+	local_model?: string | null,
 };
 
 /**  One row of Troubleshoot. */
@@ -189,6 +196,13 @@ export type Check_Serialize = {
 	fix: FixAction | null,
 	/**  That button's label. */
 	fix_label: string | null,
+	/**
+	 *  Only on the engine row when the engine is the model on this Mac: a
+	 *  short readiness line (downloaded, loading, ready, error). Troubleshoot
+	 *  shows it instead of "Test connection", which has nothing to test then
+	 *  (U1).
+	 */
+	local_model: string | null,
 };
 
 /**  What "Test connection" found. */

@@ -141,6 +141,11 @@ pub struct Check {
     pub fix: Option<FixAction>,
     /// That button's label.
     pub fix_label: Option<String>,
+    /// Only on the engine row when the engine is the model on this Mac: a
+    /// short readiness line (downloaded, loading, ready, error). Troubleshoot
+    /// shows it instead of "Test connection", which has nothing to test then
+    /// (U1).
+    pub local_model: Option<String>,
 }
 
 /// Whether the provider's key can be read.
@@ -228,6 +233,21 @@ pub fn local_state(view: EngineView, download: ModelState) -> LocalState {
     }
 }
 
+impl LocalState {
+    /// One short line for Troubleshoot's local readiness (U1).
+    #[must_use]
+    pub const fn readiness(self) -> &'static str {
+        match self {
+            Self::Loaded => "Ready: the model is downloaded and loaded.",
+            Self::Loading => "Loading: the model is downloaded and starting up.",
+            Self::NotLoaded => "Downloaded: the model hasn't been loaded yet.",
+            Self::LoadFailed => "Error: the model is downloaded but couldn't be loaded.",
+            Self::Downloading => "Downloading: the model isn't ready yet.",
+            Self::Missing => "Not downloaded: get the model in Settings.",
+        }
+    }
+}
+
 impl EngineState {
     /// The code of what is missing, or `None` if the engine is ready.
     fn problem(&self) -> Option<ErrorCode> {
@@ -271,6 +291,7 @@ fn failing(id: CheckId, label: &str, code: ErrorCode) -> Check {
         code: Some(code),
         fix: Some(info.action),
         fix_label: Some(info.action_label.to_owned()),
+        local_model: None,
     }
 }
 
@@ -283,6 +304,7 @@ fn passing(id: CheckId, label: &str, detail: &str) -> Check {
         code: None,
         fix: None,
         fix_label: None,
+        local_model: None,
     }
 }
 
@@ -296,10 +318,13 @@ pub fn checks(input: &CheckInput) -> Vec<Check> {
             failing(id, label, code)
         }
     };
-    let engine = match input.engine.problem() {
+    let mut engine = match input.engine.problem() {
         None => passing(CheckId::Engine, "Transcription engine", "Ready."),
         Some(code) => failing(CheckId::Engine, "Transcription engine", code),
     };
+    if let EngineState::Local(state) = input.engine {
+        engine.local_model = Some(state.readiness().to_owned());
+    }
     let hotkey = if input.hotkey_up && input.accessibility == PermissionStatus::Granted {
         passing(CheckId::Hotkey, "Hotkey", "Registered.")
     } else {
@@ -326,6 +351,7 @@ pub fn checks(input: &CheckInput) -> Vec<Check> {
                 code: Some(error.code),
                 fix: Some(info.action),
                 fix_label: Some(info.action_label.to_owned()),
+                local_model: None,
             }
         }
     };
@@ -812,6 +838,32 @@ mod tests {
         let mut data = input();
         data.engine = EngineState::Local(LocalState::Loaded);
         assert!(by_id(&checks(&data), CheckId::Engine).ok);
+    }
+
+    /// U1 criterion 8: only the on-device engine carries a readiness line
+    /// (Troubleshoot hides "Test connection" for it); cloud engines don't.
+    #[test]
+    fn only_the_local_engine_has_a_readiness_line() {
+        let mut data = input();
+        data.engine = EngineState::Cloud(KeyState::Saved);
+        assert_eq!(by_id(&checks(&data), CheckId::Engine).local_model, None);
+        for state in [
+            LocalState::Loaded,
+            LocalState::Loading,
+            LocalState::NotLoaded,
+            LocalState::LoadFailed,
+            LocalState::Downloading,
+            LocalState::Missing,
+        ] {
+            data.engine = EngineState::Local(state);
+            let rows = checks(&data);
+            let line = by_id(&rows, CheckId::Engine).local_model.clone();
+            assert_eq!(line.as_deref(), Some(state.readiness()), "{state:?}");
+            assert!(
+                by_id(&rows, CheckId::Hotkey).local_model.is_none(),
+                "{state:?}"
+            );
+        }
     }
 
     /// E1 round 1: a model file that is on disk but will not load is not

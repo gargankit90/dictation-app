@@ -259,6 +259,14 @@ impl std_fmt::Display for PanicMessage<'_> {
 
 #[cfg(test)]
 mod tests {
+    /// U1 criterion 2: the app is called Vocet, but its log files keep the
+    /// prefix, so `cat dictation-app.log*` and the rotation of old files
+    /// carry on across the update.
+    #[test]
+    fn the_log_file_prefix_is_unchanged_by_the_rename() {
+        assert_eq!(super::LOG_FILE_PREFIX, "dictation-app.log");
+    }
+
     use std::io;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
