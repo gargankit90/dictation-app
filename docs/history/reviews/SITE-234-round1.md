@@ -1,4 +1,4 @@
-Reviewer: CHANGES REQUESTED
+Reviewer: APPROVED
 
 # SITE-234 review, round 1
 
@@ -6,7 +6,7 @@ PR: #234 at 3ba9fa1d2541c9c009dd90013038447d381b1a4b.
 App reference: origin/main b7ae67e6ad2dc807b38b3ce12830a4a26834e6a7.
 Reviewed #234 alone, #235's diff, and their combined result. No merge performed.
 
-## Findings
+## Original snapshot findings
 
 | # | Severity | Location | Finding and suggested fix |
 | - | - | - | - |
@@ -15,7 +15,7 @@ Reviewed #234 alone, #235's diff, and their combined result. No merge performed.
 | 3 | major | site/index.html:1654; site/og.png | Offline operation requires a downloaded local model. #235 qualifies the HTML by contrasting local and cloud operation, but the 1200×630 social image still says “Works offline” without qualification. Update the image to say offline with a local model. |
 | 4 | major | site/index.html:2125 | “The model downloads meanwhile” promises automatic downloading during permission setup. origin/main src/Onboarding.tsx:470 instead tells local users to download in Settings; default transcription is cloud and setup requests an API key. Replace this with the actual engine/key/model preparation step; do not advertise the planned onboarding as shipped. This remains in #235 at line 2130. |
 
-Conditional approval is insufficient: #235 addresses findings 1 and 2 and the HTML part of 3, but leaves the social image and finding 4. Fix those before approval of the stack.
+Final disposition: APPROVED ONLY ON CONDITION that #235 (including fix 78208760f60c337113e01fa7c9c9440e2635a13c) merges immediately after #234, before deploying the stack. That fix removes the automatic-download promise, accurately describes key/model preparation, and replaces the unqualified offline text in the social image. I inspected the updated image and re-ran the 390 px/all-tabs and initial axe checks successfully. The four original majors above are resolved by that required follow-up; zero open findings in the combined result, zero minors. Do not deploy #234 alone.
 
 ## Fact check and external requests
 
