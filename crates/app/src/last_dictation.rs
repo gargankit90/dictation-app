@@ -72,6 +72,12 @@ impl<I: TextInserter> TextInserter for Remembering<I> {
         self.last.set(text);
         Ok(())
     }
+
+    /// Forwarded: the wrapped inserter's quit-time clipboard restore must
+    /// run, not the trait's no-op default (#241).
+    fn finish(&self) {
+        self.inner.finish();
+    }
 }
 
 #[cfg(test)]
@@ -110,6 +116,14 @@ mod tests {
         let inserter = Remembering::new(failing, none.clone());
         assert!(inserter.insert("secret").is_err());
         assert!(!none.is_held());
+    }
+
+    #[test]
+    fn finish_reaches_the_wrapped_inserter() {
+        let fake = FakeInserter::new();
+        let inserter = Remembering::new(fake.clone(), LastDictation::default());
+        inserter.finish();
+        assert_eq!(fake.finished(), 1);
     }
 
     #[test]
