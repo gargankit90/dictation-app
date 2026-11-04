@@ -1639,8 +1639,9 @@
         <a
           class="nav-cta"
           data-download
-          href="https://github.com/gargankit90/dictation-app/releases/latest"
-          >Download</a
+          data-ready-label="Download"
+          href="https://github.com/gargankit90/dictation-app"
+          >Coming soon</a
         >
       </nav>
     </header>
@@ -1651,15 +1652,17 @@
           <h1>Talk instead of type in every app you use.</h1>
           <p class="lede">
             Hold one key, say what you mean, let go — the words are pasted where your cursor is.
-            Runs on your Mac and works offline. Free and open source.
+            Runs on your Mac, even offline, or with your own Groq or OpenAI key. Free and open
+            source.
           </p>
           <div class="ctas">
             <a
               id="download"
               class="btn btn-primary"
               data-download
-              href="https://github.com/gargankit90/dictation-app/releases/latest"
-              >Download for Mac</a
+              data-ready-label="Download for Mac"
+              href="https://github.com/gargankit90/dictation-app"
+              >Alpha coming soon</a
             >
             <a class="btn btn-secondary" href="https://github.com/gargankit90/dictation-app">
               <svg
@@ -1678,8 +1681,10 @@
             </a>
           </div>
           <p class="fine">
-            <span id="release-version">Alpha</span> · Apple Silicon · macOS 13 or later ·
-            <a href="https://github.com/gargankit90/dictation-app/releases">Release notes</a> ·
+            <span id="release-version">Alpha in testing</span> · Apple Silicon · macOS 13 or later ·
+            <span id="release-notes" hidden
+              ><a href="https://github.com/gargankit90/dictation-app/releases">Release notes</a> ·
+            </span>
             Windows is on the roadmap
           </p>
           <p class="fine phone-only">
@@ -2116,22 +2121,28 @@
       </section>
 
       <section id="setup" class="wrap section">
-        <h2 class="h2">Setup ends with your first real dictation</h2>
+        <h2 class="h2">Setup ends with a test dictation</h2>
         <ol class="setup-steps">
           <li>
             <span class="num">1</span><strong>Allow two permissions</strong
             ><span
-              >Microphone, and Accessibility to paste at your cursor — it doesn’t read your screen.
-              The model downloads meanwhile.</span
+              >Microphone, and Accessibility to paste at your cursor — it doesn’t read your
+              screen.</span
             >
           </li>
           <li>
-            <span class="num">2</span><strong>Pick your dictation shortcut</strong
-            ><span>Right Option (⌥) by default, or record a different key.</span>
+            <span class="num">2</span><strong>Choose how speech becomes text</strong
+            ><span
+              >Paste a Groq or OpenAI key, or use the model on your Mac (download it once in
+              Settings).</span
+            >
           </li>
           <li>
-            <span class="num">3</span><strong>Say a sentence</strong
-            ><span>It’s recorded, transcribed and pasted — so you know it all works.</span>
+            <span class="num">3</span><strong>Try your key</strong
+            ><span
+              >Right Option (⌥) by default, or record a different one. Hold it, say a sentence, and
+              let go.</span
+            >
           </li>
         </ol>
       </section>
@@ -2143,10 +2154,14 @@
             <div>
               <h3>Usage and error events are on by default</h3>
               <p>
-                Anonymous events go to PostHog and error reports to Sentry, so we can see where
-                setup and dictation break. Events include which app you dictated into (for example,
-                Slack), so we know where pasting needs work. Turn them off on the first setup
-                screen, or any time in Settings → Privacy.
+                Anonymous usage events go to PostHog and error reports to Sentry, so we can see
+                where setup and dictation break. They carry a random install ID, not your name or
+                account. Turn them off any time in Settings → Privacy; one switch covers both.
+              </p>
+              <p>
+                <a href="https://github.com/gargankit90/dictation-app/blob/main/docs/privacy.md"
+                  >See the full list of what's sent</a
+                >
               </p>
             </div>
             <div>
@@ -2155,6 +2170,8 @@
                 <li>Audio</li>
                 <li>Transcripts or anything you type</li>
                 <li>API keys</li>
+                <li>Names or window titles of the apps you use</li>
+                <li>File paths and your user name</li>
               </ul>
             </div>
           </div>
@@ -2171,8 +2188,9 @@
           <a
             class="btn btn-primary"
             data-download
-            href="https://github.com/gargankit90/dictation-app/releases/latest"
-            >Download for Mac</a
+            data-ready-label="Download for Mac"
+            href="https://github.com/gargankit90/dictation-app"
+            >Alpha coming soon</a
           >
           <a class="btn btn-secondary" href="https://github.com/gargankit90/dictation-app"
             ><svg
@@ -2211,9 +2229,10 @@
 
     <script>
       (function () {
-        // Download buttons: point straight at the newest stable release's Mac installer.
-        // GitHub's "latest" release skips drafts and pre-releases. If the lookup fails,
-        // the buttons keep their fallback link to the releases page.
+        // Download buttons: until a stable release with a Mac installer exists they say
+        // "coming soon" and link to the repository. Once GitHub's "latest" release (which
+        // skips drafts and pre-releases) has a .dmg, they point straight at it and take
+        // their data-ready-label text. If the lookup fails, they stay as they are.
         var REPO = "gargankit90/dictation-app";
         fetch("https://api.github.com/repos/" + REPO + "/releases/latest", {
           headers: { Accept: "application/vnd.github+json" },
@@ -2233,12 +2252,15 @@
             document.querySelectorAll("[data-download]").forEach(function (a) {
               a.href = dmg.browser_download_url;
               a.setAttribute("download", "");
+              if (a.dataset.readyLabel) a.textContent = a.dataset.readyLabel;
             });
+            var notes = document.getElementById("release-notes");
+            if (notes) notes.hidden = false;
             var v = document.getElementById("release-version");
             if (v && rel.tag_name) v.textContent = "Alpha " + rel.tag_name;
           })
           .catch(function () {
-            /* keep the releases-page fallback */
+            /* keep the "coming soon" link to the repository */
           });
 
         // Hero: one composer that changes app on every loop
