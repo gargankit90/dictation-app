@@ -10,7 +10,6 @@
 # Only made-up text goes in, so the file is safe to save as evidence.
 
 HISTORY_SETTINGS_WINDOW=Settings
-HISTORY_TEXT="$MOCK_TEXT"
 HISTORY_FAILED_TEXT="this paste will fail"
 
 history_open() {
@@ -79,6 +78,7 @@ history_log_is_clean() {
 }
 
 e2e_history() {
+  local HISTORY_TEXT=$MOCK_TEXT
   fresh_app_state
   vm "rm -f $(q "$VM_HISTORY_FILE")"
   launch_full
