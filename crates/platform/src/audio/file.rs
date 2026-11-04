@@ -3,9 +3,12 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
-use dictation_ports::{Audio, AudioError, AudioSource};
+use dictation_ports::{Audio, AudioError, AudioSource, LevelMeter};
 
 use super::lock;
 
@@ -16,10 +19,19 @@ use super::lock;
 ///
 /// A missing file is [`AudioError::NoDevice`]; an unreadable one, or one
 /// with an unsupported sample width, is [`AudioError::Device`].
+///
+/// Its [`LevelMeter`] (U4) plays the file's level in real time: while
+/// recording, a thread feeds the meter one 10 ms chunk every 10 ms, and
+/// silence once the file has played, as a microphone would. So the
+/// overlay's meter and "No sound" can be checked end to end with a file.
 #[derive(Debug, Clone)]
 pub struct FileAudioSource {
     path: Arc<PathBuf>,
     captured: Arc<Mutex<Option<Audio>>>,
+    meter: LevelMeter,
+    /// Bumped by each start, stop and discard; the feeding thread stops
+    /// once it changes.
+    generation: Arc<AtomicU64>,
 }
 
 impl FileAudioSource {
@@ -30,7 +42,42 @@ impl FileAudioSource {
         Self {
             path: Arc::new(path.into()),
             captured: Arc::new(Mutex::new(None)),
+            meter: LevelMeter::new(),
+            generation: Arc::default(),
         }
+    }
+
+    /// Feeds `audio` to the meter in real time until the next start, stop
+    /// or discard. Without a thread the meter just reads silence.
+    fn play_levels(&self, audio: &Audio) {
+        let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+        self.meter.begin(None);
+        let meter = self.meter.clone();
+        let current = Arc::clone(&self.generation);
+        let samples = audio.samples.clone();
+        let chunk = usize::try_from(audio.sample_rate / 100)
+            .unwrap_or(160)
+            .max(1);
+        let playing = thread::Builder::new()
+            .name("file-levels".into())
+            .spawn(move || {
+                for block in samples.chunks(chunk) {
+                    if current.load(Ordering::Acquire) != generation {
+                        return;
+                    }
+                    meter.record(block);
+                    thread::sleep(Duration::from_millis(10));
+                }
+            });
+        if let Err(error) = playing {
+            tracing::debug!(%error, "no level thread for the file");
+        }
+    }
+
+    /// Ends the meter's recording and stops its thread.
+    fn stop_levels(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        self.meter.end();
     }
 }
 
@@ -40,20 +87,32 @@ impl AudioSource for FileAudioSource {
         if captured.is_some() {
             return Err(AudioError::AlreadyRecording);
         }
-        *captured = Some(read_wav(&self.path)?);
+        let audio = read_wav(&self.path)?;
+        self.play_levels(&audio);
+        *captured = Some(audio);
         Ok(())
     }
 
     fn stop(&mut self) -> Result<Audio, AudioError> {
-        lock(&self.captured).take().ok_or(AudioError::NotRecording)
+        let audio = lock(&self.captured)
+            .take()
+            .ok_or(AudioError::NotRecording)?;
+        self.stop_levels();
+        Ok(audio)
     }
 
     fn discard(&mut self) {
-        *lock(&self.captured) = None;
+        if lock(&self.captured).take().is_some() {
+            self.stop_levels();
+        }
     }
 
     fn is_recording(&self) -> bool {
         lock(&self.captured).is_some()
+    }
+
+    fn level_meter(&self) -> Option<LevelMeter> {
+        Some(self.meter.clone())
     }
 }
 
@@ -177,6 +236,57 @@ mod tests {
                 samples: vec![0.0, 0.5, -0.5, -1.0],
             }
         );
+    }
+
+    /// Waits up to a second for a reading other than the floor.
+    fn sound_level(meter: &LevelMeter) -> Option<f32> {
+        for _ in 0..100 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            match meter.take() {
+                Some(level) if level > dictation_core::level::LEVEL_FLOOR_DBFS => {
+                    return Some(level);
+                }
+                Some(_) => {}
+                None => return None,
+            }
+        }
+        None
+    }
+
+    /// U4: the fake source plays its level in real time while recording.
+    #[test]
+    fn criterion_u4_1_the_meter_plays_the_files_level() {
+        // A 1 s, 16 kHz sine whose RMS is -20 dBFS (amplitude 0.1414).
+        #[allow(clippy::cast_possible_truncation, reason = "test sine")]
+        let sine: Vec<i16> = (0..16_000)
+            .map(|i| {
+                let t = f64::from(i) / 16_000.0;
+                (0.141_42 * (t * 440.0 * std::f64::consts::TAU).sin() * 32_767.0) as i16
+            })
+            .collect();
+        let wav = TempWav::int16(16_000, 1, &sine);
+        let mut source = FileAudioSource::new(&wav.0);
+        let meter = source.level_meter().unwrap();
+        assert_eq!(meter.take(), None);
+        source.start().unwrap();
+        let level = sound_level(&meter).unwrap();
+        assert!((level + 20.0).abs() <= 2.0, "{level}");
+        source.stop().unwrap();
+        assert_eq!(meter.take(), None);
+    }
+
+    /// U4: a silent file reads the floor; after a discard nothing does.
+    #[test]
+    fn criterion_u4_1_a_silent_file_reads_the_floor() {
+        let wav = TempWav::int16(16_000, 1, &[0; 1_600]);
+        let mut source = FileAudioSource::new(&wav.0);
+        let meter = source.level_meter().unwrap();
+        source.start().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        assert_eq!(meter.take(), Some(dictation_core::level::LEVEL_FLOOR_DBFS));
+        assert_eq!(sound_level(&meter), None);
+        source.discard();
+        assert_eq!(meter.take(), None);
     }
 
     #[test]
