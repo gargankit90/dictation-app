@@ -615,12 +615,10 @@ describe("the try step", () => {
       completed: 0,
       errors: 1,
       stages: ["recorded"],
-      error: "Your API key was rejected. Open Settings → Transcription to fix it.",
+      error: "Your API key was rejected. Open Settings → Speech to fix it.",
     };
     const alert = await screen.findByRole("alert", undefined, { timeout: 3000 });
-    expect(alert.textContent).toBe(
-      "Your API key was rejected. Open Settings → Transcription to fix it.",
-    );
+    expect(alert.textContent).toBe("Your API key was rejected. Open Settings → Speech to fix it.");
     expect(screen.queryByText(/menu bar icon/u)).toBeNull();
     expect(screen.queryByText(/key_rejected/u)).toBeNull();
     expect(button("Finish").disabled).toBe(true);
@@ -659,7 +657,7 @@ describe("the window", () => {
     await heading("Try it");
     fireEvent.click(button("Skip for now"));
     fireEvent.click(button("Finish (test skipped)"));
-    expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeTruthy();
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
   });
 
   it("reopened from the tray, resumes at the step the user went back to", async () => {
@@ -674,11 +672,11 @@ describe("the window", () => {
     // Settings… in the tray, then Set up dictation… again.
     backend.view = "settings";
     windowShown();
-    expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeTruthy();
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
     backend.view = "onboarding";
     windowShown();
     await heading("Allow Accessibility");
-    expect(screen.queryByRole("heading", { level: 1, name: "Settings" })).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "Settings sections" })).toBeNull();
   });
 
   it("falls back to settings if the app can't say", async () => {
@@ -689,6 +687,6 @@ describe("the window", () => {
       return false;
     });
     render(<App />);
-    expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeTruthy();
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
   });
 });

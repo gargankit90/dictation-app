@@ -31,6 +31,17 @@
     "allow-take-window-request",
     "allow-reveal-log-file",
     "allow-dictation-progress",
-    "allow-launch-notice"
+    "allow-launch-notice",
+    "allow-set-language",
+    "allow-use-cloud-engine",
+    "allow-use-local-model",
+    "allow-get-engine-status",
+    "allow-delete-api-key",
+    "allow-start-microphone-test",
+    "allow-read-microphone-test",
+    "allow-stop-microphone-test",
+    "allow-open-link",
+    "allow-get-app-info",
+    "allow-check-for-updates"
   ]
 }

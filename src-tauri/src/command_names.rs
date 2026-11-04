@@ -36,6 +36,17 @@ pub const COMMAND_NAMES: &[&str] = &[
     "reveal_log_file",
     "dictation_progress",
     "launch_notice",
+    "set_language",
+    "use_cloud_engine",
+    "use_local_model",
+    "get_engine_status",
+    "delete_api_key",
+    "start_microphone_test",
+    "read_microphone_test",
+    "stop_microphone_test",
+    "open_link",
+    "get_app_info",
+    "check_for_updates",
 ];
 
 /// The overlay window's commands (U4 round 2): `build.rs` adds their
