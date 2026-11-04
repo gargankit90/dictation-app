@@ -21,6 +21,7 @@
     "allow-set-share-usage-events",
     "allow-set-hotkey",
     "allow-set-hotkey-recording",
+    "allow-set-launch-at-login",
     "allow-run-checks",
     "allow-test-connection",
     "allow-build-report",
