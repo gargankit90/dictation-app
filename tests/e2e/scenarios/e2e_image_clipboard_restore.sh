@@ -29,6 +29,8 @@ e2e_image_clipboard_restore() {
   expect "the PNG is on the clipboard before" test "$(clipboard_png_sha)" = "$want"
 
   expect "the dictation gets back to Idle" dictate_once 1
+  # The restore runs RESTORE_DELAY (1.5 s) after the chord, after Idle.
+  clipboard_settled
   expect "the transcript was pasted" test "$(textedit_trimmed)" = "$MOCK_TEXT"
   types=$(clipboard_image types)
   log "  clipboard types after: $types"

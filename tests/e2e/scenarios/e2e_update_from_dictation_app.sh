@@ -156,7 +156,15 @@ tr_note() {
   printf '%s\n' "$*" >>"$TR_EVIDENCE"
 }
 
+# The state of an install that ran only the old build: no remembered app name.
+# An earlier scenario in the same VM run launched Vocet and left one, which
+# would hide the first-launch notice.
+tr_forget_app_name() {
+  vm 'rm -f "$HOME/Library/Application Support/com.dictationapp.desktop/last-run-app-name"'
+}
+
 tr_write_settings() {
+  tr_forget_app_name
   vm "mkdir -p $(q "$(dirname "$TR_SETTINGS_VM")") && printf '%s' $(q "{\"version\":2,\"provider\":\"groq\",\"model\":\"$TR_MODEL\",\"language\":\"en\",\"hotkey\":\"RightAlt\",\"launch_at_login\":true,\"transcription\":\"cloud\",\"local_model\":\"parakeet-unified-en-0.6b-q4_k_m\",\"share_usage_events\":false}") > $(q "$TR_SETTINGS_VM")"
 }
 

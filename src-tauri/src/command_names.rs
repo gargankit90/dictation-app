@@ -25,6 +25,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "set_share_usage_events",
     "set_hotkey",
     "set_hotkey_recording",
+    "set_launch_at_login",
     "run_checks",
     "test_connection",
     "build_report",
@@ -34,3 +35,9 @@ pub const COMMAND_NAMES: &[&str] = &[
     "dictation_progress",
     "launch_notice",
 ];
+
+/// The overlay window's commands (U4 round 2): `build.rs` adds their
+/// `allow-<command>` permissions to the app's ACL manifest, and only
+/// `capabilities/overlay.json` grants them. Not in [`COMMAND_NAMES`], so the
+/// settings window can't call them.
+pub const OVERLAY_COMMAND_NAMES: &[&str] = &["get_overlay_level"];

@@ -173,7 +173,7 @@ mod tests {
                 DictationError::InsertFailed {
                     reason: "no focused app".into(),
                 },
-                "Check Accessibility in System Settings, then dictate again.",
+                "It's on the clipboard: press ⌘V. If it keeps happening, check Accessibility.",
             ),
             (
                 DictationError::PermissionMissing(Permission::Accessibility),

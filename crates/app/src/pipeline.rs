@@ -18,6 +18,12 @@
 //! recording's `Start` is dropped before it begins, see [`AudioQueue`]), its
 //! start failures, and the UI events (see [`crate::ui_events`] for what a UI
 //! that stops reading gets).
+//!
+//! While recording, the task also reads the source's [`LevelMeter`] every
+//! [`LEVEL_INTERVAL`] and publishes the input level on a `watch` channel
+//! ([`Pipeline::levels`], U4) for the recording pill. A watch keeps only the
+//! newest reading, so a reader that falls behind can't make anything grow.
+//! A level is a number only: never logged at info level, stored or sent.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,8 +37,8 @@ use dictation_core::events::{Command, Event};
 use dictation_core::text::{Cleaned, Transcript, clean};
 use dictation_ports::{
     Audio, AudioError, AudioSource, Clock, HotkeyError, HotkeyEvent, HotkeySource, InsertError,
-    Permission, PermissionStatus, Permissions, TextBeforeCursor, TextInserter, TranscribeError,
-    Transcriber,
+    LevelMeter, Permission, PermissionStatus, Permissions, TextBeforeCursor, TextInserter,
+    TranscribeError, Transcriber,
 };
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{Notify, mpsc, oneshot, watch};
@@ -52,6 +58,26 @@ pub enum UiEvent {
     /// ([`DictationError::HotkeyFailed`]); stop showing that.
     HotkeyRestored,
 }
+
+/// The input level while recording (U4): what [`Pipeline::levels`]
+/// publishes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LevelReading {
+    /// The RMS of the audio since the previous reading, in dBFS
+    /// ([`dictation_core::level::rms_to_dbfs`]); the floor when no audio
+    /// arrived.
+    pub dbfs: f32,
+    /// The input device's name, if the source knows it.
+    pub device: Option<String>,
+}
+
+/// The pipeline's input levels: `Some` reading about every
+/// [`LEVEL_INTERVAL`] while recording, `None` otherwise.
+pub type LevelReceiver = watch::Receiver<Option<LevelReading>>;
+
+/// How often the pipeline reads the input level while recording: 20 times a
+/// second.
+pub const LEVEL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// The ports the pipeline runs against.
 pub struct Ports<H, A, T, I, P, C> {
@@ -160,6 +186,7 @@ impl std::fmt::Debug for CursorReader {
 pub struct Pipeline {
     shutdown: watch::Sender<bool>,
     task: JoinHandle<()>,
+    levels: LevelReceiver,
 }
 
 impl Pipeline {
@@ -262,6 +289,8 @@ impl Pipeline {
 
         let (ui, ui_events) = ui_channel();
         let (shutdown, shutdown_rx) = watch::channel(false);
+        let meter = audio.level_meter();
+        let (levels_tx, levels) = watch::channel(None);
         let (audio, audio_failures) = AudioWorker::spawn(audio);
         let mut runner = Runner::new(
             hotkey,
@@ -275,8 +304,25 @@ impl Pipeline {
             ticks,
         );
         runner.cursor = cursor;
+        runner.meter = meter;
+        runner.levels = levels_tx;
         let task = tokio::spawn(runner.run(keys, audio_failures));
-        Ok((Self { shutdown, task }, ui_events))
+        Ok((
+            Self {
+                shutdown,
+                task,
+                levels,
+            },
+            ui_events,
+        ))
+    }
+
+    /// The input level while recording (U4), for the recording pill: about
+    /// 20 readings a second while recording, `None` otherwise. Nothing is
+    /// published for a source without a [`LevelMeter`].
+    #[must_use]
+    pub fn levels(&self) -> LevelReceiver {
+        self.levels.clone()
     }
 
     /// Stops listening, drops any recording and waits for the task to end.
@@ -287,6 +333,13 @@ impl Pipeline {
         let _ = self.shutdown.send(true);
         let _ = self.task.await;
     }
+}
+
+/// Ticks every [`LEVEL_INTERVAL`]; a late tick is skipped, not made up.
+fn level_interval() -> Interval {
+    let mut ticks = tokio::time::interval(LEVEL_INTERVAL);
+    ticks.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    ticks
 }
 
 /// The event for a transcript once cleaned up (`dictation_core::text`),
@@ -640,6 +693,13 @@ struct Runner<H, T, I, P, C> {
     shutdown: watch::Receiver<bool>,
     /// Ticks while recording; reset when a recording starts.
     ticks: Interval,
+    /// The source's input level, if it measures one.
+    meter: Option<LevelMeter>,
+    /// Where the levels go ([`Pipeline::levels`]).
+    levels: watch::Sender<Option<LevelReading>>,
+    /// Ticks every [`LEVEL_INTERVAL`] while recording; reset when a
+    /// recording starts.
+    level_ticks: Interval,
     /// Transcriptions and inserts. Dropping the set (at shutdown) aborts
     /// what's left, so a transcription's request is cancelled.
     jobs: JoinSet<JobResult>,
@@ -656,7 +716,15 @@ struct Runner<H, T, I, P, C> {
     /// Events produced while carrying out commands, fed before the next
     /// outside event.
     pending: VecDeque<Event>,
+    /// How long the shutdown waits for the inserter to finish its
+    /// clipboard work ([`FINISH_BOUND`]).
+    finish_bound: Duration,
 }
+
+/// How long the shutdown waits for [`TextInserter::finish`]: the restore
+/// delay (1.5 s) plus some room. The shell's main thread waits on the
+/// shutdown, so this keeps Quit and Relaunch from ever hanging on it.
+pub const FINISH_BOUND: Duration = Duration::from_secs(2);
 
 impl<H, T, I, P, C> Runner<H, T, I, P, C>
 where
@@ -691,17 +759,22 @@ where
             ui,
             shutdown,
             ticks,
+            meter: None,
+            levels: watch::channel(None).0,
+            level_ticks: level_interval(),
             jobs: JoinSet::new(),
             running: None,
             captured: None,
             job: 0,
             pending: VecDeque::new(),
+            finish_bound: FINISH_BOUND,
         }
     }
 
     async fn run(mut self, mut keys: Keys, mut audio_failures: mpsc::Receiver<StartFailed>) {
         loop {
             let recording = matches!(self.state, State::Recording { .. });
+            let metering = recording && self.meter.is_some();
             // Biased, in this order: shutdown wins over anything else that
             // is ready; audio failures and job results, at most a few per
             // dictation, come before keys so a flood of keys can't hold
@@ -726,11 +799,28 @@ where
                 }
                 Some((key, at)) = keys.rx.recv() => self.key(key, at).await,
                 _ = self.ticks.tick(), if recording => self.feed(Event::Tick(self.clock.now())),
+                _ = self.level_ticks.tick(), if metering => self.publish_level(),
             }
         }
         self.jobs.abort_all();
         self.hotkey.stop();
         self.audio.shut_down().await;
+        // The user's clipboard may still be owed from the last paste (it
+        // goes back a moment after the chord, on a timer the exit would
+        // kill): finish it before the app exits (#241).
+        // Bounded: the shell's main thread is blocked on this shutdown, so
+        // nothing here may wait on it for long. If the bound passes, the
+        // quit goes on and that one restore may be skipped.
+        let inserter = Arc::clone(&self.inserter);
+        let finish = task::spawn_blocking(move || inserter.finish());
+        match tokio::time::timeout(self.finish_bound, finish).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => tracing::warn!("finishing the clipboard restore failed"),
+            Err(_) => tracing::warn!(
+                bound = ?self.finish_bound,
+                "the clipboard restore didn't finish in time; quitting without it"
+            ),
+        }
     }
 
     /// Feeds a key, then a Tick that has come due: keys alone can't hold off
@@ -768,6 +858,18 @@ where
         tracing::warn!(discarded, "hotkey events overflowed; cancelled");
         self.feed(Event::CancelPressed);
         Some(discarded)
+    }
+
+    /// Publishes the input level read since the last reading. Nothing while
+    /// the source hasn't started measuring yet (its `start` still running).
+    fn publish_level(&self) {
+        let Some(meter) = &self.meter else { return };
+        if let Some(dbfs) = meter.take() {
+            self.levels.send_replace(Some(LevelReading {
+                dbfs,
+                device: meter.device(),
+            }));
+        }
     }
 
     /// Whether a Tick is due now, taking it if so; doesn't wait.
@@ -929,6 +1031,7 @@ where
                 // The first Tick comes a full interval from now, never at
                 // once, ahead of keys that are still on their way.
                 self.ticks.reset();
+                self.level_ticks.reset();
                 self.session += 1;
                 self.audio.send(AudioCommand::Start(self.session));
             }
@@ -950,6 +1053,10 @@ where
                 self.ui.send(UiEvent::Error(error));
             }
             Command::StateChanged(phase) => {
+                if phase != Phase::Recording {
+                    // No level outside a recording.
+                    self.levels.send_if_modified(|level| level.take().is_some());
+                }
                 self.ui.send(UiEvent::StateChanged(phase));
             }
         }
@@ -1094,6 +1201,99 @@ mod tests {
             tokio::time::interval(Duration::from_millis(250)),
         );
         (runner, shutdown)
+    }
+
+    /// An inserter whose `finish` never returns on its own: an insert in
+    /// flight that needs a main-queue callback while the main thread waits
+    /// on this shutdown (#241 round 4's deadlock). `release` lets it go at
+    /// the end of the test.
+    #[derive(Clone)]
+    struct StuckFinish {
+        entered: Arc<std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>>,
+        release: Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>,
+    }
+
+    impl TextInserter for StuckFinish {
+        fn insert(&self, _: &str) -> Result<(), InsertError> {
+            Ok(())
+        }
+
+        fn finish(&self) {
+            if let Some(entered) = self.entered.lock().unwrap().take() {
+                let _ = entered.send(());
+            }
+            // Waits for a "main-queue callback" that can't come while the
+            // main thread is blocked in the shutdown.
+            let _ = self.release.lock().unwrap().recv();
+        }
+    }
+
+    /// #241 round 4: the shutdown's wait on `finish` is bounded, so a stuck
+    /// clipboard restore can't hang Quit or Relaunch.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shutdown_does_not_hang_on_a_stuck_finish() {
+        let (entered_tx, entered) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let inserter = StuckFinish {
+            entered: Arc::new(std::sync::Mutex::new(Some(entered_tx))),
+            release: Arc::new(std::sync::Mutex::new(release_rx)),
+        };
+        let (ui, _) = ui_channel();
+        let (shutdown, shutdown_rx) = watch::channel(false);
+        let (audio, failures) = AudioWorker::spawn(BurstAudio(false));
+        let mut runner = Runner::new(
+            FakeHotkey::new(),
+            audio,
+            SilentTranscriber,
+            inserter,
+            FakePermissions::all_granted(),
+            Arc::new(FakeClock::new()),
+            ui,
+            shutdown_rx,
+            tokio::time::interval(Duration::from_millis(250)),
+        );
+        assert_eq!(runner.finish_bound, FINISH_BOUND);
+        assert_eq!(FINISH_BOUND, Duration::from_secs(2));
+        runner.finish_bound = Duration::from_millis(100);
+        let (_keys_tx, keys_rx) = mpsc::channel(KEYS_QUEUED);
+        let keys = Keys {
+            rx: keys_rx,
+            overflow: Arc::new(Overflow::default()),
+        };
+        let started = std::time::Instant::now();
+        let task = tokio::spawn(runner.run(keys, failures));
+        shutdown.send(true).unwrap();
+        // Ends after the bound, though `finish` is still stuck.
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("the shutdown hung on finish")
+            .unwrap();
+        assert!(entered.try_recv().is_ok(), "finish was called");
+        assert!(started.elapsed() >= Duration::from_millis(100));
+        release.send(()).unwrap();
+    }
+
+    /// #241 round 3: a Quit (or a relaunch) right after a dictation must
+    /// not exit before the user's clipboard is back; the pipeline's
+    /// shutdown has the inserter finish its pending restore.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shutdown_has_the_inserter_finish_its_clipboard_work() {
+        let inserter = FakeInserter::new();
+        let (runner, shutdown) = runner(&inserter);
+        let (_keys_tx, keys_rx) = mpsc::channel(KEYS_QUEUED);
+        let keys = Keys {
+            rx: keys_rx,
+            overflow: Arc::new(Overflow::default()),
+        };
+        let (_failures_tx, failures) = mpsc::channel(1);
+        let task = tokio::spawn(runner.run(keys, failures));
+        assert_eq!(inserter.finished(), 0);
+        shutdown.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(inserter.finished(), 1);
     }
 
     fn key(runner: &mut TestRunner, key: HotkeyEvent, at_ms: u64) {
@@ -1809,6 +2009,171 @@ mod audio_worker_tests {
         fn drop(&mut self) {
             let _ = self.1.send(());
         }
+    }
+
+    /// A [`ScriptedAudio`] that measures its level like the microphone
+    /// does: the meter runs from `start` to `stop` or `discard`. The test
+    /// feeds it samples, as the capture thread would.
+    #[derive(Clone)]
+    struct MeteredAudio(ScriptedAudio, LevelMeter);
+
+    impl AudioSource for MeteredAudio {
+        fn start(&mut self) -> Result<(), AudioError> {
+            self.0.start()?;
+            self.1.begin(Some("Test Microphone".into()));
+            Ok(())
+        }
+
+        fn stop(&mut self) -> Result<Audio, AudioError> {
+            self.1.end();
+            self.0.stop()
+        }
+
+        fn discard(&mut self) {
+            self.1.end();
+            self.0.discard();
+        }
+
+        fn is_recording(&self) -> bool {
+            self.1.is_recording()
+        }
+
+        fn level_meter(&self) -> Option<LevelMeter> {
+            Some(self.1.clone())
+        }
+    }
+
+    fn metered_harness() -> (Harness, MeteredAudio) {
+        let audio = MeteredAudio(ScriptedAudio::new(Vec::new()), LevelMeter::new());
+        let hotkey = FakeHotkey::new();
+        let clock = FakeClock::new();
+        let ports = Ports {
+            hotkey: hotkey.clone(),
+            audio: audio.clone(),
+            transcriber: FixedTranscriber,
+            inserter: FakeInserter::new(),
+            permissions: FakePermissions::all_granted(),
+            clock: clock.clone(),
+        };
+        let (pipeline, ui) = Pipeline::spawn(ports, Config::default()).unwrap();
+        (
+            Harness {
+                hotkey,
+                clock,
+                pipeline,
+                ui,
+            },
+            audio,
+        )
+    }
+
+    /// 10 ms of a sine whose RMS is `dbfs`, at 16 kHz.
+    fn sine_chunk(dbfs: f32) -> Vec<f32> {
+        let amplitude = 10f32.powf(dbfs / 20.0) * std::f32::consts::SQRT_2;
+        (0..160_u16)
+            .map(|i| amplitude * (f32::from(i) * 440.0 * std::f32::consts::TAU / 16_000.0).sin())
+            .collect()
+    }
+
+    /// U4 criterion 1: while recording the pipeline publishes the level
+    /// 15 to 30 times a second, with the device's name, and nothing once
+    /// the recording ends.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn criterion_u4_1_levels_are_published_while_recording_only() {
+        let (mut harness, audio) = metered_harness();
+        let mut levels = harness.pipeline.levels();
+        assert_eq!(*levels.borrow_and_update(), None);
+
+        harness.emit(HotkeyEvent::Pressed);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+        wait_for("the meter to start", || audio.1.is_recording()).await;
+
+        // The capture thread: a -20 dBFS sine in 10 ms chunks.
+        let feeding = Arc::new(AtomicBool::new(true));
+        let feeder = {
+            let meter = audio.1.clone();
+            let feeding = Arc::clone(&feeding);
+            std::thread::spawn(move || {
+                while feeding.load(Ordering::Relaxed) {
+                    meter.record(&sine_chunk(-20.0));
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            })
+        };
+
+        // Skip the first reading (it may predate the feeder), then count
+        // readings for a second.
+        tokio::time::timeout(WAIT, levels.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        levels.borrow_and_update();
+        let started = Instant::now();
+        let mut readings = Vec::new();
+        while started.elapsed() < Duration::from_secs(1) {
+            let left = Duration::from_secs(1).saturating_sub(started.elapsed());
+            if let Ok(changed) = tokio::time::timeout(left, levels.changed()).await {
+                changed.unwrap();
+                readings.push(levels.borrow_and_update().clone());
+            }
+        }
+        feeding.store(false, Ordering::Relaxed);
+        feeder.join().unwrap();
+        assert!(
+            (15..=30).contains(&readings.len()),
+            "{} readings in a second",
+            readings.len()
+        );
+        for reading in &readings {
+            let reading = reading.as_ref().expect("a level while recording");
+            assert_eq!(reading.device.as_deref(), Some("Test Microphone"));
+            assert!((reading.dbfs + 20.0).abs() <= 2.0, "{reading:?}");
+        }
+
+        // Released: the level goes away and stays away.
+        harness.clock.advance(Duration::from_millis(1_500));
+        harness.emit(HotkeyEvent::Released);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Transcribing));
+        assert_eq!(*levels.borrow_and_update(), None);
+        tokio::time::sleep(LEVEL_INTERVAL * 4).await;
+        assert!(!levels.has_changed().unwrap(), "{:?}", *levels.borrow());
+        assert!(!audio.1.is_recording());
+        harness.pipeline.shutdown().await;
+    }
+
+    /// A recording with no audio arriving reads the floor (no sound), and a
+    /// cancelled recording stops publishing too.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn criterion_u4_1_no_audio_reads_the_floor_and_cancel_clears_it() {
+        let (mut harness, audio) = metered_harness();
+        let mut levels = harness.pipeline.levels();
+        harness.emit(HotkeyEvent::Pressed);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+        wait_for("the meter to start", || audio.1.is_recording()).await;
+        tokio::time::timeout(WAIT, levels.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        let reading = levels.borrow_and_update().clone().unwrap();
+        assert_eq!(reading.dbfs, dictation_core::level::LEVEL_FLOOR_DBFS);
+
+        harness.emit(HotkeyEvent::CancelPressed);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Idle));
+        assert_eq!(*levels.borrow_and_update(), None);
+        harness.pipeline.shutdown().await;
+    }
+
+    /// A source without a meter (file playback) publishes nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn criterion_u4_1_a_source_without_a_meter_publishes_nothing() {
+        let mut harness = Harness::start(ScriptedAudio::new(Vec::new()));
+        let levels = harness.pipeline.levels();
+        harness.emit(HotkeyEvent::Pressed);
+        assert_eq!(harness.next().await, UiEvent::StateChanged(Recording));
+        tokio::time::sleep(LEVEL_INTERVAL * 4).await;
+        assert!(!levels.has_changed().unwrap());
+        assert_eq!(*levels.borrow(), None);
+        harness.pipeline.shutdown().await;
     }
 
     /// A runner that is abandoned (its task is aborted, as a panic would

@@ -49,6 +49,10 @@ impl<A: AudioSource> AudioSource for SavingAudio<A> {
     fn is_recording(&self) -> bool {
         self.inner.is_recording()
     }
+
+    fn level_meter(&self) -> Option<dictation_ports::LevelMeter> {
+        self.inner.level_meter()
+    }
 }
 
 fn save(dir: &Path, audio: &Audio) -> Result<PathBuf, String> {
@@ -148,6 +152,54 @@ mod tests {
             },
             dir.0.join("recordings"),
         )
+    }
+
+    /// A [`Clip`] with a level meter.
+    struct Metered(Clip, dictation_ports::LevelMeter);
+
+    impl AudioSource for Metered {
+        fn start(&mut self) -> Result<(), AudioError> {
+            self.0.start()
+        }
+
+        fn stop(&mut self) -> Result<Audio, AudioError> {
+            self.0.stop()
+        }
+
+        fn discard(&mut self) {
+            self.0.discard();
+        }
+
+        fn is_recording(&self) -> bool {
+            self.0.is_recording()
+        }
+
+        fn level_meter(&self) -> Option<dictation_ports::LevelMeter> {
+            Some(self.1.clone())
+        }
+    }
+
+    /// U4: saving the recordings keeps the microphone's level meter.
+    #[test]
+    fn the_level_meter_passes_through() {
+        let dir = TempDir::new();
+        assert!(source(&dir, false).level_meter().is_none());
+        let meter = dictation_ports::LevelMeter::new();
+        let saving = SavingAudio::new(
+            Metered(
+                Clip {
+                    recording: false,
+                    fail: false,
+                },
+                meter.clone(),
+            ),
+            dir.0.join("recordings"),
+        );
+        meter.begin(Some("Mic".into()));
+        assert_eq!(
+            saving.level_meter().unwrap().device().as_deref(),
+            Some("Mic")
+        );
     }
 
     #[test]

@@ -135,7 +135,9 @@ fn a_failed_paste_leaves_a_clipboard_the_user_changed_alone() {
 }
 
 #[test]
-fn a_failed_paste_on_an_empty_clipboard_leaves_it_empty() {
+fn a_failed_paste_on_an_empty_clipboard_leaves_the_transcript_on_it() {
+    // P1 round 3 (Lead): a failed paste keeps the transcript on the
+    // clipboard for the user to paste; it used to clear it again.
     let clipboard = MemClipboard::new();
     let k = Keys {
         fail: Some(InsertError::PermissionDenied),
@@ -145,7 +147,7 @@ fn a_failed_paste_on_an_empty_clipboard_leaves_it_empty() {
         flow(&clipboard, k).insert("dictated"),
         Err(InsertError::PermissionDenied)
     );
-    assert_eq!(clipboard.read_text().unwrap(), None);
+    assert_eq!(clipboard.read_text().unwrap().as_deref(), Some("dictated"));
 }
 
 #[test]

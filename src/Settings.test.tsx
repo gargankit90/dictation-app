@@ -39,6 +39,8 @@ class Backend {
   holdTest: Promise<void> | null = null;
   /** Holds `set_share_usage_events` until released. */
   holdShare: Promise<void> | null = null;
+  /** Holds `set_launch_at_login` until released: the OS being slow (#238). */
+  holdLaunch: Promise<void> | null = null;
   /** Holds `set_hotkey` until released, to test the form while a key is saved. */
   holdSetHotkey: Promise<void> | null = null;
   /** Holds `set_api_key` until released, to test the form while a save runs. */
@@ -70,6 +72,8 @@ class Backend {
           ...(args.settings as Settings_Serialize),
           share_usage_events: this.settings.share_usage_events,
           hotkey: this.settings.hotkey,
+          // And never the login item, which only `set_launch_at_login` changes.
+          launch_at_login: this.settings.launch_at_login,
         };
         return null;
       case "set_hotkey":
@@ -78,6 +82,10 @@ class Backend {
         return null;
       case "set_hotkey_recording":
         return null;
+      case "set_launch_at_login":
+        if (this.holdLaunch) await this.holdLaunch;
+        this.settings = { ...this.settings, launch_at_login: args.enabled as boolean };
+        return args.enabled;
       case "set_share_usage_events":
         this.settings = { ...this.settings, share_usage_events: args.share as boolean };
         // The write is done; the reply is what waits.
@@ -1039,7 +1047,7 @@ describe("review round 1", () => {
 });
 
 describe("launch at login", () => {
-  const box = () => screen.getByLabelText<HTMLInputElement>("Launch at login");
+  const box = () => screen.getByLabelText<HTMLInputElement>(/^Launch at login/u);
 
   it("shows what the OS says, off by default", async () => {
     await open();
@@ -1050,34 +1058,63 @@ describe("launch at login", () => {
     expect(box().checked).toBe(true);
   });
 
-  it("sends the choice with the other settings when saved", async () => {
+  it("applies the choice at once, with Applying… until the OS answers, and Save is not involved", async () => {
     await open();
+    const slow = gate();
+    backend.holdLaunch = slow.closed;
     fireEvent.click(box());
     expect(box().checked).toBe(true);
-    // Nothing is sent until Save.
+    expect((await screen.findByRole("status")).textContent).toContain("Applying…");
+    expect(backend.named("set_launch_at_login")[0]?.args.enabled).toBe(true);
     expect(backend.named("save_settings")).toHaveLength(0);
+    // Saving the rest does not wait for the login item.
+    pick("de");
     click("Save");
     await screen.findByText("Settings saved.");
-    const saved = backend.named("save_settings");
-    expect(saved).toHaveLength(1);
-    expect((saved[0]?.args.settings as Settings_Serialize).launch_at_login).toBe(true);
-    expect(backend.settings.launch_at_login).toBe(true);
+    expect(screen.getByText(/Applying…/u)).toBeTruthy();
+    expect(backend.settings.language).toBe("de");
+    slow.open();
+    await waitFor(() => {
+      expect(screen.queryByText(/Applying…/u)).toBeNull();
+    });
     expect(box().checked).toBe(true);
+    expect(backend.settings.launch_at_login).toBe(true);
   });
 
-  it("shows the real state again when the app could not change it", async () => {
+  it("shows the real state and the next step when macOS refuses", async () => {
     await open();
-    fireEvent.click(box());
     backend.failing.set(
-      "save_settings",
+      "set_launch_at_login",
       "Launch at login needs your approval: open System Settings → General → Login Items, and allow Vocet.",
     );
-    click("Save");
-    expect((await screen.findByRole("alert")).textContent).toContain("needs your approval");
+    fireEvent.click(box());
+    expect((await screen.findByRole("alert")).textContent).toContain("General → Login Items");
     // The app still has it off, so the box goes back to off.
     await waitFor(() => {
       expect(box().checked).toBe(false);
     });
+    expect(screen.queryByText(/Applying…/u)).toBeNull();
+  });
+
+  it("ends on the last choice when toggled again while the OS is busy", async () => {
+    await open();
+    const slow = gate();
+    backend.holdLaunch = slow.closed;
+    fireEvent.click(box());
+    fireEvent.click(box());
+    fireEvent.click(box());
+    expect(box().checked).toBe(true);
+    slow.open();
+    await waitFor(() => {
+      expect(screen.queryByText(/Applying…/u)).toBeNull();
+    });
+    expect(box().checked).toBe(true);
+    expect(backend.settings.launch_at_login).toBe(true);
+    expect(backend.named("set_launch_at_login").map((call) => call.args.enabled)).toEqual([
+      true,
+      false,
+      true,
+    ]);
   });
 
   /** The window comes back to the front, as when the tray shows it again. */
@@ -1110,31 +1147,30 @@ describe("launch at login", () => {
     pick("de");
     click("Save");
     await screen.findByText("Settings saved.");
-    const saved = backend.named("save_settings");
-    expect((saved[0]?.args.settings as Settings_Serialize).launch_at_login).toBe(true);
+    expect(backend.named("set_launch_at_login")).toHaveLength(0);
     expect(backend.settings.launch_at_login).toBe(true);
-    expect(box().checked).toBe(true);
   });
 
-  it("keeps the user's own change when the window regains focus", async () => {
+  it("keeps the user's own change while the OS applies it, when the window regains focus", async () => {
     await open();
+    const slow = gate();
+    backend.holdLaunch = slow.closed;
     fireEvent.click(box());
     backend.settings = { ...backend.settings, launch_at_login: false };
     refocus();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(box().checked).toBe(true);
-    click("Save");
-    await screen.findByText("Settings saved.");
-    const saved = backend.named("save_settings");
-    expect((saved[0]?.args.settings as Settings_Serialize).launch_at_login).toBe(true);
+    slow.open();
+    await waitFor(() => {
+      expect(screen.queryByText(/Applying…/u)).toBeNull();
+    });
   });
 
   it("keeps a typed hotkey when the login item could not change", async () => {
     await open();
+    backend.failing.set("set_launch_at_login", "Couldn't change launch at login: no bundle");
     fireEvent.click(box());
     type("Or type it", "F5");
-    backend.failing.set("save_settings", "Couldn't change launch at login: no bundle");
-    click("Save");
     await screen.findByText(/no bundle/);
     expect(screen.getByLabelText<HTMLInputElement>("Or type it").value).toBe("F5");
   });
@@ -1204,40 +1240,6 @@ describe("T2: settings edges", () => {
       expect(backend.named("save_settings")).toHaveLength(2);
     });
     expect(backend.settings.model).toBe("whisper-1");
-
-    // A save that didn't take, then a re-read that failed: the box isn't
-    // passed off as the OS's state, so the choice is sent again on retry.
-    cleanup();
-    backend = new Backend();
-    mockIPC((command, payload) => backend.handle(command, payload));
-    await open();
-    const box = screen.getByLabelText<HTMLInputElement>("Launch at login");
-    fireEvent.click(box);
-    backend.failing.set("save_settings", "Couldn't change launch at login: refused");
-    const failingHandle = backend.handle;
-    mockIPC(async (command, payload) => {
-      if (command === "get_settings" && backend.named("save_settings").length > 0) {
-        // eslint-disable-next-line @typescript-eslint/only-throw-error
-        throw "the settings file is busy";
-      }
-      return failingHandle(command, payload);
-    });
-    click("Save");
-    await screen.findByText(/refused/);
-    await flush();
-    // A focus would re-read a box that "follows the OS"; this one is the
-    // user's pending choice, so it isn't overwritten.
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
-    await flush();
-    expect(box.checked).toBe(true);
-    backend.failing.delete("save_settings");
-    mockIPC((command, payload) => backend.handle(command, payload));
-    click("Save");
-    await screen.findByText("Settings saved.");
-    const sent = backend.named("save_settings").map((call) => call.args.settings);
-    expect((sent[1] as Settings_Serialize).launch_at_login).toBe(true);
   });
 
   it("late_provider_test_result_is_ignored", async () => {

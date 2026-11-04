@@ -13,11 +13,24 @@
 //!    take a while, and focus may have moved to a password field meanwhile;
 //! 3. send the paste chord, asking a last time right before the keys go
 //!    out ([`PasteKeys::paste_unless`]); if Secure Input came on after the
-//!    write, the chord isn't sent and step 5 puts the clipboard back;
-//! 4. wait a short settle delay, so the target app reads the clipboard;
-//! 5. put the saved contents back only if our session marker is still on
-//!    the clipboard ([`Clipboard::restore_snapshot_if_unchanged`]): if the
-//!    user (or an app) copied something meanwhile, it's left alone.
+//!    write, the chord isn't sent and the clipboard goes back at once;
+//! 4. leave the transcript on the clipboard for [`RESTORE_DELAY`] after the
+//!    chord, on a timer ([`Later`]; the app's runs on a thread of its own,
+//!    so nothing waits for it), because the target reads the clipboard
+//!    whenever its main thread gets to the ⌘V (#239);
+//! 5. then put the saved contents back only if our write is still on the
+//!    clipboard ([`Clipboard::restore_snapshot_if_unchanged`]: its session
+//!    token and change count). If the user (or an app) copied something
+//!    meanwhile, it's left alone and the saved contents are dropped: the
+//!    newer copy wins.
+//!
+//! A dictation that starts while a restore is still pending does that
+//! restore first, under the same rule, and only then saves the clipboard,
+//! so the user's contents are never lost and never replaced by a saved
+//! transcript. If the chord can't be sent ([`InsertError::PermissionDenied`]
+//! or [`InsertError::Failed`]), nothing is restored: the transcript stays on
+//! the clipboard, and the error the user sees says so. Nothing in this flow
+//! reads the target app (no Accessibility queries).
 //!
 //! The probes shrink the race with the user's focus; they can't close it.
 //! The OS has no "check focus and paste" in one step, so a password field
@@ -31,16 +44,28 @@
 #[cfg(target_os = "macos")]
 mod macos;
 
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
-use dictation_ports::{Clipboard, ClipboardError, InsertError, TextInserter};
+use dictation_ports::{
+    Clipboard, ClipboardError, ClipboardSnapshot, InsertError, SessionMarker, TextInserter,
+};
 
 #[cfg(target_os = "macos")]
 pub use macos::{MacPasteKeys, MacPasteboard};
 
-/// How long to wait after the paste chord before restoring the clipboard.
-/// Apps read the pasteboard asynchronously; restoring too early would paste
-/// the user's old contents instead of the transcript.
+/// How long the transcript stays on the clipboard after the paste chord
+/// before the user's clipboard goes back. The target reads the clipboard
+/// when its main thread gets to the ⌘V, not when it is posted: the slowest
+/// read measured was about 1070 ms after the chord (TextEdit, the first
+/// paste after a relaunch with a Ctrl+Shift+A hotkey, #239), where the old
+/// 300 ms pasted the user's old clipboard instead. A target that reads
+/// later than this still pastes the old clipboard; none did in testing.
+pub const RESTORE_DELAY: Duration = Duration::from_millis(1500);
+
+/// The old fixed settle delay, kept for callers that pass their own; the
+/// app uses [`RESTORE_DELAY`].
 pub const DEFAULT_SETTLE: Duration = Duration::from_millis(300);
 
 /// macOS's `kVK_ANSI_V`: where V is on a US keyboard, and the fallback when
@@ -165,6 +190,41 @@ impl Settle for ThreadSettle {
     }
 }
 
+/// Runs the clipboard restore later. Every [`Settle`] is one that waits
+/// inline (tests, and callers that want the old blocking flow);
+/// [`ThreadLater`] runs it on a thread of its own.
+pub trait Later: Send + Sync {
+    /// Runs `job` after `delay`.
+    fn after(&self, delay: Duration, job: Box<dyn FnOnce() + Send>);
+}
+
+impl<S: Settle> Later for S {
+    fn after(&self, delay: Duration, job: Box<dyn FnOnce() + Send>) {
+        self.settle(delay);
+        job();
+    }
+}
+
+/// [`Later`] on a new thread that sleeps first, so the event loop, the
+/// hotkey and the next dictation never wait for a restore.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ThreadLater;
+
+impl Later for ThreadLater {
+    fn after(&self, delay: Duration, job: Box<dyn FnOnce() + Send>) {
+        let spawned = std::thread::Builder::new()
+            .name("clipboard-restore".into())
+            .spawn(move || {
+                std::thread::sleep(delay);
+                job();
+            });
+        if let Err(error) = spawned {
+            // The restore stays pending; the next dictation does it.
+            tracing::warn!(%error, "could not schedule the clipboard restore");
+        }
+    }
+}
+
 /// Answers "is Secure Input on right now?". Any `Fn() -> bool` works, so
 /// the macOS adapter is `secure_input::is_secure_input_enabled` and tests
 /// pass a closure.
@@ -192,27 +252,58 @@ impl SecureInputProbe for NeverSecure {
     }
 }
 
-/// The paste flow (see the module docs) over any clipboard and key sender.
+/// A restore that hasn't run yet: the user's saved clipboard, owed back
+/// if the clipboard still holds the write that made `session`.
 #[derive(Debug)]
+struct Pending {
+    id: u64,
+    session: SessionMarker,
+    saved: ClipboardSnapshot,
+    /// When the timer is due: `RESTORE_DELAY` after the chord.
+    due: Instant,
+}
+
+/// The paste flow (see the module docs) over any clipboard and key sender.
 pub struct PasteInserter<C, K, S = ThreadSettle, P = NeverSecure> {
-    clipboard: C,
+    clipboard: Arc<C>,
     keys: K,
-    settle: S,
+    later: S,
     delay: Duration,
     secure_input: P,
+    /// The restore still owed, if any. Taken and done under this lock, by
+    /// the timer or by the next dictation, never both.
+    pending: Arc<Mutex<Option<Pending>>>,
+    next_id: AtomicU64,
+    /// Held for the whole of an insert, so [`TextInserter::finish`] waits
+    /// for one still pasting.
+    busy: Mutex<()>,
+    /// Set by [`TextInserter::finish`]: no insert after it.
+    closed: AtomicBool,
+}
+
+impl<C, K, S, P> std::fmt::Debug for PasteInserter<C, K, S, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PasteInserter")
+            .field("delay", &self.delay)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<C, K, S> PasteInserter<C, K, S> {
-    /// The flow with `settle` waiting `delay` between the paste and the
-    /// restore. It doesn't check Secure Input; see
-    /// [`with_secure_input`](Self::with_secure_input).
-    pub fn new(clipboard: C, keys: K, settle: S, delay: Duration) -> Self {
+    /// The flow with `later` running the restore `delay` after the chord
+    /// (a [`Settle`] waits inline; [`ThreadLater`] doesn't). It doesn't
+    /// check Secure Input; see [`with_secure_input`](Self::with_secure_input).
+    pub fn new(clipboard: C, keys: K, later: S, delay: Duration) -> Self {
         Self {
-            clipboard,
+            clipboard: Arc::new(clipboard),
             keys,
-            settle,
+            later,
             delay,
             secure_input: NeverSecure,
+            pending: Arc::new(Mutex::new(None)),
+            next_id: AtomicU64::new(0),
+            busy: Mutex::new(()),
+            closed: AtomicBool::new(false),
         }
     }
 }
@@ -224,10 +315,34 @@ impl<C, K, S, P> PasteInserter<C, K, S, P> {
         PasteInserter {
             clipboard: self.clipboard,
             keys: self.keys,
-            settle: self.settle,
+            later: self.later,
             delay: self.delay,
             secure_input: probe,
+            pending: self.pending,
+            next_id: self.next_id,
+            busy: self.busy,
+            closed: self.closed,
         }
+    }
+}
+
+fn lock(pending: &Mutex<Option<Pending>>) -> MutexGuard<'_, Option<Pending>> {
+    // A panic elsewhere can't leave an Option half written.
+    pending.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Puts `saved` back if the clipboard still holds the write that made
+/// `session`; else leaves it alone (the newer copy wins).
+fn restore<C: Clipboard + ?Sized>(
+    clipboard: &C,
+    session: &SessionMarker,
+    saved: &ClipboardSnapshot,
+) {
+    match clipboard.restore_snapshot_if_unchanged(session, saved) {
+        Ok(restored) => tracing::debug!(restored, "clipboard after paste"),
+        // The text is pasted (or the paste error is reported); a failed
+        // restore isn't worth failing the dictation for.
+        Err(error) => tracing::warn!(%error, "could not restore the clipboard"),
     }
 }
 
@@ -235,10 +350,18 @@ fn failed(what: &str, error: &ClipboardError) -> InsertError {
     InsertError::Failed(format!("{what}: {error}"))
 }
 
-impl<C: Clipboard, K: PasteKeys, S: Settle, P: SecureInputProbe> TextInserter
-    for PasteInserter<C, K, S, P>
+impl<C, K, S, P> TextInserter for PasteInserter<C, K, S, P>
+where
+    C: Clipboard + 'static,
+    K: PasteKeys,
+    S: Later,
+    P: SecureInputProbe,
 {
     fn insert(&self, text: &str) -> Result<(), InsertError> {
+        let _busy = self.busy.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(InsertError::Failed("the app is quitting".into()));
+        }
         // Before anything else: with a password field focused, don't put
         // the text on the clipboard (other apps can read it) or paste it.
         let blocked = || {
@@ -251,6 +374,9 @@ impl<C: Clipboard, K: PasteKeys, S: Settle, P: SecureInputProbe> TextInserter
         if blocked() {
             return Err(InsertError::SecureInput);
         }
+        // An earlier paste's restore first, so what is saved next is the
+        // user's clipboard, never that paste's transcript.
+        self.finish_pending();
         let saved = self
             .clipboard
             .snapshot()
@@ -266,22 +392,82 @@ impl<C: Clipboard, K: PasteKeys, S: Settle, P: SecureInputProbe> TextInserter
             .write_dictation(text)
             .map_err(|e| failed("could not write the clipboard", &e))?;
         // The last check is inside `paste_unless`, after the key sender's
-        // own preparation. If it trips, nothing is sent and the restore
-        // below puts the user's clipboard back (unless they copied since).
-        let pasted = self.keys.paste_unless(&blocked);
-        if pasted.is_ok() {
-            self.settle.settle(self.delay);
+        // own preparation. If it trips, nothing is sent and the clipboard
+        // goes back at once (unless the user copied since).
+        match self.keys.paste_unless(&blocked) {
+            Ok(()) => {
+                self.restore_later(session, saved);
+                Ok(())
+            }
+            Err(InsertError::SecureInput) => {
+                restore(&*self.clipboard, &session, &saved);
+                Err(InsertError::SecureInput)
+            }
+            Err(error) => {
+                // The chord didn't go out: keep the transcript where the
+                // user can paste it (the error shown says so).
+                tracing::warn!("the paste failed; the transcript stays on the clipboard");
+                Err(error)
+            }
         }
-        match self
-            .clipboard
-            .restore_snapshot_if_unchanged(&session, &saved)
-        {
-            Ok(restored) => tracing::debug!(restored, "clipboard after paste"),
-            // The text is pasted (or the paste error is reported below);
-            // a failed restore isn't worth failing the dictation for.
-            Err(error) => tracing::warn!(%error, "could not restore the clipboard"),
+    }
+
+    /// At quit or relaunch: waits for an insert still pasting, refuses
+    /// any later one, then does the restore still owed, if any, at its
+    /// time (never earlier: the target may not have read the transcript
+    /// yet), under the same rule as the timer. Blocks at most
+    /// [`RESTORE_DELAY`] past the last chord.
+    fn finish(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        let _busy = self.busy.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut slot = lock(&self.pending);
+        if let Some(owed) = slot.take() {
+            std::thread::sleep(owed.due.saturating_duration_since(Instant::now()));
+            restore(&*self.clipboard, &owed.session, &owed.saved);
+            tracing::info!("restored the clipboard before quitting");
         }
-        pasted
+    }
+}
+
+impl<C, K, S, P> PasteInserter<C, K, S, P>
+where
+    C: Clipboard + 'static,
+    S: Later,
+{
+    /// Does the restore still owed, if any, now: a new dictation is about
+    /// to save the clipboard.
+    fn finish_pending(&self) {
+        let mut slot = lock(&self.pending);
+        if let Some(owed) = slot.take() {
+            restore(&*self.clipboard, &owed.session, &owed.saved);
+        }
+    }
+
+    /// Steps 4 and 5: owes `saved` back and has `later` restore it after
+    /// the delay, unless the next dictation did already.
+    fn restore_later(&self, session: SessionMarker, saved: ClipboardSnapshot) {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let due = Instant::now() + self.delay;
+        *lock(&self.pending) = Some(Pending {
+            id,
+            session,
+            saved,
+            due,
+        });
+        let (clipboard, pending) = (Arc::clone(&self.clipboard), Arc::clone(&self.pending));
+        self.later.after(
+            self.delay,
+            Box::new(move || {
+                // Under the lock, so a dictation starting now waits for the
+                // restore before it saves the clipboard.
+                let mut slot = lock(&pending);
+                if slot.as_ref().is_some_and(|owed| owed.id == id)
+                    && let Some(owed) = slot.take()
+                {
+                    restore(&*clipboard, &owed.session, &owed.saved);
+                }
+            }),
+        );
     }
 }
 
@@ -290,11 +476,12 @@ impl<C: Clipboard, K: PasteKeys, S: Settle, P: SecureInputProbe> TextInserter
 /// with [`InsertError::Failed`].
 pub struct SystemInserter {
     #[cfg(target_os = "macos")]
-    inner: PasteInserter<MacPasteboard, MacPasteKeys, ThreadSettle, fn() -> bool>,
+    inner: PasteInserter<MacPasteboard, MacPasteKeys, ThreadLater, fn() -> bool>,
 }
 
 impl SystemInserter {
-    /// The inserter with the [`DEFAULT_SETTLE`] delay.
+    /// The inserter: the restore [`RESTORE_DELAY`] after the chord, on a
+    /// thread of its own.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -302,8 +489,8 @@ impl SystemInserter {
             inner: PasteInserter::new(
                 MacPasteboard::new(),
                 MacPasteKeys::new(),
-                ThreadSettle,
-                DEFAULT_SETTLE,
+                ThreadLater,
+                RESTORE_DELAY,
             )
             .with_secure_input(crate::secure_input::is_secure_input_enabled as fn() -> bool),
         }
@@ -317,6 +504,11 @@ impl Default for SystemInserter {
 }
 
 impl TextInserter for SystemInserter {
+    fn finish(&self) {
+        #[cfg(target_os = "macos")]
+        self.inner.finish();
+    }
+
     fn insert(&self, text: &str) -> Result<(), InsertError> {
         #[cfg(target_os = "macos")]
         {
@@ -531,7 +723,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_paste_restores_at_once_and_reports_the_error() {
+    fn a_failed_paste_keeps_the_transcript_and_reports_the_error() {
         let clipboard = MemClipboard::with_text("old");
         let keys = FakeKeys {
             fail: Some(InsertError::PermissionDenied),
@@ -544,7 +736,11 @@ mod tests {
             settle.waits.lock().unwrap().is_empty(),
             "no settle without a paste"
         );
-        assert_eq!(clipboard.read_text().unwrap().as_deref(), Some("old"));
+        assert_eq!(
+            clipboard.read_text().unwrap().as_deref(),
+            Some("dictated"),
+            "P1: the transcript stays"
+        );
     }
 
     #[test]
@@ -940,5 +1136,334 @@ mod tests {
         let started = std::time::Instant::now();
         ThreadSettle.settle(Duration::from_millis(1));
         assert!(started.elapsed() >= Duration::from_millis(1));
+    }
+
+    // --- P1 round 3: a fixed RESTORE_DELAY on a timer ----------------------
+
+    type Job = (Duration, Box<dyn FnOnce() + Send>);
+
+    /// A fake clock with a timer: [`Later`] jobs wait until the test runs
+    /// the clock past their time. Time starts at 0, when the chord is sent.
+    #[derive(Clone, Default)]
+    struct Timeline {
+        now: Arc<Mutex<Duration>>,
+        jobs: Arc<Mutex<Vec<Job>>>,
+        delays: Arc<Mutex<Vec<Duration>>>,
+    }
+
+    impl Later for Timeline {
+        fn after(&self, delay: Duration, job: Box<dyn FnOnce() + Send>) {
+            let due = *self.now.lock().unwrap() + delay;
+            self.delays.lock().unwrap().push(delay);
+            self.jobs.lock().unwrap().push((due, job));
+        }
+    }
+
+    impl Timeline {
+        /// Runs every job due by `t`, in order, and moves the clock to `t`.
+        fn run_until(&self, t: Duration) {
+            loop {
+                let next = {
+                    let mut jobs = self.jobs.lock().unwrap();
+                    jobs.sort_by_key(|(due, _)| *due);
+                    if jobs.first().is_some_and(|(due, _)| *due <= t) {
+                        Some(jobs.remove(0))
+                    } else {
+                        None
+                    }
+                };
+                let Some((due, job)) = next else { break };
+                *self.now.lock().unwrap() = due;
+                job();
+            }
+            *self.now.lock().unwrap() = t;
+        }
+
+        fn ms(&self, ms: u64) {
+            self.run_until(Duration::from_millis(ms));
+        }
+    }
+
+    const USER: &str = "the user's text";
+    const DICTATED: &str = "dictated words";
+
+    fn timed(
+        clipboard: &MemClipboard,
+        clock: &Timeline,
+    ) -> PasteInserter<MemClipboard, FakeKeys, Timeline> {
+        PasteInserter::new(
+            clipboard.clone(),
+            keys_for(clipboard),
+            clock.clone(),
+            RESTORE_DELAY,
+        )
+    }
+
+    fn text_of(clipboard: &MemClipboard) -> Option<String> {
+        clipboard.read_text().unwrap()
+    }
+
+    // (a) #239: a busy target reads the clipboard 1.2 s after the chord
+    // (later than the ~1070 ms measured): it gets the transcript.
+    #[test]
+    fn a_target_reading_at_1_2_s_gets_the_transcript() {
+        let clipboard = MemClipboard::with_text(USER);
+        let clock = Timeline::default();
+        timed(&clipboard, &clock).insert(DICTATED).unwrap();
+        clock.ms(1200);
+        assert_eq!(text_of(&clipboard).as_deref(), Some(DICTATED));
+    }
+
+    // (b) The user's clipboard comes back RESTORE_DELAY after the chord.
+    #[test]
+    fn the_original_comes_back_at_1_5_s() {
+        assert_eq!(RESTORE_DELAY, Duration::from_millis(1500));
+        let clipboard = MemClipboard::with_text(USER);
+        let clock = Timeline::default();
+        timed(&clipboard, &clock).insert(DICTATED).unwrap();
+        assert_eq!(*clock.delays.lock().unwrap(), [RESTORE_DELAY]);
+        clock.ms(1499);
+        assert_eq!(text_of(&clipboard).as_deref(), Some(DICTATED));
+        clock.ms(1500);
+        assert_eq!(text_of(&clipboard).as_deref(), Some(USER));
+        assert_eq!(clipboard.markers(), ClipboardMarkers::NONE);
+        assert_eq!(clipboard.session(), None);
+    }
+
+    // (c) The user copies at 1.0 s: the restore at 1.5 s leaves it alone.
+    #[test]
+    fn a_copy_at_1_0_s_is_never_overwritten() {
+        let clipboard = MemClipboard::with_text(USER);
+        let clock = Timeline::default();
+        timed(&clipboard, &clock).insert(DICTATED).unwrap();
+        clock.ms(1000);
+        clipboard.user_copies("copied at 1 s");
+        clock.ms(5000);
+        assert_eq!(text_of(&clipboard).as_deref(), Some("copied at 1 s"));
+    }
+
+    // (d) A second dictation at 0.8 s does the first restore before it
+    // saves the clipboard: it saves the user's text, not the first
+    // transcript, and gives that back after its own delay. The first
+    // timer, at 1.5 s, finds nothing owed.
+    #[test]
+    fn a_second_dictation_at_0_8_s_finishes_the_first_restore_then_saves_the_original() {
+        let clipboard = MemClipboard::with_text(USER);
+        let clock = Timeline::default();
+        let flow = timed(&clipboard, &clock);
+        flow.insert("first words").unwrap();
+        clock.ms(800);
+        flow.insert(DICTATED).unwrap();
+        assert_eq!(text_of(&clipboard).as_deref(), Some(DICTATED));
+        clock.ms(1500);
+        assert_eq!(
+            text_of(&clipboard).as_deref(),
+            Some(DICTATED),
+            "first timer: nothing owed"
+        );
+        clock.ms(2300);
+        assert_eq!(text_of(&clipboard).as_deref(), Some(USER));
+        assert_eq!(clipboard.session(), None);
+    }
+
+    // ... and a copy between the two dictations is what the second saves.
+    #[test]
+    fn a_copy_before_the_second_dictation_is_what_it_gives_back() {
+        let clipboard = MemClipboard::with_text(USER);
+        let clock = Timeline::default();
+        let flow = timed(&clipboard, &clock);
+        flow.insert("first words").unwrap();
+        clock.ms(500);
+        clipboard.user_copies("copied between");
+        clock.ms(800);
+        flow.insert(DICTATED).unwrap();
+        clock.ms(5000);
+        assert_eq!(text_of(&clipboard).as_deref(), Some("copied between"));
+    }
+
+    // (e) E1 paste_failed: the chord didn't go out, so the transcript stays
+    // on the clipboard for the user to paste, and no restore is scheduled.
+    #[test]
+    fn a_failed_paste_keeps_the_transcript_on_the_clipboard() {
+        let clipboard = MemClipboard::with_text(USER);
+        let clock = Timeline::default();
+        for error in [
+            InsertError::PermissionDenied,
+            InsertError::Failed("no keys".into()),
+        ] {
+            let flow = PasteInserter::new(
+                clipboard.clone(),
+                FakeKeys {
+                    fail: Some(error.clone()),
+                    ..keys_for(&clipboard)
+                },
+                clock.clone(),
+                RESTORE_DELAY,
+            );
+            assert_eq!(flow.insert(DICTATED), Err(error));
+            clock.ms(10_000);
+            assert_eq!(text_of(&clipboard).as_deref(), Some(DICTATED));
+        }
+        assert!(clock.delays.lock().unwrap().is_empty());
+    }
+
+    // (f) Other apps reading the clipboard before and after the chord (a
+    // clipboard manager, Universal Clipboard) change nothing: the target
+    // still gets the transcript and the original still comes back.
+    #[test]
+    fn other_readers_before_and_after_the_chord_change_nothing() {
+        let inner = MemClipboard::with_text(USER);
+        let reader = inner.clone();
+        let clipboard = HookClipboard {
+            inner: inner.clone(),
+            after_write: Some(Arc::new(move || {
+                let _ = reader.read_text().unwrap();
+            })),
+            ..HookClipboard::default()
+        };
+        let clock = Timeline::default();
+        let keys = keys_for(&inner);
+        PasteInserter::new(clipboard, keys.clone(), clock.clone(), RESTORE_DELAY)
+            .insert(DICTATED)
+            .unwrap();
+        clock.ms(10);
+        let _ = inner.read_text().unwrap();
+        clock.ms(1200);
+        assert_eq!(
+            text_of(&inner).as_deref(),
+            Some(DICTATED),
+            "the slow target's read"
+        );
+        let _ = inner.read_text().unwrap();
+        clock.ms(1500);
+        assert_eq!(text_of(&inner).as_deref(), Some(USER));
+        assert_eq!(*keys.pastes.lock().unwrap(), [Some(DICTATED.to_owned())]);
+    }
+
+    #[test]
+    fn thread_later_runs_the_job_after_the_delay() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let started = std::time::Instant::now();
+        ThreadLater.after(
+            Duration::from_millis(5),
+            Box::new(move || tx.send(started.elapsed()).unwrap()),
+        );
+        let elapsed = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(elapsed >= Duration::from_millis(5));
+    }
+
+    // --- P1 round 4: quitting before the timer --------------------------
+
+    const SHORT: Duration = Duration::from_millis(60);
+
+    /// A flow whose timer never fires on its own (the clock isn't run), as
+    /// when the app exits first, with a short real delay for `finish`.
+    fn quitting(clipboard: &MemClipboard) -> PasteInserter<MemClipboard, FakeKeys, Timeline> {
+        PasteInserter::new(
+            clipboard.clone(),
+            keys_for(clipboard),
+            Timeline::default(),
+            SHORT,
+        )
+    }
+
+    // Codex round 3: Quit right after a paste. `finish` (the app's shutdown
+    // path) waits out the rest of the delay, never restoring earlier, then
+    // gives the user's clipboard back.
+    #[test]
+    fn a_quit_before_the_timer_still_restores_the_original_at_its_time() {
+        let clipboard = MemClipboard::with_text(USER);
+        let flow = quitting(&clipboard);
+        let chord = std::time::Instant::now();
+        flow.insert(DICTATED).unwrap();
+        assert_eq!(text_of(&clipboard).as_deref(), Some(DICTATED));
+        flow.finish();
+        assert!(chord.elapsed() >= SHORT, "not before its time");
+        assert_eq!(text_of(&clipboard).as_deref(), Some(USER));
+        assert_eq!(clipboard.session(), None);
+    }
+
+    // ... and a copy the user made before quitting is kept.
+    #[test]
+    fn a_quit_keeps_a_newer_copy() {
+        let clipboard = MemClipboard::with_text(USER);
+        let flow = quitting(&clipboard);
+        flow.insert(DICTATED).unwrap();
+        clipboard.user_copies("copied before quitting");
+        flow.finish();
+        assert_eq!(
+            text_of(&clipboard).as_deref(),
+            Some("copied before quitting")
+        );
+    }
+
+    // Nothing owed: `finish` returns at once; and no insert after it.
+    #[test]
+    fn finish_with_nothing_owed_returns_at_once_and_closes() {
+        let clipboard = MemClipboard::with_text(USER);
+        let flow = PasteInserter::new(
+            clipboard.clone(),
+            keys_for(&clipboard),
+            Timeline::default(),
+            Duration::from_secs(60),
+        );
+        let started = std::time::Instant::now();
+        flow.finish();
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(matches!(flow.insert(DICTATED), Err(InsertError::Failed(_))));
+        assert_eq!(text_of(&clipboard).as_deref(), Some(USER), "untouched");
+    }
+
+    /// Keys that take a while to send, as a paste in flight at Quit.
+    #[derive(Clone)]
+    struct SlowKeys(FakeKeys);
+
+    impl PasteKeys for SlowKeys {
+        fn paste(&self) -> Result<(), InsertError> {
+            std::thread::sleep(Duration::from_millis(80));
+            self.0.paste()
+        }
+    }
+
+    // A Quit while an insert is still pasting waits for it, then finishes
+    // the restore it owes.
+    #[test]
+    fn a_quit_during_a_paste_waits_for_it_and_restores() {
+        let clipboard = MemClipboard::with_text(USER);
+        let flow = Arc::new(PasteInserter::new(
+            clipboard.clone(),
+            SlowKeys(keys_for(&clipboard)),
+            Timeline::default(),
+            SHORT,
+        ));
+        let pasting = {
+            let flow = Arc::clone(&flow);
+            std::thread::spawn(move || flow.insert(DICTATED))
+        };
+        std::thread::sleep(Duration::from_millis(20));
+        flow.finish();
+        assert_eq!(pasting.join().unwrap(), Ok(()));
+        assert_eq!(text_of(&clipboard).as_deref(), Some(USER));
+    }
+
+    // The timer, if it still runs after `finish`, finds nothing owed.
+    #[test]
+    fn the_timer_after_a_finish_changes_nothing() {
+        let clipboard = MemClipboard::with_text(USER);
+        let clock = Timeline::default();
+        let flow = PasteInserter::new(
+            clipboard.clone(),
+            keys_for(&clipboard),
+            clock.clone(),
+            SHORT,
+        );
+        flow.insert(DICTATED).unwrap();
+        flow.finish();
+        clipboard.user_copies("copied after quitting");
+        clock.ms(10_000);
+        assert_eq!(
+            text_of(&clipboard).as_deref(),
+            Some("copied after quitting")
+        );
     }
 }

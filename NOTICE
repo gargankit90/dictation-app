@@ -49,6 +49,10 @@ Handy (https://github.com/cjpais/Handy), src-tauri/src/input.rs at commit
   layout (crates/platform/src/insert/macos.rs, module `layout`).
   MIT License, Copyright (c) 2025 CJ Pais
 
+Ideas only, no code: Handy (MIT), src-tauri/src/paste_tx/ at commit
+9e57a0d, for keeping a paste's original clipboard pending until it is
+safe to restore and settling it when the next paste starts.
+
 objc2-app-kit, objc2-foundation, objc2-core-graphics
 (https://github.com/madsmtm/objc2)
   NSPasteboard access and the paste key events

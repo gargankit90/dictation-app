@@ -1,7 +1,7 @@
 //! [`SystemMicrophone`]: this OS's microphone behind one name, so callers
 //! (the Tauri shell) need no `cfg(target_os)` of their own.
 
-use dictation_ports::{Audio, AudioError, AudioSource};
+use dictation_ports::{Audio, AudioError, AudioSource, LevelMeter};
 
 /// The microphone on this OS: [`MacMicrophone`](super::MacMicrophone) on
 /// macOS. Where there's no adapter yet (Windows, Linux),
@@ -58,6 +58,17 @@ impl AudioSource for SystemMicrophone {
             false
         }
     }
+
+    fn level_meter(&self) -> Option<LevelMeter> {
+        #[cfg(target_os = "macos")]
+        {
+            self.inner.level_meter()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
 }
 
 #[cfg(all(test, not(target_os = "macos")))]
@@ -71,5 +82,6 @@ mod tests {
         assert_eq!(mic.stop(), Err(AudioError::NotRecording));
         mic.discard();
         assert!(!mic.is_recording());
+        assert!(mic.level_meter().is_none());
     }
 }

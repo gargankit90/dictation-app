@@ -16,8 +16,7 @@ export const commands = {
 	 */
 	getSettings: () => typedError<Settings_Serialize, string>(__TAURI_INVOKE("get_settings")),
 	/**
-	 *  Validates and saves the settings, applies the launch-at-login choice to
-	 *  the OS and switches to the saved hotkey. An error means something didn't
+	 *  Validates and saves the settings and switches to the saved hotkey. An error means something didn't
 	 *  take effect; its text says what was saved and what wasn't.
 	 * 
 	 *  The "share anonymous usage events" field of `settings` is ignored: the
@@ -25,7 +24,8 @@ export const commands = {
 	 *  [`set_share_usage_events`] changes it, so a Save can never undo a newer
 	 *  opt-out (A1 review, round 1). The same goes for the hotkey, which only
 	 *  [`set_hotkey`] changes (K1 review, round 1): a form loaded before the key
-	 *  was recorded can't switch it back.
+	 *  was recorded can't switch it back, and for `launch_at_login`, which only
+	 *  [`set_launch_at_login`] changes (S1).
 	 */
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, string>(__TAURI_INVOKE("save_settings", { settings })),
 	/**  Stores `key` as `provider`'s API key in the keychain. Write-only. */
@@ -94,6 +94,17 @@ export const commands = {
 	 */
 	setHotkeyRecording: (recording: boolean) => typedError<null, string>(__TAURI_INVOKE("set_hotkey_recording", { recording })),
 	/**
+	 *  Turns launch at login on or off, and nothing else. It returns at once
+	 *  with the OS's answer for the latest choice: the OS can take 40 s to
+	 *  unregister the login item (#238), so the window must not wait on it and
+	 *  Settings shows "Applying…" until this resolves. The change runs on a
+	 *  thread of its own, one at a time; if the user toggles again meanwhile,
+	 *  every call resolves with the outcome of the last choice. The result is
+	 *  whether the app starts at login now; an error says why not, and what to
+	 *  do (the user may have to approve it in System Settings).
+	 */
+	setLaunchAtLogin: (enabled: boolean) => typedError<boolean, string>(__TAURI_INVOKE("set_launch_at_login", { enabled })),
+	/**
 	 *  The live checks. Reads permissions and the key; records nothing and
 	 *  contacts nobody.
 	 */
@@ -131,6 +142,13 @@ export const commands = {
 	 *  saved key. `None` on every other launch.
 	 */
 	launchNotice: () => typedError<string | null, string>(__TAURI_INVOKE("launch_notice")),
+	/**
+	 *  The newest input level, in dBFS, for the overlay's meter; silence when
+	 *  nothing records. Only the overlay window may call it
+	 *  (`capabilities/overlay.json`), and it returns a number only. Never
+	 *  blocks: one atomic read.
+	 */
+	getOverlayLevel: () => __TAURI_INVOKE<number | null>("get_overlay_level"),
 };
 
 /* Types */

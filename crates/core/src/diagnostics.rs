@@ -222,7 +222,7 @@ const TABLE: [CodeInfo; 17] = [
     row(
         ErrorCode::PasteFailed,
         "The text couldn't be pasted.",
-        "Check Accessibility in System Settings, then dictate again.",
+        "It's on the clipboard: press ⌘V. If it keeps happening, check Accessibility.",
         FixAction::OpenAccessibilitySettings,
     ),
     row(
@@ -489,8 +489,18 @@ mod tests {
     fn every_user_facing_sentence_names_a_fix_and_no_code() {
         // How a next step starts: an instruction a person can follow.
         let verbs = [
-            "Allow", "Add", "Open", "Unlock", "Check", "Download", "Pick", "Wait", "Try", "Speak",
+            "Allow",
+            "Add",
+            "Open",
+            "Unlock",
+            "Check",
+            "Download",
+            "Pick",
+            "Wait",
+            "Try",
+            "Speak",
             "Click",
+            "It's on the clipboard",
         ];
         for code in ErrorCode::ALL {
             let info = code.info();

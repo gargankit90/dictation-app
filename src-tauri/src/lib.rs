@@ -28,7 +28,8 @@
 //! close button hides it instead of destroying it, so the tray can show it
 //! again.
 //!
-//! M5.1: the `overlay` window shows Recording, Transcribing and errors
+//! M5.1, U4: the `overlay` window (the recording pill) shows Listening with
+//! a level meter, No sound, Transcribing, Paste sent and errors
 //! without taking focus ([`overlay`]).
 //!
 //! M5.2: onboarding. The settings window shows the first-run steps
@@ -443,9 +444,14 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         Pipeline::spawn_with_cursor(ports, cursor, Config::default())
     })
     .context("could not start the pipeline")?;
+    // The input level for the overlay's meter (U4).
+    let levels = pipeline.levels();
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
     app.manage(commands::AppConfig(Arc::clone(&config)));
-    app.manage(commands::LoginItem(Arc::new(SystemLaunchAtLogin::new())));
+    app.manage(commands::LoginItem::new(
+        Arc::new(SystemLaunchAtLogin::new()),
+        Arc::clone(&config),
+    ));
     let app_name = app
         .config()
         .product_name
@@ -472,7 +478,11 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         tracing::error!(%error, "could not start reading the API key");
     }
     // Dictation still works without the overlay.
-    let overlay = overlay::start(app.handle())
+    // The overlay's meter reads the newest level (U4); managed before the
+    // window exists, so the command always finds it.
+    let overlay_level = overlay::OverlayLevel::default();
+    app.manage(overlay_level.clone());
+    let overlay = overlay::start(app.handle(), levels, &overlay_level)
         .inspect_err(|error| tracing::error!(%error, "could not create the overlay"))
         .ok();
     let diagnostics = diagnostics::Diagnostics::default();

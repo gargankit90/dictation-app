@@ -29,7 +29,7 @@ use dictation_core::onboarding::Step;
 use dictation_core::settings::{Provider, Settings};
 use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, UndoFailed};
-use dictation_pipeline::launch::{self, LaunchProblem, NotRestored};
+use dictation_pipeline::launch::LoginSync;
 use dictation_platform::secrets::KeychainSecretStore;
 use dictation_ports::{LaunchAtLogin, SecretStore, TranscribeError};
 use dictation_transcribe::check_key::check_key;
@@ -47,8 +47,42 @@ pub const BINDINGS_PATH: &str = "../src/bindings.ts";
 /// The settings file and keys the commands use.
 pub struct AppConfig(pub Arc<Config<KeychainSecretStore>>);
 
-/// The OS's login item for the launch-at-login setting (M5.3).
-pub struct LoginItem(pub Arc<dyn LaunchAtLogin>);
+/// The OS's login item for the launch-at-login setting (M5.3), and the
+/// thread that changes it, so no save waits for the OS (S1, #238).
+pub struct LoginItem {
+    /// For reading the OS's state.
+    pub login: Arc<dyn LaunchAtLogin>,
+    /// Changes it, off the caller's thread, the latest choice winning.
+    pub sync: LoginSync,
+}
+
+impl LoginItem {
+    /// Changes of the login item are stored in `config`'s settings file once
+    /// the OS has answered.
+    pub fn new<S: SecretStore + 'static>(
+        login: Arc<dyn LaunchAtLogin>,
+        config: Arc<Config<S>>,
+    ) -> Self {
+        let sync = LoginSync::new(Arc::clone(&login), move |outcome| {
+            store_launch_at_login(&config, outcome.enabled).map_err(|error| error.to_string())
+        });
+        Self { login, sync }
+    }
+}
+
+/// Stores what the OS ended up with as the launch-at-login setting.
+fn store_launch_at_login<S: SecretStore>(
+    config: &Config<S>,
+    enabled: bool,
+) -> Result<(), ConfigError> {
+    let _writing = settings_write();
+    let mut settings = config.settings()?;
+    if settings.launch_at_login != enabled {
+        settings.launch_at_login = enabled;
+        config.save_settings(&settings)?;
+    }
+    Ok(())
+}
 
 /// The running hotkey, which saving the settings switches (T2).
 pub struct ActiveHotkey(pub HotkeyControl);
@@ -107,22 +141,19 @@ pub async fn get_settings(
     login: State<'_, LoginItem>,
     hotkey: State<'_, ActiveHotkey>,
 ) -> Result<Settings, String> {
-    let login = Arc::clone(&login.0);
     let hotkey = hotkey.0.clone();
-    on_config(&state, move |config| {
-        read_settings(config, &*login, &hotkey)
-    })
-    .await
+    let login = login.sync.clone();
+    on_config(&state, move |config| read_settings(config, &login, &hotkey)).await
 }
 
 /// What Settings shows: the file, with the login item and the hotkey as
 /// they really are.
 fn read_settings<S: SecretStore>(
     config: &Config<S>,
-    login: &dyn LaunchAtLogin,
+    login: &LoginSync,
     hotkey: &HotkeyControl,
 ) -> Result<Settings, ConfigError> {
-    let saved = launch::with_os_state(login, config.settings()?);
+    let saved = login.shown(config.settings()?);
     Ok(hotkey_setting::with_active(hotkey.spec(), saved))
 }
 
@@ -130,8 +161,6 @@ fn read_settings<S: SecretStore>(
 /// take effect.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Saved {
-    /// Why the login item didn't change as asked, if it didn't.
-    launch: Option<LaunchProblem>,
     /// What happened to the hotkey.
     hotkey: HotkeyChange,
 }
@@ -139,12 +168,7 @@ struct Saved {
 impl Saved {
     /// What to tell the user instead of a plain "saved", if anything.
     fn problem(&self) -> Option<String> {
-        let problems: Vec<String> = self
-            .launch
-            .iter()
-            .map(ToString::to_string)
-            .chain(self.hotkey.problem())
-            .collect();
+        let problems: Vec<String> = self.hotkey.problem().into_iter().collect();
         (!problems.is_empty()).then(|| problems.join(" "))
     }
 }
@@ -156,8 +180,6 @@ struct SaveFailed {
     cause: ConfigError,
     /// The hotkey switched for the save that couldn't be switched back.
     hotkey: Option<Box<UndoFailed>>,
-    /// The login item changed for the save that couldn't be put back.
-    login: Option<Box<NotRestored>>,
 }
 
 impl From<ConfigError> for SaveFailed {
@@ -165,7 +187,6 @@ impl From<ConfigError> for SaveFailed {
         Self {
             cause,
             hotkey: None,
-            login: None,
         }
     }
 }
@@ -175,42 +196,36 @@ impl From<ConfigError> for SaveFailed {
 impl std::fmt::Display for SaveFailed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.cause)?;
-        if self.hotkey.is_some() || self.login.is_some() {
+        if self.hotkey.is_some() {
             f.write_str(". Your settings weren't saved.")?;
         }
         if let Some(hotkey) = &self.hotkey {
             write!(f, " {hotkey}")?;
         }
-        if let Some(login) = &self.login {
-            write!(f, " {login}")?;
-        }
         Ok(())
     }
 }
 
-/// Saves the settings: they are checked first, then the login item is
-/// changed, then the hotkey, then the file is written with whatever the OS
-/// and the hotkey ended up with, then the engine is rebuilt.
+/// Saves the settings: they are checked first, then the hotkey is
+/// switched, then the file is written with whatever the hotkey ended up with,
+/// then the engine is rebuilt. Never touches the login item, which can take
+/// the OS 40 s to change (S1, #238): `launch_at_login` has its own command,
+/// [`set_launch_at_login`], and the stored value is kept here.
 ///
-/// Invalid settings change nothing, neither the login item nor the hotkey
-/// (T3, #121). If the login item or the hotkey couldn't be changed,
-/// everything else is still saved and [`Saved`] says why (and what to do,
-/// if the user has to approve something). If the file can't be written,
-/// both are put back (T2, T3 #121): a hotkey switched for it is switched
-/// back, so the hotkey listening is the one in the file, and the login item
-/// is restored, so the OS and the file still agree on the old choice. The
-/// error starts with the file's; if either can't be put back, it goes on to
-/// say the settings weren't saved and which hotkey works and where the login
-/// item is now (T3 round 2), and Settings reads both back as they really
-/// are ([`read_settings`]).
+/// Invalid settings change nothing, not even the hotkey (T3, #121). If the
+/// hotkey couldn't be changed, everything else is still saved and [`Saved`]
+/// says why. If the file can't be written, a hotkey switched for it is
+/// switched back (T2), so the hotkey listening is the one in the file. The
+/// error starts with the file's; if the hotkey can't be put back, it goes on
+/// to say the settings weren't saved and which hotkey works (T3 round 2),
+/// and Settings reads it back as it really is ([`read_settings`]).
 fn save_with_login<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
-    login: &dyn LaunchAtLogin,
     hotkey: &HotkeyControl,
     settings: Settings,
 ) -> Result<Saved, SaveFailed> {
-    save_with(config, live, login, hotkey, settings, Config::save_settings)
+    save_with(config, live, hotkey, settings, Config::save_settings)
 }
 
 /// [`save_with_login`] with the file write passed in, so tests can make it
@@ -218,26 +233,29 @@ fn save_with_login<S: SecretStore + 'static>(
 fn save_with<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
-    login: &dyn LaunchAtLogin,
     hotkey: &HotkeyControl,
     mut settings: Settings,
     write: impl FnOnce(&Config<S>, &Settings) -> Result<(), ConfigError>,
 ) -> Result<Saved, SaveFailed> {
+    let started = std::time::Instant::now();
+    let lap = |what: &str| {
+        tracing::info!(
+            elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            "save_settings: {what}"
+        );
+    };
     settings.validate().map_err(ConfigError::from)?;
-    let before = login.state().ok();
-    let launch = launch::apply(login, &mut settings).err();
     let change = hotkey_setting::apply(hotkey, &mut settings);
-    if let Err(cause) = engine::changed(config, live, |config| write(config, &settings)) {
+    lap("hotkey applied");
+    let written = engine::changed(config, live, |config| write(config, &settings));
+    lap("file written and engine rebuilt");
+    if let Err(cause) = written {
         return Err(SaveFailed {
             cause,
             hotkey: change.undo(hotkey).err().map(Box::new),
-            login: launch::restore_or_report(login, before).err().map(Box::new),
         });
     }
-    Ok(Saved {
-        launch,
-        hotkey: change,
-    })
+    Ok(Saved { hotkey: change })
 }
 
 /// Held while the settings file is read and written by a command, so a save
@@ -251,8 +269,7 @@ fn settings_write() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Validates and saves the settings, applies the launch-at-login choice to
-/// the OS and switches to the saved hotkey. An error means something didn't
+/// Validates and saves the settings and switches to the saved hotkey. An error means something didn't
 /// take effect; its text says what was saved and what wasn't.
 ///
 /// The "share anonymous usage events" field of `settings` is ignored: the
@@ -260,22 +277,21 @@ fn settings_write() -> std::sync::MutexGuard<'static, ()> {
 /// [`set_share_usage_events`] changes it, so a Save can never undo a newer
 /// opt-out (A1 review, round 1). The same goes for the hotkey, which only
 /// [`set_hotkey`] changes (K1 review, round 1): a form loaded before the key
-/// was recorded can't switch it back.
+/// was recorded can't switch it back, and for `launch_at_login`, which only
+/// [`set_launch_at_login`] changes (S1).
 #[tauri::command]
 #[specta::specta]
 pub async fn save_settings(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
-    login: State<'_, LoginItem>,
     hotkey: State<'_, ActiveHotkey>,
     usage: State<'_, Usage>,
     settings: Settings,
 ) -> Result<(), String> {
     let live = engine.inner().clone();
-    let login = Arc::clone(&login.0);
     let hotkey = hotkey.0.clone();
     let (change, saved) = on_config(&state, move |config| {
-        save_keeping_sharing(config, &live, &*login, &hotkey, settings)
+        save_keeping_sharing(config, &live, &hotkey, settings)
     })
     .await?;
     // Usage events: names of what changed, never values (A1).
@@ -290,7 +306,6 @@ pub async fn save_settings(
 fn save_keeping_sharing<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
-    login: &dyn LaunchAtLogin,
     hotkey: &HotkeyControl,
     mut settings: Settings,
 ) -> Result<(Option<usage::SettingsChange>, Saved), SaveFailed> {
@@ -298,9 +313,10 @@ fn save_keeping_sharing<S: SecretStore + 'static>(
     let before = config.settings().ok();
     if let Some(before) = &before {
         settings.share_usage_events = before.share_usage_events;
+        settings.launch_at_login = before.launch_at_login;
         settings.hotkey.clone_from(&before.hotkey);
     }
-    save_locked(config, live, login, hotkey, settings, before)
+    save_locked(config, live, hotkey, settings, before)
 }
 
 /// Like [`save_keeping_sharing`], but `hotkey` is the key to switch to and
@@ -309,7 +325,6 @@ fn save_keeping_sharing<S: SecretStore + 'static>(
 fn write_hotkey<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
-    login: &dyn LaunchAtLogin,
     control: &HotkeyControl,
     hotkey: &str,
 ) -> Result<(Option<usage::SettingsChange>, Saved), SaveFailed> {
@@ -317,20 +332,19 @@ fn write_hotkey<S: SecretStore + 'static>(
     let before = config.settings()?;
     let mut settings = before.clone();
     hotkey.clone_into(&mut settings.hotkey);
-    save_locked(config, live, login, control, settings, Some(before))
+    save_locked(config, live, control, settings, Some(before))
 }
 
 /// The save, with [`settings_write`] already held by the caller.
 fn save_locked<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
-    login: &dyn LaunchAtLogin,
     hotkey: &HotkeyControl,
     settings: Settings,
     before: Option<Settings>,
 ) -> Result<(Option<usage::SettingsChange>, Saved), SaveFailed> {
     let after = settings.clone();
-    let saved = save_with_login(config, live, login, hotkey, settings)?;
+    let saved = save_with_login(config, live, hotkey, settings)?;
     Ok((
         before.map(|before| usage::settings_change(&before, &after)),
         saved,
@@ -352,16 +366,14 @@ const RECORDING_LEASE: std::time::Duration = std::time::Duration::from_secs(30);
 pub async fn set_hotkey(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
-    login: State<'_, LoginItem>,
     hotkey: State<'_, ActiveHotkey>,
     usage: State<'_, Usage>,
     spec: String,
 ) -> Result<(), String> {
     let live = engine.inner().clone();
-    let login = Arc::clone(&login.0);
     let control = hotkey.0.clone();
     let result = on_config(&state, move |config| {
-        write_hotkey(config, &live, &*login, &control, &spec)
+        write_hotkey(config, &live, &control, &spec)
     })
     .await;
     let (change, saved) = result?;
@@ -369,6 +381,31 @@ pub async fn set_hotkey(
         usage::settings_saved(&usage, change);
     }
     saved.problem().map_or(Ok(()), Err)
+}
+
+/// Turns launch at login on or off, and nothing else. It returns at once
+/// with the OS's answer for the latest choice: the OS can take 40 s to
+/// unregister the login item (#238), so the window must not wait on it and
+/// Settings shows "Applying…" until this resolves. The change runs on a
+/// thread of its own, one at a time; if the user toggles again meanwhile,
+/// every call resolves with the outcome of the last choice. The result is
+/// whether the app starts at login now; an error says why not, and what to
+/// do (the user may have to approve it in System Settings).
+#[tauri::command]
+#[specta::specta]
+pub async fn set_launch_at_login(
+    login: State<'_, LoginItem>,
+    enabled: bool,
+) -> Result<bool, String> {
+    let outcome = login
+        .sync
+        .request(enabled)
+        .await
+        .map_err(|_| "the login item task crashed".to_owned())?;
+    match outcome.problem {
+        Some(problem) => Err(problem.to_string()),
+        None => Ok(outcome.enabled),
+    }
 }
 
 /// While the user is choosing a new dictation key, pressing the current one
@@ -803,6 +840,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         set_share_usage_events,
         set_hotkey,
         set_hotkey_recording,
+        set_launch_at_login,
         crate::diagnostics::run_checks,
         crate::diagnostics::test_connection,
         crate::diagnostics::build_report,
@@ -811,6 +849,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::take_troubleshoot_request,
         crate::diagnostics::dictation_progress,
         launch_notice,
+        crate::overlay::get_overlay_level,
     ])
 }
 
@@ -905,6 +944,7 @@ mod tests {
             "setShareUsageEvents",
             "setHotkey",
             "setHotkeyRecording",
+            "setLaunchAtLogin",
             "runChecks",
             "testConnection",
             "buildReport",
@@ -921,7 +961,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 25,
+            commands, 26,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1038,7 +1078,7 @@ mod tests {
 
     /// A1 review, round 1: the sharing choice has one writer.
     mod sharing {
-        use dictation_platform::fakes::{FakeLaunchAtLogin, MemSecretStore};
+        use dictation_platform::fakes::MemSecretStore;
 
         use super::super::*;
         use super::hotkey::listening;
@@ -1087,14 +1127,8 @@ mod tests {
                 language: Some("fr".into()),
                 ..Settings::default()
             };
-            let (change, _) = save_keeping_sharing(
-                &config,
-                &LiveEngine::fixed(),
-                &FakeLaunchAtLogin::new(),
-                &hotkey,
-                stale,
-            )
-            .unwrap();
+            let (change, _) =
+                save_keeping_sharing(&config, &LiveEngine::fixed(), &hotkey, stale).unwrap();
             let saved = config.settings().unwrap();
             assert!(!saved.share_usage_events, "the opt-out was undone");
             assert_eq!(saved.language.as_deref(), Some("fr"), "the rest saved");
@@ -1110,14 +1144,7 @@ mod tests {
                 share_usage_events: false,
                 ..Settings::default()
             };
-            save_keeping_sharing(
-                &config,
-                &LiveEngine::fixed(),
-                &FakeLaunchAtLogin::new(),
-                &hotkey,
-                off,
-            )
-            .unwrap();
+            save_keeping_sharing(&config, &LiveEngine::fixed(), &hotkey, off).unwrap();
             assert!(stored(&config), "the stored choice (on) stays");
             let _ = std::fs::remove_dir_all(dir);
         }
@@ -1126,7 +1153,7 @@ mod tests {
     /// K1: the dictation key has one writer, `set_hotkey`; the form's save
     /// keeps the stored key, so neither can undo the other.
     mod recorded_hotkey {
-        use dictation_platform::fakes::{FakeLaunchAtLogin, MemSecretStore};
+        use dictation_platform::fakes::MemSecretStore;
 
         use super::super::*;
         use super::hotkey::listening;
@@ -1148,14 +1175,8 @@ mod tests {
                     ..Settings::default()
                 })
                 .unwrap();
-            let (_, saved) = write_hotkey(
-                &config,
-                &LiveEngine::fixed(),
-                &FakeLaunchAtLogin::new(),
-                &hotkey,
-                "RightCmd",
-            )
-            .unwrap();
+            let (_, saved) =
+                write_hotkey(&config, &LiveEngine::fixed(), &hotkey, "RightCmd").unwrap();
             assert_eq!(saved.problem(), None);
             let stored = config.settings().unwrap();
             assert_eq!(stored.hotkey, "RightCmd");
@@ -1170,14 +1191,14 @@ mod tests {
         fn a_save_with_a_stale_hotkey_keeps_the_recorded_one() {
             let (config, dir) = config("k1-stale-key");
             let (hotkey, _keys) = listening();
-            let (login, live) = (FakeLaunchAtLogin::new(), LiveEngine::fixed());
-            write_hotkey(&config, &live, &login, &hotkey, "RightCmd").unwrap();
+            let live = LiveEngine::fixed();
+            write_hotkey(&config, &live, &hotkey, "RightCmd").unwrap();
             let stale = Settings {
                 hotkey: "RightAlt".into(),
                 language: Some("fr".into()),
                 ..Settings::default()
             };
-            save_keeping_sharing(&config, &live, &login, &hotkey, stale).unwrap();
+            save_keeping_sharing(&config, &live, &hotkey, stale).unwrap();
             let stored = config.settings().unwrap();
             assert_eq!(stored.hotkey, "RightCmd", "the recorded key was undone");
             assert_eq!(stored.language.as_deref(), Some("fr"), "the rest saved");
@@ -1189,13 +1210,7 @@ mod tests {
         fn a_key_that_cannot_work_is_refused_and_the_old_one_stays() {
             let (config, dir) = config("k1-refused");
             let (hotkey, _keys) = listening();
-            let result = write_hotkey(
-                &config,
-                &LiveEngine::fixed(),
-                &FakeLaunchAtLogin::new(),
-                &hotkey,
-                "Escape",
-            );
+            let result = write_hotkey(&config, &LiveEngine::fixed(), &hotkey, "Escape");
             assert!(result.is_err());
             assert_eq!(config.settings().unwrap().hotkey, "RightAlt");
             assert_eq!(hotkey.spec(), "RightAlt".parse().unwrap());
@@ -1204,6 +1219,8 @@ mod tests {
     }
 
     mod launch_at_login {
+        use std::time::{Duration, Instant};
+
         use dictation_platform::fakes::{FakeLaunchAtLogin, MemSecretStore};
         use dictation_ports::LaunchAtLoginState;
 
@@ -1228,60 +1245,155 @@ mod tests {
             }
         }
 
+        /// S1 (#238): a save never waits for the login item, even while the
+        /// OS takes its time, and the answer arrives apart from it.
         #[test]
-        fn saving_applies_the_choice_to_the_os_and_the_file_keeps_the_result() {
+        fn saving_does_not_wait_for_a_slow_login_item() {
             let (config, dir) = config();
-            let login = FakeLaunchAtLogin::new();
-            let live = LiveEngine::fixed();
+            let fake = FakeLaunchAtLogin::new();
+            fake.set_state(LaunchAtLoginState::Enabled);
+            fake.delay_changes(Duration::from_millis(1500));
+            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
             let (hotkey, _) = listening();
-            let saved = save_with_login(&config, &live, &login, &hotkey, on()).unwrap();
-            assert_eq!(saved.problem(), None);
-            assert_eq!(login.state(), Ok(LaunchAtLoginState::Enabled));
-            assert!(config.settings().unwrap().launch_at_login);
 
-            // The user turns it off in System Settings; the screen shows
-            // that, and saving something else doesn't turn it back on.
-            login.set_state(LaunchAtLoginState::Disabled);
-            let shown = launch::with_os_state(&login, config.settings().unwrap());
-            assert!(!shown.launch_at_login);
-            assert_eq!(
-                save_with_login(&config, &live, &login, &hotkey, shown)
-                    .unwrap()
-                    .problem(),
-                None
-            );
-            assert!(!config.settings().unwrap().launch_at_login);
-            assert_eq!(login.calls(), [true]);
-            let _ = std::fs::remove_dir_all(dir);
-        }
-
-        #[test]
-        fn a_refused_login_item_still_saves_the_other_settings() {
-            let (config, dir) = config();
-            let login = FakeLaunchAtLogin::new();
-            login.enabling_gives(LaunchAtLoginState::RequiresApproval);
+            let answer = item.sync.request(false);
+            let started = Instant::now();
             let settings = Settings {
                 language: Some("de".into()),
-                ..on()
+                launch_at_login: false,
+                ..Settings::default()
             };
-            let (hotkey, _) = listening();
-            let saved =
-                save_with_login(&config, &LiveEngine::fixed(), &login, &hotkey, settings).unwrap();
-            assert_eq!(saved.launch, Some(LaunchProblem::NeedsApproval));
-            assert_eq!(
-                saved.problem(),
-                Some(LaunchProblem::NeedsApproval.to_string())
+            let saved = save_keeping_sharing(&config, &LiveEngine::fixed(), &hotkey, settings);
+            assert_eq!(saved.unwrap().1.problem(), None);
+            assert!(
+                started.elapsed() < Duration::from_millis(1000),
+                "the save waited {:?}",
+                started.elapsed()
             );
-            let saved = config.settings().unwrap();
-            assert_eq!(saved.language.as_deref(), Some("de"));
-            assert!(!saved.launch_at_login, "not claimed as on");
+            assert_eq!(config.settings().unwrap().language.as_deref(), Some("de"));
+            // The OS is still working.
+            assert_eq!(item.sync.pending(), Some(false));
+            assert_eq!(fake.state(), Ok(LaunchAtLoginState::Enabled));
+
+            let outcome = tauri::async_runtime::block_on(answer).unwrap();
+            assert!(!outcome.enabled && outcome.problem.is_none());
+            assert_eq!(fake.state(), Ok(LaunchAtLoginState::Disabled));
+            assert!(!config.settings().unwrap().launch_at_login, "stored");
             let _ = std::fs::remove_dir_all(dir);
         }
 
-        /// #121: a save the settings refuse never reaches the OS or the
-        /// hotkey, including a typo the form's own hotkey check lets through.
+        /// The form's `launch_at_login` is ignored by a save, like the
+        /// sharing choice: a form loaded before the box changed can't undo it.
         #[test]
-        fn invalid_settings_never_change_login_item() {
+        fn saving_keeps_the_stored_choice_and_leaves_the_os_alone() {
+            let (config, dir) = config();
+            let fake = FakeLaunchAtLogin::new();
+            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
+            let (hotkey, _) = listening();
+            tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
+            assert!(config.settings().unwrap().launch_at_login);
+
+            // A stale form says off; saving other things must keep it on.
+            save_keeping_sharing(
+                &config,
+                &LiveEngine::fixed(),
+                &hotkey,
+                Settings {
+                    language: Some("fr".into()),
+                    launch_at_login: false,
+                    ..Settings::default()
+                },
+            )
+            .unwrap();
+            let saved = config.settings().unwrap();
+            assert!(saved.launch_at_login);
+            assert_eq!(saved.language.as_deref(), Some("fr"));
+            assert_eq!(fake.calls(), [true], "the save never touched the OS");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// The screen shows the OS's state, so a change made in System
+        /// Settings shows even though the file still says otherwise.
+        #[test]
+        fn the_screen_follows_the_os_after_a_change_outside_the_app() {
+            let (config, dir) = config();
+            let fake = FakeLaunchAtLogin::new();
+            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
+            tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
+            fake.set_state(LaunchAtLoginState::Disabled);
+            let (hotkey, _) = listening();
+            let shown = read_settings(&config, &item.sync, &hotkey).unwrap();
+            assert!(!shown.launch_at_login);
+            // Asking for it on again does reach the OS, whatever the file says.
+            let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
+            assert!(outcome.enabled);
+            assert_eq!(fake.calls(), [true, true]);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// Toggled again while the first change is pending: the file and the
+        /// OS both end on the last choice.
+        #[test]
+        fn the_file_and_the_os_agree_on_the_last_choice() {
+            let (config, dir) = config();
+            let fake = FakeLaunchAtLogin::new();
+            fake.delay_changes(Duration::from_millis(300));
+            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
+            let first = item.sync.request(true);
+            std::thread::sleep(Duration::from_millis(50));
+            let second = item.sync.request(false);
+            let (first, second) =
+                tauri::async_runtime::block_on(async { (first.await, second.await) });
+            assert_eq!(first.unwrap(), second.unwrap());
+            assert_eq!(fake.state(), Ok(LaunchAtLoginState::Disabled));
+            assert!(!config.settings().unwrap().launch_at_login);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// S1 review, R2: an unwritable settings file after the OS changed is
+        /// an error the user sees, the OS result is kept, and a later change
+        /// stores again.
+        #[test]
+        fn a_settings_file_that_cannot_be_written_is_reported() {
+            let (config, dir) = config();
+            let _ = std::fs::remove_dir_all(&dir);
+            // A file where the settings directory should be.
+            std::fs::write(&dir, "not a directory").unwrap();
+            let fake = FakeLaunchAtLogin::new();
+            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
+            let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
+            assert!(outcome.enabled);
+            assert_eq!(fake.state(), Ok(LaunchAtLoginState::Enabled));
+            let text = outcome.problem.unwrap().to_string();
+            assert!(text.contains("Vocet couldn't save that setting"), "{text}");
+            assert!(text.contains("see Troubleshoot"), "{text}");
+            let _ = std::fs::remove_file(&dir);
+            let again = tauri::async_runtime::block_on(item.sync.request(false)).unwrap();
+            assert!(again.problem.is_none(), "{again:?}");
+            assert!(!config.settings().unwrap().launch_at_login);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// A refusal stores what the OS really has, and says why.
+        #[test]
+        fn a_refused_change_stores_the_real_state() {
+            let (config, dir) = config();
+            let fake = FakeLaunchAtLogin::new();
+            fake.enabling_gives(LaunchAtLoginState::RequiresApproval);
+            let item = LoginItem::new(Arc::new(fake), Arc::clone(&config));
+            let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
+            assert_eq!(
+                outcome.problem,
+                Some(dictation_pipeline::launch::LaunchProblem::NeedsApproval)
+            );
+            assert!(!config.settings().is_ok_and(|saved| saved.launch_at_login));
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// #121: a save the settings refuse never reaches the hotkey,
+        /// including a typo the form's own hotkey check lets through.
+        #[test]
+        fn invalid_settings_never_change_the_hotkey() {
             for bad in [
                 Settings {
                     model: String::new(),
@@ -1299,149 +1411,47 @@ mod tests {
                 },
             ] {
                 let (config, dir) = config();
-                let login = FakeLaunchAtLogin::new();
                 let (hotkey, keys) = listening();
-                let error =
-                    save_with_login(&config, &LiveEngine::fixed(), &login, &hotkey, bad.clone())
-                        .unwrap_err();
+                let error = save_with_login(&config, &LiveEngine::fixed(), &hotkey, bad.clone())
+                    .unwrap_err();
                 assert!(matches!(error.cause, ConfigError::Settings(_)), "{error}");
-                assert!(login.calls().is_empty(), "{bad:?} reached the OS");
                 assert_eq!(hotkey.spec(), HotkeySpec::default(), "{bad:?} switched");
                 assert!(!keys.listening("F6"), "{bad:?} started the new hotkey");
                 assert!(keys.listening("RightAlt"));
-                assert_eq!(login.state(), Ok(LaunchAtLoginState::Disabled));
                 assert!(!config.path().exists(), "nothing written");
                 let _ = std::fs::remove_dir_all(dir);
             }
         }
 
-        /// A login item that turns on fine, then refuses to change again.
-        struct OnceLogin(FakeLaunchAtLogin);
-
-        impl LaunchAtLogin for OnceLogin {
-            fn state(&self) -> Result<LaunchAtLoginState, dictation_ports::LaunchAtLoginError> {
-                self.0.state()
-            }
-
-            fn set_enabled(
-                &self,
-                enabled: bool,
-            ) -> Result<(), dictation_ports::LaunchAtLoginError> {
-                if self.0.calls().is_empty() {
-                    self.0.set_enabled(enabled)
-                } else {
-                    Err(dictation_ports::LaunchAtLoginError::Os("refused".into()))
-                }
-            }
-        }
-
-        /// #121: the OS accepted the change and the hotkey switched, but the
-        /// file couldn't be written. Both are put back, so neither the error
-        /// nor what the form shows next claims the save worked; if the login
-        /// item can't be put back, the error is still the file's and the
-        /// form shows what the OS has.
+        /// #121: the hotkey switched but the file couldn't be written: it is
+        /// switched back, so the error doesn't claim the save worked.
         #[test]
-        fn failed_settings_write_reports_actual_login_state() {
+        fn failed_settings_write_puts_the_hotkey_back() {
             let (config, dir) = config();
             let _ = std::fs::remove_dir_all(&dir);
             // A file where the settings directory should be.
             std::fs::write(&dir, "not a directory").unwrap();
-            let both = || Settings {
+            let both = Settings {
                 hotkey: "F6".into(),
                 ..on()
             };
-
-            let login = FakeLaunchAtLogin::new();
             let (hotkey, keys) = listening();
-            let error = save_with_login(&config, &LiveEngine::fixed(), &login, &hotkey, both())
-                .unwrap_err();
+            let error = save_with_login(&config, &LiveEngine::fixed(), &hotkey, both).unwrap_err();
             assert!(matches!(error.cause, ConfigError::Io { .. }), "{error}");
-            assert_eq!(login.calls(), [true, false], "turned on, then back off");
-            assert_eq!(login.state(), Ok(LaunchAtLoginState::Disabled));
             assert_eq!(hotkey.spec(), HotkeySpec::default(), "switched back");
             assert!(keys.listening("RightAlt") && !keys.listening("F6"));
-            // What the form reads back after the error (Settings.tsx).
-            let shown = launch::with_os_state(&login, Settings::default());
-            assert!(!shown.launch_at_login);
-
-            // Putting it back fails too: the file's error comes first, then
-            // where the login item was left; the form shows the OS's real
-            // state, on.
-            let stuck = OnceLogin(FakeLaunchAtLogin::new());
-            let error = save_with_login(&config, &LiveEngine::fixed(), &stuck, &hotkey, both())
-                .unwrap_err();
-            assert!(matches!(error.cause, ConfigError::Io { .. }), "{error}");
-            assert!(error.hotkey.is_none(), "the hotkey was put back");
-            assert!(
-                error.to_string().contains("still opens at login"),
-                "{error}"
-            );
-            assert_eq!(hotkey.spec(), HotkeySpec::default(), "switched back");
-            assert_eq!(stuck.state(), Ok(LaunchAtLoginState::Enabled));
-            assert!(launch::with_os_state(&stuck, Settings::default()).launch_at_login);
             let _ = std::fs::remove_file(dir);
-        }
-
-        /// T3 round 2: the OS turned the login item on and the hotkey
-        /// switched, the write failed, and the login item refuses to turn
-        /// off again. The error says the settings weren't saved and that
-        /// Vocet still opens at login; Settings shows it on.
-        #[test]
-        fn a_login_item_that_cannot_be_put_back_is_reported() {
-            let (config, dir) = config();
-            let _ = std::fs::remove_dir_all(&dir);
-            config.save_settings(&Settings::default()).unwrap();
-            let login = OnceLogin(FakeLaunchAtLogin::new());
-            let (hotkey, keys) = listening();
-            let error = save_with(
-                &config,
-                &LiveEngine::fixed(),
-                &login,
-                &hotkey,
-                Settings {
-                    hotkey: "F6".into(),
-                    ..on()
-                },
-                super::hotkey::refused_write,
-            )
-            .unwrap_err();
-
-            assert!(error.hotkey.is_none(), "the hotkey was put back");
-            assert_eq!(
-                error.login.as_ref().map(|failed| failed.now),
-                Some(Some(LaunchAtLoginState::Enabled))
-            );
-            let message = error.to_string();
-            assert!(
-                message.starts_with("settings file prefs: disk full. Your settings weren't saved."),
-                "{message}"
-            );
-            assert!(
-                message.contains("Launch at login couldn't be put back"),
-                "{message}"
-            );
-            assert!(message.contains("still opens at login"), "{message}");
-            assert!(keys.listening("RightAlt") && !keys.listening("F6"));
-            let shown = read_settings(&config, &login, &hotkey).unwrap();
-            assert!(shown.launch_at_login, "Settings shows the OS's state");
-            assert!(
-                !config.settings().unwrap().launch_at_login,
-                "file unchanged"
-            );
-            assert_eq!(shown.hotkey, "RightAlt");
-            let _ = std::fs::remove_dir_all(dir);
         }
 
         #[test]
         fn invalid_settings_are_not_saved() {
             let (config, dir) = config();
-            let login = FakeLaunchAtLogin::new();
             let bad = Settings {
                 model: String::new(),
                 ..on()
             };
             let (hotkey, _) = listening();
-            assert!(save_with_login(&config, &LiveEngine::fixed(), &login, &hotkey, bad).is_err());
+            assert!(save_with_login(&config, &LiveEngine::fixed(), &hotkey, bad).is_err());
             let _ = std::fs::remove_dir_all(dir);
         }
     }
@@ -1729,14 +1739,8 @@ mod tests {
         fn saving_switches_to_the_new_hotkey_and_says_saved() {
             let (config, dir) = config("switch");
             let (hotkey, keys) = listening();
-            let saved = save_with_login(
-                &config,
-                &LiveEngine::fixed(),
-                &FakeLaunchAtLogin::new(),
-                &hotkey,
-                with_hotkey("F6"),
-            )
-            .unwrap();
+            let saved =
+                save_with_login(&config, &LiveEngine::fixed(), &hotkey, with_hotkey("F6")).unwrap();
             assert_eq!(saved.problem(), None);
             assert!(keys.listening("F6"));
             assert!(!keys.listening("RightAlt"));
@@ -1749,14 +1753,8 @@ mod tests {
             let (config, dir) = config("refused");
             let (hotkey, keys) = listening();
             *keys.fail_next.lock().unwrap() = Some(HotkeyError::Unavailable("busy".into()));
-            let saved = save_with_login(
-                &config,
-                &LiveEngine::fixed(),
-                &FakeLaunchAtLogin::new(),
-                &hotkey,
-                with_hotkey("F6"),
-            )
-            .unwrap();
+            let saved =
+                save_with_login(&config, &LiveEngine::fixed(), &hotkey, with_hotkey("F6")).unwrap();
             let problem = saved.problem().expect("an error, not \"Settings saved.\"");
             assert!(
                 problem.contains("Couldn't switch the hotkey to F6"),
@@ -1773,20 +1771,13 @@ mod tests {
         }
 
         #[test]
-        fn both_problems_are_reported() {
+        fn a_hotkey_problem_is_reported() {
             let (config, dir) = config("both");
             let (hotkey, keys) = listening();
             *keys.fail_next.lock().unwrap() = Some(HotkeyError::Unavailable("busy".into()));
-            let login = FakeLaunchAtLogin::new();
-            login.enabling_gives(dictation_ports::LaunchAtLoginState::RequiresApproval);
-            let settings = Settings {
-                launch_at_login: true,
-                ..with_hotkey("F6")
-            };
             let saved =
-                save_with_login(&config, &LiveEngine::fixed(), &login, &hotkey, settings).unwrap();
+                save_with_login(&config, &LiveEngine::fixed(), &hotkey, with_hotkey("F6")).unwrap();
             let problem = saved.problem().unwrap();
-            assert!(problem.contains("needs your approval"), "{problem}");
             assert!(problem.contains("Couldn't switch the hotkey"), "{problem}");
             let _ = std::fs::remove_dir_all(dir);
         }
@@ -1797,13 +1788,7 @@ mod tests {
             // A file where the settings directory should be.
             std::fs::write(&dir, "not a directory").unwrap();
             let (hotkey, keys) = listening();
-            let result = save_with_login(
-                &config,
-                &LiveEngine::fixed(),
-                &FakeLaunchAtLogin::new(),
-                &hotkey,
-                with_hotkey("F6"),
-            );
+            let result = save_with_login(&config, &LiveEngine::fixed(), &hotkey, with_hotkey("F6"));
             assert!(result.is_err());
             assert_eq!(hotkey.spec(), HotkeySpec::default());
             assert!(keys.listening("RightAlt"));
@@ -1833,7 +1818,6 @@ mod tests {
             let error = save_with(
                 &config,
                 &LiveEngine::fixed(),
-                &login,
                 &hotkey,
                 with_hotkey("F6"),
                 refused_write,
@@ -1841,7 +1825,6 @@ mod tests {
             .unwrap_err();
 
             assert!(matches!(error.cause, ConfigError::Io { .. }), "{error}");
-            assert!(error.login.is_none(), "the login item didn't change");
             let message = error.to_string();
             assert!(
                 message.starts_with("settings file prefs: disk full. Your settings weren't saved."),
@@ -1860,7 +1843,12 @@ mod tests {
             // The file still has RightAlt and the old language; what
             // Settings shows is the hotkey that works, with the rest as saved.
             assert_eq!(config.settings().unwrap().hotkey, "RightAlt");
-            let shown = read_settings(&config, &login, &hotkey).unwrap();
+            let shown = read_settings(
+                &config,
+                &LoginSync::new(Arc::new(login.clone()), |_| Ok(())),
+                &hotkey,
+            )
+            .unwrap();
             assert_eq!(shown.hotkey, "F6");
             assert_eq!(shown.language.as_deref(), Some("fr"));
             let _ = std::fs::remove_dir_all(dir);
@@ -1877,7 +1865,6 @@ mod tests {
             let error = save_with(
                 &config,
                 &LiveEngine::fixed(),
-                &login,
                 &hotkey,
                 with_hotkey("F6"),
                 refused_write,
@@ -1886,7 +1873,13 @@ mod tests {
             assert_eq!(error.to_string(), "settings file prefs: disk full");
             assert!(keys.listening("RightAlt") && !keys.listening("F6"));
             assert_eq!(
-                read_settings(&config, &login, &hotkey).unwrap().hotkey,
+                read_settings(
+                    &config,
+                    &LoginSync::new(Arc::new(login.clone()), |_| Ok(())),
+                    &hotkey
+                )
+                .unwrap()
+                .hotkey,
                 "RightAlt"
             );
             let _ = std::fs::remove_dir_all(dir);
@@ -2274,14 +2267,19 @@ mod capability_tests {
     use tauri_utils::platform::Target;
 
     use super::AppConfig;
-    use crate::command_names::COMMAND_NAMES;
+    use crate::command_names::{COMMAND_NAMES, OVERLAY_COMMAND_NAMES};
     use crate::engine::LiveEngine;
 
     /// The settings window: the app's commands.
     const MAIN: &str = "main";
     /// The overlay window (M5.1): listening to events and nothing else.
     const OVERLAY: &str = "overlay";
-    const OVERLAY_COMMANDS: [&str; 2] = ["plugin:event|listen", "plugin:event|unlisten"];
+    /// U4 round 2: and read the input level.
+    const OVERLAY_COMMANDS: [&str; 3] = [
+        "plugin:event|listen",
+        "plugin:event|unlisten",
+        "get_overlay_level",
+    ];
 
     fn manifests() -> BTreeMap<String, Manifest> {
         let path = PathBuf::from(env!("OUT_DIR")).join("acl-manifests.json");
@@ -2421,8 +2419,13 @@ mod capability_tests {
             .iter()
             .map(|name| ((*name).to_owned(), vec![MAIN.to_owned()]))
             .collect();
-        // M5.1 B1: the overlay listens to its event, nothing more, and no
-        // app command reaches it.
+        // M5.1 B1: the overlay listens to its event, and (U4) reads the
+        // level with its own command; no settings command reaches it.
+        assert!(
+            OVERLAY_COMMAND_NAMES
+                .iter()
+                .all(|name| OVERLAY_COMMANDS.contains(name) && !COMMAND_NAMES.contains(name))
+        );
         for command in OVERLAY_COMMANDS {
             expected.insert(command.to_owned(), vec![OVERLAY.to_owned()]);
         }
@@ -2485,7 +2488,11 @@ mod capability_tests {
         let overlay = capability_file("overlay.json");
         assert_eq!(
             overlay["permissions"],
-            serde_json::json!(["core:event:allow-listen", "core:event:allow-unlisten"])
+            serde_json::json!([
+                "core:event:allow-listen",
+                "core:event:allow-unlisten",
+                "allow-get-overlay-level"
+            ])
         );
         assert_eq!(overlay["windows"], serde_json::json!([OVERLAY]));
         assert!(overlay.get("webviews").is_none());
@@ -2547,20 +2554,20 @@ mod capability_tests {
             .unwrap();
         let scratch = Scratch::new(&labels.join("-"));
         let dir = scratch.0.clone();
-        app.manage(AppConfig(std::sync::Arc::new(
-            dictation_pipeline::config::Config::new(
-                &dir,
-                // F1: never the owner's real Keychain.
-                dictation_platform::secrets::KeychainSecretStore::disabled(),
-            ),
-        )));
+        let config = std::sync::Arc::new(dictation_pipeline::config::Config::new(
+            &dir,
+            // F1: never the owner's real Keychain.
+            dictation_platform::secrets::KeychainSecretStore::disabled(),
+        ));
+        app.manage(AppConfig(std::sync::Arc::clone(&config)));
         let opener = dictation_platform::fakes::FakeOpener::new();
         app.manage(crate::diagnostics::AppOpener(std::sync::Arc::new(
             opener.clone(),
         )));
-        app.manage(crate::commands::LoginItem(std::sync::Arc::new(
-            dictation_platform::fakes::FakeLaunchAtLogin::new(),
-        )));
+        app.manage(crate::commands::LoginItem::new(
+            std::sync::Arc::new(dictation_platform::fakes::FakeLaunchAtLogin::new()),
+            std::sync::Arc::clone(&config),
+        ));
         app.manage(LiveEngine::fixed());
         app.manage(crate::models::ModelDownloads::default());
         app.manage(super::ActiveHotkey(super::tests::hotkey::listening().0));
@@ -2573,6 +2580,7 @@ mod capability_tests {
         app.manage(crate::usage::Usage::disabled());
         app.manage(crate::diagnostics::Diagnostics::default());
         app.manage(super::LaunchNotice(None));
+        app.manage(crate::overlay::OverlayLevel::default());
         let windows = labels
             .iter()
             .map(|label| {
@@ -2679,6 +2687,21 @@ mod capability_tests {
         }
     }
 
+    /// U4 round 2: the overlay may read the level, a bare number, and the
+    /// settings window may not.
+    #[test]
+    fn only_the_overlay_may_read_the_level() {
+        let fixture = app_with_windows(&[MAIN, OVERLAY]);
+        let (main, overlay) = (&fixture.windows[0], &fixture.windows[1]);
+        let level = invoke(overlay, "get_overlay_level", serde_json::json!({})).unwrap();
+        let tauri::ipc::InvokeResponseBody::Json(json) = level else {
+            panic!("expected JSON");
+        };
+        assert_eq!(json, "-100.0");
+        let refused = invoke(main, "get_overlay_level", serde_json::json!({})).unwrap_err();
+        assert!(refused.to_string().contains("not allowed"), "{refused}");
+    }
+
     /// Arguments the command can't take: the ACL has already let the call
     /// through when they are rejected, and the command itself never runs,
     /// so no keychain or network is touched.
@@ -2753,7 +2776,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 25);
+        assert_eq!(COMMAND_NAMES.len(), 26);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

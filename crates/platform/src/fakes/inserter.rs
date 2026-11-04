@@ -15,6 +15,7 @@ pub struct FakeInserter {
 struct State {
     inserted: Vec<String>,
     failures: VecDeque<InsertError>,
+    finished: u32,
 }
 
 impl FakeInserter {
@@ -29,6 +30,12 @@ impl FakeInserter {
     #[must_use]
     pub fn inserted(&self) -> Vec<String> {
         lock(&self.state).inserted.clone()
+    }
+
+    /// How many times [`TextInserter::finish`] was called.
+    #[must_use]
+    pub fn finished(&self) -> u32 {
+        lock(&self.state).finished
     }
 
     /// Makes the next insert fail with `error`. Queued failures are used in
@@ -46,6 +53,10 @@ impl TextInserter for FakeInserter {
         }
         state.inserted.push(text.to_owned());
         Ok(())
+    }
+
+    fn finish(&self) {
+        lock(&self.state).finished += 1;
     }
 }
 

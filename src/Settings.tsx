@@ -57,10 +57,13 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
   const [hotkey, setHotkey] = useState("");
   // What the OS says about the login item, as the app last reported it.
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
-  // Whether the user has changed the checkbox since. Until then the box
-  // follows the OS, and a save leaves the login item alone: the user may have
-  // changed it in System Settings while this window was hidden.
-  const [launchEdited, setLaunchEdited] = useState(false);
+  // Whether the OS is still applying the user's last choice (it can take
+  // tens of seconds, #238). Saving doesn't wait for it; the box shows
+  // "Applying…" and follows the OS again once it has answered.
+  const [launchPending, setLaunchPending] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  // Counts the choices, so an answer to an older one is ignored.
+  const launchChoice = useRef(0);
   const [keyInput, setKeyInput] = useState("");
   const [keyStatus, setKeyStatus] = useState<KeyStatus>(CHECKING);
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -140,7 +143,7 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
   // loaded. Whenever it comes back, read the login item again, unless the
   // user is in the middle of changing it. Nothing else in the form is touched.
   useEffect(() => {
-    if (launchEdited) return;
+    if (launchPending) return;
     const state = { cancelled: false };
     const refresh = () => {
       if (document.visibilityState === "hidden") return;
@@ -162,7 +165,7 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [launchEdited]);
+  }, [launchPending]);
 
   const info = providerInfo(provider);
   // The languages the active engine offers (U2). Before the on-device list
@@ -290,13 +293,6 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
         keyCheck.current += 1; // any lookup still running predates this key
         setKeyStatus({ state: "saved" });
       }
-      // An untouched checkbox follows the OS, so ask it once more: a save of
-      // only the language must not undo a change made in System Settings.
-      let launch = launchAtLogin;
-      if (!launchEdited) {
-        const current = await commands.getSettings();
-        if (current.status === "ok") launch = current.data.launch_at_login;
-      }
       const toSave: Settings_Serialize = {
         ...loaded,
         provider,
@@ -304,7 +300,6 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
         // new provider's default (the form says so).
         model: provider === loaded.provider ? loaded.model : info.defaultModel,
         language: normalizeLanguage(language),
-        launch_at_login: launch,
         transcription,
         local_model: localModel,
       };
@@ -317,19 +312,10 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
         if (change.error !== null) saved = { status: "error", error: change.error };
       }
       if (saved.status === "error") {
-        // Something didn't take effect: the login item (the OS can refuse,
-        // or want the user's approval) or the hotkey (the old one keeps
-        // working). The message says which. The typed values stay, so the
+        // Something didn't take effect: the hotkey (the old one keeps
+        // working). The message says what. The typed values stay, so the
         // user can retry.
         setNotice({ kind: "error", text: messageOf(saved.error) });
-        // Show what the login item really is. If the app can't say, the box
-        // stays the user's own unapplied choice rather than claiming to be
-        // the OS's state.
-        const actual = await commands.getSettings();
-        if (actual.status === "ok") {
-          setLaunchAtLogin(actual.data.launch_at_login);
-          setLaunchEdited(false);
-        }
         return;
       }
       // Reload, so the form shows what was stored (the canonical hotkey). If
@@ -342,8 +328,6 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
       setLocalModel(stored.local_model);
       setLanguage(stored.language ?? "");
       setHotkey(stored.hotkey);
-      setLaunchAtLogin(stored.launch_at_login);
-      setLaunchEdited(false);
       await checkKeySaved(stored.provider);
       setNotice({ kind: "ok", text: "Settings saved." });
     } catch {
@@ -351,6 +335,42 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
     } finally {
       setSaving(false);
     }
+  }
+
+  /**
+   * Turns launch at login on or off at once, without the Save button: the OS
+   * can take tens of seconds, so the box shows "Applying…" meanwhile and
+   * nothing else waits for it. If the user toggles again, only the answer to
+   * the last choice counts. An error says why and what to do; the box then
+   * shows what the OS really has.
+   */
+  async function changeLaunch(want: boolean) {
+    const choice = ++launchChoice.current;
+    setLaunchAtLogin(want);
+    setLaunchPending(true);
+    setLaunchError(null);
+    let actual: boolean | null = null;
+    let error: string | null = null;
+    try {
+      const result = await commands.setLaunchAtLogin(want);
+      if (result.status === "ok") actual = result.data;
+      else error = messageOf(result.error);
+    } catch {
+      error = BROKEN;
+    }
+    if (choice !== launchChoice.current) return;
+    if (actual === null) {
+      try {
+        const current = await commands.getSettings();
+        if (current.status === "ok") actual = current.data.launch_at_login;
+      } catch {
+        // Keep the user's choice shown; the error says it may not have applied.
+      }
+      if (choice !== launchChoice.current) return;
+    }
+    if (actual !== null) setLaunchAtLogin(actual);
+    setLaunchError(error);
+    setLaunchPending(false);
   }
 
   /**
@@ -637,18 +657,22 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
                 type="checkbox"
                 checked={launchAtLogin}
                 aria-describedby="launch-at-login-hint"
-                onChange={(event) => {
-                  if (saving) return;
-                  setLaunchAtLogin(event.target.checked);
-                  setLaunchEdited(true);
-                  setNotice(null);
-                }}
+                onChange={(event) => void changeLaunch(event.target.checked)}
               />
               Launch at login
+              {launchPending && (
+                <span role="status" className="hint">
+                  {" "}
+                  Applying…
+                </span>
+              )}
             </label>
             <p id="launch-at-login-hint" className="hint">
-              Starts Vocet in the menu bar when you log in. Takes effect when you save. You can also
-              change it in System Settings → General → Login Items.
+              Starts Vocet in the menu bar when you log in. Applies as soon as you change it,
+              without Save. You can also change it in System Settings → General → Login Items.
+            </p>
+            <p role={launchError ? "alert" : undefined} className="error">
+              {launchError}
             </p>
           </div>
 
