@@ -798,6 +798,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::save_report,
         crate::diagnostics::open_issue,
         crate::diagnostics::take_troubleshoot_request,
+        crate::overlay::get_overlay_level,
     ])
 }
 
@@ -2259,14 +2260,19 @@ mod capability_tests {
     use tauri_utils::platform::Target;
 
     use super::AppConfig;
-    use crate::command_names::COMMAND_NAMES;
+    use crate::command_names::{COMMAND_NAMES, OVERLAY_COMMAND_NAMES};
     use crate::engine::LiveEngine;
 
     /// The settings window: the app's commands.
     const MAIN: &str = "main";
     /// The overlay window (M5.1): listening to events and nothing else.
     const OVERLAY: &str = "overlay";
-    const OVERLAY_COMMANDS: [&str; 2] = ["plugin:event|listen", "plugin:event|unlisten"];
+    /// U4 round 2: and read the input level.
+    const OVERLAY_COMMANDS: [&str; 3] = [
+        "plugin:event|listen",
+        "plugin:event|unlisten",
+        "get_overlay_level",
+    ];
 
     fn manifests() -> BTreeMap<String, Manifest> {
         let path = PathBuf::from(env!("OUT_DIR")).join("acl-manifests.json");
@@ -2406,8 +2412,13 @@ mod capability_tests {
             .iter()
             .map(|name| ((*name).to_owned(), vec![MAIN.to_owned()]))
             .collect();
-        // M5.1 B1: the overlay listens to its event, nothing more, and no
-        // app command reaches it.
+        // M5.1 B1: the overlay listens to its event, and (U4) reads the
+        // level with its own command; no settings command reaches it.
+        assert!(
+            OVERLAY_COMMAND_NAMES
+                .iter()
+                .all(|name| OVERLAY_COMMANDS.contains(name) && !COMMAND_NAMES.contains(name))
+        );
         for command in OVERLAY_COMMANDS {
             expected.insert(command.to_owned(), vec![OVERLAY.to_owned()]);
         }
@@ -2470,7 +2481,11 @@ mod capability_tests {
         let overlay = capability_file("overlay.json");
         assert_eq!(
             overlay["permissions"],
-            serde_json::json!(["core:event:allow-listen", "core:event:allow-unlisten"])
+            serde_json::json!([
+                "core:event:allow-listen",
+                "core:event:allow-unlisten",
+                "allow-get-overlay-level"
+            ])
         );
         assert_eq!(overlay["windows"], serde_json::json!([OVERLAY]));
         assert!(overlay.get("webviews").is_none());
@@ -2557,6 +2572,7 @@ mod capability_tests {
         app.manage(super::AppShell(std::sync::Arc::new(NoShell)));
         app.manage(crate::usage::Usage::disabled());
         app.manage(crate::diagnostics::Diagnostics::default());
+        app.manage(crate::overlay::OverlayLevel::default());
         let windows = labels
             .iter()
             .map(|label| {
@@ -2661,6 +2677,21 @@ mod capability_tests {
             let message = error.to_string();
             assert!(message.contains("not allowed"), "{command}: {message}");
         }
+    }
+
+    /// U4 round 2: the overlay may read the level, a bare number, and the
+    /// settings window may not.
+    #[test]
+    fn only_the_overlay_may_read_the_level() {
+        let fixture = app_with_windows(&[MAIN, OVERLAY]);
+        let (main, overlay) = (&fixture.windows[0], &fixture.windows[1]);
+        let level = invoke(overlay, "get_overlay_level", serde_json::json!({})).unwrap();
+        let tauri::ipc::InvokeResponseBody::Json(json) = level else {
+            panic!("expected JSON");
+        };
+        assert_eq!(json, "-100.0");
+        let refused = invoke(main, "get_overlay_level", serde_json::json!({})).unwrap_err();
+        assert!(refused.to_string().contains("not allowed"), "{refused}");
     }
 
     /// Arguments the command can't take: the ACL has already let the call

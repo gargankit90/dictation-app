@@ -32,3 +32,9 @@ pub const COMMAND_NAMES: &[&str] = &[
     "open_issue",
     "take_troubleshoot_request",
 ];
+
+/// The overlay window's commands (U4 round 2): `build.rs` adds their
+/// `allow-<command>` permissions to the app's ACL manifest, and only
+/// `capabilities/overlay.json` grants them. Not in [`COMMAND_NAMES`], so the
+/// settings window can't call them.
+pub const OVERLAY_COMMAND_NAMES: &[&str] = &["get_overlay_level"];

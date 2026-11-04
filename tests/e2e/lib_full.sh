@@ -368,8 +368,11 @@ quit_from_tray() {
 # The log's `overlay shown state=…` only says what the app sent.
 
 OVERLAY_HIDDEN=hidden
-OVERLAY_RECORDING="shown: Recording"
+# U4: the recording pill's Listening label and hint (the meter has no text).
+OVERLAY_RECORDING="shown: Listening Release to paste · Esc to cancel"
+OVERLAY_NO_SOUND="shown: No sound Check your microphone"
 OVERLAY_TRANSCRIBING="shown: Transcribing…"
+OVERLAY_PASTE_SENT="shown: Paste sent"
 
 # overlay_shows <want> [seconds]: until the overlay shows exactly <want>,
 # within [seconds] (default 5); says what it showed instead.

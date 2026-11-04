@@ -22,19 +22,19 @@
 # The panel is checked on screen (CGWindowList, e2e_overlay_focus.sh's
 # overlay_on_screen) whenever it shows something, and off screen when hidden.
 
-# The overlay's text for the provider's 401 (TranscribeError::BadKey's user
-# message in DictationError's "Transcription failed: …"). The "!" icon is
-# aria-hidden, so it isn't in the text.
-OVERLAY_BAD_KEY="shown: The provider rejected your API key. Check or re-enter it in Settings. key_rejected"
+# The overlay's text for the provider's 401 (the error code table's user
+# text). The "!" icon is aria-hidden, so it isn't in the text, and since U4
+# the overlay shows no code.
+OVERLAY_BAD_KEY="shown: The provider rejected your API key. Check or re-enter it in Settings."
 # The error's time on screen (crates/app/src/overlay.rs ERROR_VISIBLE_FOR),
 # and how far the log's show-to-hide gap may stray from it.
 OVERLAY_ERROR_MS=4000
 OVERLAY_ERROR_SLACK_MS=600
 
 # The overlay's lines in the log after the first <n>, space-separated:
-# recording, transcribing, error, hidden.
+# recording, transcribing, error, hidden (U4: no_sound, paste_sent).
 overlay_log_since() {
-  app_log | sed -nE 's/.*overlay (shown state="?([a-z]+)"?|(hidden)).*/\2\3/p' |
+  app_log | sed -nE 's/.*overlay (shown state="?([a-z_]+)"?|(hidden)).*/\2\3/p' |
     tail -n +$(($1 + 1)) | paste -sd ' ' -
 }
 
@@ -73,7 +73,19 @@ overlay_watch_end() {
 overlay_watch_went() {
   local watch=$1 got want
   shift
-  got=$(printf '%s\n' "$watch" | cut -d' ' -f2- | grep -vxF "$OVERLAY_TRANSCRIBING" | paste -sd '|' -)
+  # U4: the meter re-lays the pill out 20 times a second, and a sample
+  # taken mid-layout can read the label without its hint; it counts as
+  # Listening. A blank page right before hidden is the hide in progress
+  # (the page is cleared, then the panel hidden). Repeats collapse.
+  got=$(printf '%s\n' "$watch" | cut -d' ' -f2- | grep -vxF "$OVERLAY_TRANSCRIBING" |
+    awk -v partial="shown: Listening" -v full="$OVERLAY_RECORDING" '
+      $0 == partial { $0 = full }
+      $0 == "shown:" || $0 == "shown: " { blank = 1; next }
+      blank && $0 != "hidden" { if (last != "shown: ") print "shown: "; last = "shown: " }
+      { blank = 0 }
+      $0 != last { print; last = $0 }
+      END { if (blank) print "shown: " }' |
+    paste -sd '|' -)
   want=$(printf '%s\n' "$@" | paste -sd '|' -)
   log "  the overlay showed: $(printf '%s\n' "$watch" | paste -sd '|' -)"
   [ "$got" = "$want" ] && return 0
@@ -149,6 +161,7 @@ e2e_overlay_rendered_states_and_error() {
   launch --release
   expect "the provider holds the reply" provider_wait_event '^held n=1'
   expect "the overlay renders Transcribing while it waits" overlay_shows "$OVERLAY_TRANSCRIBING"
+  screenshot e2e_overlay_rendered_states_and_error.transcribing
   expect "the panel is still on screen" overlay_on_screen
   expect "TextEdit is in front again for the paste" textedit_front
   provider_release
@@ -176,6 +189,8 @@ e2e_overlay_rendered_states_and_error() {
   expect "the provider rejected the key" provider_request_has 1 auth=bad
   expect "the overlay renders the error's text" overlay_shows "$OVERLAY_BAD_KEY"
   expect "the panel is on screen with the error" overlay_on_screen
+  # After the check: the error shows for only 4 s.
+  screenshot e2e_overlay_rendered_states_and_error.error
   overlay_watch_end
   watch=$OVERLAY_WATCHED
   expect "the watch saw Recording, the error, then hidden, and nothing after" \
@@ -220,8 +235,9 @@ e2e_overlay_rendered_states_and_error() {
   expect "that dictation ends Idle" wait_for_idle_count 5 15
   expect "the overlay is hidden" overlay_shows "$OVERLAY_HIDDEN"
   expect "the panel is off screen" overlay_off_screen
-  expect "the overlay went recording, transcribing, error, recording, transcribing, hidden" \
-    test "$(overlay_log_since "$mark")" = "recording transcribing error recording transcribing hidden"
+  # U4: a paste that was sent shows Paste sent (800 ms) before hiding.
+  expect "the overlay went recording, transcribing, error, recording, transcribing, paste_sent, hidden" \
+    test "$(overlay_log_since "$mark")" = "recording transcribing error recording transcribing paste_sent hidden"
   expect "it pasted" textedit_is "$(esc_b64 "$PROVIDER_TEXT")"
 
   [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_overlay_rendered_states_and_error
