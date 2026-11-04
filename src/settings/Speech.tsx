@@ -97,7 +97,9 @@ export function Speech({
   const [keyInput, setKeyInput] = useState("");
   const [keyStatus, setKeyStatus] = useState<KeyStatus>({ state: "checking" });
   const [keyNotice, setKeyNotice] = useState<KeyNotice>(null);
-  const [keyBusy, setKeyBusy] = useState<"testing" | "removing" | null>(null);
+  const [keyBusy, setKeyBusy] = useState<"testing" | "saving" | "removing" | null>(null);
+  // A key write is running; edits don't cancel it (it is already sent).
+  const writing = useRef(false);
   // Only the newest key lookup and test count.
   const keyCheck = useRef(0);
   const keyRun = useRef(0);
@@ -219,7 +221,16 @@ export function Speech({
       if (tested.status === "error") {
         notice = { kind: "error", text: tested.error.message };
       } else {
-        const saved = await commands.setApiKey(which, typed);
+        // Only the newest Test & Save may write, and only if no edit,
+        // removal or newer save came since it started: an obsolete test
+        // must never restore a removed key or replace a newer one.
+        if (run !== keyRun.current) return;
+        // From here the write is committed: the field and buttons wait for it.
+        writing.current = true;
+        setKeyBusy("saving");
+        const saved = await commands.setApiKey(which, typed).finally(() => {
+          writing.current = false;
+        });
         notice =
           saved.status === "error"
             ? { kind: "error", text: `${KEY_NOT_SAVED}: ${messageOf(saved.error)}` }
@@ -376,6 +387,7 @@ export function Speech({
                     <select
                       id="provider"
                       value={provider}
+                      disabled={keyBusy === "saving"}
                       onChange={(event) => {
                         changeProvider(event.target.value as Provider);
                       }}
@@ -421,7 +433,9 @@ export function Speech({
                       }
                       aria-describedby="api-key-status"
                       aria-invalid={keyNotice?.kind === "error"}
+                      readOnly={keyBusy === "saving"}
                       onChange={(event) => {
+                        if (writing.current) return;
                         keyRun.current += 1;
                         setKeyBusy(null);
                         setKeyInput(event.target.value);
@@ -453,7 +467,11 @@ export function Speech({
                       disabled={keyBusy !== null}
                       onClick={() => void testAndSave()}
                     >
-                      {keyBusy === "testing" ? "Testing…" : "Test & Save"}
+                      {keyBusy === "testing"
+                        ? "Testing…"
+                        : keyBusy === "saving"
+                          ? "Saving…"
+                          : "Test & Save"}
                     </button>
                     {keyStatus.state === "saved" && (
                       <button

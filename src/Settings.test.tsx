@@ -601,6 +601,51 @@ describe("criterion_u6_4 Speech: exactly one Active engine", () => {
 
 describe("criterion_u6_5 own key: Test & Save", () => {
   const keyBox = () => screen.getByLabelText<HTMLInputElement>(/API key/);
+  const OLD = "gsk_dummy_OLDER_TEST_NOT_REAL_000000";
+  const savedKeys = () => backend.named("set_api_key").map((call) => call.args.key);
+
+  // Review round 1, finding 1: an obsolete test must not write its key.
+  it("a test still running when the key is removed doesn't put its key back", async () => {
+    backend.keys.groq = true;
+    await open("speech");
+    await screen.findByText("A key is saved in your Keychain.");
+    const slow = gate();
+    backend.holds.set("test_api_key", slow.closed);
+    fireEvent.change(keyBox(), { target: { value: OLD } });
+    click("Test & Save");
+    // The user changes their mind: edits the field, then removes the key.
+    fireEvent.change(keyBox(), { target: { value: "" } });
+    click("Remove key");
+    expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
+    slow.open();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(savedKeys()).toEqual([]);
+    expect(backend.keys.groq).toBe(false);
+    expect(screen.queryByText(CONNECTED)).toBeNull();
+  });
+
+  it("a slow test can't overwrite a newer key that was saved", async () => {
+    await open("speech");
+    const slow = gate();
+    backend.holds.set("test_api_key", slow.closed);
+    fireEvent.change(keyBox(), { target: { value: OLD } });
+    click("Test & Save");
+    // Only the first test is slow.
+    await waitFor(() => {
+      expect(backend.named("test_api_key")).toHaveLength(1);
+    });
+    backend.holds.delete("test_api_key");
+    fireEvent.change(keyBox(), { target: { value: KEY } });
+    click("Test & Save");
+    expect((await screen.findByRole("status")).textContent).toBe(CONNECTED);
+    slow.open();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(savedKeys()).toEqual([KEY]);
+  });
 
   it("tests, then saves; success only after both, and the key is never shown back", async () => {
     await open("speech");
