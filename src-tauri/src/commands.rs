@@ -211,11 +211,23 @@ fn save_with<S: SecretStore + 'static>(
     mut settings: Settings,
     write: impl FnOnce(&Config<S>, &Settings) -> Result<(), ConfigError>,
 ) -> Result<Saved, SaveFailed> {
+    let started = std::time::Instant::now();
+    let lap = |what: &str| {
+        tracing::info!(
+            elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            "save_settings: {what}"
+        );
+    };
     settings.validate().map_err(ConfigError::from)?;
     let before = login.state().ok();
+    lap("login state read");
     let launch = launch::apply(login, &mut settings).err();
+    lap("login item applied");
     let change = hotkey_setting::apply(hotkey, &mut settings);
-    if let Err(cause) = engine::changed(config, live, |config| write(config, &settings)) {
+    lap("hotkey applied");
+    let written = engine::changed(config, live, |config| write(config, &settings));
+    lap("file written and engine rebuilt");
+    if let Err(cause) = written {
         return Err(SaveFailed {
             cause,
             hotkey: change.undo(hotkey).err().map(Box::new),
