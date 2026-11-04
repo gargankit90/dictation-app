@@ -222,7 +222,7 @@ const TABLE: [CodeInfo; 17] = [
     row(
         ErrorCode::PasteFailed,
         "The text couldn't be pasted.",
-        "Check Accessibility, then dictate again.",
+        "It's on the clipboard: press ⌘V. If it keeps happening, check Accessibility.",
         FixAction::OpenAccessibilitySettings,
     ),
     row(

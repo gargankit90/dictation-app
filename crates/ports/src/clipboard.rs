@@ -200,14 +200,6 @@ pub trait Clipboard: Send + Sync {
     ) -> Result<bool, ClipboardError> {
         self.restore_if_unchanged(session, previous.text())
     }
-
-    /// Whether the clipboard still holds the write that returned `session`
-    /// (nobody copied since). A paste that couldn't be confirmed (#239)
-    /// leaves the transcript on the clipboard and keeps the user's saved
-    /// contents pending; this says whether they are still owed.
-    ///
-    /// Threading: may block briefly; call from a blocking task.
-    fn holds_dictation(&self, session: &SessionMarker) -> bool;
 }
 
 #[cfg(test)]

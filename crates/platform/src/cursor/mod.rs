@@ -15,25 +15,6 @@ mod macos;
 
 use dictation_ports::{BeforeCursor, CursorReadError, TextBeforeCursor};
 
-use crate::insert::Caret;
-
-/// The caret of the focused text field, for the paste's landing check
-/// (`crate::insert`, #239): the selection's offsets and the character
-/// before it, read like the smart space's (never from a password field,
-/// at most two UTF-16 units of text, nothing kept or logged). `None` if it
-/// can't be read, and always `None` off macOS for now.
-#[must_use]
-pub fn caret() -> Option<Caret> {
-    #[cfg(target_os = "macos")]
-    {
-        macos::caret()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        None
-    }
-}
-
 /// This OS's reader of the text before the cursor.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemTextBeforeCursor;

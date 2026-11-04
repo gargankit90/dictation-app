@@ -266,10 +266,6 @@ impl Clipboard for MacPasteboard {
         self.restore_snapshot_if_unchanged(session, &snapshot)
     }
 
-    fn holds_dictation(&self, session: &SessionMarker) -> bool {
-        autoreleasepool(|_| Self::holds(&self.pasteboard(), session))
-    }
-
     fn snapshot(&self) -> Result<ClipboardSnapshot, ClipboardError> {
         autoreleasepool(|_| {
             Ok(ClipboardSnapshot::Items(Self::snapshot_items(
