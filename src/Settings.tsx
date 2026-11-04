@@ -58,6 +58,9 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
+  // The recorder is listening for the new key: the real hotkey is paused
+  // until it ends, so nothing else may save (or change the key) meanwhile.
+  const [listening, setListening] = useState(false);
   // Bumped whenever a test result would be out of date (a new test, or the
   // key or provider changed), so a slow reply can't show up under a newer key.
   const testRun = useRef(0);
@@ -220,7 +223,7 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
     event.preventDefault();
     // Busy like the Save button: a submit that gets past it (Enter in a field)
     // starts nothing while a save or a key test runs.
-    if (loaded === null || saving || testing) return;
+    if (loaded === null || saving || testing || listening) return;
     const found: FieldErrors = {
       key: keyInput.trim() === "" ? undefined : (validateKey(keyInput) ?? undefined),
       language: validateLanguage(language) ?? undefined,
@@ -511,7 +514,10 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
               value={loaded.hotkey}
               disabled={saving}
               onChange={recordHotkey}
-              onRecording={setHotkeyRecording}
+              onRecording={(recording) => {
+                setListening(recording);
+                setHotkeyRecording(recording);
+              }}
             />
             <label htmlFor="hotkey">Or type it</label>
             <input
@@ -646,7 +652,7 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
           )}
 
           <div className="row actions">
-            <button type="submit" className="primary" disabled={saving || testing}>
+            <button type="submit" className="primary" disabled={saving || testing || listening}>
               {saving ? "Saving…" : "Save"}
             </button>
           </div>

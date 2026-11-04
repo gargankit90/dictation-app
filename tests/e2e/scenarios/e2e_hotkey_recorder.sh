@@ -63,17 +63,25 @@ e2e_hotkey_recorder() {
   expect "nothing was saved" test "$(vm "test -e $(q "$SETTINGS_FILE_VM") && echo yes || echo no")" = no
 
   # The CURRENT key while recording: the global hotkey must not dictate.
-  local before_phases
-  expect "Record again" hr_record
+  # TextEdit is set up first (that blurs Settings and would end a recording).
+  # Then ONE Terminal job brings Settings forward, starts recording, checks
+  # that the recorder is listening, and only then holds the key, so nothing
+  # takes focus between the check and the key.
+  local before_phases hold
   textedit_fresh
   before_phases=$(logged_phases | wc -l | tr -d ' ')
-  job_says "posted down
-posted up" post_key_hold right-option 1.5 "$APP_NAME"
+  hold=$(vm_terminal "open -a $(q "$APP_NAME"); sleep 1; osascript -l JavaScript $(q "$VM_AX") press $(q "$APP_NAME") $(q "$SETTINGS_WINDOW") 'Record a different key'; sleep 1; osascript -l JavaScript $(q "$VM_AX") dump $(q "$APP_NAME") $(q "$SETTINGS_WINDOW") | grep -q 'Press a key' || { echo NOT-LISTENING; exit 3; }; echo LISTENING; down=0; release() { if [ \$down = 1 ]; then osascript -l JavaScript $(q "$VM_POST_KEY") right-option up; fi; }; trap release EXIT; trap 'exit 1' INT TERM HUP; down=1; osascript -l JavaScript $(q "$VM_POST_KEY") right-option down || exit; sleep 1.5 & wait \$!; osascript -l JavaScript $(q "$VM_POST_KEY") right-option up || exit; down=0; echo HELD" 2>&1) || true
+  log "OBS: hold job said: $(printf '%s' "$hold" | tr '\n' ' ')"
+  expect "the recorder was listening when the key went down" \
+    sh -c 'printf "%s" "$1" | grep -q LISTENING && printf "%s" "$1" | grep -q HELD' _ "$hold"
   sleep 3
   expect "holding the current key while recording starts no dictation" \
     test "$(logged_phases | wc -l | tr -d ' ')" = "$before_phases"
   expect "and nothing is pasted" test -z "$(textedit_trimmed)"
-  expect "the app is idle" wait_for_log 'ready .*hotkey=RightAlt'
+  # The recorder ended with the key (it records the current key again); the
+  # hotkey works as before.
+  textedit_fresh
+  expect "afterwards a Right Option hold dictates as usual" hr_hold_dictates right-option
 
   # Right Command.
   vm "pkill -x TextEdit; true" >/dev/null 2>&1

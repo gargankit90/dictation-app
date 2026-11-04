@@ -576,6 +576,37 @@ describe("criterion 2: settings save and reload", () => {
     expect(backend.named("set_hotkey")).toHaveLength(1);
   });
 
+  it("can't save the form while the recorder is listening, and the pause stays", async () => {
+    await open();
+    type("Or type it", "F6");
+    click("Record a different key");
+    await waitFor(() => {
+      expect(backend.named("set_hotkey_recording")).toHaveLength(1);
+    });
+    const save = screen.getByRole<HTMLButtonElement>("button", { name: "Save" });
+    expect(locked(save)).toBe(true);
+    fireEvent.click(save);
+    fireEvent.submit(save.closest("form") as HTMLElement);
+    await flush();
+    // Nothing was saved, so nothing could have made the real F6 live.
+    expect(backend.named("save_settings")).toHaveLength(0);
+    expect(backend.named("set_hotkey")).toHaveLength(0);
+    expect(backend.named("set_hotkey_recording").map((c) => c.args.recording)).toEqual([true]);
+
+    // Once the recorder is cancelled the pause ends, and Save works.
+    keyDown("Escape");
+    await waitFor(() => {
+      expect(backend.named("set_hotkey_recording").map((c) => c.args.recording)).toEqual([
+        true,
+        false,
+      ]);
+    });
+    expect(locked(screen.getByRole("button", { name: "Save" }))).toBe(false);
+    click("Save");
+    await screen.findByText("Settings saved.");
+    expect(backend.settings.hotkey).toBe("F6");
+  });
+
   it("can't start recording a key while a Save runs", async () => {
     await open();
     const hold = gate();

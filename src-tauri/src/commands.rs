@@ -332,7 +332,9 @@ const RECORDING_LEASE: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Sets the dictation key and nothing else: the one writer of it (K1).
 /// The key listens at once; if it can't, the old one keeps listening, and
-/// the error says why. Ends the pause [`set_hotkey_recording`] began.
+/// the error says why. It never ends the pause [`set_hotkey_recording`]
+/// began: only the recorder ending does, so a Save can't make the real
+/// hotkey live while the user is still choosing (K1 review, round 2).
 #[tauri::command]
 #[specta::specta]
 pub async fn set_hotkey(
@@ -350,7 +352,6 @@ pub async fn set_hotkey(
         write_hotkey(config, &live, &*login, &control, &spec)
     })
     .await;
-    hotkey.0.resume();
     let (change, saved) = result?;
     if let Some(change) = change {
         usage::settings_saved(&usage, change);
@@ -360,7 +361,7 @@ pub async fn set_hotkey(
 
 /// While the user is choosing a new dictation key, pressing the current one
 /// must not dictate: `recording` pauses the hotkey (renewed by calling it
-/// again, and ended by `false`, by [`set_hotkey`], or by itself after
+/// again, and ended by `false` or by itself after
 /// [`RECORDING_LEASE`]).
 #[tauri::command]
 #[specta::specta]

@@ -81,13 +81,15 @@ export const commands = {
 	/**
 	 *  Sets the dictation key and nothing else: the one writer of it (K1).
 	 *  The key listens at once; if it can't, the old one keeps listening, and
-	 *  the error says why. Ends the pause [`set_hotkey_recording`] began.
+	 *  the error says why. It never ends the pause [`set_hotkey_recording`]
+	 *  began: only the recorder ending does, so a Save can't make the real
+	 *  hotkey live while the user is still choosing (K1 review, round 2).
 	 */
 	setHotkey: (spec: string) => typedError<null, string>(__TAURI_INVOKE("set_hotkey", { spec })),
 	/**
 	 *  While the user is choosing a new dictation key, pressing the current one
 	 *  must not dictate: `recording` pauses the hotkey (renewed by calling it
-	 *  again, and ended by `false`, by [`set_hotkey`], or by itself after
+	 *  again, and ended by `false` or by itself after
 	 *  [`RECORDING_LEASE`]).
 	 */
 	setHotkeyRecording: (recording: boolean) => typedError<null, string>(__TAURI_INVOKE("set_hotkey_recording", { recording })),
