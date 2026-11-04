@@ -166,7 +166,13 @@ fn switch_to_local<S: SecretStore + 'static>(
         settings.transcription = Transcription::Local;
         model.id.clone_into(&mut settings.local_model);
     })
-    .map_err(|error| error.to_string())
+    .map_err(|error| {
+        // The new model may already be live (from another on-device model
+        // it is published as it loads). The settings weren't written, so
+        // what they still choose becomes the engine again (review round 1).
+        live.rebuild(config);
+        error.to_string()
+    })
 }
 
 /// Where the engine in use is.
