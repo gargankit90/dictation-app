@@ -41,6 +41,7 @@ mod cursor;
 mod hotkey;
 mod insert;
 mod launch;
+mod opener;
 mod permissions;
 mod secrets;
 mod telemetry;
@@ -57,6 +58,7 @@ pub use dictation_core::text::Transcript;
 pub use hotkey::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};
 pub use insert::{InsertError, TextInserter};
 pub use launch::{LaunchAtLogin, LaunchAtLoginError, LaunchAtLoginState};
+pub use opener::Opener;
 pub use permissions::{PermissionError, PermissionStatus, Permissions};
 pub use secrets::{Secret, SecretError, SecretStore};
 pub use telemetry::{
