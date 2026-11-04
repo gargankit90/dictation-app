@@ -29,7 +29,7 @@ use dictation_core::onboarding::Step;
 use dictation_core::settings::{Provider, Settings};
 use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, UndoFailed};
-use dictation_pipeline::launch::{self, LoginSync};
+use dictation_pipeline::launch::LoginSync;
 use dictation_platform::secrets::KeychainSecretStore;
 use dictation_ports::{LaunchAtLogin, SecretStore, TranscribeError};
 use dictation_transcribe::check_key::check_key;
@@ -133,22 +133,19 @@ pub async fn get_settings(
     login: State<'_, LoginItem>,
     hotkey: State<'_, ActiveHotkey>,
 ) -> Result<Settings, String> {
-    let login = Arc::clone(&login.login);
     let hotkey = hotkey.0.clone();
-    on_config(&state, move |config| {
-        read_settings(config, &*login, &hotkey)
-    })
-    .await
+    let login = login.sync.clone();
+    on_config(&state, move |config| read_settings(config, &login, &hotkey)).await
 }
 
 /// What Settings shows: the file, with the login item and the hotkey as
 /// they really are.
 fn read_settings<S: SecretStore>(
     config: &Config<S>,
-    login: &dyn LaunchAtLogin,
+    login: &LoginSync,
     hotkey: &HotkeyControl,
 ) -> Result<Settings, ConfigError> {
-    let saved = launch::with_os_state(login, config.settings()?);
+    let saved = login.shown(config.settings()?);
     Ok(hotkey_setting::with_active(hotkey.spec(), saved))
 }
 
@@ -1312,7 +1309,7 @@ mod tests {
             tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
             fake.set_state(LaunchAtLoginState::Disabled);
             let (hotkey, _) = listening();
-            let shown = read_settings(&config, &fake, &hotkey).unwrap();
+            let shown = read_settings(&config, &item.sync, &hotkey).unwrap();
             assert!(!shown.launch_at_login);
             // Asking for it on again does reach the OS, whatever the file says.
             let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
@@ -1348,7 +1345,10 @@ mod tests {
             fake.enabling_gives(LaunchAtLoginState::RequiresApproval);
             let item = LoginItem::new(Arc::new(fake), Arc::clone(&config));
             let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
-            assert_eq!(outcome.problem, Some(launch::LaunchProblem::NeedsApproval));
+            assert_eq!(
+                outcome.problem,
+                Some(dictation_pipeline::launch::LaunchProblem::NeedsApproval)
+            );
             assert!(!config.settings().is_ok_and(|saved| saved.launch_at_login));
             let _ = std::fs::remove_dir_all(dir);
         }
@@ -1806,7 +1806,12 @@ mod tests {
             // The file still has RightAlt and the old language; what
             // Settings shows is the hotkey that works, with the rest as saved.
             assert_eq!(config.settings().unwrap().hotkey, "RightAlt");
-            let shown = read_settings(&config, &login, &hotkey).unwrap();
+            let shown = read_settings(
+                &config,
+                &LoginSync::new(Arc::new(login.clone()), |_| {}),
+                &hotkey,
+            )
+            .unwrap();
             assert_eq!(shown.hotkey, "F6");
             assert_eq!(shown.language.as_deref(), Some("fr"));
             let _ = std::fs::remove_dir_all(dir);
@@ -1831,7 +1836,13 @@ mod tests {
             assert_eq!(error.to_string(), "settings file prefs: disk full");
             assert!(keys.listening("RightAlt") && !keys.listening("F6"));
             assert_eq!(
-                read_settings(&config, &login, &hotkey).unwrap().hotkey,
+                read_settings(
+                    &config,
+                    &LoginSync::new(Arc::new(login.clone()), |_| {}),
+                    &hotkey
+                )
+                .unwrap()
+                .hotkey,
                 "RightAlt"
             );
             let _ = std::fs::remove_dir_all(dir);

@@ -48,8 +48,15 @@ impl From<LaunchAtLoginError> for LaunchProblem {
 /// `saved` with `launch_at_login` set to what the OS says. If the OS can't
 /// say, the saved value stays.
 #[must_use]
-pub fn with_os_state(login: &dyn LaunchAtLogin, mut saved: Settings) -> Settings {
-    match login.state() {
+pub fn with_os_state(login: &dyn LaunchAtLogin, saved: Settings) -> Settings {
+    reconcile(saved, login.state())
+}
+
+fn reconcile(
+    mut saved: Settings,
+    state: Result<LaunchAtLoginState, LaunchAtLoginError>,
+) -> Settings {
+    match state {
         Ok(state) => {
             if state.is_enabled() != saved.launch_at_login {
                 tracing::info!(
@@ -64,6 +71,9 @@ pub fn with_os_state(login: &dyn LaunchAtLogin, mut saved: Settings) -> Settings
     }
     saved
 }
+
+/// How long the screen waits for the OS to say if the login item is on.
+pub const READ_LIMIT: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// What a change of the login item ended in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,8 +169,11 @@ struct Pending {
 /// skipped: after the running OS call, only the newest wish is applied, and
 /// every waiting receiver gets that last outcome, so nothing arrives out of
 /// order and the final state is the last choice.
+#[derive(Clone)]
 pub struct LoginSync {
     login: Arc<dyn LaunchAtLogin>,
+    /// What the OS last said, whether the app asked or the screen did.
+    known: Arc<Mutex<Option<LaunchAtLoginState>>>,
     /// Called with each final outcome before the receivers are told, with
     /// no other change running or starting: stores the result.
     on_done: Arc<dyn Fn(&Outcome) + Send + Sync>,
@@ -175,9 +188,53 @@ impl LoginSync {
     ) -> Self {
         Self {
             login,
+            known: Arc::new(Mutex::new(None)),
             on_done: Arc::new(on_done),
             pending: Arc::new(Mutex::new(Pending::default())),
         }
+    }
+
+    /// `saved` with `launch_at_login` as the screen should show it, without
+    /// waiting long for the OS: reading the state has taken 8 s (just after
+    /// a boot) and blocks while the OS unregisters, which would hold up the
+    /// settings window (S1, #238). While a change is pending the screen shows
+    /// that choice; otherwise the OS's state if it answers within
+    /// [`READ_LIMIT`], else the last state it gave (the late answer is kept
+    /// for the next call), else `saved`.
+    #[must_use]
+    pub fn shown(&self, mut saved: Settings) -> Settings {
+        if let Some(wanted) = self.pending() {
+            saved.launch_at_login = wanted;
+            return saved;
+        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let (login, known) = (Arc::clone(&self.login), Arc::clone(&self.known));
+        let spawned = std::thread::Builder::new()
+            .name("login-item-state".into())
+            .spawn(move || {
+                let state = login.state();
+                if let Ok(state) = state {
+                    *known
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(state);
+                }
+                let _ = sender.send(state);
+            });
+        let state = match spawned {
+            Ok(_) => receiver.recv_timeout(READ_LIMIT).ok(),
+            Err(_) => None,
+        };
+        let state = state.unwrap_or_else(|| {
+            tracing::info!(
+                "the OS is slow to say if the login item is on; using what it said last"
+            );
+            let known = *self
+                .known
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            known.ok_or(LaunchAtLoginError::Unsupported)
+        });
+        reconcile(saved, state)
     }
 
     /// Asks for the login item to be `enabled`. Returns without waiting for
@@ -192,14 +249,15 @@ impl LoginSync {
             !std::mem::replace(&mut pending.running, true)
         };
         if start {
-            let (login, on_done, pending) = (
+            let (login, on_done, pending, known) = (
                 Arc::clone(&self.login),
                 Arc::clone(&self.on_done),
                 Arc::clone(&self.pending),
+                Arc::clone(&self.known),
             );
             let spawned = std::thread::Builder::new()
                 .name("login-item".into())
-                .spawn(move || work(&*login, &*on_done, &pending));
+                .spawn(move || work(&*login, &*on_done, &pending, &known));
             if let Err(error) = spawned {
                 tracing::warn!(%error, "could not start the login item thread");
                 let mut pending = lock(&self.pending);
@@ -230,6 +288,7 @@ fn work(
     login: &dyn LaunchAtLogin,
     on_done: &(dyn Fn(&Outcome) + Send + Sync),
     shared: &Mutex<Pending>,
+    known: &Mutex<Option<LaunchAtLoginState>>,
 ) {
     loop {
         let wanted = {
@@ -259,6 +318,11 @@ fn work(
         }
         // Still holding the lock: a newer request can't overtake the store.
         on_done(&outcome);
+        if let Ok(state) = login.state() {
+            *known
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(state);
+        }
         pending.running = false;
         pending.applying = None;
         for waiter in pending.waiters.drain(..) {
@@ -503,5 +567,60 @@ mod tests {
         assert!(!sync.request(false).await.unwrap().enabled);
         assert_eq!(stored.lock().unwrap().len(), 3);
         assert_eq!(login.calls(), [true, true, false]);
+    }
+
+    /// A login item whose state reads are slow.
+    struct SlowRead(FakeLaunchAtLogin, Duration);
+
+    impl LaunchAtLogin for SlowRead {
+        fn state(&self) -> Result<LaunchAtLoginState, LaunchAtLoginError> {
+            std::thread::sleep(self.1);
+            self.0.state()
+        }
+
+        fn set_enabled(&self, enabled: bool) -> Result<(), LaunchAtLoginError> {
+            self.0.set_enabled(enabled)
+        }
+    }
+
+    #[test]
+    fn the_screen_does_not_wait_for_a_slow_state_read() {
+        let fake = FakeLaunchAtLogin::new();
+        fake.set_state(LaunchAtLoginState::Enabled);
+        let sync = LoginSync::new(Arc::new(SlowRead(fake, READ_LIMIT * 4)), |_: &Outcome| {});
+        let started = std::time::Instant::now();
+        // Nothing known yet: the saved value shows, after the limit.
+        let shown = sync.shown(settings(false));
+        assert!(
+            started.elapsed() < READ_LIMIT * 3,
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(!shown.launch_at_login);
+        // The late answer was kept: the next look has it.
+        std::thread::sleep(READ_LIMIT * 5);
+        assert!(sync.shown(settings(false)).launch_at_login);
+    }
+
+    #[test]
+    fn the_screen_shows_the_pending_choice_without_asking_the_os() {
+        let fake = FakeLaunchAtLogin::new();
+        fake.set_state(LaunchAtLoginState::Enabled);
+        fake.delay_changes(Duration::from_millis(400));
+        let (sync, _) = synced(&fake);
+        let answer = sync.request(false);
+        let started = std::time::Instant::now();
+        assert!(!sync.shown(settings(true)).launch_at_login);
+        assert!(started.elapsed() < Duration::from_millis(100));
+        drop(answer);
+    }
+
+    #[test]
+    fn a_quick_read_is_the_os_state() {
+        let fake = FakeLaunchAtLogin::new();
+        let (sync, _) = synced(&fake);
+        assert!(!sync.shown(settings(true)).launch_at_login);
+        fake.set_state(LaunchAtLoginState::Enabled);
+        assert!(sync.shown(settings(false)).launch_at_login);
     }
 }
