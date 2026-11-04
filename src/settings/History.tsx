@@ -179,6 +179,14 @@ export function History({
   const select = useRef<HTMLSelectElement>(null);
   const clearButton = useRef<HTMLButtonElement>(null);
   const deleteButtons = useRef(new Map<string, HTMLButtonElement>());
+  // Where the keyboard goes when the question closes. Only after the render
+  // that takes `inert` off this section: an inert element can't take focus.
+  const focusAfterAsking = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (asking !== null) return;
+    focusAfterAsking.current?.focus();
+    focusAfterAsking.current = null;
+  }, [asking]);
 
   // The times keep up, and "Copied" doesn't outlive the section.
   useEffect(() => {
@@ -228,9 +236,9 @@ export function History({
       confirm: "Delete",
       returnTo: select,
       run: () => {
+        focusAfterAsking.current = select.current;
         setAsking(null);
         void applyLimit(next);
-        select.current?.focus();
       },
     });
   }
@@ -384,9 +392,8 @@ export function History({
         <Confirm
           asking={asking}
           onCancel={() => {
-            const back = asking.returnTo;
+            focusAfterAsking.current = asking.returnTo.current;
             setAsking(null);
-            back.current?.focus();
           }}
         />
       )}

@@ -270,6 +270,26 @@ describe("Settings → History", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
+  it("the section is inert while asking, and the keyboard returns only once it isn't", async () => {
+    backend.entries = [row(1, "one")];
+    await show();
+    const clear = await screen.findByRole("button", { name: "Clear history…" });
+    fireEvent.click(clear);
+    const dialog = await screen.findByRole("alertdialog");
+    expect(clear.closest("[inert]")).not.toBeNull();
+    // A real browser refuses focus inside `inert`; check it was lifted first.
+    let inertWhenFocused: boolean | null = null;
+    clear.addEventListener("focus", () => {
+      inertWhenFocused = clear.closest("[inert]") !== null;
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(clear);
+    });
+    expect(inertWhenFocused).toBe(false);
+    expect(clear.closest("[inert]")).toBeNull();
+  });
+
   it("the question works by keyboard: Esc cancels and Tab stays inside", async () => {
     backend.entries = [row(1, "one")];
     await show();
