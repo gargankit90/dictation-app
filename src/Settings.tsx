@@ -1,11 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SyntheticEvent } from "react";
 import { commands } from "./bindings";
-import type { Provider, Settings_Serialize, Transcription } from "./bindings";
+import type {
+  LocalModelInfo_Serialize,
+  Provider,
+  Settings_Serialize,
+  Transcription,
+} from "./bindings";
 import { BROKEN, messageOf, testKey as runKeyTest } from "./keyTest";
+import { HotkeyRecorder } from "./HotkeyRecorder";
+import { LanguagePicker } from "./LanguagePicker";
+import { cloudLanguages } from "./languages";
 import { LocalModels } from "./LocalModels";
 import type { Notice } from "./keyTest";
 import { PROVIDERS, providerInfo } from "./providers";
+import { saveHotkey, setHotkeyRecording } from "./saveHotkey";
 import "./settings.css";
 import { normalizeLanguage, validateHotkey, validateKey, validateLanguage } from "./validation";
 
@@ -42,6 +51,8 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
   const [provider, setProvider] = useState<Provider>("groq");
   const [transcription, setTranscription] = useState<Transcription>("cloud");
   const [localModel, setLocalModel] = useState("");
+  // The on-device catalogue, once LocalModels has read it.
+  const [catalogue, setCatalogue] = useState<LocalModelInfo_Serialize[] | null>(null);
   const [language, setLanguage] = useState("");
   const [hotkey, setHotkey] = useState("");
   // What the OS says about the login item, as the app last reported it.
@@ -56,6 +67,9 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
+  // The recorder is listening for the new key: the real hotkey is paused
+  // until it ends, so nothing else may save (or change the key) meanwhile.
+  const [listening, setListening] = useState(false);
   // Bumped whenever a test result would be out of date (a new test, or the
   // key or provider changed), so a slow reply can't show up under a newer key.
   const testRun = useRef(0);
@@ -138,6 +152,26 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
   }, [launchEdited]);
 
   const info = providerInfo(provider);
+  // The languages the active engine offers (U2). Before the on-device list
+  // has been read, nothing is filtered or flagged.
+  const selectedModel = catalogue?.find((model) => model.id === localModel);
+  const onDevice = transcription === "local";
+  const languageChoices: readonly string[] =
+    onDevice && selectedModel !== undefined
+      ? selectedModel.language_codes
+      : cloudLanguages(provider);
+  // Plain words, not catalogue names (those belong in Speech details).
+  const languageEngine = onDevice
+    ? selectedModel === undefined
+      ? null
+      : selectedModel.language_codes.join() === "en"
+        ? "the English model"
+        : "the multilingual model"
+    : info.name;
+  const englishOnlyModel =
+    onDevice && selectedModel?.language_codes.join() === "en" ? selectedModel : undefined;
+  const englishOnly = englishOnlyModel !== undefined;
+  const multilingual = catalogue?.find((model) => model.language_codes.length > 1);
 
   // The form is locked while a save runs, so what it shows is what gets saved.
   // (The fieldset disables the controls; these guards cover anything else.)
@@ -191,11 +225,34 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
     setNotice(outcome);
   }
 
+  /**
+   * Applies a recorded (or reset) key at once; returns a message if it can't.
+   * Busy like a Save: neither starts while the other runs, and the key has
+   * one writer on the app's side, so the two can't undo each other.
+   */
+  async function recordHotkey(spec: string): Promise<string | null> {
+    if (loaded === null || saving || testing) return "Wait for the other change to finish.";
+    setSaving(true);
+    try {
+      const result = await saveHotkey(spec);
+      if (result.settings !== null) {
+        setLoaded(result.settings);
+        // The form follows the key that listens, unless the change failed
+        // and the user has a typed value of their own.
+        if (result.error === null) setHotkey(result.settings.hotkey);
+      }
+      if (result.error === null) setNotice({ kind: "ok", text: "Dictation key saved." });
+      return result.error;
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function save(event: SyntheticEvent) {
     event.preventDefault();
     // Busy like the Save button: a submit that gets past it (Enter in a field)
     // starts nothing while a save or a key test runs.
-    if (loaded === null || saving || testing) return;
+    if (loaded === null || saving || testing || listening) return;
     const found: FieldErrors = {
       key: keyInput.trim() === "" ? undefined : (validateKey(keyInput) ?? undefined),
       language: validateLanguage(language) ?? undefined,
@@ -234,12 +291,18 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
         // new provider's default (the form says so).
         model: provider === loaded.provider ? loaded.model : info.defaultModel,
         language: normalizeLanguage(language),
-        hotkey: hotkey.trim(),
         launch_at_login: launch,
         transcription,
         local_model: localModel,
       };
-      const saved = await commands.saveSettings(toSave);
+      let saved = await commands.saveSettings(toSave);
+      // The dictation key has its own writer: a typed one is set after the
+      // rest is saved, and says so if it can't be used.
+      const typedKey = hotkey.trim();
+      if (saved.status === "ok" && typedKey !== loaded.hotkey) {
+        const change = await saveHotkey(typedKey);
+        if (change.error !== null) saved = { status: "error", error: change.error };
+      }
       if (saved.status === "error") {
         // Something didn't take effect: the login item (the OS can refuse,
         // or want the user's approval) or the hotkey (the old one keeps
@@ -369,6 +432,7 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
                   setNotice(null);
                 }}
                 disabled={saving}
+                onModels={setCatalogue}
               />
               {notice !== null && (
                 <p
@@ -473,7 +537,19 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
           )}
 
           <div className="field">
-            <label htmlFor="hotkey">Hotkey</label>
+            <span className="label" id="hotkey-label">
+              Dictation key
+            </span>
+            <HotkeyRecorder
+              value={loaded.hotkey}
+              disabled={saving}
+              onChange={recordHotkey}
+              onRecording={(recording) => {
+                setListening(recording);
+                setHotkeyRecording(recording);
+              }}
+            />
+            <label htmlFor="hotkey">Or type it</label>
             <input
               id="hotkey"
               type="text"
@@ -489,8 +565,8 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
               }}
             />
             <p id="hotkey-hint" className="hint">
-              Hold it to talk. For example RightAlt (the right Option key) or Ctrl+Shift+Space. A
-              new hotkey works as soon as you save.
+              Hold it to talk. Typed, it looks like RightAlt or Ctrl+Shift+Space, and works as soon
+              as you save. A recorded key works at once.
             </p>
             <p id="hotkey-error" role={errors.hotkey ? "alert" : undefined} className="error">
               {errors.hotkey}
@@ -499,23 +575,37 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
 
           <div className="field">
             <label htmlFor="language">Language</label>
-            <input
+            <LanguagePicker
               id="language"
-              type="text"
               value={language}
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="Detect automatically"
-              aria-invalid={errors.language !== undefined}
-              aria-describedby="language-hint language-error"
-              onChange={(event) => {
+              onChange={(code) => {
                 if (saving) return;
-                setLanguage(event.target.value);
+                setLanguage(code);
                 setErrors((current) => ({ ...current, language: undefined }));
               }}
+              supported={languageChoices}
+              engineName={languageEngine}
+              disabled={saving}
+              describedBy="language-hint language-error"
+              invalid={errors.language !== undefined}
             />
             <p id="language-hint" className="hint">
-              A code such as en, de or fr. Leave it empty to detect the language.
+              {englishOnly
+                ? `The English model understands English only. For Hindi and other languages, `
+                : "Choose the language you speak, or let the app detect it."}
+              {englishOnly && (
+                <button
+                  type="button"
+                  className="link"
+                  disabled={saving || multilingual === undefined}
+                  onClick={() => {
+                    if (multilingual !== undefined) setLocalModel(multilingual.id);
+                  }}
+                >
+                  choose the multilingual model
+                </button>
+              )}
+              {englishOnly && "."}
             </p>
             <p id="language-error" role={errors.language ? "alert" : undefined} className="error">
               {errors.language}
@@ -606,7 +696,7 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
           )}
 
           <div className="row actions">
-            <button type="submit" className="primary" disabled={saving || testing}>
+            <button type="submit" className="primary" disabled={saving || testing || listening}>
               {saving ? "Saving…" : "Save"}
             </button>
           </div>

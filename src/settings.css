@@ -1,62 +1,48 @@
-:root {
-  --bg: #ffffff;
-  --fg: #1d1d1f;
-  --muted: #6e6e73;
-  --border: #c7c7cc;
-  --accent: #0a66d6;
-  --accent-fg: #ffffff;
-  --ok: #1a7f37;
-  --danger: #c4261d;
-  color-scheme: light dark;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1e1e1e;
-    --fg: #f2f2f7;
-    --muted: #a1a1a6;
-    --border: #48484a;
-    --accent: #4c9aff;
-    --accent-fg: #0b0b0c;
-    --ok: #4cc26a;
-    --danger: #ff6b62;
-  }
-}
+/* Colours, radii, spacing and type sizes come from styles/tokens.css (DS1).
+   Dark mode follows the system through the tokens' prefers-color-scheme block. */
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font:
-    14px/1.4 -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  background: var(--vc-bg);
+  color: var(--vc-ink);
+  font: var(--vc-text-md) / var(--vc-leading) var(--vc-font-ui);
+}
+
+/* Focus ring on every interactive element: 3 px accent, 2 px offset. */
+:focus-visible {
+  outline: 3px solid var(--vc-accent);
+  outline-offset: 2px;
 }
 
 .settings {
-  padding: 20px 24px;
+  padding: var(--vc-space-5) var(--vc-space-6);
 }
 
 .settings h1 {
-  margin: 0 0 16px;
-  font-size: 20px;
+  margin: 0 0 var(--vc-space-4);
+  font-family: var(--vc-font-display);
+  font-size: var(--vc-text-xl);
+}
+
+.settings h2 {
+  font-size: var(--vc-text-lg);
 }
 
 .field {
-  margin-bottom: 18px;
+  margin-bottom: var(--vc-space-4);
 }
 
-.field label {
+.field label,
+.field .label {
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: var(--vc-space-1);
   font-weight: 600;
 }
 
 .field label.check {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--vc-space-2);
 }
 
 .field label.check input {
@@ -69,26 +55,62 @@ body {
 .field textarea {
   box-sizing: border-box;
   width: 100%;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
+  min-height: var(--vc-control-h);
+  padding: var(--vc-space-1) var(--vc-space-2);
+  border: 1px solid var(--vc-line-strong);
+  border-radius: var(--vc-radius-sm);
+  background: var(--vc-bg);
+  color: var(--vc-ink);
   font: inherit;
 }
 
+/* The switch: a checkbox drawn as a track and a knob. */
+.field label.check input[type="checkbox"] {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 36px;
+  min-height: 0;
+  height: 20px;
+  padding: 0;
+  border-radius: var(--vc-radius-pill);
+  background: var(--vc-line-strong);
+  transition: background-color var(--vc-dur) var(--vc-ease);
+}
+
+.field label.check input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--vc-accent-fg);
+  box-shadow: var(--vc-shadow-card);
+  transition: transform var(--vc-dur) var(--vc-ease);
+}
+
+.field label.check input[type="checkbox"]:checked {
+  background: var(--vc-accent);
+}
+
+.field label.check input[type="checkbox"]:checked::after {
+  transform: translateX(16px);
+}
+
 .field input[aria-invalid="true"] {
-  border-color: var(--danger);
+  border-color: var(--vc-danger);
 }
 
 .hint {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 12px;
+  margin: var(--vc-space-1) 0 0;
+  color: var(--vc-muted);
+  font-size: var(--vc-text-sm);
 }
 
 .saved {
-  color: var(--ok);
+  color: var(--vc-ready);
 }
 
 p.error:empty {
@@ -97,41 +119,64 @@ p.error:empty {
 
 .error,
 .notice.error {
-  margin: 4px 0 0;
-  color: var(--danger);
-  font-size: 13px;
+  margin: var(--vc-space-1) 0 0;
+  color: var(--vc-danger);
+  font-size: var(--vc-text-md);
 }
 
 .notice {
-  margin: 8px 0 0;
-  font-size: 13px;
+  margin: var(--vc-space-2) 0 0;
+  font-size: var(--vc-text-md);
 }
 
 .notice.ok {
-  color: var(--ok);
+  color: var(--vc-ready);
 }
 
 .row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 8px;
+  gap: var(--vc-space-3);
+  margin-top: var(--vc-space-2);
 }
 
+/* Buttons: secondary by default, 28 px in Settings. */
 button {
-  padding: 6px 14px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fg);
+  min-height: var(--vc-control-h);
+  padding: 0 var(--vc-space-4);
+  border: 1px solid var(--vc-line-strong);
+  border-radius: var(--vc-radius-sm);
+  background: var(--vc-bg);
+  color: var(--vc-ink);
   font: inherit;
   cursor: pointer;
+  transition: background-color var(--vc-dur-fast) var(--vc-ease);
+}
+
+button:hover:not(:disabled) {
+  background: var(--vc-bg-grouped);
 }
 
 button.primary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-fg);
+  border-color: var(--vc-accent);
+  background: var(--vc-accent);
+  color: var(--vc-accent-fg);
+}
+
+button.primary:hover:not(:disabled) {
+  border-color: var(--vc-accent-hover);
+  background: var(--vc-accent-hover);
+}
+
+button.plain {
+  border-color: transparent;
+  background: transparent;
+  color: var(--vc-accent);
+}
+
+button.destructive {
+  border-color: var(--vc-danger);
+  color: var(--vc-danger);
 }
 
 button:disabled {
@@ -150,17 +195,75 @@ button:disabled {
   border: 0;
 }
 
+/* Grouped rows: a card of rows separated by hairlines. */
+.group {
+  margin: 0 0 var(--vc-space-4);
+  padding: 0 var(--vc-space-3);
+  border-radius: var(--vc-radius-md);
+  background: var(--vc-bg-grouped);
+  box-shadow: var(--vc-shadow-card);
+}
+
+.group > .group-row {
+  padding: var(--vc-space-3) 0;
+  border-bottom: 1px solid var(--vc-line);
+}
+
+.group > .group-row:last-child {
+  border-bottom: 0;
+}
+
+/* Chips: always a symbol or word as well as colour. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--vc-space-1);
+  padding: 2px var(--vc-space-2);
+  border-radius: var(--vc-radius-pill);
+  font-size: var(--vc-text-xs);
+  font-weight: 600;
+}
+
+.chip.ready {
+  background: var(--vc-ready-soft);
+  color: var(--vc-ready);
+}
+
+.chip.info {
+  background: var(--vc-accent-soft);
+  color: var(--vc-accent);
+}
+
+.chip.attention {
+  background: var(--vc-attention-soft);
+  color: var(--vc-attention);
+}
+
+.chip.error {
+  background: var(--vc-danger-soft);
+  color: var(--vc-danger);
+}
+
 .onboarding h2 {
-  margin: 0 0 6px;
-  font-size: 16px;
+  margin: 0 0 var(--vc-space-2);
+  font-family: var(--vc-font-display);
+  font-size: var(--vc-text-2xl);
 }
 
 .onboarding section p {
-  margin: 4px 0;
+  margin: var(--vc-space-1) 0;
+}
+
+/* Onboarding primaries are 44 px. */
+.onboarding button.primary {
+  min-height: var(--vc-control-h-lg);
+  padding: 0 var(--vc-space-6);
+  border-radius: var(--vc-radius-md);
+  font-size: var(--vc-text-lg);
 }
 
 .field textarea {
-  margin-top: 6px;
+  margin-top: var(--vc-space-2);
   resize: vertical;
 }
 
@@ -168,7 +271,7 @@ button:disabled {
 fieldset.choice {
   border: none;
   padding: 0;
-  margin: 0 0 1rem;
+  margin: 0 0 var(--vc-space-4);
 }
 
 .local-models ul {
@@ -178,15 +281,16 @@ fieldset.choice {
 }
 
 .local-models li {
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--vc-space-3);
 }
 
 .local-models progress {
   width: 100%;
+  accent-color: var(--vc-accent);
 }
 
 .checks {
-  margin: 12px 0;
+  margin: var(--vc-space-3) 0;
   padding: 0;
   list-style: none;
 }
@@ -194,9 +298,9 @@ fieldset.choice {
 .check-row {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border);
+  gap: var(--vc-space-3);
+  padding: var(--vc-space-2) 0;
+  border-bottom: 1px solid var(--vc-line);
 }
 
 .check-row > span {
@@ -213,21 +317,88 @@ fieldset.choice {
 }
 
 .troubleshoot h2 {
-  margin: 20px 0 6px;
-  font-size: 16px;
+  margin: var(--vc-space-5) 0 var(--vc-space-2);
+  font-size: var(--vc-text-xl);
 }
 
 pre.report {
   max-height: 260px;
-  margin: 8px 0;
-  padding: 10px;
+  margin: var(--vc-space-2) 0;
+  padding: var(--vc-space-3);
   overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font:
-    12px/1.4 ui-monospace,
-    Menlo,
-    monospace;
+  border: 1px solid var(--vc-line-strong);
+  border-radius: var(--vc-radius-sm);
+  background: var(--vc-bg-grouped);
+  font: var(--vc-text-sm) / var(--vc-leading) var(--vc-font-mono);
   white-space: pre-wrap;
   user-select: text;
+}
+
+.hotkey-recorder {
+  margin-bottom: var(--vc-space-3);
+}
+
+/* Keycap (shared with U2). */
+.keycap {
+  display: inline-block;
+  margin-bottom: var(--vc-space-2);
+  padding: 2px var(--vc-space-2);
+  border: 1px solid var(--vc-line-strong);
+  border-bottom-width: 3px;
+  border-radius: var(--vc-radius-sm);
+  background: var(--vc-bg-grouped);
+  color: var(--vc-ink);
+  font: inherit;
+  font-size: var(--vc-text-sm);
+  font-weight: 600;
+  text-align: center;
+}
+
+.keycap.recording {
+  border-color: var(--vc-accent);
+  color: var(--vc-muted);
+}
+
+.language-picker {
+  position: relative;
+}
+
+.language-list {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  margin: 2px 0 0;
+  padding: var(--vc-space-1);
+  overflow: auto;
+  list-style: none;
+  border: 1px solid var(--vc-line-strong);
+  border-radius: var(--vc-radius-sm);
+  background: var(--vc-bg);
+}
+
+.language-option,
+.language-empty {
+  padding: var(--vc-space-1) var(--vc-space-2);
+  border-radius: var(--vc-radius-sm);
+}
+
+.language-option.active {
+  background: var(--vc-accent);
+  color: var(--vc-accent-fg);
+}
+
+.language-empty {
+  color: var(--vc-muted);
+}
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vc-accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }

@@ -23,7 +23,9 @@ export const commands = {
 	 *  The "share anonymous usage events" field of `settings` is ignored: the
 	 *  stored choice stays, whatever the form held when it was loaded. Only
 	 *  [`set_share_usage_events`] changes it, so a Save can never undo a newer
-	 *  opt-out (A1 review, round 1).
+	 *  opt-out (A1 review, round 1). The same goes for the hotkey, which only
+	 *  [`set_hotkey`] changes (K1 review, round 1): a form loaded before the key
+	 *  was recorded can't switch it back.
 	 */
 	saveSettings: (settings: Settings_Deserialize) => typedError<null, string>(__TAURI_INVOKE("save_settings", { settings })),
 	/**  Stores `key` as `provider`'s API key in the keychain. Write-only. */
@@ -76,6 +78,21 @@ export const commands = {
 	 *  batches on their way are dropped and the install ID is deleted.
 	 */
 	setShareUsageEvents: (share: boolean) => typedError<null, string>(__TAURI_INVOKE("set_share_usage_events", { share })),
+	/**
+	 *  Sets the dictation key and nothing else: the one writer of it (K1).
+	 *  The key listens at once; if it can't, the old one keeps listening, and
+	 *  the error says why. It never ends the pause [`set_hotkey_recording`]
+	 *  began: only the recorder ending does, so a Save can't make the real
+	 *  hotkey live while the user is still choosing (K1 review, round 2).
+	 */
+	setHotkey: (spec: string) => typedError<null, string>(__TAURI_INVOKE("set_hotkey", { spec })),
+	/**
+	 *  While the user is choosing a new dictation key, pressing the current one
+	 *  must not dictate: `recording` pauses the hotkey (renewed by calling it
+	 *  again, and ended by `false` or by itself after
+	 *  [`RECORDING_LEASE`]).
+	 */
+	setHotkeyRecording: (recording: boolean) => typedError<null, string>(__TAURI_INVOKE("set_hotkey_recording", { recording })),
 	/**
 	 *  The live checks. Reads permissions and the key; records nothing and
 	 *  contacts nobody.
@@ -280,6 +297,8 @@ export type LocalModelInfo_Deserialize = {
 	name: string,
 	/**  Its languages in words ("English only"). */
 	languages: string,
+	/**  The ISO codes it transcribes, so the language picker offers only these. */
+	language_codes: string[],
 	/**  The download's size in bytes (a number: sizes fit a double exactly). */
 	size_bytes: number | null,
 	/**  Bytes on disk so far (the size when ready, 0 when missing). */
@@ -300,6 +319,8 @@ export type LocalModelInfo_Serialize = {
 	name: string,
 	/**  Its languages in words ("English only"). */
 	languages: string,
+	/**  The ISO codes it transcribes, so the language picker offers only these. */
+	language_codes: string[],
 	/**  The download's size in bytes (a number: sizes fit a double exactly). */
 	size_bytes: number | null,
 	/**  Bytes on disk so far (the size when ready, 0 when missing). */

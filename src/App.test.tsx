@@ -35,7 +35,7 @@ describe("App", () => {
     render(<App />);
 
     expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Settings");
-    expect(await screen.findByLabelText("Hotkey")).toBeTruthy();
+    expect(await screen.findByLabelText("Or type it")).toBeTruthy();
   });
 
   it("opens Troubleshoot when the tray asked for it, and from the Settings button", async () => {

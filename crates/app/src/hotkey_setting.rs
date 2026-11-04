@@ -132,6 +132,15 @@ struct Delivery {
     dead: bool,
     /// The hotkey was stopped; the supervisor ends.
     closed: bool,
+    /// While set and in the future, presses, releases, Esc and shortcuts
+    /// don't reach the pipeline: the user is choosing a new key (K1). It
+    /// lapses by itself, so a window that never says it is done (closed,
+    /// crashed) can't leave the hotkey off.
+    paused_until: Option<Instant>,
+    /// A press was dropped (or the hold interrupted) while paused, so its
+    /// release, which may come after the pause ends, must not reach the
+    /// pipeline alone.
+    swallow_release: bool,
 }
 
 impl Delivery {
@@ -141,11 +150,63 @@ impl Delivery {
         }
     }
 
+    /// Whether delivery is paused now; clears a lapsed pause.
+    fn paused(&mut self) -> bool {
+        match self.paused_until {
+            Some(until) if Instant::now() < until => true,
+            Some(_) => {
+                self.paused_until = None;
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Pauses delivery for `lease` (renewing a pause), or ends the pause
+    /// (`None`). A hold in progress ends with [`HotkeyEvent::Interrupted`];
+    /// its release is dropped whenever it comes.
+    fn pause(&mut self, lease: Option<Duration>) {
+        match lease {
+            Some(lease) => {
+                self.paused_until = Some(Instant::now() + lease);
+                if std::mem::take(&mut self.held) {
+                    self.swallow_release = true;
+                    self.send(HotkeyEvent::Interrupted);
+                }
+            }
+            None => self.paused_until = None,
+        }
+    }
+
+    /// Whether a pause (or a hold it cut short) drops `event`.
+    fn dropped(&mut self, event: HotkeyEvent) -> bool {
+        let paused = self.paused();
+        match event {
+            HotkeyEvent::Pressed if paused => {
+                self.swallow_release = true;
+                true
+            }
+            HotkeyEvent::Pressed => {
+                self.swallow_release = false;
+                false
+            }
+            HotkeyEvent::Released | HotkeyEvent::Interrupted if paused || self.swallow_release => {
+                self.swallow_release = false;
+                true
+            }
+            HotkeyEvent::CancelPressed | HotkeyEvent::ShortcutPressed => paused,
+            _ => false,
+        }
+    }
+
     /// An event from the source of `generation`. Returns whether it made
     /// the hotkey [`dead`](Self::dead), so the supervisor must be woken.
     fn deliver(&mut self, generation: u64, event: HotkeyEvent) -> bool {
         let mut died = false;
         if generation == self.active {
+            if self.dropped(event) {
+                return false;
+            }
             match event {
                 HotkeyEvent::Pressed => self.held = true,
                 HotkeyEvent::Released | HotkeyEvent::Interrupted => self.held = false,
@@ -217,8 +278,12 @@ impl Delivery {
             self.send(HotkeyEvent::Restored);
         }
         if pressed {
-            self.held = true;
-            self.send(HotkeyEvent::Pressed);
+            if self.paused() {
+                self.swallow_release = true;
+            } else {
+                self.held = true;
+                self.send(HotkeyEvent::Pressed);
+            }
         }
         false
     }
@@ -239,6 +304,7 @@ struct State<H> {
 trait Switch: Send + Sync {
     fn spec(&self) -> HotkeySpec;
     fn switch(&self, spec: HotkeySpec) -> Result<Switched, HotkeyError>;
+    fn pause(&self, lease: Option<Duration>);
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -547,6 +613,10 @@ impl<H: HotkeySource + 'static> Switch for Shared<H> {
         lock(&self.state).spec
     }
 
+    fn pause(&self, lease: Option<Duration>) {
+        lock(&self.delivery).pause(lease);
+    }
+
     fn switch(&self, spec: HotkeySpec) -> Result<Switched, HotkeyError> {
         let mut state = lock(&self.state);
         let dead = lock(&self.delivery).dead;
@@ -616,6 +686,19 @@ impl HotkeyControl {
     /// the old hotkey keeps listening and stays current.
     pub fn switch(&self, spec: HotkeySpec) -> Result<Switched, HotkeyError> {
         self.switch.switch(spec)
+    }
+
+    /// Stops the hotkey from reaching the pipeline for `lease` (K1: while
+    /// the user is choosing a new key in Settings, pressing the current one
+    /// must not dictate). A hold in progress is interrupted. Call again to
+    /// renew; it ends by itself after `lease`, so it can't stay off.
+    pub fn pause(&self, lease: Duration) {
+        self.switch.pause(Some(lease));
+    }
+
+    /// Ends [`pause`](Self::pause) now.
+    pub fn resume(&self) {
+        self.switch.pause(None);
     }
 }
 
