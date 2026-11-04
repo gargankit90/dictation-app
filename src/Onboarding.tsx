@@ -175,18 +175,14 @@ export function Onboarding({ onFinished }: Props) {
         setError(BROKEN);
       }
       await refreshModels();
-      await refreshStatusOnly();
+      await refresh();
     } else if (action === "use-key") {
       await goTo("speech");
     } else {
       setResumedFrom(null);
       await download(id);
-      await refreshStatusOnly();
+      await refresh();
     }
-  }
-
-  async function refreshStatusOnly() {
-    await refresh();
   }
 
   async function finish() {

@@ -11,6 +11,9 @@ and error reports are built field by field from an allow-list
   more is sent, events and reports still waiting are deleted, requests under
   way are dropped, and the install ID is deleted. Turning it on again makes a
   new ID.
+- **Nothing before you choose.** On a first run the same switch is on the
+  first setup screen. Nothing is sent, and no install ID is made, until you
+  continue past that screen, and nothing at all if you switched it off there.
 - **Where it goes.** PostHog Cloud US (`https://us.i.posthog.com`), sent by
   the app itself, never by the webview.
 - **A build without a PostHog key sends nothing.** Development builds, CI and
