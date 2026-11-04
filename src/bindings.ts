@@ -297,6 +297,8 @@ export type LocalModelInfo_Deserialize = {
 	name: string,
 	/**  Its languages in words ("English only"). */
 	languages: string,
+	/**  The ISO codes it transcribes, so the language picker offers only these. */
+	language_codes: string[],
 	/**  The download's size in bytes (a number: sizes fit a double exactly). */
 	size_bytes: number | null,
 	/**  Bytes on disk so far (the size when ready, 0 when missing). */
@@ -317,6 +319,8 @@ export type LocalModelInfo_Serialize = {
 	name: string,
 	/**  Its languages in words ("English only"). */
 	languages: string,
+	/**  The ISO codes it transcribes, so the language picker offers only these. */
+	language_codes: string[],
 	/**  The download's size in bytes (a number: sizes fit a double exactly). */
 	size_bytes: number | null,
 	/**  Bytes on disk so far (the size when ready, 0 when missing). */
