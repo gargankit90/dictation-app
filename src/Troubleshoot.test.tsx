@@ -263,3 +263,31 @@ describe("criterion_e1_3 Report a problem", () => {
     expect(onBack).toHaveBeenCalledOnce();
   });
 });
+
+// U5 criterion 6: "Reveal log" left the tray menu; Troubleshoot has it.
+describe("criterion_u5_6 Show log file", () => {
+  it("opens the log folder through the app", async () => {
+    view();
+    fireEvent.click(await screen.findByRole("button", { name: "Show log file" }));
+    await waitFor(() => {
+      expect(calls).toContain("reveal_log_file");
+    });
+  });
+
+  it("says so when the folder can't be opened", async () => {
+    mockIPC((command, payload) => {
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the app rejects with a plain string
+      if (command === "reveal_log_file") return Promise.reject("Couldn't open the log folder.");
+      return backend(command, payload);
+    });
+    view();
+    fireEvent.click(await screen.findByRole("button", { name: "Show log file" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("log folder");
+  });
+
+  it("builds the report at once when the tray's Report a problem opened it", async () => {
+    view({ autoReport: true });
+    expect(await screen.findByLabelText("Report")).toBeTruthy();
+    expect(calls.filter((command) => command === "build_report")).toHaveLength(1);
+  });
+});

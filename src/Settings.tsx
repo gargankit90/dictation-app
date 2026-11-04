@@ -36,7 +36,14 @@ interface FieldErrors {
  * being typed; it is cleared after a save and never loaded back. The only
  * thing the app tells us about a stored key is whether one exists.
  */
-export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {}) {
+export function Settings({
+  onTroubleshoot,
+  focus = null,
+}: {
+  onTroubleshoot?: () => void;
+  /** The tray asked for this field: the speech engine or the dictation key. */
+  focus?: { target: "speech" | "shortcut"; id: number } | null;
+} = {}) {
   // `null` until the saved settings load. Fields the form doesn't show
   // (version) are sent back as loaded.
   const [loaded, setLoaded] = useState<Settings_Serialize | null>(null);
@@ -68,6 +75,16 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
   // only the newest reply counts: replies can arrive in any order, and one for
   // a provider the user has since left must not overwrite the current one.
   const keyCheck = useRef(0);
+
+  // The tray's fix rows land on the field that fixes the problem.
+  const loadedOnce = loaded !== null;
+  useEffect(() => {
+    if (focus === null || !loadedOnce) return;
+    const selector =
+      focus.target === "shortcut" ? "#hotkey" : "input[name='transcription']:checked";
+    const element = document.querySelector<HTMLElement>(selector);
+    element?.focus();
+  }, [focus, loadedOnce]);
 
   const checkKeySaved = useCallback(async (which: Provider) => {
     keyCheck.current += 1;

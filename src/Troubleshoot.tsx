@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "./bindings";
 import type { Check, FixAction } from "./bindings";
 import { BROKEN, messageOf } from "./keyTest";
@@ -9,6 +9,8 @@ interface Props {
   onBack: () => void;
   /** Opens the settings form (the fix for a missing key or model). */
   onOpenSettings: () => void;
+  /** Builds the report preview at once (the tray's "Report a problem…"). */
+  autoReport?: boolean;
 }
 
 type Checks = { state: "loading" } | { state: "ready"; checks: Check[] } | { state: "error" };
@@ -20,13 +22,14 @@ type Checks = { state: "loading" } | { state: "ready"; checks: Check[] } | { sta
  * can be saved, copied or opened as a GitHub issue. Nothing here records
  * audio or sends anything by itself.
  */
-export function Troubleshoot({ onBack, onOpenSettings }: Props) {
+export function Troubleshoot({ onBack, onOpenSettings, autoReport = false }: Props) {
   const [checks, setChecks] = useState<Checks>({ state: "loading" });
   const [connection, setConnection] = useState<Notice | null>(null);
   const [testing, setTesting] = useState(false);
   const [report, setReport] = useState<string | null>(null);
   const [reportNotice, setReportNotice] = useState<Notice | null>(null);
   const [building, setBuilding] = useState(false);
+  const [logNotice, setLogNotice] = useState<Notice | null>(null);
   // Bumped to run the checks again.
   const [round, setRound] = useState(0);
   const load = useCallback(() => {
@@ -121,6 +124,24 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
       setBuilding(false);
     }
   }
+
+  async function showLogFile() {
+    setLogNotice(null);
+    try {
+      const result = await commands.revealLogFile();
+      if (result.status === "error") setLogNotice({ kind: "error", text: messageOf(result.error) });
+    } catch {
+      setLogNotice({ kind: "error", text: BROKEN });
+    }
+  }
+
+  // The tray's "Report a problem…" opens with the preview already built.
+  const autoBuilt = useRef(false);
+  useEffect(() => {
+    if (!autoReport || autoBuilt.current) return;
+    autoBuilt.current = true;
+    void buildReport();
+  }, [autoReport]);
 
   async function saveReport() {
     try {
@@ -217,6 +238,14 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
         </button>
         <button
           type="button"
+          onClick={() => {
+            void showLogFile();
+          }}
+        >
+          Show log file
+        </button>
+        <button
+          type="button"
           disabled={testing}
           onClick={() => {
             void testConnection();
@@ -232,6 +261,12 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
       {connection !== null ? (
         <p role="status" className={`notice ${connection.kind}`}>
           {connection.text}
+        </p>
+      ) : null}
+
+      {logNotice !== null ? (
+        <p role="alert" className={`notice ${logNotice.kind}`}>
+          {logNotice.text}
         </p>
       ) : null}
 

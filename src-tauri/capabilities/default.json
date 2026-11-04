@@ -26,6 +26,7 @@
     "allow-build-report",
     "allow-save-report",
     "allow-open-issue",
-    "allow-take-troubleshoot-request"
+    "allow-take-window-request",
+    "allow-reveal-log-file"
   ]
 }

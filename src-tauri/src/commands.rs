@@ -797,7 +797,8 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::build_report,
         crate::diagnostics::save_report,
         crate::diagnostics::open_issue,
-        crate::diagnostics::take_troubleshoot_request,
+        crate::diagnostics::take_window_request,
+        crate::diagnostics::reveal_log_file,
     ])
 }
 
@@ -897,7 +898,8 @@ mod tests {
             "buildReport",
             "saveReport",
             "openIssue",
-            "takeTroubleshootRequest",
+            "takeWindowRequest",
+            "revealLogFile",
         ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
@@ -906,7 +908,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 23,
+            commands, 24,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -2556,6 +2558,7 @@ mod capability_tests {
         app.manage(super::AppShell(std::sync::Arc::new(NoShell)));
         app.manage(crate::usage::Usage::disabled());
         app.manage(crate::diagnostics::Diagnostics::default());
+        app.manage(crate::LogDir(dir.join("logs")));
         let windows = labels
             .iter()
             .map(|label| {
@@ -2713,9 +2716,11 @@ mod capability_tests {
                 },
                 // F1: it must succeed, through the fake opener.
                 "open_issue" => invoke(main, command, args(command)).map(|_| ()),
-                "run_checks" | "test_connection" | "build_report" | "take_troubleshoot_request" => {
-                    invoke(main, command, args(command)).map(|_| ())
-                }
+                "run_checks"
+                | "test_connection"
+                | "build_report"
+                | "take_window_request"
+                | "reveal_log_file" => invoke(main, command, args(command)).map(|_| ()),
                 // No keychain, network or OS prompt: the onboarding ones
                 // run on fakes (granted permissions, no shell).
                 "get_settings" | "save_settings" | "get_onboarding" | "finish_onboarding"
@@ -2736,7 +2741,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 23);
+        assert_eq!(COMMAND_NAMES.len(), 24);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");
@@ -2745,7 +2750,27 @@ mod capability_tests {
             "{}",
             urls[0]
         );
-        assert!(fixture.opener.folders().is_empty());
+        // U5: the only folder opened is the log folder, by "Show log file",
+        // and through the fake: no Finder window.
+        assert_eq!(fixture.opener.folders().len(), 1);
+    }
+
+    /// U5 criterion 6: Troubleshoot's "Show log file" opens the log folder
+    /// through the opener port, and a failing launcher is reported.
+    #[test]
+    fn criterion_6_show_log_file_goes_through_the_opener() {
+        let fixture = app_with_windows(&[MAIN]);
+        let main = &fixture.windows[0];
+        invoke(main, "reveal_log_file", args("reveal_log_file")).unwrap();
+        let folders = fixture.opener.folders();
+        assert_eq!(folders.len(), 1, "{folders:?}");
+        assert!(folders[0].ends_with("logs"), "{folders:?}");
+        fixture.opener.fail_from_now_on();
+        let error = invoke(main, "reveal_log_file", args("reveal_log_file")).unwrap_err();
+        assert!(
+            error.to_string().contains("Couldn't open the log folder"),
+            "{error}"
+        );
     }
 
     /// F1: a failing launcher is reported, not swallowed.

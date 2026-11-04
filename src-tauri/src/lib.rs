@@ -56,6 +56,7 @@ mod logging;
 pub mod models;
 pub mod onboarding;
 mod overlay;
+pub mod tray_menu;
 mod updater;
 pub mod usage;
 mod window;
@@ -66,12 +67,12 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context as _;
 use dictation_pipeline::debug_audio::SavingAudio;
 use dictation_pipeline::hotkey_setting::{self, ConfigurableHotkey, HotkeyControl};
+use dictation_pipeline::last_dictation::{LastDictation, Remembering};
 use dictation_pipeline::pipeline::{Config, CursorReader, Pipeline, Ports, UiEvent};
 use dictation_pipeline::stand_ins::{GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
 #[cfg(debug_assertions)]
 use dictation_pipeline::test_hooks::{Breakable, HotkeyOutage, SyntheticHotkey};
-use dictation_pipeline::tray::{TrayStatus, TrayView};
 use dictation_pipeline::ui_events::{UiReceiver, UiSender};
 use dictation_pipeline::usage::UsageTracker;
 use dictation_platform::audio::{FileAudioSource, SystemMicrophone};
@@ -88,26 +89,14 @@ use dictation_ports::{
 };
 use dictation_transcribe::engine::{Engine, Transcribers};
 use dictation_transcribe::mock::MockTranscriber;
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
-use tauri::{App, AppHandle, Manager, RunEvent, WindowEvent, Wry};
+use tauri::{App, AppHandle, Manager, RunEvent, WindowEvent};
 
-const QUIT_ID: &str = "quit";
-const SETTINGS_ID: &str = "settings";
-const REVEAL_LOG_ID: &str = "reveal-log";
-const ONBOARDING_ID: &str = "onboarding";
-const RELAUNCH_ID: &str = "relaunch";
-const TROUBLESHOOT_ID: &str = "troubleshoot";
-/// The tray's Relaunch item, offered while the microphone is denied (M5.7).
-const RELAUNCH_LABEL: &str = "Relaunch dictation-app";
-const TRAY_ID: &str = "main";
-const TOOLTIP: &str = "dictation-app";
 /// Where a launch's flags came from, for the log.
 const THIS_LAUNCH: &str = "this launch";
 const SECOND_LAUNCH: &str = "a second launch";
 
-/// The app's log folder, for the tray's "Reveal log".
-struct LogDir(std::path::PathBuf);
+/// The app's log folder, for Troubleshoot's "Show log file".
+pub struct LogDir(pub std::path::PathBuf);
 
 /// The running pipeline, taken out on Quit to shut it down.
 struct RunningPipeline(Mutex<Option<Pipeline>>);
@@ -342,7 +331,8 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         dictation_platform::reveal::SystemOpener,
     )));
 
-    build_tray(app).context("could not create the tray icon")?;
+    let last_dictation = LastDictation::default();
+    tray_menu::build(app, last_dictation.clone()).context("could not create the tray icon")?;
 
     let argv: Vec<String> = std::env::args().collect();
     let launch = flags::parse(&argv, flags::TEST_FLAGS);
@@ -431,7 +421,7 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         hotkey,
         audio,
         transcriber: transcribers.clone(),
-        inserter: SystemInserter::new(),
+        inserter: Remembering::new(SystemInserter::new(), last_dictation),
         permissions,
         clock: SystemClock::new(),
     };
@@ -478,6 +468,8 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         transcribers,
         diagnostics,
     ));
+    // The menu reads the settings, engine and permissions from here on.
+    tray_menu::start(app.handle());
     tracing::info!(hotkey = %hotkey_control.spec(), "ready");
     onboarding_at_launch(
         app.handle(),
@@ -589,15 +581,6 @@ fn show_onboarding(app: &AppHandle) {
     if let Err(error) = spawned {
         tracing::error!(%error, "could not open onboarding");
     }
-}
-
-/// Shows the window on its Troubleshoot view (E1): the page asks for it
-/// when the window is shown.
-fn show_troubleshoot(app: &AppHandle) {
-    if let Some(diagnostics) = app.try_state::<diagnostics::Diagnostics>() {
-        diagnostics.ask_for_troubleshoot();
-    }
-    show_settings(app);
 }
 
 /// Shows the settings form.
@@ -727,106 +710,10 @@ fn handle_flags(
     Ok(())
 }
 
-/// The tray's menu and its Relaunch item, which [`show_in_tray`] adds and
-/// removes (Tauri menu items can't be hidden).
-struct TrayMenu {
-    menu: Menu<Wry>,
-    relaunch: MenuItem<Wry>,
-}
-
-/// What a tray menu item does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TrayAction {
-    Settings,
-    Onboarding,
-    Troubleshoot,
-    CheckForUpdates,
-    RevealLog,
-    Relaunch,
-    Quit,
-}
-
-/// The action for a tray menu item's id.
-fn tray_action(id: &str) -> Option<TrayAction> {
-    Some(match id {
-        SETTINGS_ID => TrayAction::Settings,
-        ONBOARDING_ID => TrayAction::Onboarding,
-        TROUBLESHOOT_ID => TrayAction::Troubleshoot,
-        updater::CHECK_ID => TrayAction::CheckForUpdates,
-        REVEAL_LOG_ID => TrayAction::RevealLog,
-        RELAUNCH_ID => TrayAction::Relaunch,
-        QUIT_ID => TrayAction::Quit,
-        _ => return None,
-    })
-}
-
-fn build_tray(app: &App) -> tauri::Result<()> {
-    let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, None::<&str>)?;
-    let setup = MenuItem::with_id(app, ONBOARDING_ID, "Set up dictation…", true, None::<&str>)?;
-    let troubleshoot =
-        MenuItem::with_id(app, TROUBLESHOOT_ID, "Troubleshoot…", true, None::<&str>)?;
-    let reveal = MenuItem::with_id(app, REVEAL_LOG_ID, "Reveal log", true, None::<&str>)?;
-    let updates = MenuItem::with_id(
-        app,
-        updater::CHECK_ID,
-        updater::CHECK_LABEL,
-        true,
-        None::<&str>,
-    )?;
-    let quit = MenuItem::with_id(app, QUIT_ID, "Quit dictation-app", true, None::<&str>)?;
-    // Not in the menu until the microphone is denied.
-    let relaunch = MenuItem::with_id(app, RELAUNCH_ID, RELAUNCH_LABEL, true, None::<&str>)?;
-    let menu = Menu::with_items(
-        app,
-        &[&settings, &setup, &troubleshoot, &updates, &reveal, &quit],
-    )?;
-    let mut tray = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip(TOOLTIP)
-        .menu(&menu)
-        .on_menu_event(|app, event| match tray_action(event.id().as_ref()) {
-            Some(TrayAction::Quit) => {
-                tracing::info!("quit from the tray");
-                app.exit(0);
-            }
-            Some(TrayAction::Settings) => show_settings(app),
-            Some(TrayAction::Onboarding) => show_onboarding(app),
-            Some(TrayAction::Troubleshoot) => show_troubleshoot(app),
-            Some(TrayAction::RevealLog) => reveal_log(app),
-            Some(TrayAction::CheckForUpdates) => updater::check_from_tray(app),
-            Some(TrayAction::Relaunch) => {
-                if let Some(shell) = app.try_state::<commands::AppShell>() {
-                    commands::relaunch_from_tray(&shell);
-                }
-            }
-            None => {}
-        });
-    if let Some(icon) = app.default_window_icon() {
-        tray = tray.icon(icon.clone());
-    }
-    tray.build(app)?;
-    app.manage(TrayMenu { menu, relaunch });
-    Ok(())
-}
-
-/// Opens the log folder in the file manager (Finder on macOS).
-fn reveal_log(app: &AppHandle) {
-    let Some(dir) = app.try_state::<LogDir>() else {
-        tracing::warn!("the log folder isn't known yet");
-        return;
-    };
-    let Some(opener) = app.try_state::<diagnostics::AppOpener>() else {
-        return;
-    };
-    if let Err(error) = opener.0.reveal_folder(&dir.0) {
-        tracing::warn!(%error, "could not open the log folder");
-    }
-}
-
 /// Logs each state change (never the transcript), passes each event to the
-/// overlay, and shows in the tray's title and tooltip a dictation error
-/// until the next recording starts, and "Hotkey unavailable" while the
-/// hotkey doesn't work, and in its menu Relaunch while the microphone is
-/// denied (`microphone_denied` at launch; [`TrayStatus`]).
+/// overlay, and to the tray, whose status line and icon show a dictation
+/// error until the next recording starts, and the hotkey while it doesn't
+/// work (`microphone_denied` at launch; [`tray_menu`]).
 async fn show_ui_events(
     app: AppHandle,
     mut events: UiReceiver,
@@ -836,13 +723,17 @@ async fn show_ui_events(
     transcribers: Transcribers,
     diagnostics: diagnostics::Diagnostics,
 ) {
-    let mut tray = TrayStatus::new(microphone_denied);
     // Usage events from the same stream; only kinds and buckets leave it.
     let mut tracker =
         UsageTracker::new(usage.0.clone(), EngineKind::Cloud).with_reporter(usage.1.clone());
     let started = std::time::Instant::now();
     if microphone_denied {
-        show_in_tray(&app, tray.view());
+        tray_menu::on_event(
+            &app,
+            &UiEvent::Error(dictation_core::error::DictationError::PermissionMissing(
+                Permission::Microphone,
+            )),
+        );
     }
     while let Some(event) = events.recv().await {
         if let Some(overlay) = &overlay {
@@ -869,52 +760,7 @@ async fn show_ui_events(
                 tracing::info!("hotkey restored; shown to the user");
             }
         }
-        if let Some(view) = tray.on_event(&event) {
-            show_in_tray(&app, &view);
-        }
-    }
-}
-
-/// The tray's tooltip for `view`: the app's name, then the detail if any.
-fn tray_tooltip(view: &TrayView) -> String {
-    let Some(detail) = &view.detail else {
-        return TOOLTIP.to_owned();
-    };
-    match view.code {
-        Some(code) => format!("{TOOLTIP}: {detail} ({code})"),
-        None => format!("{TOOLTIP}: {detail}"),
-    }
-}
-
-/// Puts `view` in the tray's title (next to the icon), tooltip and menu.
-fn show_in_tray(app: &AppHandle, view: &TrayView) {
-    let Some(tray) = app.tray_by_id(TRAY_ID) else {
-        return;
-    };
-    if let Err(error) = tray
-        .set_title(view.title.as_deref())
-        .and_then(|()| tray.set_tooltip(Some(tray_tooltip(view))))
-    {
-        tracing::warn!(%error, "could not update the tray");
-    }
-    if let Some(menu) = app.try_state::<TrayMenu>() {
-        offer_relaunch(&menu, view.relaunch);
-    }
-}
-
-/// Adds Relaunch at the top of the tray menu, or removes it, unless it is
-/// already so.
-fn offer_relaunch(tray: &TrayMenu, offered: bool) {
-    let shown = tray.menu.get(RELAUNCH_ID).is_some();
-    let result = match (shown, offered) {
-        (false, true) => tray.menu.insert(&tray.relaunch, 0),
-        (true, false) => tray.menu.remove(&tray.relaunch),
-        _ => return,
-    };
-    match result {
-        // This line's text is what the e2e scenario waits for.
-        Ok(()) => tracing::info!(offered, "tray relaunch item"),
-        Err(error) => tracing::warn!(%error, "could not update the tray menu"),
+        tray_menu::on_event(&app, &event);
     }
 }
 
@@ -944,90 +790,6 @@ fn shut_down(app: &AppHandle) {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .take(),
         );
-    }
-}
-
-#[cfg(test)]
-mod tray_tests {
-    use dictation_core::error::{DictationError, Permission};
-    use dictation_pipeline::tray::{DICTATION_FAILED, HOTKEY_UNAVAILABLE, MAX_TITLE_CHARS};
-
-    use super::*;
-
-    /// One of each error, with reasons as long as the summary lets through.
-    fn every_error() -> Vec<DictationError> {
-        let long = "The provider rejected your API key. Check it in Settings. ".repeat(4);
-        let all = vec![
-            DictationError::TranscriptionFailed {
-                reason: long.clone(),
-            },
-            DictationError::EmptyTranscript,
-            DictationError::InsertFailed { reason: long },
-            DictationError::SecureInput,
-            DictationError::PermissionMissing(Permission::Microphone),
-            DictationError::PermissionMissing(Permission::Accessibility),
-            DictationError::HotkeyFailed,
-        ];
-        // A new kind of error fails to compile here until it is listed above.
-        for error in &all {
-            match error {
-                DictationError::TranscriptionFailed { .. }
-                | DictationError::EmptyTranscript
-                | DictationError::InsertFailed { .. }
-                | DictationError::SecureInput
-                | DictationError::PermissionMissing(_)
-                | DictationError::HotkeyFailed => {}
-            }
-        }
-        all
-    }
-
-    /// #151: whatever the error, the title is the same short text, so the
-    /// status item fits in the menu bar; the whole message is the tooltip.
-    #[test]
-    fn the_tray_title_stays_short_for_every_error() {
-        for error in every_error() {
-            let mut tray = TrayStatus::default();
-            let view = tray.on_event(&UiEvent::Error(error.clone()));
-            let view = view.unwrap_or_else(|| tray.view().clone());
-            let title = view.title.clone().unwrap_or_default();
-            assert!(title.chars().count() <= MAX_TITLE_CHARS, "{error}: {title}");
-            let expected = match error {
-                DictationError::HotkeyFailed => HOTKEY_UNAVAILABLE,
-                _ => DICTATION_FAILED,
-            };
-            assert_eq!(title, expected, "{error}");
-            // E1: the tooltip ends with the error's stable code.
-            assert_eq!(tray_tooltip(&view), {
-                let code = dictation_core::diagnostics::ErrorCode::of(&error);
-                format!("dictation-app: {} ({code})", code.user_text())
-            });
-        }
-    }
-
-    /// M5.7 criterion 2: the Relaunch item's id is the Relaunch action, which
-    /// calls the restart M5.2's `relaunch_app` uses
-    /// (`commands::tests::the_tray_relaunch_restarts_the_app`).
-    #[test]
-    fn m5_7_criterion_2_the_relaunch_item_is_the_relaunch_action() {
-        assert_eq!(tray_action(RELAUNCH_ID), Some(TrayAction::Relaunch));
-        assert_eq!(tray_action(QUIT_ID), Some(TrayAction::Quit));
-        assert_eq!(tray_action(SETTINGS_ID), Some(TrayAction::Settings));
-        assert_eq!(tray_action(ONBOARDING_ID), Some(TrayAction::Onboarding));
-        assert_eq!(tray_action(REVEAL_LOG_ID), Some(TrayAction::RevealLog));
-        assert_eq!(tray_action(TROUBLESHOOT_ID), Some(TrayAction::Troubleshoot));
-        assert_eq!(
-            tray_action(updater::CHECK_ID),
-            Some(TrayAction::CheckForUpdates)
-        );
-        assert_eq!(tray_action("something else"), None);
-    }
-
-    #[test]
-    fn no_error_clears_the_title() {
-        let view = TrayView::default();
-        assert_eq!(view.title, None);
-        assert_eq!(tray_tooltip(&view), "dictation-app");
     }
 }
 

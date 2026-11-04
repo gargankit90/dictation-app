@@ -38,6 +38,32 @@ use crate::onboarding::OsPermissions;
 #[derive(Clone)]
 pub struct AppOpener(pub Arc<dyn dictation_ports::Opener>);
 
+/// What the tray asks the one window to show (U5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowRequest {
+    /// The Troubleshoot page.
+    Troubleshoot,
+    /// The Troubleshoot page with the report preview built.
+    Report,
+    /// Settings, on the speech engine and key.
+    Speech,
+    /// Settings, on the dictation key.
+    Shortcut,
+}
+
+impl WindowRequest {
+    /// The name the window reads.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Troubleshoot => "troubleshoot",
+            Self::Report => "report",
+            Self::Speech => "speech",
+            Self::Shortcut => "shortcut",
+        }
+    }
+}
+
 /// What the app remembers for Troubleshoot and the report. Managed Tauri
 /// state; clones share it.
 #[derive(Clone, Default)]
@@ -48,8 +74,8 @@ struct Shared {
     log: Mutex<ErrorLog>,
     /// Whether the hotkey doesn't work, as the pipeline last said.
     hotkey_down: AtomicBool,
-    /// Whether the tray asked for the Troubleshoot view.
-    wants_troubleshoot: AtomicBool,
+    /// What the tray asked the window to show, until the window asks.
+    wanted: Mutex<Option<WindowRequest>>,
     /// The report the user is looking at; Save and "Open a GitHub issue"
     /// use this text, so they can't differ from what was shown.
     shown_report: Mutex<Option<String>>,
@@ -87,10 +113,14 @@ impl Diagnostics {
         *lock(&self.0.app) = Some(app);
     }
 
-    /// The tray's "Troubleshoot…": the window shows that view next time it
-    /// asks.
-    pub fn ask_for_troubleshoot(&self) {
-        self.0.wants_troubleshoot.store(true, Ordering::Relaxed);
+    /// The tray asks the window to show `request` the next time it asks.
+    pub fn ask_for(&self, request: WindowRequest) {
+        *lock(&self.0.wanted) = Some(request);
+    }
+
+    /// What the tray asked for since the window last asked; asking clears it.
+    pub fn take_request(&self) -> Option<WindowRequest> {
+        lock(&self.0.wanted).take()
     }
 
     fn recent(&self) -> Vec<LoggedError> {
@@ -628,17 +658,33 @@ pub async fn open_issue(
         })
 }
 
-/// Whether the tray asked for Troubleshoot since the window last asked;
-/// asking clears it.
+/// What the tray asked the window to show since the window last asked, as
+/// `"troubleshoot"`, `"report"`, `"speech"` or `"shortcut"`; empty if
+/// nothing. Asking clears it.
 #[tauri::command]
 #[specta::specta]
-pub async fn take_troubleshoot_request(
-    diagnostics: State<'_, Diagnostics>,
-) -> Result<bool, String> {
+pub async fn take_window_request(diagnostics: State<'_, Diagnostics>) -> Result<String, String> {
     Ok(diagnostics
-        .0
-        .wants_troubleshoot
-        .swap(false, Ordering::Relaxed))
+        .take_request()
+        .map_or("", WindowRequest::as_str)
+        .to_owned())
+}
+
+/// Shows the log folder in the file manager, through the opener port.
+#[tauri::command]
+#[specta::specta]
+pub async fn reveal_log_file(
+    dir: State<'_, crate::LogDir>,
+    opener: State<'_, AppOpener>,
+) -> Result<(), String> {
+    let (opener, dir) = (opener.0.clone(), dir.0.clone());
+    tauri::async_runtime::spawn_blocking(move || opener.reveal_folder(&dir))
+        .await
+        .map_err(|_| "the file manager task crashed".to_owned())?
+        .map_err(|error| {
+            tracing::warn!(%error, "could not open the log folder");
+            "Couldn't open the log folder.".to_owned()
+        })
 }
 
 #[cfg(test)]
@@ -869,14 +915,12 @@ mod tests {
         let recent = diagnostics.recent();
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[1].code, ErrorCode::MicDenied);
-        assert!(!diagnostics.0.wants_troubleshoot.load(Ordering::Relaxed));
-        diagnostics.ask_for_troubleshoot();
-        assert!(
-            diagnostics
-                .0
-                .wants_troubleshoot
-                .swap(false, Ordering::Relaxed)
-        );
+        assert_eq!(diagnostics.take_request(), None);
+        diagnostics.ask_for(WindowRequest::Troubleshoot);
+        diagnostics.ask_for(WindowRequest::Report);
+        // The newest ask wins, and asking clears it.
+        assert_eq!(diagnostics.take_request(), Some(WindowRequest::Report));
+        assert_eq!(diagnostics.take_request(), None);
     }
 
     // E1 criterion 4. Everything that could reach the report is planted

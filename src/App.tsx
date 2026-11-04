@@ -15,6 +15,11 @@ export function App() {
   const [view, setView] = useState<View | null>(null);
   // Settings, or Troubleshoot (E1), which the tray can ask for.
   const [page, setPage] = useState<"settings" | "troubleshoot">("settings");
+  // The tray's "Report a problem…": Troubleshoot with the report built.
+  const [autoReport, setAutoReport] = useState(false);
+  // The tray's fix rows: Settings with this field focused. `id` makes a
+  // repeated ask count.
+  const [focus, setFocus] = useState<{ target: "speech" | "shortcut"; id: number } | null>(null);
 
   useEffect(() => {
     const state = { cancelled: false };
@@ -26,18 +31,24 @@ export function App() {
       } catch {
         // Settings, which works without onboarding.
       }
-      let troubleshoot = false;
+      let request = "";
       if (next === "settings") {
         try {
-          const asked = await commands.takeTroubleshootRequest();
-          troubleshoot = asked.status === "ok" && asked.data;
+          const asked = await commands.takeWindowRequest();
+          if (asked.status === "ok") request = asked.data;
         } catch {
           // Settings.
         }
       }
       if (state.cancelled) return;
       setView(next);
-      if (troubleshoot) setPage("troubleshoot");
+      if (request === "troubleshoot" || request === "report") {
+        setAutoReport(request === "report");
+        setPage("troubleshoot");
+      } else if (request === "speech" || request === "shortcut") {
+        setPage("settings");
+        setFocus((current) => ({ target: request, id: (current?.id ?? 0) + 1 }));
+      }
     };
     void ask();
     const onShow = () => {
@@ -65,7 +76,9 @@ export function App() {
   if (page === "troubleshoot") {
     return (
       <Troubleshoot
+        autoReport={autoReport}
         onBack={() => {
+          setAutoReport(false);
           setPage("settings");
         }}
         onOpenSettings={() => {
@@ -76,6 +89,7 @@ export function App() {
   }
   return (
     <Settings
+      focus={focus}
       onTroubleshoot={() => {
         setPage("troubleshoot");
       }}

@@ -30,5 +30,6 @@ pub const COMMAND_NAMES: &[&str] = &[
     "build_report",
     "save_report",
     "open_issue",
-    "take_troubleshoot_request",
+    "take_window_request",
+    "reveal_log_file",
 ];

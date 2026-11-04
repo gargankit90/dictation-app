@@ -117,10 +117,13 @@ export const commands = {
 	 */
 	openIssue: () => typedError<null, string>(__TAURI_INVOKE("open_issue")),
 	/**
-	 *  Whether the tray asked for Troubleshoot since the window last asked;
-	 *  asking clears it.
+	 *  What the tray asked the window to show since the window last asked, as
+	 *  `"troubleshoot"`, `"report"`, `"speech"` or `"shortcut"`; empty if
+	 *  nothing. Asking clears it.
 	 */
-	takeTroubleshootRequest: () => typedError<boolean, string>(__TAURI_INVOKE("take_troubleshoot_request")),
+	takeWindowRequest: () => typedError<string, string>(__TAURI_INVOKE("take_window_request")),
+	/**  Shows the log folder in the file manager, through the opener port. */
+	revealLogFile: () => typedError<null, string>(__TAURI_INVOKE("reveal_log_file")),
 };
 
 /* Types */
