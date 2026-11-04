@@ -84,6 +84,9 @@ fn reconcile(
     saved
 }
 
+/// Stores an outcome; the error says why it couldn't.
+type StoreFn = dyn Fn(&Outcome) -> Result<(), String> + Send + Sync;
+
 /// How long the screen waits for the OS to say if the login item is on.
 pub const READ_LIMIT: std::time::Duration = std::time::Duration::from_millis(500);
 
@@ -188,7 +191,7 @@ pub struct LoginSync {
     known: Arc<Mutex<Option<LaunchAtLoginState>>>,
     /// Called with each final outcome before the receivers are told, with
     /// no other change running or starting: stores the result.
-    on_done: Arc<dyn Fn(&Outcome) -> Result<(), String> + Send + Sync>,
+    on_done: Arc<StoreFn>,
     pending: Arc<Mutex<Pending>>,
 }
 
@@ -298,7 +301,7 @@ fn lock(pending: &Mutex<Pending>) -> std::sync::MutexGuard<'_, Pending> {
 
 fn work(
     login: &dyn LaunchAtLogin,
-    on_done: &(dyn Fn(&Outcome) -> Result<(), String> + Send + Sync),
+    on_done: &StoreFn,
     shared: &Mutex<Pending>,
     known: &Mutex<Option<LaunchAtLoginState>>,
 ) {
