@@ -1,12 +1,13 @@
 # M5.3 criterion 3 and T4b (#123): launch at login, turned on and off the way
-# a user does it (the Settings window's checkbox, with Save pressed), across two
+# a user does it (the Settings window's switch in General, applied at once:
+# U6 has no Save), across two
 # reboots of the VM.
 #
 # 1. The login item is off (the OS's state, read by the debug flag
 #    --debug-launch-at-login-status, which runs the code behind Settings).
 # 2. The app is started; in Settings (from the tray) the box is unchecked; it
-#    is checked (it applies at once, "Applying…" until the OS answers), Save
-#    shows "Settings saved." within 5 s whatever the OS is doing; the window is closed and
+#    is checked (it applies at once, "Applying…" until the OS answers) and
+#    the window answers within 5 s whatever the OS is doing; the window is closed and
 #    reopened and the box shows the OS's state, checked, and the OS says
 #    enabled. Quit from the tray.
 # 3. macOS restarts (System Events `restart`, boot time checked): exactly one
@@ -15,7 +16,7 @@
 #    Esc once the log shows Recording, Right Option up (real key events from
 #    Terminal): `Recording Idle`, never Transcribing (so no request), nothing
 #    pasted, the clipboard untouched.
-# 4. In Settings the box is checked; it is unchecked and saved; reopened, it
+# 4. In Settings the box is checked; it is unchecked; reopened, it
 #    shows unchecked and the OS says disabled. Quit from the tray.
 # 5. macOS restarts again: the GUI session comes back (the positive control:
 #    the Dock and the user's GUI domain), and for LOGIN_QUIET_SECS (at least
@@ -93,6 +94,8 @@ gui_session_up() {
 # takes longest).
 login_box_ready() {
   local i
+  # U6: the switch is in the General section.
+  ax radio-press "$APP_NAME" "$SETTINGS_WINDOW" General >/dev/null 2>&1 || true
   for i in $(seq 1 20); do
     if ax check-get "$APP_NAME" "$SETTINGS_WINDOW" launch-at-login >/dev/null 2>&1; then
       return 0
@@ -110,8 +113,9 @@ login_box_shows() {
 }
 
 # login_box_save <on|off>: sets the box like a user. The change applies at
-# once and the OS may need tens of seconds for it (#238): Save must not wait
-# for it ("Settings saved." within 5 s, S1), and "Applying…" goes away once
+# once and the OS may need tens of seconds for it (#238): the window must not
+# wait for it (another control answers within 5 s, S1, U6 criterion 3: the
+# Dictation section opens and back), and "Applying…" goes away once
 # the OS has answered (waited for 150 s, inside an outer Terminal-job bound of
 # 180 polls, each taking at least a second).
 login_box_save() {
@@ -119,10 +123,11 @@ login_box_save() {
   [ "$1" = on ] || want=unchecked
   login_box_ready &&
     job_says "$want" ax check-set "$APP_NAME" "$SETTINGS_WINDOW" launch-at-login "$1" &&
-    ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Save &&
     started=$SECONDS &&
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 5 &&
-    log "  Settings saved. took at most $((SECONDS - started + 1))s after Save" &&
+    ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Dictation &&
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Record a different key" 5 &&
+    ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" General &&
+    log "  the window answered within $((SECONDS - started + 1))s while the OS applied it" &&
     VM_TERMINAL_TIMEOUT=180 ax_ok wait-no-text "$APP_NAME" "$SETTINGS_WINDOW" "Applying…" 150 &&
     log "  the OS answered after $((SECONDS - started))s"
 }
@@ -145,7 +150,7 @@ login_setting() {
   fi
   expect "Settings opens from the tray" open_settings
   expect "the box shows the OS's state: $before" login_box_shows "$before"
-  expect "the box is set $1 and saved" login_box_save "$1"
+  expect "the box is set $1, applied at once" login_box_save "$1"
   expect "Settings closes" close_settings
   expect "and opens again" open_settings
   expect "the box shows $after" login_box_shows "$after"

@@ -601,7 +601,7 @@ mod tests {
         let cases = [
             (
                 load_failure,
-                "Pick or download another in Settings → Transcription.",
+                "Pick or download another in Settings → Speech.",
             ),
             (
                 DictationError::InsertFailed {

@@ -348,6 +348,24 @@ pub fn check_at_launch_wanted(scripted: bool, asked: bool) -> bool {
     !scripted || asked
 }
 
+/// When this run of the app last heard from the update server (U6:
+/// Settings, General shows it next to "Check for updates").
+static LAST_CHECKED: std::sync::Mutex<Option<std::time::SystemTime>> = std::sync::Mutex::new(None);
+
+fn note_checked(when: std::time::SystemTime) {
+    *LAST_CHECKED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(when);
+}
+
+/// When this run of the app last heard from the update server, if it has.
+#[must_use]
+pub fn last_checked() -> Option<std::time::SystemTime> {
+    *LAST_CHECKED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// The tray item: checks, tells the user, and installs if they say yes.
 /// Runs on the async runtime; the dialogs are native and don't block it.
 pub fn check_from_tray<R: Runtime>(app: &AppHandle<R>) {
@@ -365,6 +383,9 @@ fn spawn_check<R: Runtime>(app: &AppHandle<R>, trigger: Trigger) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let (outcome, update) = check(&app).await;
+        if !matches!(outcome, Outcome::Failed { .. }) {
+            note_checked(std::time::SystemTime::now());
+        }
         let (title, text) = outcome.message();
         let Some(update) = update else {
             if !trigger.shows(&outcome) {

@@ -30,12 +30,14 @@ describe("App", () => {
           share_usage_events: true,
         };
       }
+      if (command === "list_local_models") return [];
+      if (command === "get_engine_status") return { state: "ready", message: null };
       return false; // has_api_key
     });
     render(<App />);
 
-    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Settings");
-    expect(await screen.findByLabelText("Or type it")).toBeTruthy();
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
+    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("General");
   });
 
   it("opens Troubleshoot when the tray asked for it, and from the Settings button", async () => {
@@ -68,15 +70,21 @@ describe("App", () => {
           share_usage_events: true,
         };
       }
+      if (command === "list_local_models") return [];
+      if (command === "get_engine_status") return { state: "ready", message: null };
       return false;
     });
     render(<App />);
 
     expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Troubleshoot");
     fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
-    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Settings");
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Help" }));
     fireEvent.click(await screen.findByRole("button", { name: "Troubleshoot…" }));
     expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Troubleshoot");
+    // ⌘, goes back to Settings (U6).
+    fireEvent.keyDown(window, { key: ",", metaKey: true });
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
   });
 
   /** A backend whose first window request is `request`. */
@@ -113,31 +121,43 @@ describe("App", () => {
             local_model: "parakeet-unified-en-0.6b-q4_k_m",
             share_usage_events: true,
           };
+        case "list_local_models":
+          return [];
+        case "get_engine_status":
+          return { state: "ready", message: null };
+        case "reveal_log_file":
+          return null;
         default:
           return false;
       }
     });
   }
 
-  // U5 criterion 3: the fix rows land on the field that fixes the problem.
-  it("focuses the speech engine when the tray's Open Speech settings asked", async () => {
+  // U5 criterion 3, U6: the fix rows open the section that fixes the problem.
+  it("opens Speech when the tray's Open Speech settings asked", async () => {
     backendAsking("speech");
     render(<App />);
-    await screen.findByLabelText("Or type it");
-    await waitFor(() => {
-      const checked = document.querySelector<HTMLElement>("input[name='transcription']:checked");
-      expect(checked).not.toBeNull();
-      expect(document.activeElement).toBe(checked);
-    });
+    expect(await screen.findByRole("heading", { level: 1, name: "Speech" })).toBeTruthy();
   });
 
-  it("focuses the dictation key when the tray's Choose another key asked", async () => {
+  it("opens Dictation, with the shortcut, when the tray's Choose another key asked", async () => {
     backendAsking("shortcut");
     render(<App />);
-    const typed = await screen.findByLabelText("Or type it");
+    expect(await screen.findByRole("heading", { level: 1, name: "Dictation" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Record a different key" })).toBeTruthy();
+  });
+
+  // U6 criterion 7: Help → Show log file, through the app's Opener (U5's command).
+  it("shows the log file from Settings, Help", async () => {
+    const seen: string[] = [];
+    backendAsking("", seen);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Help" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show log file" }));
     await waitFor(() => {
-      expect(document.activeElement).toBe(typed);
+      expect(seen).toContain("reveal_log_file");
     });
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   // U5: "Report a problem…" opens Troubleshoot with the report preview built.
@@ -150,8 +170,8 @@ describe("App", () => {
     expect(seen.filter((command) => command === "build_report")).toHaveLength(1);
   });
 
-  // U5 criterion 6: "Resume setup…" leaves the tray once setup is done; setup
-  // stays reachable from Settings, Help.
+  // U5 criterion 6, U6 criterion 7: "Resume setup…" leaves the tray once setup
+  // is done; Settings, Help → Run setup again opens the first-run steps.
   it("opens the first-run steps from Settings, Help", async () => {
     let view = "settings";
     const seen: string[] = [];
@@ -170,6 +190,8 @@ describe("App", () => {
           return null;
         case "take_window_request":
           return "";
+        case "list_local_models":
+          return [];
         case "get_settings":
           return {
             version: 2,
@@ -187,10 +209,11 @@ describe("App", () => {
       }
     });
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Set up dictation…" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Help" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Run setup again" }));
     await waitFor(() => {
       expect(seen).toContain("open_setup");
-      expect(screen.queryByRole("button", { name: "Set up dictation…" })).toBeNull();
+      expect(screen.queryByRole("tablist", { name: "Settings sections" })).toBeNull();
     });
   });
 });

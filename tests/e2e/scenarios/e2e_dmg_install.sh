@@ -5,7 +5,7 @@
 # drift from what is tested) clears the quarantine. A first dictation (mock
 # transcriber, tone fixture) pastes into TextEdit. Then the guide's sections
 # 3 to 5: both permissions hold (permissions_hold), the made-up key is typed
-# into Settings, Test key and Save work against the local provider (the
+# into Settings, Test & Save works against the local provider (the
 # T4a seam), and a dictation pastes the provider's transcript. The app that
 # runs is the one from the DMG, replacing the build run.sh installed.
 #
@@ -118,14 +118,14 @@ e2e_dmg_guide_steps() {
   expect "the app starts on the local provider" launch_on_provider
   expect "with no key saved yet" wait_for_log 'engine settings provider=groq .*has_key=false'
   expect "section 4: Settings… opens from the tray" open_settings
+  expect "the Speech section opens" ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Speech
   expect "the key is typed into the key field" \
     ax_ok secret-set "$APP_NAME" "$SETTINGS_WINDOW" api-key "$PROVIDER_GOOD_KEY"
-  expect "Test key" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Test key"
-  expect "says the key works" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "The key works." 15
+  expect "Test & Save" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Test & Save"
+  expect "says it is connected and saved" \
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "✓ Connected · saved in Keychain" 15
   expect "the test reached the local provider with the typed key" provider_request_has 1 auth=good
   GROQ_KEY_STORED=1
-  expect "Save" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Save
-  expect "says Key saved" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Key saved" 15
   expect "the engine is rebuilt with the key" wait_for_log 'engine settings provider=groq .*has_key=true'
   expect "closing the window hides it" close_settings
 
@@ -134,7 +134,7 @@ e2e_dmg_guide_steps() {
   expect "section 5: the first dictation ends Idle" dictate_once 1
   expect "it was sent with the saved key" provider_request_has 2 auth=good
   expect "TextEdit holds the transcript" textedit_is "$(esc_b64 "$PROVIDER_TEXT")"
-  expect "two requests in all (Test key and the dictation)" provider_requests_are 2
+  expect "two requests in all (Test & Save and the dictation)" provider_requests_are 2
 
   [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_dmg_install
   collect_log e2e_dmg_install

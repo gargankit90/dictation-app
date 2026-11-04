@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { BROKEN, messageOf } from "./keyTest";
 import { commands } from "./bindings";
 import type { View } from "./bindings";
 import { Onboarding } from "./Onboarding";
 import { Settings } from "./Settings";
+import type { SectionId } from "./Settings";
 import { Troubleshoot } from "./Troubleshoot";
 
 /**
@@ -17,9 +19,23 @@ export function App() {
   const [page, setPage] = useState<"settings" | "troubleshoot">("settings");
   // The tray's "Report a problem…": Troubleshoot with the report built.
   const [autoReport, setAutoReport] = useState(false);
-  // The tray's fix rows: Settings with this field focused. `id` makes a
-  // repeated ask count.
-  const [focus, setFocus] = useState<{ target: "speech" | "shortcut"; id: number } | null>(null);
+  // The tray's fix rows: Settings open at the section that fixes it
+  // (Speech, or Dictation for the shortcut). `id` makes a repeated ask count.
+  const [open, setOpen] = useState<{ section: SectionId; id: number } | null>(null);
+
+  // ⌘, opens Settings (U6), as in every Mac app, from Troubleshoot too.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey && event.key === ",") {
+        event.preventDefault();
+        setPage("settings");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
 
   useEffect(() => {
     const state = { cancelled: false };
@@ -47,7 +63,8 @@ export function App() {
         setPage("troubleshoot");
       } else if (request === "speech" || request === "shortcut") {
         setPage("settings");
-        setFocus((current) => ({ target: request, id: (current?.id ?? 0) + 1 }));
+        const section: SectionId = request === "speech" ? "speech" : "dictation";
+        setOpen((current) => ({ section, id: (current?.id ?? 0) + 1 }));
       }
     };
     void ask();
@@ -89,7 +106,7 @@ export function App() {
   }
   return (
     <Settings
-      focus={focus}
+      open={open}
       onSetup={() => {
         void (async () => {
           try {
@@ -103,6 +120,19 @@ export function App() {
       }}
       onTroubleshoot={() => {
         setPage("troubleshoot");
+      }}
+      onReport={() => {
+        setAutoReport(true);
+        setPage("troubleshoot");
+      }}
+      onShowLog={async () => {
+        // The same command as Troubleshoot's, through the app's Opener.
+        try {
+          const result = await commands.revealLogFile();
+          return result.status === "error" ? messageOf(result.error) : null;
+        } catch {
+          return BROKEN;
+        }
       }}
     />
   );

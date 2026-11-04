@@ -156,13 +156,13 @@ const TABLE: [CodeInfo; 17] = [
     row(
         ErrorCode::KeyMissing,
         "No API key saved.",
-        "Add one in Settings → Transcription, or use the model on this Mac.",
+        "Add one in Settings → Speech, or use the model on this Mac.",
         FixAction::OpenSettings,
     ),
     row(
         ErrorCode::KeyRejected,
         "Your API key was rejected.",
-        "Open Settings → Transcription to fix it.",
+        "Open Settings → Speech to fix it.",
         FixAction::OpenSettings,
     ),
     row(
@@ -186,13 +186,13 @@ const TABLE: [CodeInfo; 17] = [
     row(
         ErrorCode::ProviderRedirect,
         "The provider sent a redirect.",
-        "Check the provider in Settings → Transcription.",
+        "Check the provider in Settings → Speech.",
         FixAction::OpenSettings,
     ),
     row(
         ErrorCode::ModelMissing,
         "The model on this Mac isn't downloaded.",
-        "Download it in Settings → Transcription.",
+        "Download it in Settings → Speech.",
         FixAction::OpenSettings,
     ),
     row(
@@ -204,7 +204,7 @@ const TABLE: [CodeInfo; 17] = [
     row(
         ErrorCode::ModelLoadingFailed,
         "The model on this Mac couldn't be loaded.",
-        "Pick or download another in Settings → Transcription.",
+        "Pick or download another in Settings → Speech.",
         FixAction::OpenSettings,
     ),
     row(
@@ -516,7 +516,7 @@ mod tests {
         }
         assert_eq!(
             ErrorCode::KeyRejected.user_text(),
-            "Your API key was rejected. Open Settings → Transcription to fix it."
+            "Your API key was rejected. Open Settings → Speech to fix it."
         );
         assert_eq!(
             ErrorCode::MicDenied.user_text(),
