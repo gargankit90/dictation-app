@@ -67,6 +67,7 @@ tms_copy_last() {
   expect "the app quits" quit_from_tray
   launch_full
   expect "copy-last: the app is back" wait_for_log 'INFO .*ready'
+  sleep 3
   expect "copy-last: disabled again after a relaunch" \
     sh -c "printf '%s' \"\$1\" | grep -qF '(off) Copy last dictation'" _ "$(tray_menu)"
   expect "the app quits" quit_from_tray
