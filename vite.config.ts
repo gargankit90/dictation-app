@@ -20,6 +20,8 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // Process stylesheets so tokens.test.ts can read their text (?raw).
+    css: { include: /.+/ },
     include: ["src/**/*.test.{ts,tsx}"],
     setupFiles: ["src/testSetup.ts"],
   },
