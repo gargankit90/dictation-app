@@ -7,6 +7,7 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type {
+  DictationProgressView,
   KeyTestError,
   OnboardingStatus,
   PermissionState,
@@ -45,6 +46,14 @@ class Backend {
     transcription: "cloud",
     local_model: "parakeet-unified-en-0.6b-q4_k_m",
     share_usage_events: true,
+  };
+  /** What the app says the last dictation got through (U1). */
+  progress: DictationProgressView = {
+    started: 0,
+    completed: 0,
+    errors: 0,
+    stages: [],
+    error: null,
   };
   /** What `test_api_key` answers: `null` for success. */
   testResult: KeyTestError | null = null;
@@ -95,6 +104,8 @@ class Backend {
         return null;
       case "relaunch_app":
         return null;
+      case "dictation_progress":
+        return this.progress;
       case "get_settings":
         return this.settings;
       case "save_settings":
@@ -208,7 +219,7 @@ describe("the microphone step", () => {
 
     backend.microphone = "denied";
     windowShown();
-    await screen.findByText(/The microphone is turned off for dictation-app/u);
+    await screen.findByText(/The microphone is turned off for Vocet/u);
     expect(await heading("Allow the microphone")).toBeTruthy();
     expect(backend.named("set_onboarding_step")).toEqual([]);
     expect(screen.queryByRole("alert")).toBeNull();
@@ -218,7 +229,7 @@ describe("the microphone step", () => {
     backend.microphone = "denied";
     render(<Onboarding onFinished={() => undefined} />);
     await heading("Allow the microphone");
-    expect(screen.getByText(/The microphone is turned off for dictation-app/u)).toBeTruthy();
+    expect(screen.getByText(/The microphone is turned off for Vocet/u)).toBeTruthy();
     fireEvent.click(button("Open System Settings"));
     await waitFor(() => {
       expect(backend.named("request_permission")).toHaveLength(1);
@@ -491,22 +502,128 @@ describe("the try step", () => {
     backend.step = "try";
   });
 
-  it("puts the focus in the field, shows what was pasted, and finishes", async () => {
-    const onFinished = vi.fn();
-    render(<Onboarding onFinished={onFinished} />);
+  /** The step has taken its first answer from the app (the baseline). */
+  async function stepOpen() {
+    await heading("Try it");
+    await waitFor(() => {
+      expect(backend.named("dictation_progress").length).toBeGreaterThan(0);
+    });
+    // One more poll, so the baseline is set before the test changes things.
+    const polls = backend.named("dictation_progress").length;
+    await waitFor(() => {
+      expect(backend.named("dictation_progress").length).toBeGreaterThan(polls);
+    });
+  }
+
+  it("puts the focus in the field", async () => {
+    render(<Onboarding onFinished={() => undefined} />);
     await heading("Try it");
     const field = await screen.findByLabelText(/Hold the right Option key/u);
     expect(document.activeElement).toBe(field);
+  });
 
-    // What the paste does to the field.
+  it("U1 criterion 6: typing in the box never shows success", async () => {
+    render(<Onboarding onFinished={() => undefined} />);
+    await stepOpen();
+    const field = screen.getByLabelText(/Hold the right Option key/u);
     fireEvent.change(field, { target: { value: "hello world" } });
-    expect(screen.getByRole("status").textContent).toMatch(/It works/u);
+    // Give the poll a chance to (wrongly) change its mind.
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    expect(screen.queryByText(/It works/u)).toBeNull();
+    expect(button("Finish").disabled).toBe(true);
+  });
 
-    fireEvent.click(button("Done"));
+  it("U1 criterion 6: shows success, listing the stages seen, after a completed dictation", async () => {
+    const onFinished = vi.fn();
+    render(<Onboarding onFinished={onFinished} />);
+    await stepOpen();
+
+    // Half way: recorded and transcribed, not pasted yet. No success.
+    backend.progress = {
+      started: 1,
+      completed: 0,
+      errors: 0,
+      stages: ["recorded", "transcribed"],
+      error: null,
+    };
+    expect(
+      await screen.findByText(/So far Vocet recorded and transcribed/u, undefined, {
+        timeout: 3000,
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByText(/It works/u)).toBeNull();
+    expect(button("Finish").disabled).toBe(true);
+
+    backend.progress = {
+      started: 1,
+      completed: 1,
+      errors: 0,
+      stages: ["recorded", "transcribed", "pasted"],
+      error: null,
+    };
+    expect(
+      await screen.findByText(/It works: Vocet recorded, transcribed and pasted/u, undefined, {
+        timeout: 3000,
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
+
+    fireEvent.click(button("Finish"));
     await waitFor(() => {
       expect(onFinished).toHaveBeenCalledTimes(1);
     });
     expect(backend.named("finish_onboarding")).toHaveLength(1);
+  });
+
+  it("U1 criterion 6: a dictation from before the step opened doesn't count", async () => {
+    backend.progress = {
+      started: 1,
+      completed: 1,
+      errors: 0,
+      stages: ["recorded", "transcribed", "pasted"],
+      error: null,
+    };
+    render(<Onboarding onFinished={() => undefined} />);
+    await stepOpen();
+    expect(screen.queryByText(/It works/u)).toBeNull();
+    expect(button("Finish").disabled).toBe(true);
+  });
+
+  it("U1 criterion 6: Skip for now is secondary, and Finish says the test was skipped", async () => {
+    const onFinished = vi.fn();
+    render(<Onboarding onFinished={onFinished} />);
+    await stepOpen();
+    expect(button("Finish").disabled).toBe(true);
+    fireEvent.click(button("Skip for now"));
+    expect(screen.getByText(/Test skipped/u)).toBeTruthy();
+    expect(screen.queryByText(/It works/u)).toBeNull();
+    const finish = button("Finish (test skipped)");
+    expect(finish.disabled).toBe(false);
+    expect(finish.className).toContain("primary");
+    expect(button("Skip for now").className).not.toContain("primary");
+    fireEvent.click(finish);
+    await waitFor(() => {
+      expect(onFinished).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("U1 criterion 7: a failed dictation shows its sentence inline, not the menu bar icon", async () => {
+    render(<Onboarding onFinished={() => undefined} />);
+    await stepOpen();
+    backend.progress = {
+      started: 1,
+      completed: 0,
+      errors: 1,
+      stages: ["recorded"],
+      error: "Your API key was rejected. Open Settings → Transcription to fix it.",
+    };
+    const alert = await screen.findByRole("alert", undefined, { timeout: 3000 });
+    expect(alert.textContent).toBe(
+      "Your API key was rejected. Open Settings → Transcription to fix it.",
+    );
+    expect(screen.queryByText(/menu bar icon/u)).toBeNull();
+    expect(screen.queryByText(/key_rejected/u)).toBeNull();
+    expect(button("Finish").disabled).toBe(true);
   });
 
   it("shows the dictation key and records a different one", async () => {
@@ -540,7 +657,8 @@ describe("the window", () => {
     backend.step = "try";
     render(<App />);
     await heading("Try it");
-    fireEvent.click(button("Done"));
+    fireEvent.click(button("Skip for now"));
+    fireEvent.click(button("Finish (test skipped)"));
     expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeTruthy();
   });
 

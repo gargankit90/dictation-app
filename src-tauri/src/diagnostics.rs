@@ -21,6 +21,8 @@ use dictation_core::error::DictationError;
 use dictation_core::report::{self, Access, EngineInfo, ReportInput};
 use dictation_core::settings::{Settings, Transcription};
 use dictation_pipeline::config::Config;
+use dictation_pipeline::pipeline::UiEvent;
+use dictation_pipeline::progress::{DictationProgress, Stage};
 use dictation_platform::secrets::KeychainSecretStore;
 use dictation_ports::{PermissionStatus, TranscribeError};
 use dictation_transcribe::engine::Engine;
@@ -46,6 +48,8 @@ pub struct Diagnostics(Arc<Shared>);
 #[derive(Default)]
 struct Shared {
     log: Mutex<ErrorLog>,
+    /// What the last dictation got through, for onboarding's Try it (U1).
+    progress: Mutex<DictationProgress>,
     /// Whether the hotkey doesn't work, as the pipeline last said.
     hotkey_down: AtomicBool,
     /// Whether the tray asked for the Troubleshoot view.
@@ -75,6 +79,11 @@ impl Diagnostics {
         if matches!(error, DictationError::HotkeyFailed) {
             self.0.hotkey_down.store(true, Ordering::Relaxed);
         }
+    }
+
+    /// Feeds one pipeline event to the progress Try it reads.
+    pub fn record_event(&self, event: &UiEvent) {
+        lock(&self.0.progress).on_event(event);
     }
 
     /// The hotkey works again.
@@ -132,6 +141,11 @@ pub struct Check {
     pub fix: Option<FixAction>,
     /// That button's label.
     pub fix_label: Option<String>,
+    /// Only on the engine row when the engine is the model on this Mac: a
+    /// short readiness line (downloaded, loading, ready, error). Troubleshoot
+    /// shows it instead of "Test connection", which has nothing to test then
+    /// (U1).
+    pub local_model: Option<String>,
 }
 
 /// Whether the provider's key can be read.
@@ -219,6 +233,21 @@ pub fn local_state(view: EngineView, download: ModelState) -> LocalState {
     }
 }
 
+impl LocalState {
+    /// One short line for Troubleshoot's local readiness (U1).
+    #[must_use]
+    pub const fn readiness(self) -> &'static str {
+        match self {
+            Self::Loaded => "Ready: the model is downloaded and loaded.",
+            Self::Loading => "Loading: the model is downloaded and starting up.",
+            Self::NotLoaded => "Downloaded: the model hasn't been loaded yet.",
+            Self::LoadFailed => "Error: the model is downloaded but couldn't be loaded.",
+            Self::Downloading => "Downloading: the model isn't ready yet.",
+            Self::Missing => "Not downloaded: get the model in Settings.",
+        }
+    }
+}
+
 impl EngineState {
     /// The code of what is missing, or `None` if the engine is ready.
     fn problem(&self) -> Option<ErrorCode> {
@@ -262,6 +291,7 @@ fn failing(id: CheckId, label: &str, code: ErrorCode) -> Check {
         code: Some(code),
         fix: Some(info.action),
         fix_label: Some(info.action_label.to_owned()),
+        local_model: None,
     }
 }
 
@@ -274,6 +304,7 @@ fn passing(id: CheckId, label: &str, detail: &str) -> Check {
         code: None,
         fix: None,
         fix_label: None,
+        local_model: None,
     }
 }
 
@@ -287,10 +318,13 @@ pub fn checks(input: &CheckInput) -> Vec<Check> {
             failing(id, label, code)
         }
     };
-    let engine = match input.engine.problem() {
+    let mut engine = match input.engine.problem() {
         None => passing(CheckId::Engine, "Transcription engine", "Ready."),
         Some(code) => failing(CheckId::Engine, "Transcription engine", code),
     };
+    if let EngineState::Local(state) = input.engine {
+        engine.local_model = Some(state.readiness().to_owned());
+    }
     let hotkey = if input.hotkey_up && input.accessibility == PermissionStatus::Granted {
         passing(CheckId::Hotkey, "Hotkey", "Registered.")
     } else {
@@ -317,6 +351,7 @@ pub fn checks(input: &CheckInput) -> Vec<Check> {
                 code: Some(error.code),
                 fix: Some(info.action),
                 fix_label: Some(info.action_label.to_owned()),
+                local_model: None,
             }
         }
     };
@@ -584,7 +619,7 @@ pub async fn save_report(diagnostics: State<'_, Diagnostics>) -> Result<Option<S
         let Some(path) = app
             .dialog()
             .file()
-            .set_file_name("dictation-app-report.txt")
+            .set_file_name("vocet-report.txt")
             .blocking_save_file()
         else {
             return Ok(None);
@@ -626,6 +661,66 @@ pub async fn open_issue(
             tracing::warn!(%error, "couldn't open the browser");
             "Couldn't open the browser. Use Copy and paste the report into a new issue.".to_owned()
         })
+}
+
+/// A stage of a dictation, as onboarding's Try it names them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum DictationStage {
+    /// Recorded.
+    Recorded,
+    /// Transcribed.
+    Transcribed,
+    /// Pasted.
+    Pasted,
+}
+
+/// What the last dictation got through (U1). Counts only grow, so a window
+/// compares them with what it saw when it opened. No transcript, no code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+pub struct DictationProgressView {
+    /// Dictations started since launch.
+    pub started: u32,
+    /// Dictations that ended pasted with no error.
+    pub completed: u32,
+    /// Errors shown.
+    pub errors: u32,
+    /// The stages the current or last dictation got through, in order.
+    pub stages: Vec<DictationStage>,
+    /// The latest error's sentence, until the next recording starts.
+    pub error: Option<String>,
+}
+
+impl From<&dictation_pipeline::progress::ProgressView> for DictationProgressView {
+    fn from(view: &dictation_pipeline::progress::ProgressView) -> Self {
+        Self {
+            started: view.started,
+            completed: view.completed,
+            errors: view.errors,
+            stages: view
+                .stages
+                .iter()
+                .map(|stage| match stage {
+                    Stage::Recorded => DictationStage::Recorded,
+                    Stage::Transcribed => DictationStage::Transcribed,
+                    Stage::Pasted => DictationStage::Pasted,
+                })
+                .collect(),
+            error: view.error.clone(),
+        }
+    }
+}
+
+/// What the last dictation got through: onboarding's Try it shows success
+/// only when `completed` grows while its step is open.
+#[tauri::command]
+#[specta::specta]
+pub async fn dictation_progress(
+    diagnostics: State<'_, Diagnostics>,
+) -> Result<DictationProgressView, String> {
+    Ok(DictationProgressView::from(
+        lock(&diagnostics.0.progress).view(),
+    ))
 }
 
 /// Whether the tray asked for Troubleshoot since the window last asked;
@@ -683,7 +778,7 @@ mod tests {
         assert_eq!(mic.code, Some(ErrorCode::MicDenied));
         assert_eq!(mic.fix, Some(FixAction::OpenMicrophoneSettings));
         assert_eq!(mic.fix_label.as_deref(), Some("Open Microphone Settings"));
-        assert!(mic.detail.contains("Microphone is off"), "{}", mic.detail);
+        assert!(mic.detail.contains("use the microphone"), "{}", mic.detail);
         assert!(by_id(&rows, CheckId::Accessibility).ok);
     }
 
@@ -745,6 +840,32 @@ mod tests {
         assert!(by_id(&checks(&data), CheckId::Engine).ok);
     }
 
+    /// U1 criterion 8: only the on-device engine carries a readiness line
+    /// (Troubleshoot hides "Test connection" for it); cloud engines don't.
+    #[test]
+    fn only_the_local_engine_has_a_readiness_line() {
+        let mut data = input();
+        data.engine = EngineState::Cloud(KeyState::Saved);
+        assert_eq!(by_id(&checks(&data), CheckId::Engine).local_model, None);
+        for state in [
+            LocalState::Loaded,
+            LocalState::Loading,
+            LocalState::NotLoaded,
+            LocalState::LoadFailed,
+            LocalState::Downloading,
+            LocalState::Missing,
+        ] {
+            data.engine = EngineState::Local(state);
+            let rows = checks(&data);
+            let line = by_id(&rows, CheckId::Engine).local_model.clone();
+            assert_eq!(line.as_deref(), Some(state.readiness()), "{state:?}");
+            assert!(
+                by_id(&rows, CheckId::Hotkey).local_model.is_none(),
+                "{state:?}"
+            );
+        }
+    }
+
     /// E1 round 1: a model file that is on disk but will not load is not
     /// "Ready", in the check or in the report.
     #[test]
@@ -761,7 +882,7 @@ mod tests {
         assert!(!row.ok);
         assert_eq!(row.code, Some(ErrorCode::ModelLoadingFailed));
         assert_eq!(row.fix, Some(FixAction::OpenSettings));
-        assert!(row.detail.contains("another model"), "{}", row.detail);
+        assert!(row.detail.contains("download another"), "{}", row.detail);
         assert!(data.engine.problem().is_some());
     }
 
@@ -961,7 +1082,7 @@ mod tests {
             }
             // And the shape: only the allowlisted lines are there.
             let allowed = [
-                "dictation-app diagnostics report",
+                "Vocet diagnostics report",
                 "Built from a fixed list of fields.",
                 "app_version: ",
                 "macos_version: ",

@@ -64,10 +64,9 @@ pub enum OverlayView {
     PasteSent,
     /// A dictation failed; `message` is the user-facing error text.
     Error {
-        /// The error's `Display` text.
+        /// One plain sentence naming the fix. No error code: codes stay in
+        /// Troubleshoot and the report (U1).
         message: String,
-        /// Its stable code, shown under the message (E1).
-        code: ErrorCode,
     },
 }
 
@@ -154,7 +153,6 @@ impl OverlayModel {
                 self.inserting = false;
                 self.view = OverlayView::Error {
                     message: code.user_text(),
-                    code,
                 };
                 self.hotkey_error = matches!(error, DictationError::HotkeyFailed);
                 return Some(Change {
@@ -387,7 +385,6 @@ mod tests {
     fn error_view() -> OverlayView {
         OverlayView::Error {
             message: ErrorCode::NoSpeech.user_text(),
-            code: ErrorCode::NoSpeech,
         }
     }
 
@@ -602,7 +599,10 @@ mod tests {
                 .into(),
         };
         let cases = [
-            (load_failure, "Pick or download another model in Settings."),
+            (
+                load_failure,
+                "Pick or download another in Settings → Transcription.",
+            ),
             (
                 DictationError::InsertFailed {
                     reason: "no focused app".into(),
@@ -611,11 +611,11 @@ mod tests {
             ),
             (
                 DictationError::PermissionMissing(Permission::Accessibility),
-                "Allow it in Privacy & Security, Accessibility.",
+                "Allow it in System Settings → Privacy & Security → Accessibility.",
             ),
             (
                 DictationError::PermissionMissing(Permission::Microphone),
-                "Allow it in Privacy & Security, then relaunch.",
+                "Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet.",
             ),
             (
                 DictationError::EmptyTranscript,
@@ -625,11 +625,15 @@ mod tests {
         for (error, step) in cases {
             let mut model = OverlayModel::default();
             let change = model.on_event(&UiEvent::Error(error.clone())).unwrap();
-            let OverlayView::Error { message, code } = change.view else {
+            let OverlayView::Error { message } = change.view else {
                 panic!("expected an error view");
             };
             assert!(message.ends_with(step), "{error:?}: {message}");
-            assert_eq!(message, code.user_text());
+            assert_eq!(message, ErrorCode::of(&error).user_text());
+            assert!(
+                !message.contains(ErrorCode::of(&error).as_str()),
+                "{message}"
+            );
             assert!(!message.contains("Something went wrong"), "{message}");
             assert!(!message.contains("no focused app"), "{message}");
         }
@@ -644,7 +648,7 @@ mod tests {
                 reason: format!("401 Unauthorized for key {key}"),
             }))
             .expect("an error is a change");
-        let OverlayView::Error { message, .. } = change.view else {
+        let OverlayView::Error { message } = change.view else {
             panic!("expected an error view");
         };
         assert!(!message.contains(key), "{message}");
@@ -687,7 +691,6 @@ mod tests {
     fn hotkey_error_view() -> OverlayView {
         OverlayView::Error {
             message: ErrorCode::HotkeyUnregistered.user_text(),
-            code: ErrorCode::HotkeyUnregistered,
         }
     }
 

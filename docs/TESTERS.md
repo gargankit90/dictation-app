@@ -1,4 +1,4 @@
-# dictation-app: tester guide
+# Vocet: tester guide
 
 Hold a key, speak, let go, and your words are typed into whatever app is in
 front. Thank you for trying it. This page takes you from the DMG to your first
@@ -19,38 +19,38 @@ text:
 
 ## 1. Install
 
-1. Download the DMG (`dictation-app_<version>_aarch64.dmg`) from the newest
+1. Download the DMG (`Vocet_<version>_aarch64.dmg`) from the newest
    release at
    <https://github.com/gargankit90/dictation-app/releases/latest>,
    or use the one you were sent, and open it.
-2. Drag **dictation-app** onto the **Applications** shortcut in the window.
+2. Drag **Vocet** onto the **Applications** shortcut in the window.
 3. Eject the DMG (Finder sidebar, or drag it to the Trash).
 
 The licences of the open-source software inside the app are on the release
 page as `THIRD-PARTY-LICENSES.txt`, and inside the app at
-`dictation-app.app/Contents/Resources/`.
+`Vocet.app/Contents/Resources/`.
 
 ## 2. Open it for the first time (clear the quarantine flag)
 
-dictation-app is not yet signed with an Apple Developer ID, so macOS blocks
+Vocet is not yet signed with an Apple Developer ID, so macOS blocks
 the first launch of anything downloaded from a browser, chat or email with
-_"dictation-app can't be opened because Apple cannot check it for malicious
+_"Vocet can't be opened because Apple cannot check it for malicious
 software"_. You tell macOS you trust it once. Open **Terminal** (Spotlight:
 `Terminal`) and paste this. It assumes you already dragged the app into
 **Applications** (section 1); if you opened it from the DMG window instead,
 do that first, or the command says "No such file":
 
 ```sh
-xattr -dr com.apple.quarantine /Applications/dictation-app.app
+xattr -dr com.apple.quarantine /Applications/Vocet.app
 ```
 
-It prints nothing when it works. Then open **dictation-app** from Applications.
+It prints nothing when it works. Then open **Vocet** from Applications.
 
 If you would rather not use Terminal: try to open the app, click **Done** on
 the warning, then go to **System Settings > Privacy & Security**, scroll down
-to _"dictation-app was blocked…"_ and click **Open Anyway**.
+to _"Vocet was blocked…"_ and click **Open Anyway**.
 
-dictation-app lives in the **menu bar** (top right of the screen, an icon
+Vocet lives in the **menu bar** (top right of the screen, an icon
 without a Dock entry), not in the Dock. The first time it opens, a **Set up
 dictation** window walks you through four steps. If you don't see it, click
 the menu-bar icon.
@@ -61,14 +61,14 @@ The window shows "Step 1 of 4" and so on, and has **Back** and **Continue**
 buttons. A permission step moves on by itself once you have allowed it.
 
 1. **Allow the microphone.** Click **Allow microphone**; macOS asks once, so
-   choose **Allow**. dictation-app records only while you hold the hotkey. If
+   choose **Allow**. Vocet records only while you hold the hotkey. If
    you chose "Don't Allow" earlier, the step says the microphone is turned off:
-   click **Open System Settings** and switch **dictation-app** on under
+   click **Open System Settings** and switch **Vocet** on under
    **Privacy & Security > Microphone**.
 2. **Allow Accessibility.** The hotkey and pasting need it. Click **Open
-   System Settings** and switch **dictation-app** on under **Privacy &
+   System Settings** and switch **Vocet** on under **Privacy &
    Security > Accessibility**. If it is not in the list, click **+**, choose
-   `/Applications/dictation-app.app` and switch it on. If the step doesn't move
+   `/Applications/Vocet.app` and switch it on. If the step doesn't move
    on after that, click **Relaunch**; the app opens again at this step.
 3. **Add your API key.** Pick the **Provider** (**Groq** is the recommended
    one; **OpenAI** is the alternative), then paste your key into the key box.
@@ -101,7 +101,7 @@ change anything you set above:
   saved**.
 - **Hotkey**, **Language** and **Launch at login**.
 - A permission turned off by mistake: switch it back on in **System Settings >
-  Privacy & Security** (Microphone or Accessibility), then quit dictation-app
+  Privacy & Security** (Microphone or Accessibility), then quit Vocet
   from its menu-bar icon and open it again.
 
 ## 4. Dictate
@@ -119,7 +119,7 @@ If nothing happens, see "Something went wrong" below.
 
 ## How updates arrive
 
-You install from the DMG once. After that, dictation-app updates itself:
+You install from the DMG once. After that, Vocet updates itself:
 
 - **When it starts**, it quietly asks the release page whether there is a
   newer build. If there is, it shows **Update available** with what is new;
@@ -133,6 +133,20 @@ You install from the DMG once. After that, dictation-app updates itself:
 - The app restarts as the new version by itself. **Microphone and
   Accessibility stay granted**: every build is signed the same way, so macOS
   knows it is the same app. You don't clear the quarantine flag again.
+- **The app was called dictation-app before.** If you installed that build,
+  an update turns it into Vocet (name, menu, windows) but the file in
+  Applications may keep its old name, `dictation-app.app`. Your settings, saved
+  key and permissions carry over. To get the new file name, install
+  `Vocet.app` from the DMG and drag `dictation-app.app` to the Trash; it is
+  the same app to macOS, so permissions stay.
+- **After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to your speech provider (Groq or OpenAI).** The prompt reads "Vocet wants to access key
+  com.dictationapp.desktop"; enter your Mac password. Until you answer,
+  Vocet can't read the key and says so. It can come back after any update
+  of this build, not only this one.
+- **Login Items may still say `dictation-app`.** If you had the old build
+  with Launch at login on, the entry in System Settings → General → Login
+  Items keeps the name macOS stored when it was added. It is the same item
+  and opens Vocet; the name is cosmetic.
 - Every update is signed with our update key, and the app refuses one whose
   signature doesn't match (_"The update's signature didn't match this app's
   update key, so it was not installed."_). If you see that, report it (see "Report a bug").
@@ -142,7 +156,7 @@ and install it over the old app, as in section 1.
 
 ## Something went wrong: the log
 
-dictation-app writes a log that you can send us. It holds what the app did
+Vocet writes a log that you can send us. It holds what the app did
 (starts, recordings, errors), not what you said, and **never your API key**:
 keys are removed from the log before it is written, and the words you dictate
 are not written at all.
@@ -153,7 +167,7 @@ are not written at all.
   and attach the zip to a bug report (see "Report a bug" below; the files are
   small: at most 10 MB in all).
 - **If we ask for more detail:** quit the app, then in Terminal run
-  `open --env DICTATION_LOG=debug /Applications/dictation-app.app`, repeat the
+  `open --env DICTATION_LOG=debug /Applications/Vocet.app`, repeat the
   problem, and send the log again. Debug logs show how long a dictation was,
   still not its text.
 
@@ -163,8 +177,8 @@ Open an issue: <https://github.com/gargankit90/dictation-app/issues/new/choose>
 and pick **Bug report**. The form asks for:
 
 - your macOS version (Apple menu > **About This Mac**) and Mac model,
-- the dictation-app version: menu-bar icon > **Check for updates…** says
-  "dictation-app _x.y.z_ is the newest version" (or what you have, if there is
+- the Vocet version: menu-bar icon > **Check for updates…** says
+  "Vocet _x.y.z_ is the newest version" (or what you have, if there is
   an update),
 - what you did, what you expected and what happened,
 - the log zip from above. The log never holds your API key or what you said
@@ -176,13 +190,13 @@ public issue; see [SECURITY.md](../SECURITY.md).
 
 ## Quit and uninstall
 
-- **Quit:** menu-bar icon > **Quit dictation-app**. (Closing the Settings
+- **Quit:** menu-bar icon > **Quit Vocet**. (Closing the Settings
   window only hides it; the app keeps running in the menu bar.)
 - **Stop it starting at login:** untick **Launch at login** in Settings and
   **Save**, or remove it in System Settings > General > Login Items.
 - **Uninstall:**
   1. Quit the app as above.
-  2. Drag `/Applications/dictation-app.app` to the Trash.
+  2. Drag `/Applications/Vocet.app` to the Trash.
   3. Remove its data (Terminal):
 
      ```sh
@@ -193,7 +207,7 @@ public issue; see [SECURITY.md](../SECURITY.md).
   4. Remove the saved API key: open **Keychain Access**, search for
      `com.dictationapp.desktop` and delete that entry. (You can also delete the
      key itself on your provider's key page: Groq or OpenAI, as in section 3.)
-  5. In **System Settings > Privacy & Security**, remove dictation-app from
+  5. In **System Settings > Privacy & Security**, remove Vocet from
      **Microphone** and **Accessibility** (select it, click **−**).
 
 ## Known limits

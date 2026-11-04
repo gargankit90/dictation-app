@@ -25,7 +25,7 @@
 # The overlay's text for the provider's 401 (the error code table's user
 # text). The "!" icon is aria-hidden, so it isn't in the text, and since U4
 # the overlay shows no code.
-OVERLAY_BAD_KEY="shown: The provider rejected your API key. Check or re-enter it in Settings."
+OVERLAY_BAD_KEY="shown: Your API key was rejected. Open Settings → Transcription to fix it."
 # The error's time on screen (crates/app/src/overlay.rs ERROR_VISIBLE_FOR),
 # and how far the log's show-to-hide gap may stray from it.
 OVERLAY_ERROR_MS=4000

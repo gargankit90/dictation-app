@@ -32,6 +32,8 @@ pub const COMMAND_NAMES: &[&str] = &[
     "save_report",
     "open_issue",
     "take_troubleshoot_request",
+    "dictation_progress",
+    "launch_notice",
 ];
 
 /// The overlay window's commands (U4 round 2): `build.rs` adds their

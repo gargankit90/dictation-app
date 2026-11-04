@@ -243,7 +243,7 @@ impl<'a> From<&'a OverlayView> for Payload<'a> {
             },
             OverlayView::Transcribing => Self::Transcribing,
             OverlayView::PasteSent => Self::PasteSent,
-            OverlayView::Error { message, .. } => Self::Error { message },
+            OverlayView::Error { message } => Self::Error { message },
         }
     }
 }
@@ -287,7 +287,6 @@ mod tests {
         // The latest view, not the first one.
         let error = OverlayView::Error {
             message: "Microphone permission is missing.".to_owned(),
-            code: dictation_core::diagnostics::ErrorCode::MicDenied,
         };
         relay.send(&error, |_| {});
         let (_, again) = title_sends(&relay, &format!("{LISTENING_TITLE} 2"));
@@ -348,7 +347,6 @@ mod tests {
     fn payloads_match_the_page() {
         let error = OverlayView::Error {
             message: "No speech was recognised.".to_owned(),
-            code: dictation_core::diagnostics::ErrorCode::NoSpeech,
         };
         let cases = [
             (OverlayView::Hidden, r#"{"state":"hidden"}"#),

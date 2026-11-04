@@ -1,6 +1,6 @@
 # Privacy: usage events and error reports
 
-dictation-app can share anonymous usage events and error reports so we can see
+Vocet can share anonymous usage events and error reports so we can see
 what works and what breaks. This page lists everything it sends. The list is
 enforced in code: events are a closed enum (`crates/ports/src/telemetry.rs`),
 and error reports are built field by field from an allow-list

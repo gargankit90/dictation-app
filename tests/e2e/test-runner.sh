@@ -76,7 +76,7 @@ case $script in
   *ax.js)
     [ "${STUB_AX_STATUS:-0}" = 0 ] || exit "$STUB_AX_STATUS"
     case $1 in
-      tray-click) echo "clicked $3 dictation-app" ;;
+      tray-click) echo "clicked $3 Vocet" ;;
       *) echo "fake ax: $*" ;;
     esac
     ;;

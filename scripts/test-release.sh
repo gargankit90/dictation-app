@@ -119,7 +119,7 @@ echo "npm $*" >>"$STUB_CALLS/npm"
 [ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ] && echo password >>"$STUB_CALLS/npm-got-password"
 printf '%s' "${DICTATION_POSTHOG_KEY-unset}" >"$STUB_CALLS/npm-posthog"
 printf '%s' "${DICTATION_SENTRY_DSN-unset}" >"$STUB_CALLS/npm-sentry"
-echo "    Building dictation-app"
+echo "    Building Vocet"
 if [ -n "${FAKE_LEAK:-}" ]; then
   echo "debug: posthog=${DICTATION_POSTHOG_KEY-}"
   echo "debug: sentry=${DICTATION_SENTRY_DSN-}"
@@ -127,19 +127,19 @@ if [ -n "${FAKE_LEAK:-}" ]; then
   echo "debug: password=$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" >&2
 fi
 b=target/release/bundle
-mkdir -p "$b/macos/dictation-app.app/Contents" "$b/dmg"
-echo app >"$b/macos/dictation-app.app/Contents/Info.plist"
-echo dmg >"$b/dmg/dictation-app_0.3.0_aarch64.dmg"
-tar -C "$b/macos" -czf "$b/macos/dictation-app.app.tar.gz" dictation-app.app
+mkdir -p "$b/macos/Vocet.app/Contents" "$b/dmg"
+echo app >"$b/macos/Vocet.app/Contents/Info.plist"
+echo dmg >"$b/dmg/Vocet_0.3.0_aarch64.dmg"
+tar -C "$b/macos" -czf "$b/macos/Vocet.app.tar.gz" Vocet.app
 version=$(jq -r .version src-tauri/tauri.conf.json)
 [ -z "${FAKE_SIGN_VERSION:-}" ] || version=$FAKE_SIGN_VERSION
 if [ -n "${FAKE_OTHER_KEY:-}" ]; then
   TAURI_SIGNING_PRIVATE_KEY=$FAKE_OTHER_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
-    "$TAURI_CLI" signer sign --app-version "$version" "$b/macos/dictation-app.app.tar.gz" >/dev/null 2>&1
+    "$TAURI_CLI" signer sign --app-version "$version" "$b/macos/Vocet.app.tar.gz" >/dev/null 2>&1
 else
-  "$TAURI_CLI" signer sign --app-version "$version" "$b/macos/dictation-app.app.tar.gz" >/dev/null 2>&1
+  "$TAURI_CLI" signer sign --app-version "$version" "$b/macos/Vocet.app.tar.gz" >/dev/null 2>&1
 fi
-[ -z "${FAKE_TAMPER:-}" ] || echo tampered >>"$b/macos/dictation-app.app.tar.gz"
+[ -z "${FAKE_TAMPER:-}" ] || echo tampered >>"$b/macos/Vocet.app.tar.gz"
 echo "    Finished"
 STUB
 chmod +x "$stubs"/*
@@ -224,7 +224,7 @@ no_secret_in_output() {
 [ "$(env PATH="$stubs:$PATH" bash -c 'command -v gh')" = "$stubs/gh" ] || fail "the gh stub isn't first on PATH"
 
 out=$repo/target/release-out/v$VERSION
-base=dictation-app_${VERSION}_aarch64
+base=Vocet_${VERSION}_aarch64
 
 # 1. A dry run.
 run_release "$VERSION" --notes "Test notes." || fail "the dry run failed"

@@ -50,6 +50,8 @@ class Backend {
    * when the call arrives, but delivered only when the promise settles.
    */
   holdKeyCheck = new Map<Provider, Promise<void>>();
+  /** What `launch_notice` says: the first launch after the rename (U1). */
+  launchNotice: string | null = null;
 
   handle = async (command: string, payload: unknown): Promise<unknown> => {
     const args = (payload ?? {}) as Record<string, unknown>;
@@ -59,6 +61,8 @@ class Backend {
     // eslint-disable-next-line @typescript-eslint/only-throw-error
     if (failure !== undefined) throw failure;
     switch (command) {
+      case "launch_notice":
+        return this.launchNotice;
       case "get_settings":
         return this.settings;
       case "save_settings":
@@ -183,6 +187,20 @@ const checks = (provider: Provider) =>
   backend.named("has_api_key").filter((call) => call.args.provider === provider).length;
 
 describe("loading", () => {
+  it("U1: says what to expect from the Keychain on the first launch after the rename", async () => {
+    backend.launchNotice =
+      "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to your speech provider (Groq or OpenAI).";
+    await open();
+    const notice = await screen.findByTestId("launch-notice");
+    expect(notice.textContent).toContain("Choose Always Allow");
+    expect(notice.textContent).toContain("sent only to your speech provider (Groq or OpenAI)");
+  });
+
+  it("U1: says nothing about the Keychain on any other launch", async () => {
+    await open();
+    expect(screen.queryByTestId("launch-notice")).toBeNull();
+  });
+
   it("shows the saved settings", async () => {
     backend.settings = { ...backend.settings, provider: "openai", language: "de", hotkey: "F5" };
     await open();
@@ -728,6 +746,7 @@ describe("criterion 3: the key is never rendered back", () => {
     expect([...used].sort()).toEqual([
       "get_settings",
       "has_api_key",
+      "launch_notice",
       "save_settings",
       "set_api_key",
     ]);
@@ -1066,10 +1085,10 @@ describe("launch at login", () => {
     await open();
     backend.failing.set(
       "set_launch_at_login",
-      "Launch at login needs your approval: open System Settings, General, Login Items, and allow dictation-app.",
+      "Launch at login needs your approval: open System Settings → General → Login Items, and allow Vocet.",
     );
     fireEvent.click(box());
-    expect((await screen.findByRole("alert")).textContent).toContain("General, Login Items");
+    expect((await screen.findByRole("alert")).textContent).toContain("General → Login Items");
     // The app still has it off, so the box goes back to off.
     await waitFor(() => {
       expect(box().checked).toBe(false);

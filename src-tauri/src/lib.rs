@@ -42,7 +42,7 @@
 //! start keeps the old one and says so.
 //!
 //! M5.7: while the microphone is denied the tray menu offers "Relaunch
-//! dictation-app" (M5.2's restart), since a grant made in System Settings
+//! Vocet" (M5.2's restart), since a grant made in System Settings
 //! reaches the app only after a relaunch.
 
 // Only the build script and the capability tests need the list.
@@ -100,9 +100,9 @@ const ONBOARDING_ID: &str = "onboarding";
 const RELAUNCH_ID: &str = "relaunch";
 const TROUBLESHOOT_ID: &str = "troubleshoot";
 /// The tray's Relaunch item, offered while the microphone is denied (M5.7).
-const RELAUNCH_LABEL: &str = "Relaunch dictation-app";
+const RELAUNCH_LABEL: &str = "Relaunch Vocet";
 const TRAY_ID: &str = "main";
-const TOOLTIP: &str = "dictation-app";
+const TOOLTIP: &str = "Vocet";
 /// Where a launch's flags came from, for the log.
 const THIS_LAUNCH: &str = "this launch";
 const SECOND_LAUNCH: &str = "a second launch";
@@ -327,7 +327,7 @@ pub fn run() {
 fn exit_early(reason: &str) -> ! {
     #[allow(clippy::print_stderr)] // Logging isn't set up yet.
     {
-        eprintln!("dictation-app: {reason}");
+        eprintln!("Vocet: {reason}");
     }
     std::process::exit(1);
 }
@@ -451,6 +451,15 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     app.manage(commands::LoginItem::new(
         Arc::new(SystemLaunchAtLogin::new()),
         Arc::clone(&config),
+    ));
+    let app_name = app
+        .config()
+        .product_name
+        .clone()
+        .unwrap_or_else(|| "Vocet".to_owned());
+    app.manage(commands::LaunchNotice(
+        dictation_pipeline::rename::first_launch_after_rename(&config_dir, &app_name)
+            .then_some(dictation_pipeline::rename::KEYCHAIN_NOTICE),
     ));
     app.manage(commands::ActiveHotkey(hotkey_control.clone()));
     app.manage(commands::ConfigDir(config_dir.clone()));
@@ -783,7 +792,7 @@ fn build_tray(app: &App) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
-    let quit = MenuItem::with_id(app, QUIT_ID, "Quit dictation-app", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT_ID, "Quit Vocet", true, None::<&str>)?;
     // Not in the menu until the microphone is denied.
     let relaunch = MenuItem::with_id(app, RELAUNCH_ID, RELAUNCH_LABEL, true, None::<&str>)?;
     let menu = Menu::with_items(
@@ -865,6 +874,7 @@ async fn show_ui_events(
             tracker.set_engine(usage::engine_kind(&transcribers.current()));
         }
         tracker.on_event(&event, started.elapsed());
+        diagnostics.record_event(&event);
         match &event {
             UiEvent::StateChanged(phase) => tracing::info!(?phase, "state changed"),
             UiEvent::Error(error) => {
@@ -887,13 +897,12 @@ async fn show_ui_events(
 
 /// The tray's tooltip for `view`: the app's name, then the detail if any.
 fn tray_tooltip(view: &TrayView) -> String {
-    let Some(detail) = &view.detail else {
-        return TOOLTIP.to_owned();
-    };
-    match view.code {
-        Some(code) => format!("{TOOLTIP}: {detail} ({code})"),
-        None => format!("{TOOLTIP}: {detail}"),
-    }
+    // The sentence only: the stable code stays in Troubleshoot and the
+    // report (U1).
+    view.detail.as_ref().map_or_else(
+        || TOOLTIP.to_owned(),
+        |detail| format!("{TOOLTIP}: {detail}"),
+    )
 }
 
 /// Puts `view` in the tray's title (next to the icon), tooltip and menu.
@@ -1007,11 +1016,10 @@ mod tray_tests {
                 _ => DICTATION_FAILED,
             };
             assert_eq!(title, expected, "{error}");
-            // E1: the tooltip ends with the error's stable code.
-            assert_eq!(tray_tooltip(&view), {
-                let code = dictation_core::diagnostics::ErrorCode::of(&error);
-                format!("dictation-app: {} ({code})", code.user_text())
-            });
+            // U1: the tooltip is the sentence, with no error code.
+            let code = dictation_core::diagnostics::ErrorCode::of(&error);
+            assert_eq!(tray_tooltip(&view), format!("Vocet: {}", code.user_text()));
+            assert!(!tray_tooltip(&view).contains(code.as_str()));
         }
     }
 
@@ -1037,7 +1045,7 @@ mod tray_tests {
     fn no_error_clears_the_title() {
         let view = TrayView::default();
         assert_eq!(view.title, None);
-        assert_eq!(tray_tooltip(&view), "dictation-app");
+        assert_eq!(tray_tooltip(&view), "Vocet");
     }
 }
 

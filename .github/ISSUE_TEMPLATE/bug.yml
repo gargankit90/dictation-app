@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in dictation-app doesn't work
+description: Something in Vocet doesn't work
 labels: [bug]
 body:
   - type: markdown
@@ -26,8 +26,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: dictation-app version
-      description: 'Menu-bar icon > Check for updates… shows "dictation-app x.y.z is the newest version"'
+      label: Vocet version
+      description: 'Menu-bar icon > Check for updates… shows "Vocet x.y.z is the newest version"'
       placeholder: 0.1.0
     validations:
       required: true

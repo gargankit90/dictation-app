@@ -38,11 +38,11 @@
 MIC_BUNDLE_ID=com.dictationapp.desktop
 # DictationError::PermissionMissing(Microphone)'s text (crates/core).
 # What the overlay and tray show (the code table, ErrorCode::user_text).
-MIC_SHOWN="Microphone is off for dictation-app. Allow it in Privacy & Security, then relaunch."
+MIC_SHOWN="Vocet can't use the microphone. Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet."
 # What the log says (DictationError's Display).
-MIC_ERROR="Microphone is off. Allow it in Privacy & Security, Microphone, then relaunch from the menu bar."
+MIC_ERROR="Microphone is off. Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet from the menu bar."
 # The tray menu's item while the microphone is denied (src-tauri).
-MIC_RELAUNCH="Relaunch dictation-app"
+MIC_RELAUNCH="Relaunch Vocet"
 MIC_PROMPT_APP=UserNotificationCenter
 MIC_PROMPT_TEXT="would like to access the microphone"
 MIC_SETTINGS_URL='x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'
@@ -105,7 +105,7 @@ tray_has_no_relaunch() {
   log "  tray: $said"
   [ "$status" != 0 ] || return 1
   case $said in
-    *"no menu item starting with"*"Quit dictation-app"*) return 0 ;;
+    *"no menu item starting with"*"Quit Vocet"*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -243,7 +243,7 @@ e2e_microphone_denied_then_recover() {
     wait_for_log_count "shown to the user error=$MIC_ERROR" 1 10
   expect "the overlay renders it" overlay_shows "shown: $MIC_SHOWN"
   screenshot e2e_microphone_denied_then_recover.error
-  expect "and the tray's tooltip has it" tray_shows "$TRAY_ERROR_TITLE" "$TRAY_TOOLTIP: $MIC_SHOWN (mic_denied)"
+  expect "and the tray's tooltip has it" tray_shows "$TRAY_ERROR_TITLE" "$TRAY_TOOLTIP: $MIC_SHOWN"
   expect "the tray menu offers Relaunch" wait_for_log 'tray relaunch item offered=true' 5
   expect "macOS doesn't ask again" no_mic_prompt
   launch --release

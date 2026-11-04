@@ -1,0 +1,200 @@
+AXApplication Title="Vocet"
+  AXWindow Subrole="AXStandardWindow" Title="Vocet Settings"
+    AXGroup
+      AXGroup
+        AXScrollArea
+          AXWebArea Description="Vocet"
+            AXGroup Subrole="AXLandmarkMain"
+              AXHeading Title="Troubleshoot"
+                AXStaticText Value="Troubleshoot"
+              AXGroup
+                AXStaticText Value="These checks read the state of this Mac. They don't record audio or contact anyo"
+              AXGroup Subrole="AXApplicationGroup" Title="Checks" Description="Checks"
+                AXGroup
+                  AXImage Title="OK" Description="OK"
+                  AXStaticText Value="Microphone"
+                  AXGroup
+                    AXStaticText Value="Allowed."
+                AXGroup
+                  AXImage Title="OK" Description="OK"
+                  AXStaticText Value="Accessibility"
+                  AXGroup
+                    AXStaticText Value="Allowed."
+                AXGroup
+                  AXImage Title="OK" Description="OK"
+                  AXStaticText Value="Hotkey"
+                  AXGroup
+                    AXStaticText Value="Registered."
+                AXGroup
+                  AXImage Title="Problem" Description="Problem"
+                  AXStaticText Value="Transcription engine"
+                  AXGroup
+                    AXStaticText Value="The model on this Mac isn't downloaded. Download it in Settings → Transcription."
+                    AXStaticText Value="(model_missing)"
+                  AXButton Title="Open Settings"
+                AXGroup
+                  AXImage Title="OK" Description="OK"
+                  AXStaticText Value="Last error"
+                  AXGroup
+                    AXStaticText Value="None since the app started."
+              AXButton Title="Check again"
+              AXGroup
+                AXStaticText Value="Model on this Mac. "
+                AXStaticText Value="Not downloaded: get the model in Settings."
+              AXHeading Title="Report a problem"
+                AXStaticText Value="Report a problem"
+              AXGroup
+                AXStaticText Value="Builds a short report from a fixed list of facts: versions, permissions, your ho"
+              AXButton Title="Preview report"
+              AXButton Title="Back to Settings"
+          AXScrollBar
+    AXButton Subrole="AXCloseButton"
+    AXButton Subrole="AXZoomButton"
+      AXGroup
+    AXButton Subrole="AXMinimizeButton"
+    AXStaticText Value="Vocet Settings"
+  AXMenuBar
+    AXMenuBarItem Title="Apple"
+      AXMenu
+        AXMenuItem Title="About This Mac" Identifier="_aboutThisMacRequested:"
+        AXMenuItem Title="System Information" Identifier="_systemInformationRequested:"
+        AXMenuItem
+        AXMenuItem Title="System Settings…" Identifier="_systemSettingsRequested:"
+        AXMenuItem Title="App Store" Identifier="_appStoreRequested:"
+        AXMenuItem
+        AXMenuItem Title="Recent Items" Identifier="_recentsRequested:"
+          AXMenu
+            AXMenuItem Title="Applications"
+            AXMenuItem Title="System Settings" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “System Settings” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Terminal" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “Terminal” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem Title="TextEdit" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “TextEdit” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem
+            AXMenuItem Title="Documents"
+            AXMenuItem Title="job-20261103234449-10869-19-33722.command" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “job-20261103234449-10869-19-33722.command” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem Title="job-20261103234449-10869-20-35699.command" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “job-20261103234449-10869-20-35699.command” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem Title="job-20261103234449-10869-21-36485.command" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “job-20261103234449-10869-21-36485.command” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem Title="job-20261103234449-10869-22-36994.command" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “job-20261103234449-10869-22-36994.command” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem Title="job-20261103234449-10869-23-39682.command" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “job-20261103234449-10869-23-39682.command” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem Title="job-20261103234449-10869-24-40592.command" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “job-20261103234449-10869-24-40592.command” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem Title="job-20261103234449-10869-25-40918.command" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “job-20261103234449-10869-25-40918.command” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem Title="job-20261103234449-10869-26-41246.command" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “job-20261103234449-10869-26-41246.command” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem Title="job-20261103234449-10869-27-41455.command" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “job-20261103234449-10869-27-41455.command” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem Title="job-20261103234449-10869-28-23370.command" Identifier="_recentItemRequested:"
+            AXMenuItem Title="Show “job-20261103234449-10869-28-23370.command” in Finder" Identifier="_recentItemRequested:"
+            AXMenuItem
+            AXMenuItem Title="Servers"
+            AXMenuItem
+            AXMenuItem Title="Clear Menu" Identifier="_clearRecentItemsRequested:"
+        AXMenuItem
+        AXMenuItem Title="Force Quit…" Identifier="_forceQuitPanelRequested:"
+        AXMenuItem Title="Force Quit Vocet" Identifier="_forceQuitRequested:"
+        AXMenuItem
+        AXMenuItem Title="Sleep" Identifier="_sleepRequested:"
+        AXMenuItem Title="Restart…" Identifier="_restartRequested:"
+        AXMenuItem Title="Restart" Identifier="_restartNowRequested:"
+        AXMenuItem Title="Shut Down…" Identifier="_shutDownRequested:"
+        AXMenuItem Title="Shut Down" Identifier="_shutDownNowRequested:"
+        AXMenuItem
+        AXMenuItem Title="Lock Screen" Identifier="_lockScreenRequested:"
+        AXMenuItem Title="Log Out lume…" Identifier="_logOutRequested:"
+        AXMenuItem Title="Log Out lume" Identifier="_logOutNowRequested:"
+        AXMenuItem
+    AXMenuBarItem Title="Vocet"
+      AXMenu
+        AXMenuItem Title="About Vocet" Identifier="customShowAboutPanel:"
+        AXMenuItem
+        AXMenuItem Title="Services"
+          AXMenu
+        
+        AXMenuItem Title="Hide Vocet" Identifier="hide:"
+        AXMenuItem Title="Hide Others" Identifier="hideOtherApplications:"
+        AXMenuItem
+        AXMenuItem Title="Quit Vocet" Identifier="terminate:"
+    AXMenuBarItem Title="File"
+      AXMenu
+        AXMenuItem Title="Close Window" Identifier="performClose:"
+        AXMenuItem Title="Close All" Identifier="closeAll:"
+    AXMenuBarItem Title="Edit"
+      AXMenu
+        AXMenuItem Title="Undo" Identifier="undo:"
+        AXMenuItem Title="Redo" Identifier="redo:"
+        AXMenuItem
+        AXMenuItem Title="Cut" Identifier="cut:"
+        AXMenuItem Title="Copy" Identifier="copy:"
+        AXMenuItem Title="Paste" Identifier="paste:"
+        AXMenuItem Title="Select All" Identifier="selectAll:"
+        AXMenuItem
+        AXMenuItem Title="AutoFill" Identifier="_NSMenuItemAutoFillIdentifier"
+          AXMenu
+            AXMenuItem Title="Contact…" Identifier="_handleInsertFromContactsCommand:"
+            AXMenuItem Title="Passwords…" Identifier="_handleInsertFromPasswordsCommand:"
+        AXMenuItem Title="Start Dictation…" Identifier="startDictation:"
+        AXMenuItem Title="Emoji & Symbols" Identifier="orderFrontCharacterPalette:"
+    AXMenuBarItem Title="View"
+      AXMenu
+        AXMenuItem Title="Toggle Full Screen" Identifier="toggleFullScreen:"
+    AXMenuBarItem Title="Window"
+      AXMenu
+        AXMenuItem Title="Minimize" Identifier="performMiniaturize:"
+        AXMenuItem Title="Minimize All" Identifier="miniaturizeAll:"
+        AXMenuItem Title="Zoom" Identifier="performZoom:"
+        AXMenuItem Title="Zoom All" Identifier="zoomAll:"
+        AXMenuItem Title="Fill" Identifier="_zoomFill:"
+        AXMenuItem Title="Center" Identifier="_zoomCenter:"
+        AXMenuItem
+        AXMenuItem Title="Move & Resize"
+          AXMenu
+            AXMenuItem Title="Halves"
+            AXMenuItem Title="Left" Identifier="_zoomLeft:"
+            AXMenuItem Title="Right" Identifier="_zoomRight:"
+            AXMenuItem Title="Top" Identifier="_zoomTop:"
+            AXMenuItem Title="Bottom" Identifier="_zoomBottom:"
+            AXMenuItem
+            AXMenuItem Title="Quarters"
+            AXMenuItem Title="Top Left" Identifier="_zoomTopLeft:"
+            AXMenuItem Title="Top Right" Identifier="_zoomTopRight:"
+            AXMenuItem Title="Bottom Left" Identifier="_zoomBottomLeft:"
+            AXMenuItem Title="Bottom Right" Identifier="_zoomBottomRight:"
+            AXMenuItem
+            AXMenuItem Title="Arrange"
+            AXMenuItem Title="Left & Right" Identifier="_zoomLeftAndRight:"
+            AXMenuItem Title="Left & Quarters" Identifier="_zoomLeftThreeUp:"
+            AXMenuItem Title="Right & Left" Identifier="_zoomRightAndLeft:"
+            AXMenuItem Title="Right & Quarters" Identifier="_zoomRightThreeUp:"
+            AXMenuItem Title="Top & Bottom" Identifier="_zoomTopAndBottom:"
+            AXMenuItem Title="Top & Quarters" Identifier="_zoomTopThreeUp:"
+            AXMenuItem Title="Bottom & Top" Identifier="_zoomBottomAndTop:"
+            AXMenuItem Title="Bottom & Quarters" Identifier="_zoomBottomThreeUp:"
+            AXMenuItem Title="Quarters" Identifier="_zoomQuarters:"
+            AXMenuItem
+            AXMenuItem Title="Return to Previous Size" Identifier="_zoomUntile:"
+        AXMenuItem Title="Full Screen Tile"
+        AXMenuItem
+        AXMenuItem Title="Remove Window from Set" Identifier="_removeWindowFromStageManagerSet:"
+        AXMenuItem
+        AXMenuItem Title="Close Window" Identifier="performClose:"
+        AXMenuItem
+        AXMenuItem Title="Vocet Settings" Identifier="makeKeyAndOrderFront:"
+    AXMenuBarItem Title="Help"
+      AXMenu
+  AXMenuBar
+    AXMenuBarItem Subrole="AXMenuExtra"
+      AXMenu
+        AXMenuItem Title="Settings…" Identifier="customAction:"
+        AXMenuItem Title="Set up dictation…" Identifier="customAction:"
+        AXMenuItem Title="Troubleshoot…" Identifier="customAction:"
+        AXMenuItem Title="Check for updates…" Identifier="customAction:"
+        AXMenuItem Title="Reveal log" Identifier="customAction:"
+        AXMenuItem Title="Quit Vocet" Identifier="customAction:"

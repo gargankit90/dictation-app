@@ -98,6 +98,19 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
     if (run === keyCheck.current) setKeyStatus(status);
   }, []);
 
+  // The first launch after the rename says something about the Keychain.
+  const [launchNotice, setLaunchNotice] = useState<string | null>(null);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const result = await commands.launchNotice();
+        if (result.status === "ok") setLaunchNotice(result.data);
+      } catch {
+        // No notice is the same as nothing to say.
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     // An object, not a `let`, so the checks after each `await` see changes.
     const state = { cancelled: false };
@@ -402,6 +415,11 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
   return (
     <main className="settings">
       <h1>Settings</h1>
+      {launchNotice !== null ? (
+        <p role="status" className="notice ok" data-testid="launch-notice">
+          {launchNotice}
+        </p>
+      ) : null}
       <form onSubmit={(event) => void save(event)} noValidate>
         <fieldset disabled={saving}>
           <fieldset className="field choice">
@@ -650,8 +668,8 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
               )}
             </label>
             <p id="launch-at-login-hint" className="hint">
-              Starts dictation-app in the menu bar when you log in. Applies as soon as you change
-              it, without Save. You can also change it in System Settings, General, Login Items.
+              Starts Vocet in the menu bar when you log in. Applies as soon as you change it,
+              without Save. You can also change it in System Settings → General → Login Items.
             </p>
             <p role={launchError ? "alert" : undefined} className="error">
               {launchError}

@@ -8,9 +8,16 @@
 #   scripts/updater-test.sh serve            # serve them (Ctrl-C to stop)
 #
 # Then (docs/releasing.md, "Try the updater"): install
-# target/updater-test/old/dictation-app.app on a Mac or in the VM, open it,
+# target/updater-test/old/Vocet.app on a Mac or in the VM, open it,
 # menu-bar icon > Check for updates… > Install and restart, and see 0.1.1 run
 # with its permissions kept.
+#
+# OLD_REF=<git ref> builds the OLD version from that ref instead of this
+# tree (U1: the build from before the rename, whose bundle is
+# dictation-app.app), to try the update from the old product name. It is
+# built in a throwaway git worktree under $dir with its own target folder;
+# $dir/old then holds whatever bundle that ref makes. NEW_REF=<git ref> does
+# the same for the new version (a control without the rename).
 #
 # HOST is where the app can reach this Mac: the Lume VM sees it at
 # 192.168.64.1 (the default); the Mac itself can use 127.0.0.1.
@@ -36,8 +43,11 @@ if [ "${DMG_ADHOC:-0}" = 1 ] || ! security find-identity -p codesigning 2>/dev/n
   sign_config='{"bundle":{"macOS":{"signingIdentity":"-"}}}'
 fi
 
+# build_one <version> <outdir> [<source dir> [<cargo target dir>]]: builds the
+# tree in <source dir> (default: this one) and copies its .app, .app.tar.gz
+# and signature to <outdir>.
 build_one() {
-  local version=$1 outdir=$2 config
+  local version=$1 outdir=$2 src=${3:-.} target=${4:-target} config
   config=$(jq -nc \
     --arg pubkey "$(cat "$dir/test.key.pub")" \
     --arg endpoint "$base/latest.json" \
@@ -48,28 +58,67 @@ build_one() {
       plugins: {updater: {pubkey: $pubkey, endpoints: [$endpoint],
                           dangerousInsecureTransportProtocol: true}}} * $sign')
   # A debug build: faster, and the same updater code.
-  TAURI_SIGNING_PRIVATE_KEY="$PWD/$dir/test.key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
-    npm run tauri build -- --debug --bundles app --config "$config"
+  local root=$PWD bundle
+  (
+    cd "$src"
+    TAURI_SIGNING_PRIVATE_KEY="$root/$dir/test.key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
+      CARGO_TARGET_DIR="$root/$target" \
+      npm run tauri build -- --debug --bundles app --config "$config"
+  )
   rm -rf "$outdir"
   mkdir -p "$outdir"
-  cp -R target/debug/bundle/macos/dictation-app.app "$outdir/"
-  cp target/debug/bundle/macos/dictation-app.app.tar.gz "$outdir/"
-  cp target/debug/bundle/macos/dictation-app.app.tar.gz.sig "$outdir/"
+  bundle=$(find "$target/debug/bundle/macos" -maxdepth 1 -name '*.app' -print -quit)
+  [ -n "$bundle" ] || {
+    echo "updater-test: no .app was built in $target/debug/bundle/macos" >&2
+    exit 1
+  }
+  cp -R "$bundle" "$outdir/"
+  cp "$bundle.tar.gz" "$outdir/"
+  cp "$bundle.tar.gz.sig" "$outdir/"
+}
+
+# build_from_ref <ref> <outdir> <version> <tag>: a version from a git ref, in
+# its own worktree (OLD_REF, NEW_REF).
+build_from_ref() {
+  local ref=$1 outdir=$2 version=$3 tag=$4 src=$dir/$4-src
+  git worktree remove --force "$src" 2>/dev/null || true
+  git worktree add --detach "$src" "$ref" >/dev/null
+  ln -s "$PWD/node_modules" "$src/node_modules"
+  build_one "$version" "$outdir" "$src" "$dir/$tag-target"
+  git worktree remove --force "$src" || true
 }
 
 case ${1:-} in
   build)
     mkdir -p "$dir"
     # The throwaway pair. Never commit it; target/ is git-ignored.
-    rm -f "$dir/test.key" "$dir/test.key.pub"
-    npx tauri signer generate --ci -w "$dir/test.key" -p "" >/dev/null
-    build_one "$OLD_VERSION" "$dir/old"
-    build_one "$NEW_VERSION" "$dir/new"
+    # KEEP_OLD=1 rebuilds only the new version, trusting the same key as the
+    # old build already in $dir/old (it takes minutes to build).
+    if [ "${KEEP_OLD:-0}" = 1 ] && [ -d "$dir/old" ] && [ -f "$dir/test.key" ]; then
+      echo "updater-test: keeping the old build in $dir/old"
+    else
+      rm -f "$dir/test.key" "$dir/test.key.pub"
+      npx tauri signer generate --ci -w "$dir/test.key" -p "" >/dev/null
+      if [ -n "${OLD_REF:-}" ]; then
+        build_from_ref "$OLD_REF" "$dir/old" "$OLD_VERSION" old
+      else
+        build_one "$OLD_VERSION" "$dir/old"
+      fi
+    fi
+    # NEW_REF=<git ref> builds the NEW version from that ref too (the control
+    # in U1: an update that changes only the version, no rename).
+    if [ -n "${NEW_REF:-}" ]; then
+      build_from_ref "$NEW_REF" "$dir/new" "$NEW_VERSION" new
+    else
+      build_one "$NEW_VERSION" "$dir/new"
+    fi
+    newapp=$(find "$dir/new" -maxdepth 1 -name '*.app' -print -quit)
+    newname=$(basename "$newapp" .app)
     mkdir -p "$dir/serve"
-    cp "$dir/new/dictation-app.app.tar.gz" "$dir/serve/dictation-app_$NEW_VERSION.app.tar.gz"
+    cp "$dir/new/$newname.app.tar.gz" "$dir/serve/${newname}_$NEW_VERSION.app.tar.gz"
     scripts/make-latest-json.sh "$NEW_VERSION" "A test update." \
-      "$dir/serve/dictation-app_$NEW_VERSION.app.tar.gz" "$dir/new/dictation-app.app.tar.gz.sig" \
-      "$base/dictation-app_$NEW_VERSION.app.tar.gz" >"$dir/serve/latest.json"
+      "$dir/serve/${newname}_$NEW_VERSION.app.tar.gz" "$dir/new/$newname.app.tar.gz.sig" \
+      "$base/${newname}_$NEW_VERSION.app.tar.gz" >"$dir/serve/latest.json"
     echo "updater-test: built $OLD_VERSION ($dir/old) and $NEW_VERSION ($dir/new)"
     echo "updater-test: manifest: $dir/serve/latest.json"
     ;;

@@ -13,6 +13,9 @@ interface Props {
 
 type Checks = { state: "loading" } | { state: "ready"; checks: Check[] } | { state: "error" };
 
+/** When the relaunch command itself can't be reached: what to do instead. */
+const RELAUNCH_FAILED = "Couldn't relaunch Vocet. Quit it from the menu bar and open it again.";
+
 /**
  * Troubleshoot (E1): live checks with a ✓ or ✗ and a fix button each, a
  * "Test connection" button that is the only thing that contacts the
@@ -27,11 +30,19 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
   const [report, setReport] = useState<string | null>(null);
   const [reportNotice, setReportNotice] = useState<Notice | null>(null);
   const [building, setBuilding] = useState(false);
+  // Why Relaunch Vocet did nothing, with what to do instead.
+  const [relaunchError, setRelaunchError] = useState<string | null>(null);
   // Bumped to run the checks again.
   const [round, setRound] = useState(0);
   const load = useCallback(() => {
     setRound((current) => current + 1);
   }, []);
+  // The model on this Mac: there is no connection to test (U1), so the
+  // engine row's readiness line stands in for the button.
+  const localModel =
+    checks.state === "ready"
+      ? (checks.checks.find((check) => check.id === "engine")?.local_model ?? null)
+      : null;
 
   useEffect(() => {
     const state = { cancelled: false };
@@ -105,6 +116,16 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
     } finally {
       setTesting(false);
       load();
+    }
+  }
+
+  async function relaunch() {
+    setRelaunchError(null);
+    try {
+      const result = await commands.relaunchApp();
+      if (result.status === "error") setRelaunchError(messageOf(result.error));
+    } catch {
+      setRelaunchError(RELAUNCH_FAILED);
     }
   }
 
@@ -205,30 +226,54 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
                     {check.fix_label}
                   </button>
                 ) : null}
+                {!check.ok && check.code === "mic_denied" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void relaunch();
+                    }}
+                  >
+                    Relaunch Vocet
+                  </button>
+                ) : null}
               </li>
             );
           })}
         </ul>
       ) : null}
 
+      {relaunchError !== null ? (
+        <p role="alert" className="notice error">
+          {relaunchError}
+        </p>
+      ) : null}
+
       <div className="row">
         <button type="button" onClick={load}>
           Check again
         </button>
-        <button
-          type="button"
-          disabled={testing}
-          onClick={() => {
-            void testConnection();
-          }}
-        >
-          {testing ? "Testing…" : "Test connection"}
-        </button>
+        {checks.state !== "loading" && localModel === null ? (
+          <button
+            type="button"
+            disabled={testing}
+            onClick={() => {
+              void testConnection();
+            }}
+          >
+            {testing ? "Testing…" : "Test connection"}
+          </button>
+        ) : null}
       </div>
-      <p className="hint">
-        Test connection sends a short silent clip to your provider with your saved key, only when
-        you press it. It does nothing for the model on this Mac.
-      </p>
+      {localModel !== null ? (
+        <p className="hint" data-testid="local-readiness">
+          Model on this Mac. {localModel}
+        </p>
+      ) : (
+        <p className="hint">
+          Test connection sends a short silent clip to your provider with your saved key, only when
+          you press it.
+        </p>
+      )}
       {connection !== null ? (
         <p role="status" className={`notice ${connection.kind}`}>
           {connection.text}

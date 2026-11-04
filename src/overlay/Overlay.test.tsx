@@ -104,6 +104,14 @@ describe("criterion_m5_1_1 criterion_u4_3 OverlayContent", () => {
     expect(status.dataset.state).toBe("transcribing");
   });
 
+  it("shows one sentence and no error code (U1)", () => {
+    // Even if a payload carried a code, parseView drops it and nothing renders it.
+    const view = parseView({ state: "error", message: MESSAGE, code: "mic_denied" });
+    render(<OverlayContent view={view} />);
+    expect(screen.getByRole("alert").textContent).toBe(`!${MESSAGE}`);
+    expect(screen.queryByText("mic_denied")).toBeNull();
+  });
+
   it("shows Paste sent with a check", () => {
     render(<OverlayContent view={{ state: "paste_sent" }} />);
     const status = screen.getByRole("status");

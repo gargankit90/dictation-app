@@ -1,4 +1,4 @@
-# dictation-app
+# Vocet (dictation-app)
 
 Hold a hotkey, speak, release, and the text is pasted into the app that has
 focus.

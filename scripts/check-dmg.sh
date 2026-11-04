@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Checks a built DMG the way a tester meets it: it verifies, it mounts, it
-# holds dictation-app.app beside an Applications shortcut, the app's
+# holds Vocet.app beside an Applications shortcut, the app's
 # signature is intact, the Info.plist says what we promise (bundle id, macOS
 # 13 minimum, menu-bar app) and the third-party licence notice is inside.
 #
-#   scripts/check-dmg.sh path/to/dictation-app_0.1.0_aarch64.dmg
+#   scripts/check-dmg.sh path/to/Vocet_0.1.0_aarch64.dmg
 #
 # macOS only. Used by scripts/build-dmg.sh, CI and tests/e2e.
 set -euo pipefail
@@ -31,8 +31,8 @@ hdiutil verify "$dmg" -quiet || fail "hdiutil verify failed"
 hdiutil attach "$dmg" -nobrowse -readonly -noautoopen -mountpoint "$mount" -quiet ||
   fail "could not mount $dmg"
 
-app=$mount/dictation-app.app
-[ -d "$app" ] || fail "no dictation-app.app in the DMG ($(ls "$mount" | tr '\n' ' '))"
+app=$mount/Vocet.app
+[ -d "$app" ] || fail "no Vocet.app in the DMG ($(ls "$mount" | tr '\n' ' '))"
 [ -e "$mount/Applications" ] || fail "no Applications shortcut in the DMG"
 
 codesign --verify --deep --strict "$app" || fail "the app's signature does not verify"

@@ -133,6 +133,16 @@ export const commands = {
 	 */
 	takeTroubleshootRequest: () => typedError<boolean, string>(__TAURI_INVOKE("take_troubleshoot_request")),
 	/**
+	 *  What the last dictation got through: onboarding's Try it shows success
+	 *  only when `completed` grows while its step is open.
+	 */
+	dictationProgress: () => typedError<DictationProgressView_Serialize, string>(__TAURI_INVOKE("dictation_progress")),
+	/**
+	 *  The notice for this launch only: macOS may ask once to let Vocet use the
+	 *  saved key. `None` on every other launch.
+	 */
+	launchNotice: () => typedError<string | null, string>(__TAURI_INVOKE("launch_notice")),
+	/**
 	 *  The newest input level, in dBFS, for the overlay's meter; silence when
 	 *  nothing records. Only the overlay window may call it
 	 *  (`capabilities/overlay.json`), and it returns a number only. Never
@@ -184,6 +194,13 @@ export type Check_Deserialize = {
 	fix?: FixAction | null,
 	/**  That button's label. */
 	fix_label?: string | null,
+	/**
+	 *  Only on the engine row when the engine is the model on this Mac: a
+	 *  short readiness line (downloaded, loading, ready, error). Troubleshoot
+	 *  shows it instead of "Test connection", which has nothing to test then
+	 *  (U1).
+	 */
+	local_model?: string | null,
 };
 
 /**  One row of Troubleshoot. */
@@ -202,6 +219,13 @@ export type Check_Serialize = {
 	fix: FixAction | null,
 	/**  That button's label. */
 	fix_label: string | null,
+	/**
+	 *  Only on the engine row when the engine is the model on this Mac: a
+	 *  short readiness line (downloaded, loading, ready, error). Troubleshoot
+	 *  shows it instead of "Test connection", which has nothing to test then
+	 *  (U1).
+	 */
+	local_model: string | null,
 };
 
 /**  What "Test connection" found. */
@@ -226,6 +250,55 @@ export type ConnectionResult_Serialize = {
 	/**  One plain sentence. */
 	message: string,
 };
+
+/**
+ *  What the last dictation got through (U1). Counts only grow, so a window
+ *  compares them with what it saw when it opened. No transcript, no code.
+ */
+export type DictationProgressView = DictationProgressView_Serialize | DictationProgressView_Deserialize;
+
+/**
+ *  What the last dictation got through (U1). Counts only grow, so a window
+ *  compares them with what it saw when it opened. No transcript, no code.
+ */
+export type DictationProgressView_Deserialize = {
+	/**  Dictations started since launch. */
+	started: number,
+	/**  Dictations that ended pasted with no error. */
+	completed: number,
+	/**  Errors shown. */
+	errors: number,
+	/**  The stages the current or last dictation got through, in order. */
+	stages: DictationStage[],
+	/**  The latest error's sentence, until the next recording starts. */
+	error?: string | null,
+};
+
+/**
+ *  What the last dictation got through (U1). Counts only grow, so a window
+ *  compares them with what it saw when it opened. No transcript, no code.
+ */
+export type DictationProgressView_Serialize = {
+	/**  Dictations started since launch. */
+	started: number,
+	/**  Dictations that ended pasted with no error. */
+	completed: number,
+	/**  Errors shown. */
+	errors: number,
+	/**  The stages the current or last dictation got through, in order. */
+	stages: DictationStage[],
+	/**  The latest error's sentence, until the next recording starts. */
+	error: string | null,
+};
+
+/**  A stage of a dictation, as onboarding's Try it names them. */
+export type DictationStage = 
+/**  Recorded. */
+"recorded" | 
+/**  Transcribed. */
+"transcribed" | 
+/**  Pasted. */
+"pasted";
 
 /**
  *  A stable name for a way dictation can fail. The `snake_case` text
