@@ -16,7 +16,8 @@
 # tree (U1: the build from before the rename, whose bundle is
 # dictation-app.app), to try the update from the old product name. It is
 # built in a throwaway git worktree under $dir with its own target folder;
-# $dir/old then holds whatever bundle that ref makes.
+# $dir/old then holds whatever bundle that ref makes. NEW_REF=<git ref> does
+# the same for the new version (a control without the rename).
 #
 # HOST is where the app can reach this Mac: the Lume VM sees it at
 # 192.168.64.1 (the default); the Mac itself can use 127.0.0.1.
@@ -76,13 +77,14 @@ build_one() {
   cp "$bundle.tar.gz.sig" "$outdir/"
 }
 
-# The old version from a git ref, in its own worktree (see OLD_REF).
-build_old_from_ref() {
-  local ref=$1 outdir=$2 src=$dir/old-src
+# build_from_ref <ref> <outdir> <version> <tag>: a version from a git ref, in
+# its own worktree (OLD_REF, NEW_REF).
+build_from_ref() {
+  local ref=$1 outdir=$2 version=$3 tag=$4 src=$dir/$4-src
   git worktree remove --force "$src" 2>/dev/null || true
   git worktree add --detach "$src" "$ref" >/dev/null
   ln -s "$PWD/node_modules" "$src/node_modules"
-  build_one "$OLD_VERSION" "$outdir" "$src" "$dir/old-target"
+  build_one "$version" "$outdir" "$src" "$dir/$tag-target"
   git worktree remove --force "$src" || true
 }
 
@@ -98,17 +100,25 @@ case ${1:-} in
       rm -f "$dir/test.key" "$dir/test.key.pub"
       npx tauri signer generate --ci -w "$dir/test.key" -p "" >/dev/null
       if [ -n "${OLD_REF:-}" ]; then
-        build_old_from_ref "$OLD_REF" "$dir/old"
+        build_from_ref "$OLD_REF" "$dir/old" "$OLD_VERSION" old
       else
         build_one "$OLD_VERSION" "$dir/old"
       fi
     fi
-    build_one "$NEW_VERSION" "$dir/new"
+    # NEW_REF=<git ref> builds the NEW version from that ref too (the control
+    # in U1: an update that changes only the version, no rename).
+    if [ -n "${NEW_REF:-}" ]; then
+      build_from_ref "$NEW_REF" "$dir/new" "$NEW_VERSION" new
+    else
+      build_one "$NEW_VERSION" "$dir/new"
+    fi
+    newapp=$(find "$dir/new" -maxdepth 1 -name '*.app' -print -quit)
+    newname=$(basename "$newapp" .app)
     mkdir -p "$dir/serve"
-    cp "$dir/new/Vocet.app.tar.gz" "$dir/serve/Vocet_$NEW_VERSION.app.tar.gz"
+    cp "$dir/new/$newname.app.tar.gz" "$dir/serve/${newname}_$NEW_VERSION.app.tar.gz"
     scripts/make-latest-json.sh "$NEW_VERSION" "A test update." \
-      "$dir/serve/Vocet_$NEW_VERSION.app.tar.gz" "$dir/new/Vocet.app.tar.gz.sig" \
-      "$base/Vocet_$NEW_VERSION.app.tar.gz" >"$dir/serve/latest.json"
+      "$dir/serve/${newname}_$NEW_VERSION.app.tar.gz" "$dir/new/$newname.app.tar.gz.sig" \
+      "$base/${newname}_$NEW_VERSION.app.tar.gz" >"$dir/serve/latest.json"
     echo "updater-test: built $OLD_VERSION ($dir/old) and $NEW_VERSION ($dir/new)"
     echo "updater-test: manifest: $dir/serve/latest.json"
     ;;
