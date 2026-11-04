@@ -139,6 +139,13 @@ You install from the DMG once. After that, Vocet updates itself:
   key and permissions carry over. To get the new file name, install
   `Vocet.app` from the DMG and drag `dictation-app.app` to the Trash; it is
   the same app to macOS, so permissions stay.
+- **After an update, macOS may ask once** whether Vocet may use the API key
+  saved in your keychain ("Vocet wants to access key
+  com.dictationapp.desktop"). Enter your Mac password and choose **Always
+  Allow**. Until then Vocet can't read the key and says so. The entry in
+  System Settings → General → Login Items may keep showing the old name
+  `dictation-app` (macOS keeps the name from when it was added); it is the
+  same item and opens Vocet.
 - Every update is signed with our update key, and the app refuses one whose
   signature doesn't match (_"The update's signature didn't match this app's
   update key, so it was not installed."_). If you see that, report it (see "Report a bug").

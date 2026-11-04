@@ -123,18 +123,24 @@ tr_btm() {
 
 TR_EVIDENCE=""
 
-# After an update macOS asks, in a SecurityAgent dialog, whether the new
-# build may read the key the old one saved (the finding this scenario
-# records). The dialog covers TextEdit and would fail the permission checks
-# for a reason that has nothing to do with permissions, so a loop in the VM
-# closes it (the app then just can't read the key) for the next 4 minutes.
-tr_prompt_killer() {
-  vm "nohup sh -c 'i=0; while [ \$i -lt 120 ]; do pkill -x SecurityAgent; sleep 2; i=\$((i + 1)); done' >/dev/null 2>&1 </dev/null &" || true
-}
+# After an update macOS asks, in a dialog, whether the new build may read the
+# key the old one saved ("Vocet wants to access key ... Always Allow"): the
+# designated requirement is unchanged (same id and certificate), but the
+# keychain item is bound to the build that made it. The scenario records the
+# log line and the screenshot of it; it can't answer the dialog.
 
 # <app path>: the BTM dump has exactly one app entry with this bundle id and
 # its URL is <app path>. Its Name (what Login Items shows) is kept as
 # evidence: macOS keeps the name from the first registration.
+tr_dismiss_keychain_prompt() {
+  local said
+  screenshot "$1"
+  said=$(ax alert-dismiss SecurityAgent "wants to access" Deny 2>&1) || true
+  log "  SecurityAgent: $said"
+  # The dialog outlives the app; whatever is left is closed.
+  vm "pkill -x SecurityAgent" >/dev/null 2>&1 || true
+}
+
 tr_one_login_item() {
   local dump
   dump=$(printf '%s\n' "${VM_PASSWORD:-lume}" | vm "sudo -S -p '' sfltool dumpbtm 2>&1")
@@ -322,7 +328,12 @@ EOF' _ "$(vm "codesign -dvv $(q "$(tr_copies | head -1)") 2>&1")"
   tr_note "BTM after the in-app update:"
   tr_note "$(tr_btm)"
   expect "Background Task Management has one login item for the app, at the updated bundle" tr_one_login_item "$VM_APP"
-  tr_prompt_killer
+  # The old build's key stays in the keychain, but the new build can't read it
+  # without macOS asking (see the note above tr_one_login_item); the dialog would
+  # cover TextEdit in the permission checks, so the key goes now and the
+  # DMG step stores one with Vocet.app itself.
+  tr_dismiss_keychain_prompt u1-keychain-prompt-after-update
+  tr_key_remove
   expect "the updated app has Microphone and Accessibility" permissions_hold "$TR_NEW"
   # The updater still finds updates: this app asks the same endpoint.
   upd_serve newer
@@ -342,20 +353,20 @@ EOF' _ "$(vm "codesign -dvv $(q "$(tr_copies | head -1)") 2>&1")"
   tr_note "after the DMG-style move, ~/Applications holds: $(tr_copies | tr '\n' ' ')"
   expect "exactly one bundle with this id is left, Vocet.app" \
     test "$(tr_copies | tr -d '\n')" = "$TR_VM_NEW_APP"
+  groq_key_store "$TR_KEY"
   clear_app_log
   E2E_TRANSCRIBER=settings launch_full "$VM_TONE"
   expect "Vocet.app starts" wait_for_log "INFO .*starting version=\"$TR_NEW\""
-  expect "its engine has the same settings" tr_engine_settings_kept
-  expect "the key is still in the keychain" tr_key_in_keychain
-  tr_note "reading the key after the move: $(app_log | grep -E 'API key|has_key' | cut -c1-260 | tail -3)"
+  expect "its engine has the same settings, and reads a key it saved itself" tr_engine_from_settings
+  expect "the key is in the keychain" tr_key_in_keychain
   expect "the settings file is as it was" tr_settings_kept
   expect "the OS says launch at login is on for Vocet.app" tr_login_is_enabled
   tr_note "BTM after the DMG-style move:"
   tr_note "$(tr_btm)"
   expect "Background Task Management has one login item for the app, at Vocet.app" tr_one_login_item "$TR_VM_NEW_APP"
-  tr_prompt_killer
   expect "Vocet.app has Microphone and Accessibility" permissions_hold "$TR_NEW"
 
+  tr_dismiss_keychain_prompt u1-keychain-prompt-before-screenshots
   # Screenshots for U1's criterion 9: Vocet's first-run window, and its tray
   # menu open (a click on an item that isn't there leaves the menu open).
   fresh_app_state
