@@ -53,6 +53,7 @@ class Backend {
     transcription: "cloud",
     local_model: ENGLISH,
     share_usage_events: true,
+    history_limit: 25,
   };
   keys: Record<Provider, boolean> = { groq: false, openai: false };
   models: LocalModelInfo_Serialize[] = [model(ENGLISH), model(MULTI)];
@@ -84,6 +85,8 @@ class Backend {
         return this.settings;
       case "launch_notice":
         return this.launchNotice;
+      case "list_history":
+        return [];
       case "set_hotkey":
         this.settings = { ...this.settings, hotkey: args.spec as string };
         return null;
@@ -192,6 +195,7 @@ const SECTION_NAMES: Record<SectionId, string> = {
   dictation: "Dictation",
   speech: "Speech",
   privacy: "Privacy",
+  history: "History",
   help: "Help",
   about: "About",
 };
@@ -241,7 +245,7 @@ describe("criterion_u6_1 sections, keyboard and names", () => {
   it("shows the sidebar sections and opens each one's pane", async () => {
     await open();
     const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
-    expect(tabs).toEqual(["General", "Dictation", "Speech", "Privacy", "Help", "About"]);
+    expect(tabs).toEqual(["General", "Dictation", "Speech", "Privacy", "History", "Help", "About"]);
     for (const name of tabs) {
       fireEvent.click(screen.getByRole("tab", { name }));
       expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(name);

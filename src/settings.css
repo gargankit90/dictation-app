@@ -686,3 +686,116 @@ button.menu-button {
 .row-control .hotkey-recorder .row {
   margin-top: var(--vc-space-1);
 }
+
+/* U7: Settings → History. */
+.history-section .settings-group + .history-list,
+.history-section .history-list + .settings-group {
+  margin-top: var(--vc-space-4);
+}
+
+.history-empty {
+  margin: var(--vc-space-4) 0;
+  color: var(--vc-muted);
+}
+
+.history-list {
+  margin: var(--vc-space-4) 0;
+  padding: 0;
+  border-radius: var(--vc-radius-md);
+  background: var(--vc-bg-grouped);
+  list-style: none;
+}
+
+.history-row {
+  position: relative;
+  padding: var(--vc-space-3) var(--vc-space-4);
+  border-top: 1px solid var(--vc-line);
+}
+
+.history-row:first-child {
+  border-top: 0;
+}
+
+.history-meta {
+  display: flex;
+  min-height: var(--vc-control-h);
+  align-items: center;
+  gap: var(--vc-space-2);
+}
+
+.history-time {
+  color: var(--vc-muted);
+  font-size: var(--vc-text-sm);
+}
+
+/* The first two lines; Copy gets the whole text. */
+.history-text {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: var(--vc-space-1) 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* Hidden by opacity only, so the keyboard and VoiceOver always reach them. */
+.history-actions {
+  position: absolute;
+  top: var(--vc-space-3);
+  right: var(--vc-space-4);
+  display: flex;
+  gap: var(--vc-space-2);
+  opacity: 0;
+  transition: opacity var(--vc-dur-fast) var(--vc-ease);
+}
+
+.history-row:hover .history-actions,
+.history-row:focus-within .history-actions {
+  opacity: 1;
+}
+
+.visually-hidden {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The question before deleting. */
+.confirm-backdrop {
+  position: fixed;
+  z-index: 10;
+  background: var(--vc-ink);
+  inset: 0;
+  opacity: 0.25;
+}
+
+.confirm-dialog {
+  position: fixed;
+  z-index: 11;
+  top: 50%;
+  left: 50%;
+  width: min(360px, calc(100vw - var(--vc-space-12)));
+  padding: var(--vc-space-5);
+  border: 1px solid var(--vc-line);
+  border-radius: var(--vc-radius-md);
+  background: var(--vc-bg);
+  box-shadow: var(--vc-shadow-pop);
+  transform: translate(-50%, -50%);
+}
+
+.confirm-dialog p {
+  margin: 0 0 var(--vc-space-4);
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--vc-space-2);
+}

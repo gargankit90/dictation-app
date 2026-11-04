@@ -120,7 +120,10 @@ describe("App", () => {
             transcription: "cloud",
             local_model: "parakeet-unified-en-0.6b-q4_k_m",
             share_usage_events: true,
+            history_limit: 25,
           };
+        case "list_history":
+          return [];
         case "list_local_models":
           return [];
         case "get_engine_status":
@@ -145,6 +148,14 @@ describe("App", () => {
     render(<App />);
     expect(await screen.findByRole("heading", { level: 1, name: "Dictation" })).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Record a different key" })).toBeTruthy();
+  });
+
+  // U7 criterion 6: the menu's "History…".
+  it("opens History when the tray's History… asked", async () => {
+    backendAsking("history");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "History" })).toBeTruthy();
+    expect(await screen.findByLabelText("Keep recent dictations")).toBeTruthy();
   });
 
   // U6 criterion 7: Help → Show log file, through the app's Opener (U5's command).
