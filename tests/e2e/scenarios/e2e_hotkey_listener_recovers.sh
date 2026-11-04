@@ -43,7 +43,7 @@ posted up" real_key_hold 1.5
   expect "the outage hook reaches the app" \
     wait_for_log 'test hook outage command=Begin from="a second launch"'
   expect "the app says the hotkey isn't working" \
-    wait_for_log "shown to the user error=The dictation hotkey isn.t working"
+    wait_for_log "shown to the user error=The dictation key isn.t working"
   expect "the tray says the hotkey isn't working, with its fix" \
     env_tray_fix "Choose another key…" tray_shows "! $TRAY_HOTKEY_SHOWN" "Vocet: $TRAY_HOTKEY_SHOWN" 10
   expect "the supervisor is retrying (Accessibility looks missing)" \

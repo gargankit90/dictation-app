@@ -219,7 +219,7 @@ e2e_accessibility_revoked() {
   expect "it knows Accessibility is off" \
     wait_for_log 'PermissionMissing: the hotkey is off until Accessibility is granted' 10
   expect "it says the hotkey is off until Accessibility is allowed" \
-    wait_for_log "shown to the user error=The dictation hotkey isn.t working" 10
+    wait_for_log "shown to the user error=The dictation key isn.t working" 10
   expect "the tray says the hotkey isn't working, with its fix" \
     env_tray_fix "Open Accessibility settings…" tray_shows "! $AX_HOTKEY_SHOWN" "Vocet: $AX_HOTKEY_SHOWN" 10
   expect "typing still reaches TextEdit with the app running unallowed" typed_in_textedit still
