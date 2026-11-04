@@ -32,9 +32,9 @@ OVERLAY_ERROR_MS=4000
 OVERLAY_ERROR_SLACK_MS=600
 
 # The overlay's lines in the log after the first <n>, space-separated:
-# recording, transcribing, error, hidden.
+# recording, transcribing, error, hidden (U4: no_sound, paste_sent).
 overlay_log_since() {
-  app_log | sed -nE 's/.*overlay (shown state="?([a-z]+)"?|(hidden)).*/\2\3/p' |
+  app_log | sed -nE 's/.*overlay (shown state="?([a-z_]+)"?|(hidden)).*/\2\3/p' |
     tail -n +$(($1 + 1)) | paste -sd ' ' -
 }
 
@@ -73,7 +73,19 @@ overlay_watch_end() {
 overlay_watch_went() {
   local watch=$1 got want
   shift
-  got=$(printf '%s\n' "$watch" | cut -d' ' -f2- | grep -vxF "$OVERLAY_TRANSCRIBING" | paste -sd '|' -)
+  # U4: the meter re-lays the pill out 20 times a second, and a sample
+  # taken mid-layout can read the label without its hint; it counts as
+  # Listening. A blank page right before hidden is the hide in progress
+  # (the page is cleared, then the panel hidden). Repeats collapse.
+  got=$(printf '%s\n' "$watch" | cut -d' ' -f2- | grep -vxF "$OVERLAY_TRANSCRIBING" |
+    awk -v partial="shown: Listening" -v full="$OVERLAY_RECORDING" '
+      $0 == partial { $0 = full }
+      $0 == "shown:" || $0 == "shown: " { blank = 1; next }
+      blank && $0 != "hidden" { if (last != "shown: ") print "shown: "; last = "shown: " }
+      { blank = 0 }
+      $0 != last { print; last = $0 }
+      END { if (blank) print "shown: " }' |
+    paste -sd '|' -)
   want=$(printf '%s\n' "$@" | paste -sd '|' -)
   log "  the overlay showed: $(printf '%s\n' "$watch" | paste -sd '|' -)"
   [ "$got" = "$want" ] && return 0
@@ -176,8 +188,9 @@ e2e_overlay_rendered_states_and_error() {
   expect "the dictation fails and is back in Idle" wait_for_idle_count 3 15
   expect "the provider rejected the key" provider_request_has 1 auth=bad
   expect "the overlay renders the error's text" overlay_shows "$OVERLAY_BAD_KEY"
-  screenshot e2e_overlay_rendered_states_and_error.error
   expect "the panel is on screen with the error" overlay_on_screen
+  # After the check: the error shows for only 4 s.
+  screenshot e2e_overlay_rendered_states_and_error.error
   overlay_watch_end
   watch=$OVERLAY_WATCHED
   expect "the watch saw Recording, the error, then hidden, and nothing after" \
