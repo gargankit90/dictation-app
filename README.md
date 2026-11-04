@@ -15,8 +15,14 @@ _Recorded in a macOS VM: a real Right Option hold, speech by macOS `say` fed to 
 
 1. Download the latest DMG from
    [Releases](https://github.com/gargankit90/dictation-app/releases/latest).
-2. Follow the [tester guide](docs/TESTERS.md): install, first run, API key,
-   first dictation, and how to report a bug.
+2. Follow the [tester guide](docs/TESTERS.md): install, first run, API key
+   (or an on-device model), first dictation, and how to report a bug.
+
+You need an Apple Silicon Mac (M1 or newer) with macOS 13 or newer. The app is
+not notarized yet, so the first launch needs one extra step, which the guide
+shows. What is in each release, and what is not yet checked, is in the
+[changelog](CHANGELOG.md). Anonymous usage and error events are on by default
+and can be turned off in Settings; see [what is sent](docs/privacy.md).
 
 ## How it was built
 

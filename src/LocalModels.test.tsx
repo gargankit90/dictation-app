@@ -95,7 +95,7 @@ afterEach(() => {
 
 async function open() {
   render(<Settings />);
-  await screen.findByLabelText("Hotkey");
+  await screen.findByLabelText("Or type it");
 }
 
 const item = (name: RegExp) => screen.getByRole("radio", { name }).closest("li") as HTMLElement;
