@@ -36,8 +36,15 @@ const overlaySources: Record<string, string> = Object.fromEntries(
   ),
 );
 
-/** Listening to and unlistening from events: all the overlay may do. */
-const OVERLAY_PERMISSIONS = ["core:event:allow-listen", "core:event:allow-unlisten"];
+/**
+ * Listening and unlistening from events, and (U4 round 2) reading the input
+ * level with its one command: all the overlay may do.
+ */
+const OVERLAY_PERMISSIONS = [
+  "core:event:allow-listen",
+  "core:event:allow-unlisten",
+  "allow-get-overlay-level",
+];
 
 describe("criterion_m5_1_2 the overlay capability", () => {
   const overlay = capabilities["overlay.json"];
@@ -54,7 +61,7 @@ describe("criterion_m5_1_2 the overlay capability", () => {
     expect(overlay?.local ?? true).toBe(true);
   });
 
-  it("grants only listening to events: no commands, no other permission", () => {
+  it("grants only listening to events and the level command, nothing else", () => {
     expect(overlay?.permissions).toEqual(OVERLAY_PERMISSIONS);
   });
 
@@ -76,16 +83,29 @@ describe("criterion_m5_1_2 the overlay capability", () => {
   });
 });
 
-describe("criterion_m5_1_2 the overlay code calls no commands", () => {
+describe("criterion_m5_1_2 the overlay code calls only the level command", () => {
   it("has source files to check", () => {
     expect(Object.keys(overlaySources)).toContain("./Overlay.tsx");
   });
 
-  it.each(Object.entries(overlaySources))("%s only listens", (_file, source) => {
-    expect(source).not.toMatch(/@tauri-apps\/api\/core|invoke\(|\.\.\/bindings/);
-    const tauriImports = [...source.matchAll(/from "(@tauri-apps\/[^"]+)"/g)].map((m) => m[1]);
-    for (const module of tauriImports) {
-      expect(module).toBe("@tauri-apps/api/event");
-    }
+  it.each(Object.entries(overlaySources))(
+    "%s only listens and reads the level",
+    (_file, source) => {
+      expect(source).not.toMatch(/\.\.\/bindings/);
+      const tauriImports = [...source.matchAll(/from "(@tauri-apps\/[^"]+)"/g)].map((m) => m[1]);
+      for (const module of tauriImports) {
+        expect(["@tauri-apps/api/event", "@tauri-apps/api/core"]).toContain(module);
+      }
+      // Every invoke is of the level command, by its constant.
+      for (const call of source.matchAll(/invoke(?:<[^>]*>)?\(([^)]*)\)/g)) {
+        expect(call[1]).toBe("LEVEL_COMMAND");
+      }
+    },
+  );
+
+  it("the level command is get_overlay_level", () => {
+    expect(overlaySources["./view.ts"]).toContain(
+      'export const LEVEL_COMMAND = "get_overlay_level";',
+    );
   });
 });

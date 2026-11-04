@@ -662,3 +662,81 @@ fn the_real_microphone_opens_nothing_until_started() {
     assert!(!mic.is_open());
     assert!(!mic.is_recording());
 }
+
+/// U4 criterion 1: pushes `blocks` 10 ms blocks of a 440 Hz sine whose RMS
+/// is `dbfs` (zeros for `None`) into a recording on a `sample_rate` mono
+/// device, waits until the collector has them, and returns the level the
+/// meter reads.
+fn level_of(sample_rate: u32, dbfs: Option<f32>, blocks: usize) -> f32 {
+    let device = device(sample_rate, 1);
+    let mut mic = device.microphone(Permission::Granted, Duration::ZERO);
+    let meter = mic.level_meter().unwrap();
+    mic.start().unwrap();
+    let block = sample_rate as usize / 100;
+    #[allow(clippy::cast_precision_loss, reason = "test sine")]
+    let samples: Vec<f32> = (0..block * blocks)
+        .map(|i| {
+            dbfs.map_or(0.0, |dbfs| {
+                10f32.powf(dbfs / 20.0)
+                    * std::f32::consts::SQRT_2
+                    * (i as f32 * 440.0 * std::f32::consts::TAU / sample_rate as f32).sin()
+            })
+        })
+        .collect();
+    // Drop what the meter saw before the first block.
+    let _ = meter.take();
+    for chunk in samples.chunks(block) {
+        assert!(device.fake.push(chunk), "the stream took the block");
+    }
+    // Most of it: the resampler holds a little back until the stop.
+    let expected = u64::try_from(16 * block * blocks / (sample_rate as usize / 1_000) / 2).unwrap();
+    wait_until("audio", || mic.frames_so_far() >= expected);
+    let level = meter.take().unwrap();
+    stop_acknowledged(&device.fake, &mut mic).unwrap();
+    level
+}
+
+#[test]
+fn criterion_u4_1_silence_reads_at_the_floor() {
+    let level = level_of(16_000, None, 20);
+    assert_eq!(level, dictation_core::level::LEVEL_FLOOR_DBFS);
+}
+
+#[test]
+fn criterion_u4_1_a_sine_at_minus_20_dbfs_reads_minus_20() {
+    let level = level_of(16_000, Some(-20.0), 20);
+    assert!((level + 20.0).abs() <= 2.0, "{level}");
+}
+
+#[test]
+fn criterion_u4_1_the_level_survives_resampling() {
+    let level = level_of(48_000, Some(-20.0), 40);
+    assert!((level + 20.0).abs() <= 2.0, "{level}");
+}
+
+#[test]
+fn criterion_u4_1_no_level_outside_a_recording() {
+    let device = device(16_000, 1);
+    let mut mic = device.microphone(Permission::Granted, Duration::ZERO);
+    let meter = mic.level_meter().unwrap();
+    let _pump = device.pump(16_000, 1, false);
+    assert_eq!(meter.take(), None);
+    record(&mut mic, 320);
+    // Stopped: nothing measured, and the device is no longer named.
+    assert_eq!(meter.take(), None);
+    assert_eq!(meter.device(), None);
+    mic.start().unwrap();
+    assert!(meter.is_recording());
+    assert!(meter.device().is_some());
+    mic.discard();
+    assert_eq!(meter.take(), None);
+}
+
+#[test]
+fn criterion_u4_1_a_failed_start_measures_nothing() {
+    let device = device(16_000, 1);
+    let mut mic = device.microphone(Permission::Denied, Duration::ZERO);
+    let meter = mic.level_meter().unwrap();
+    assert_eq!(mic.start(), Err(AudioError::PermissionDenied));
+    assert_eq!(meter.take(), None);
+}

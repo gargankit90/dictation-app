@@ -90,6 +90,16 @@ pub trait AudioSource: Send {
     ///
     /// Errors: none. Threading: never blocks.
     fn is_recording(&self) -> bool;
+
+    /// The source's live input level (U4), if it measures one: a handle the
+    /// source feeds while recording and the pipeline reads. `None` (the
+    /// default) for sources that don't, such as file playback.
+    ///
+    /// Errors: none. Threading: never blocks; called once, before the
+    /// source moves to its worker.
+    fn level_meter(&self) -> Option<crate::LevelMeter> {
+        None
+    }
 }
 
 /// A boxed source is a source, so a caller can pick one at run time (the
@@ -109,6 +119,10 @@ impl<A: AudioSource + ?Sized> AudioSource for Box<A> {
 
     fn is_recording(&self) -> bool {
         (**self).is_recording()
+    }
+
+    fn level_meter(&self) -> Option<crate::LevelMeter> {
+        (**self).level_meter()
     }
 }
 
@@ -171,5 +185,6 @@ mod tests {
         audio.start().unwrap();
         audio.discard();
         assert!(!audio.is_recording());
+        assert!(audio.level_meter().is_none());
     }
 }

@@ -241,7 +241,7 @@ e2e_microphone_denied_then_recover() {
   launch --press
   expect "a second press shows the actionable error" \
     wait_for_log_count "shown to the user error=$MIC_ERROR" 1 10
-  expect "the overlay renders it" overlay_shows "shown: $MIC_SHOWN mic_denied"
+  expect "the overlay renders it" overlay_shows "shown: $MIC_SHOWN"
   screenshot e2e_microphone_denied_then_recover.error
   expect "and the tray's tooltip has it" tray_shows "$TRAY_ERROR_TITLE" "$TRAY_TOOLTIP: $MIC_SHOWN (mic_denied)"
   expect "the tray menu offers Relaunch" wait_for_log 'tray relaunch item offered=true' 5

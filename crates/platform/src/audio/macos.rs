@@ -41,6 +41,10 @@
 //!   audio chunk, logged at debug level as `first_audio_ms`.
 //! - **Length.** The resampler's leading filter delay is dropped, so a clip
 //!   is as long as the audio captured ([`resampler_delay`]).
+//! - **Level (U4).** The [`Collector`] adds each 16 kHz chunk to the
+//!   source's [`LevelMeter`], which the pipeline reads as the RMS of the
+//!   chunks since its last read, in dBFS. The meter measures only between
+//!   `start` and `stop` or `discard`, and knows the device's name.
 //!
 //! Never logs audio contents.
 
@@ -50,7 +54,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dictation_core::wav::SAMPLE_RATE;
-use dictation_ports::{Audio, AudioError, AudioSource};
+use dictation_ports::{Audio, AudioError, AudioSource, LevelMeter};
 use handy_recorder::{
     AudioChunk, Channels, EndReason, Error, ErrorKind, Permission, Recorder, RecorderConfig, Sink,
     StartError,
@@ -111,8 +115,10 @@ fn config() -> RecorderConfig {
 
 /// The sink one recording's audio goes into: 16 kHz mono samples, and when
 /// the first chunk arrived. Runs on handy-recorder's delivery thread, not the
-/// real-time one, so it may allocate.
+/// real-time one, so it may allocate (and lock the level meter).
 pub struct Collector {
+    /// Each chunk's samples go here too, for the live level (U4).
+    meter: LevelMeter,
     samples: Vec<f32>,
     started: Instant,
     first_audio: Option<Duration>,
@@ -123,8 +129,9 @@ pub struct Collector {
 }
 
 impl Collector {
-    fn new(started: Instant, frames: Arc<AtomicU64>) -> Self {
+    fn new(started: Instant, frames: Arc<AtomicU64>, meter: LevelMeter) -> Self {
         Self {
+            meter,
             // Ten seconds up front; dictations are usually shorter.
             samples: Vec::with_capacity(SAMPLE_RATE as usize * 10),
             started,
@@ -152,6 +159,7 @@ impl Sink for Collector {
         self.skip -= skipped;
         let real = &real[skipped..];
         self.samples.extend_from_slice(real);
+        self.meter.record(real);
         self.frames.fetch_add(real.len() as u64, Ordering::Relaxed);
     }
 }
@@ -228,6 +236,8 @@ pub struct MacMicrophone {
     shared: Arc<Shared>,
     /// The current recording's frame count, while recording.
     recording: Option<Arc<AtomicU64>>,
+    /// The live input level, fed by each recording's [`Collector`].
+    meter: LevelMeter,
     last_first_audio: Option<Duration>,
 }
 
@@ -265,6 +275,7 @@ impl MacMicrophone {
                 generation: AtomicU64::new(0),
             }),
             recording: None,
+            meter: LevelMeter::new(),
             last_first_audio: None,
         }
     }
@@ -386,7 +397,7 @@ impl AudioSource for MacMicrophone {
         let started = Instant::now();
         self.shared.generation.fetch_add(1, Ordering::AcqRel);
         let frames = Arc::new(AtomicU64::new(0));
-        let sink = Collector::new(started, Arc::clone(&frames));
+        let sink = Collector::new(started, Arc::clone(&frames), self.meter.clone());
         // Read before taking the lock: CoreAudio may be slow mid-switch.
         let default = (self.default_input)();
 
@@ -416,20 +427,29 @@ impl AudioSource for MacMicrophone {
             Some(open) => open,
             None => self.open_device()?,
         };
+        // Before the stream starts, so the first chunk counts.
+        self.meter
+            .begin(Some(open.recorder.info().device.name.clone()));
         let open = match open.recorder.start(sink.skipping(&open)) {
             Ok(()) => open,
             Err(StartError { error, sink }) if is_recorder_failure(error.kind()) => {
                 // Failed after the check above: one fresh try.
                 tracing::debug!(%error, "the warm microphone failed; reopening");
                 open.close();
-                let fresh = self.open_device()?;
+                let fresh = self.open_device().inspect_err(|_| self.meter.end())?;
+                self.meter
+                    .begin(Some(fresh.recorder.info().device.name.clone()));
                 fresh
                     .recorder
                     .start(sink.skipping(&fresh))
-                    .map_err(|start| audio_error(&start.error))?;
+                    .map_err(|start| {
+                        self.meter.end();
+                        audio_error(&start.error)
+                    })?;
                 fresh
             }
             Err(StartError { error, .. }) => {
+                self.meter.end();
                 *slot = Some(open);
                 return Err(audio_error(&error));
             }
@@ -444,6 +464,7 @@ impl AudioSource for MacMicrophone {
         if self.recording.take().is_none() {
             return Err(AudioError::NotRecording);
         }
+        self.meter.end();
         let stopped = {
             let mut slot = lock(&self.shared.open);
             let Some(open) = slot.as_ref() else {
@@ -504,6 +525,7 @@ impl AudioSource for MacMicrophone {
         if self.recording.take().is_none() {
             return;
         }
+        self.meter.end();
         {
             let mut slot = lock(&self.shared.open);
             let failed = slot
@@ -518,6 +540,10 @@ impl AudioSource for MacMicrophone {
 
     fn is_recording(&self) -> bool {
         self.recording.is_some()
+    }
+
+    fn level_meter(&self) -> Option<LevelMeter> {
+        Some(self.meter.clone())
     }
 }
 
