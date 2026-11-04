@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SyntheticEvent } from "react";
 import { commands } from "./bindings";
-import type { Provider, Settings_Serialize, Transcription } from "./bindings";
+import type {
+  LocalModelInfo_Serialize,
+  Provider,
+  Settings_Serialize,
+  Transcription,
+} from "./bindings";
 import { BROKEN, messageOf, testKey as runKeyTest } from "./keyTest";
 import { HotkeyRecorder } from "./HotkeyRecorder";
+import { LanguagePicker } from "./LanguagePicker";
+import { CLOUD_LANGUAGES } from "./languages";
 import { LocalModels } from "./LocalModels";
 import type { Notice } from "./keyTest";
 import { PROVIDERS, providerInfo } from "./providers";
@@ -44,6 +51,8 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
   const [provider, setProvider] = useState<Provider>("groq");
   const [transcription, setTranscription] = useState<Transcription>("cloud");
   const [localModel, setLocalModel] = useState("");
+  // The on-device catalogue, once LocalModels has read it.
+  const [catalogue, setCatalogue] = useState<LocalModelInfo_Serialize[] | null>(null);
   const [language, setLanguage] = useState("");
   const [hotkey, setHotkey] = useState("");
   // What the OS says about the login item, as the app last reported it.
@@ -143,6 +152,17 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
   }, [launchEdited]);
 
   const info = providerInfo(provider);
+  // The languages the active engine offers (U2). Before the on-device list
+  // has been read, nothing is filtered or flagged.
+  const selectedModel = catalogue?.find((model) => model.id === localModel);
+  const onDevice = transcription === "local";
+  const languageChoices: readonly string[] =
+    onDevice && selectedModel !== undefined ? selectedModel.language_codes : CLOUD_LANGUAGES;
+  const languageEngine = onDevice ? (selectedModel?.name ?? null) : info.name;
+  const englishOnlyModel =
+    onDevice && selectedModel?.language_codes.join() === "en" ? selectedModel : undefined;
+  const englishOnly = englishOnlyModel !== undefined;
+  const multilingual = catalogue?.find((model) => model.language_codes.length > 1);
 
   // The form is locked while a save runs, so what it shows is what gets saved.
   // (The fieldset disables the controls; these guards cover anything else.)
@@ -403,6 +423,7 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
                   setNotice(null);
                 }}
                 disabled={saving}
+                onModels={setCatalogue}
               />
               {notice !== null && (
                 <p
@@ -545,23 +566,37 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
 
           <div className="field">
             <label htmlFor="language">Language</label>
-            <input
+            <LanguagePicker
               id="language"
-              type="text"
               value={language}
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="Detect automatically"
-              aria-invalid={errors.language !== undefined}
-              aria-describedby="language-hint language-error"
-              onChange={(event) => {
+              onChange={(code) => {
                 if (saving) return;
-                setLanguage(event.target.value);
+                setLanguage(code);
                 setErrors((current) => ({ ...current, language: undefined }));
               }}
+              supported={languageChoices}
+              engineName={languageEngine}
+              disabled={saving}
+              describedBy="language-hint language-error"
+              invalid={errors.language !== undefined}
             />
             <p id="language-hint" className="hint">
-              A code such as en, de or fr. Leave it empty to detect the language.
+              {englishOnlyModel !== undefined
+                ? `${englishOnlyModel.name} understands English only. For Hindi and other languages, `
+                : "Choose the language you speak, or let the app detect it."}
+              {englishOnly && (
+                <button
+                  type="button"
+                  className="link"
+                  disabled={saving || multilingual === undefined}
+                  onClick={() => {
+                    if (multilingual !== undefined) setLocalModel(multilingual.id);
+                  }}
+                >
+                  choose the multilingual model
+                </button>
+              )}
+              {englishOnly && "."}
             </p>
             <p id="language-error" role={errors.language ? "alert" : undefined} className="error">
               {errors.language}
