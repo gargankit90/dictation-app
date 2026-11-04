@@ -122,9 +122,9 @@ const fn row(
     }
 }
 
-/// The longest [`ErrorCode::user_text`], in characters: the overlay shows two
-/// lines of about 55 characters.
-pub const USER_TEXT_MAX_CHARS: usize = 105;
+/// The longest [`ErrorCode::user_text`], in characters: the overlay shows three
+/// lines of about 52 characters.
+pub const USER_TEXT_MAX_CHARS: usize = 150;
 
 /// The table: every code once. A code missing here fails
 /// `every_code_has_one_row_in_order`.
@@ -132,7 +132,7 @@ const TABLE: [CodeInfo; 17] = [
     row(
         ErrorCode::MicDenied,
         "Vocet can't use the microphone.",
-        "Allow it in System Settings → Privacy & Security → Microphone.",
+        "Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet.",
         FixAction::OpenMicrophoneSettings,
     ),
     row(
@@ -149,8 +149,8 @@ const TABLE: [CodeInfo; 17] = [
     ),
     row(
         ErrorCode::HotkeyUnregistered,
-        "The hotkey isn't working.",
-        "Allow Vocet in System Settings → Privacy & Security → Accessibility.",
+        "The dictation key isn't working.",
+        "Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself.",
         FixAction::OpenAccessibilitySettings,
     ),
     row(
@@ -510,12 +510,31 @@ mod tests {
         );
         assert_eq!(
             ErrorCode::MicDenied.user_text(),
-            "Vocet can't use the microphone. Allow it in System Settings → Privacy & Security → Microphone."
+            "Vocet can't use the microphone. Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet."
         );
         assert!(
             ErrorCode::KeyMissing
                 .user_text()
                 .starts_with("No API key saved. Add one in Settings")
+        );
+    }
+
+    /// U1 round 2: macOS doesn't tell a running app about a microphone grant
+    /// (`docs/ENGINEERING.md`), so the microphone's sentence must say to
+    /// relaunch; paths use arrows, never commas.
+    #[test]
+    fn the_microphone_sentence_says_to_relaunch_and_paths_use_arrows() {
+        let text = ErrorCode::MicDenied.user_text();
+        assert!(text.contains("then relaunch Vocet"), "{text}");
+        assert!(text.contains("System Settings → Privacy & Security → Microphone"));
+        for code in ErrorCode::ALL {
+            let text = code.user_text();
+            assert!(!text.contains("Settings, Privacy"), "{code}: {text}");
+            assert!(!text.contains("Security, "), "{code}: {text}");
+        }
+        assert_eq!(
+            ErrorCode::HotkeyUnregistered.user_text(),
+            "The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
         );
     }
 

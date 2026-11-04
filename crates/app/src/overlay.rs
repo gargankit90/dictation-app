@@ -285,7 +285,7 @@ mod tests {
             ),
             (
                 DictationError::PermissionMissing(Permission::Microphone),
-                "Allow it in System Settings → Privacy & Security → Microphone.",
+                "Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet.",
             ),
             (
                 DictationError::EmptyTranscript,

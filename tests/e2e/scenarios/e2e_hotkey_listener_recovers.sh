@@ -22,8 +22,8 @@
 # crates/app/src/tray.rs, and DictationError::HotkeyFailed in the tooltip.
 TRAY_HOTKEY_TITLE="Hotkey unavailable"
 # What the tray shows (the code table, ErrorCode::user_text).
-TRAY_HOTKEY_SHOWN="The hotkey isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility."
-TRAY_HOTKEY_ERROR="The dictation hotkey isn't working. Allow Vocet in System Settings, Privacy & Security, Accessibility; it comes back by itself."
+TRAY_HOTKEY_SHOWN="The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
+TRAY_HOTKEY_ERROR="The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
 
 e2e_hotkey_listener_recovers() {
   arm_key_cleanup e2e_hotkey_listener_recovers

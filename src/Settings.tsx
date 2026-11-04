@@ -586,7 +586,7 @@ export function Settings({ onTroubleshoot }: { onTroubleshoot?: () => void } = {
             </label>
             <p id="launch-at-login-hint" className="hint">
               Starts Vocet in the menu bar when you log in. Takes effect when you save. You can also
-              change it in System Settings, General, Login Items.
+              change it in System Settings → General → Login Items.
             </p>
           </div>
 

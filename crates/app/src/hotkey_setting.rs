@@ -762,7 +762,7 @@ impl HotkeyChange {
             Self::Unchanged | Self::Switched { .. } | Self::Invalid => None,
             Self::NotListening { wanted, reason } => Some(match reason {
                 Some(HotkeyError::PermissionDenied) => format!(
-                    "The hotkey {wanted} is saved, but Vocet can't listen to the keyboard yet: allow it in System Settings, Privacy & Security, Accessibility, and {wanted} starts working by itself."
+                    "The hotkey {wanted} is saved, but Vocet can't listen to the keyboard yet: allow it in System Settings → Privacy & Security → Accessibility, and {wanted} starts working by itself."
                 ),
                 Some(error) => format!(
                     "The hotkey {wanted} is saved, but no hotkey is listening right now ({error}). {wanted} starts working as soon as it can."

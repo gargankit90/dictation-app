@@ -211,6 +211,16 @@ export function Troubleshoot({ onBack, onOpenSettings }: Props) {
                     {check.fix_label}
                   </button>
                 ) : null}
+                {!check.ok && check.code === "mic_denied" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void commands.relaunchApp();
+                    }}
+                  >
+                    Relaunch Vocet
+                  </button>
+                ) : null}
               </li>
             );
           })}

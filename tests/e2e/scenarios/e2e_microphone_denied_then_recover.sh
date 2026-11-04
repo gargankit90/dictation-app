@@ -38,9 +38,9 @@
 MIC_BUNDLE_ID=com.dictationapp.desktop
 # DictationError::PermissionMissing(Microphone)'s text (crates/core).
 # What the overlay and tray show (the code table, ErrorCode::user_text).
-MIC_SHOWN="Vocet can't use the microphone. Allow it in System Settings → Privacy & Security → Microphone."
+MIC_SHOWN="Vocet can't use the microphone. Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet."
 # What the log says (DictationError's Display).
-MIC_ERROR="Microphone is off. Allow it in Privacy & Security, Microphone, then relaunch from the menu bar."
+MIC_ERROR="Microphone is off. Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet from the menu bar."
 # The tray menu's item while the microphone is denied (src-tauri).
 MIC_RELAUNCH="Relaunch Vocet"
 MIC_PROMPT_APP=UserNotificationCenter

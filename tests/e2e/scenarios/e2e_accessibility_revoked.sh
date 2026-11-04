@@ -44,9 +44,9 @@ AX_TYPE_KEYS="$VM_FIXTURES/type-keys.js"
 # DictationError::HotkeyFailed's text (crates/core) and the tray's title
 # for it (crates/app/src/tray.rs).
 # What the tray shows (the code table, ErrorCode::user_text).
-AX_HOTKEY_SHOWN="The hotkey isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility."
+AX_HOTKEY_SHOWN="The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
 # What the log says (DictationError's Display).
-AX_HOTKEY_ERROR="The dictation hotkey isn't working. Allow Vocet in System Settings, Privacy & Security, Accessibility; it comes back by itself."
+AX_HOTKEY_ERROR="The dictation key isn't working. Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself."
 AX_HOTKEY_TITLE="Hotkey unavailable"
 AX_EVIDENCE=""
 # 1 while the scenario may have left the switch off.

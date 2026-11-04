@@ -22,7 +22,7 @@ pub enum LaunchProblem {
     Os(String),
     /// Registered, but the user has to allow it in the OS settings.
     #[error(
-        "Launch at login needs your approval: open System Settings, General, Login Items, and allow Vocet."
+        "Launch at login needs your approval: open System Settings → General → Login Items, and allow Vocet."
     )]
     NeedsApproval,
     /// The OS said yes, but its state didn't change.
@@ -149,9 +149,9 @@ fn describe_not_restored(problem: &LaunchProblem, now: Option<LaunchAtLoginState
             "so Vocet doesn't open at login; Settings shows it off"
         }
         Some(LaunchAtLoginState::RequiresApproval) => {
-            "so it waits for your approval in System Settings, General, Login Items"
+            "so it waits for your approval in System Settings → General → Login Items"
         }
-        None => "and the system can't say its state: check System Settings, General, Login Items",
+        None => "and the system can't say its state: check System Settings → General → Login Items",
     };
     format!("Launch at login couldn't be put back ({problem}), {state}.")
 }

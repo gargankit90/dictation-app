@@ -450,8 +450,8 @@ export function Onboarding({ onFinished }: Props) {
           ) : status.microphone === "denied" ? (
             <>
               <p className="hint">
-                The microphone is turned off for Vocet. Turn it on in System Settings, Privacy &amp;
-                Security, Microphone. This step moves on by itself once it&apos;s on.
+                The microphone is turned off for Vocet. Turn it on in System Settings → Privacy
+                &amp; Security → Microphone. This step moves on by itself once it&apos;s on.
               </p>
               <div className="row">
                 <button type="button" disabled={busy} onClick={() => void ask("microphone")}>
@@ -488,7 +488,7 @@ export function Onboarding({ onFinished }: Props) {
           ) : (
             <>
               <p className="hint">
-                In System Settings, turn on Vocet under Privacy &amp; Security, Accessibility. This
+                In System Settings, turn on Vocet under Privacy &amp; Security → Accessibility. This
                 step moves on by itself once it&apos;s on.
               </p>
               <div className="row">

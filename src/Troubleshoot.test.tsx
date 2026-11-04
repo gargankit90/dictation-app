@@ -202,6 +202,16 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
     );
   });
 
+  it("U1 round 2: a denied microphone offers Relaunch Vocet, because a grant needs one", async () => {
+    checks = MIC_DENIED;
+    view();
+    await screen.findByRole("list", { name: "Checks" });
+    fireEvent.click(screen.getByRole("button", { name: "Relaunch Vocet" }));
+    await waitFor(() => {
+      expect(calls).toContain("relaunch_app");
+    });
+  });
+
   it("U1 criterion 8: still offers Test connection for a cloud provider", async () => {
     view();
     await screen.findByRole("list", { name: "Checks" });
