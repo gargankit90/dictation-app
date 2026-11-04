@@ -660,6 +660,56 @@ describe("criterion_u6_5 own key: Test & Save", () => {
     expect(screen.queryByText(CONNECTED)).toBeNull();
   });
 
+  // Review round 2: the check must survive leaving Speech and coming back.
+  const leaveAndReturn = async () => {
+    fireEvent.click(screen.getByRole("tab", { name: "General" }));
+    await screen.findByRole("heading", { level: 1, name: "General" });
+    fireEvent.click(screen.getByRole("tab", { name: "Speech" }));
+    await screen.findByText("A key is saved in your Keychain.");
+  };
+
+  it("after leaving Speech and coming back, an old test doesn't undo Remove key", async () => {
+    backend.keys.groq = true;
+    await open("speech");
+    await screen.findByText("A key is saved in your Keychain.");
+    const slow = gate();
+    backend.holds.set("test_api_key", slow.closed);
+    fireEvent.change(keyBox(), { target: { value: OLD } });
+    click("Test & Save");
+    await leaveAndReturn();
+    click("Remove key");
+    expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
+    slow.open();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(savedKeys()).toEqual([]);
+    expect(backend.keys.groq).toBe(false);
+  });
+
+  it("after leaving Speech and coming back, an old test can't replace a newer key", async () => {
+    backend.keys.groq = true;
+    await open("speech");
+    await screen.findByText("A key is saved in your Keychain.");
+    const slow = gate();
+    backend.holds.set("test_api_key", slow.closed);
+    fireEvent.change(keyBox(), { target: { value: OLD } });
+    click("Test & Save");
+    await waitFor(() => {
+      expect(backend.named("test_api_key")).toHaveLength(1);
+    });
+    await leaveAndReturn();
+    backend.holds.delete("test_api_key");
+    fireEvent.change(keyBox(), { target: { value: KEY } });
+    click("Test & Save");
+    expect((await screen.findByRole("status")).textContent).toBe(CONNECTED);
+    slow.open();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(savedKeys()).toEqual([KEY]);
+  });
+
   it("a slow test can't overwrite a newer key that was saved", async () => {
     await open("speech");
     const slow = gate();

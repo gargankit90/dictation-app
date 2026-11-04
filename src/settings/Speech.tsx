@@ -63,6 +63,15 @@ function actionLabel(action: ModelAction): string {
   }
 }
 
+/**
+ * The key operations' generation, bumped by every Test & Save, edit of
+ * the key field, provider change and Remove key; a test writes its key
+ * only if it is still the newest. In module scope, not in the component,
+ * so leaving Speech and coming back can't reset it while an old test is
+ * still waiting for the provider (review round 2).
+ */
+const keyRun = { current: 0 };
+
 /** `record` without `key`. */
 function without(record: Record<string, string>, key: string): Record<string, string> {
   return Object.fromEntries(Object.entries(record).filter(([name]) => name !== key));
@@ -97,9 +106,8 @@ export function Speech({
   const [keyBusy, setKeyBusy] = useState<"testing" | "saving" | "removing" | null>(null);
   // A key write is running; edits don't cancel it (it is already sent).
   const writing = useRef(false);
-  // Only the newest key lookup and test count.
+  // Only the newest key lookup counts.
   const keyCheck = useRef(0);
-  const keyRun = useRef(0);
 
   // The panel follows the stored provider when it changes elsewhere.
   const [seenProvider, setSeenProvider] = useState(settings.provider);
