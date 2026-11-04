@@ -1,43 +1,59 @@
-//! The first-run steps (M5.2): which step a new user is on, and when they
-//! may move on.
+//! The first-run steps (U8): which step a new user is on, when they may move
+//! on, and what is kept across launches.
 //!
-//! The steps come in a fixed order: [`Microphone`](Step::Microphone),
-//! [`Accessibility`](Step::Accessibility), [`Key`](Step::Key) (provider and
-//! API key, tested) and [`Try`](Step::Try) (a test dictation). A step is done
-//! when its condition holds ([`Readiness::is_met`]); the user may go to a
-//! step only when every step before it is done ([`Readiness::allows`]), and
-//! may always go back. Nothing here is stored: the conditions are the OS's
-//! permissions and the keychain, read by the caller each time.
+//! The steps come in a fixed order: [`Welcome`](Step::Welcome) (what the app
+//! does, and the events switch), [`Speech`](Step::Speech) (language and
+//! engine), [`Permissions`](Step::Permissions) (microphone and
+//! Accessibility), [`Try`](Step::Try) (a practice dictation) and
+//! [`Ready`](Step::Ready) (a summary). A step is done when its condition
+//! holds ([`Readiness::is_met`]); the user may go to a step only when every
+//! step before it is done ([`Readiness::allows`]), and may always go back.
+//!
+//! The permissions and the key are read by the caller each time. What only
+//! the user's walk through the steps can tell is [`SetupProgress`], which the
+//! app keeps in a file so that quitting resumes at the same step.
 
 use serde::{Deserialize, Serialize};
 
 /// One onboarding step, in order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum Step {
-    /// Allow the microphone.
-    Microphone,
-    /// Allow Accessibility (the hotkey and the paste need it).
-    Accessibility,
-    /// Pick the provider and add a working API key.
-    Key,
-    /// Try a dictation into a text field in the onboarding window.
+    /// What the app does, and the usage and error events switch.
+    #[default]
+    Welcome,
+    /// The language, and the on-device model or the user's own key.
+    Speech,
+    /// Allow the microphone and Accessibility.
+    Permissions,
+    /// The dictation key, and a practice dictation in the onboarding window.
     Try,
+    /// A summary of the real states; closes onboarding.
+    Ready,
 }
 
 impl Step {
     /// Every step, in order.
-    pub const ALL: [Self; 4] = [Self::Microphone, Self::Accessibility, Self::Key, Self::Try];
+    pub const ALL: [Self; 5] = [
+        Self::Welcome,
+        Self::Speech,
+        Self::Permissions,
+        Self::Try,
+        Self::Ready,
+    ];
 
     /// The step after this one, if any.
     #[must_use]
     pub fn next(self) -> Option<Self> {
         match self {
-            Self::Microphone => Some(Self::Accessibility),
-            Self::Accessibility => Some(Self::Key),
-            Self::Key => Some(Self::Try),
-            Self::Try => None,
+            Self::Welcome => Some(Self::Speech),
+            Self::Speech => Some(Self::Permissions),
+            Self::Permissions => Some(Self::Try),
+            Self::Try => Some(Self::Ready),
+            Self::Ready => None,
         }
     }
 
@@ -45,10 +61,11 @@ impl Step {
     #[must_use]
     pub fn previous(self) -> Option<Self> {
         match self {
-            Self::Microphone => None,
-            Self::Accessibility => Some(Self::Microphone),
-            Self::Key => Some(Self::Accessibility),
-            Self::Try => Some(Self::Key),
+            Self::Welcome => None,
+            Self::Speech => Some(Self::Welcome),
+            Self::Permissions => Some(Self::Speech),
+            Self::Try => Some(Self::Permissions),
+            Self::Ready => Some(Self::Try),
         }
     }
 }
@@ -56,41 +73,45 @@ impl Step {
 /// What the app has of what dictation needs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Readiness {
+    /// The user has continued past Welcome.
+    pub welcome_passed: bool,
+    /// An engine is chosen: an on-device model (downloaded or not), or a
+    /// provider with a key saved.
+    pub speech_chosen: bool,
     /// The microphone permission is granted.
     pub microphone: bool,
     /// The Accessibility permission is granted.
     pub accessibility: bool,
-    /// The selected provider has an API key saved.
-    pub key_saved: bool,
 }
 
 impl Readiness {
     /// Everything is in place.
     pub const READY: Self = Self {
+        welcome_passed: true,
+        speech_chosen: true,
         microphone: true,
         accessibility: true,
-        key_saved: true,
     };
 
-    /// Whether `step` is done. [`Step::Try`] is always done: trying is
-    /// optional, and it has nothing to wait for.
+    /// Whether `step` is done. [`Step::Try`] and [`Step::Ready`] are always
+    /// done: trying is optional, and neither has anything to wait for.
     #[must_use]
     pub fn is_met(&self, step: Step) -> bool {
         match step {
-            Step::Microphone => self.microphone,
-            Step::Accessibility => self.accessibility,
-            Step::Key => self.key_saved,
-            Step::Try => true,
+            Step::Welcome => self.welcome_passed,
+            Step::Speech => self.speech_chosen,
+            Step::Permissions => self.microphone && self.accessibility,
+            Step::Try | Step::Ready => true,
         }
     }
 
-    /// The first step that isn't done, or [`Step::Try`] once all are.
+    /// The first step that isn't done, or [`Step::Ready`] once all are.
     #[must_use]
     pub fn first_unmet(&self) -> Step {
         Step::ALL
             .into_iter()
             .find(|step| !self.is_met(*step))
-            .unwrap_or(Step::Try)
+            .unwrap_or(Step::Ready)
     }
 
     /// Whether the user may be on `step`: every step before it is done.
@@ -114,16 +135,94 @@ impl Readiness {
     }
 }
 
+/// How the practice dictation in [`Step::Try`] went.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub enum TryOutcome {
+    /// Not tried yet.
+    #[default]
+    NotTried,
+    /// A dictation landed in the practice box.
+    Passed,
+    /// The user pressed "Skip for now".
+    Skipped,
+}
+
+/// What survives a quit: where the user is and what they chose that only the
+/// steps know. Holds no audio, text or key.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SetupProgress {
+    /// The step the user was on.
+    pub step: Step,
+    /// The user has continued past Welcome. Usage and error events wait for
+    /// this.
+    pub welcome_passed: bool,
+    /// "Start dictating" was pressed.
+    pub completed: bool,
+    /// How the practice dictation went.
+    pub try_outcome: TryOutcome,
+    /// The user cancelled the model download, so a relaunch doesn't start it
+    /// again by itself.
+    pub download_paused: bool,
+}
+
+impl SetupProgress {
+    /// Someone who set the app up before these steps existed: nothing to
+    /// resume, and they already had the chance to turn sharing off.
+    pub const ALREADY_SET_UP: Self = Self {
+        step: Step::Ready,
+        welcome_passed: true,
+        completed: true,
+        try_outcome: TryOutcome::NotTried,
+        download_paused: false,
+    };
+
+    /// Reads the file's text. `None` if it can't be understood.
+    #[must_use]
+    pub fn from_json(text: &str) -> Option<Self> {
+        serde_json::from_str(text).ok()
+    }
+
+    /// The file's text.
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        // Plain data with string keys: serializing it can't fail.
+        serde_json::to_string(self).unwrap_or_default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn readiness(microphone: bool, accessibility: bool, key_saved: bool) -> Readiness {
+    fn readiness(
+        welcome_passed: bool,
+        speech_chosen: bool,
+        microphone: bool,
+        accessibility: bool,
+    ) -> Readiness {
         Readiness {
+            welcome_passed,
+            speech_chosen,
             microphone,
             accessibility,
-            key_saved,
         }
+    }
+
+    #[test]
+    fn there_are_exactly_five_steps_in_the_owners_order() {
+        assert_eq!(
+            Step::ALL,
+            [
+                Step::Welcome,
+                Step::Speech,
+                Step::Permissions,
+                Step::Try,
+                Step::Ready
+            ]
+        );
     }
 
     #[test]
@@ -132,84 +231,87 @@ mod tests {
             assert_eq!(pair[0].next(), Some(pair[1]));
             assert_eq!(pair[1].previous(), Some(pair[0]));
         }
-        assert_eq!(Step::Microphone.previous(), None);
-        assert_eq!(Step::Try.next(), None);
+        assert_eq!(Step::Welcome.previous(), None);
+        assert_eq!(Step::Ready.next(), None);
     }
 
     #[test]
     fn the_first_unmet_step_follows_the_order() {
         assert_eq!(
-            readiness(false, false, false).first_unmet(),
-            Step::Microphone
-        );
-        assert_eq!(readiness(false, true, true).first_unmet(), Step::Microphone);
-        assert_eq!(
-            readiness(true, false, false).first_unmet(),
-            Step::Accessibility
+            readiness(false, true, true, true).first_unmet(),
+            Step::Welcome
         );
         assert_eq!(
-            readiness(true, false, true).first_unmet(),
-            Step::Accessibility
+            readiness(true, false, true, true).first_unmet(),
+            Step::Speech
         );
-        assert_eq!(readiness(true, true, false).first_unmet(), Step::Key);
-        assert_eq!(Readiness::READY.first_unmet(), Step::Try);
+        assert_eq!(
+            readiness(true, true, false, true).first_unmet(),
+            Step::Permissions
+        );
+        assert_eq!(
+            readiness(true, true, true, false).first_unmet(),
+            Step::Permissions
+        );
+        assert_eq!(Readiness::READY.first_unmet(), Step::Ready);
     }
 
     #[test]
-    fn a_step_is_allowed_only_once_every_earlier_one_is_done() {
-        let none = Readiness::default();
-        assert!(none.allows(Step::Microphone));
-        assert!(!none.allows(Step::Accessibility));
-        assert!(!none.allows(Step::Try));
-
-        let permissions = readiness(true, true, false);
-        assert!(permissions.allows(Step::Microphone));
-        assert!(permissions.allows(Step::Accessibility));
-        assert!(permissions.allows(Step::Key));
-        assert!(!permissions.allows(Step::Try));
-
-        for step in Step::ALL {
-            assert!(Readiness::READY.allows(step));
-        }
+    fn a_step_is_allowed_only_when_the_ones_before_are_done() {
+        let fresh = Readiness::default();
+        assert!(fresh.allows(Step::Welcome));
+        assert!(!fresh.allows(Step::Speech));
+        let passed = readiness(true, false, false, false);
+        assert!(passed.allows(Step::Speech));
+        assert!(!passed.allows(Step::Permissions));
+        let chosen = readiness(true, true, false, false);
+        assert!(chosen.allows(Step::Permissions));
+        assert!(!chosen.allows(Step::Try));
+        assert!(Readiness::READY.allows(Step::Try));
+        assert!(Readiness::READY.allows(Step::Ready));
     }
 
     #[test]
-    fn onboarding_is_needed_until_everything_is_in_place() {
+    fn needs_onboarding_until_everything_is_in_place() {
+        assert!(Readiness::default().needs_onboarding());
+        assert!(readiness(true, true, true, false).needs_onboarding());
         assert!(!Readiness::READY.needs_onboarding());
-        for missing in [
-            readiness(false, true, true),
-            readiness(true, false, true),
-            readiness(true, true, false),
-        ] {
-            assert!(missing.needs_onboarding(), "{missing:?}");
-        }
     }
 
     #[test]
-    fn resuming_goes_back_to_a_step_that_came_undone() {
-        // Accessibility was turned off while the user was on the key step.
+    fn resuming_keeps_the_step_unless_an_earlier_one_came_undone() {
+        assert_eq!(Readiness::READY.resume_at(Step::Speech), Step::Speech);
+        assert_eq!(Readiness::READY.resume_at(Step::Ready), Step::Ready);
         assert_eq!(
-            readiness(true, false, true).resume_at(Step::Key),
-            Step::Accessibility
+            readiness(true, true, false, true).resume_at(Step::Try),
+            Step::Permissions
         );
-        // Otherwise the user is where they left off, even on a done step
-        // they went back to.
-        assert_eq!(
-            Readiness::READY.resume_at(Step::Microphone),
-            Step::Microphone
-        );
-        assert_eq!(readiness(true, true, false).resume_at(Step::Key), Step::Key);
     }
 
     #[test]
-    fn steps_serialize_in_snake_case() {
-        let names: Vec<String> = Step::ALL
-            .iter()
-            .map(|step| serde_json::to_string(step).unwrap())
-            .collect();
+    fn the_progress_round_trips_and_a_bad_file_is_refused() {
+        let progress = SetupProgress {
+            step: Step::Permissions,
+            welcome_passed: true,
+            completed: false,
+            try_outcome: TryOutcome::Skipped,
+            download_paused: true,
+        };
         assert_eq!(
-            names,
-            ["\"microphone\"", "\"accessibility\"", "\"key\"", "\"try\""]
+            SetupProgress::from_json(&progress.to_json()),
+            Some(progress)
+        );
+        assert_eq!(SetupProgress::from_json("not json"), None);
+    }
+
+    #[test]
+    fn a_partial_progress_file_takes_defaults_for_the_rest() {
+        assert_eq!(
+            SetupProgress::from_json(r#"{"step":"try"}"#),
+            Some(SetupProgress {
+                step: Step::Try,
+                ..SetupProgress::default()
+            })
         );
     }
 }

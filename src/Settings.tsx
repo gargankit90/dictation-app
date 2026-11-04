@@ -51,7 +51,7 @@ function remember(section: SectionId) {
 }
 
 /** The on-device catalogue, read again while a download runs. */
-function useModels() {
+export function useModels() {
   const [models, setModels] = useState<LocalModelInfo_Serialize[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Only the newest reply counts.
@@ -91,7 +91,7 @@ function useModels() {
 }
 
 /** The engine in use, read again while it loads. */
-function useEngineStatus() {
+export function useEngineStatus() {
   const [engine, setEngine] = useState<EngineStatus | null>(null);
   const refresh = useCallback(async () => {
     try {

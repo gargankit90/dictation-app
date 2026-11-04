@@ -1,74 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "./bindings";
-import type {
-  AppPermission,
-  DictationProgressView,
-  DictationStage,
-  OnboardingStatus,
-  PermissionState,
-  Provider,
-  Settings_Serialize,
-  Step,
-} from "./bindings";
-import { HotkeyRecorder } from "./HotkeyRecorder";
-import { BROKEN, messageOf, testKey } from "./keyTest";
-import type { Notice } from "./keyTest";
-import { PROVIDERS, providerInfo } from "./providers";
-import { saveHotkey, setHotkeyRecording } from "./saveHotkey";
+import type { OnboardingStatus, Settings_Serialize, Step } from "./bindings";
+import { BROKEN, messageOf } from "./keyTest";
+import { chosenModel, modelWait, stripView } from "./onboarding/logic";
+import type { StripAction } from "./onboarding/logic";
+import { PermissionsStep } from "./onboarding/PermissionsStep";
+import { ReadyStep } from "./onboarding/ReadyStep";
+import { SpeechStep } from "./onboarding/SpeechStep";
+import { TryStep } from "./onboarding/TryStep";
+import { WelcomeStep } from "./onboarding/WelcomeStep";
+import type { FrameParts } from "./onboarding/StepFrame";
+import { useEngineStatus, useModels } from "./Settings";
 import "./settings.css";
-import { validateKey } from "./validation";
 
-const STEPS: readonly Step[] = ["microphone", "accessibility", "key", "try"];
+export const STEPS: readonly { id: Step; name: string }[] = [
+  { id: "welcome", name: "Welcome" },
+  { id: "speech", name: "Speech" },
+  { id: "permissions", name: "Permissions" },
+  { id: "try", name: "Try it" },
+  { id: "ready", name: "Ready" },
+];
 
-/** How often a permission step asks the app whether the user has answered. */
+/** How often the shell asks the app about permissions, the model and the engine. */
 export const POLL_MS = 1000;
+/** Polls in a row the hotkey may be down after a grant before offering a relaunch. */
+export const RELAUNCH_AFTER_POLLS = 5;
 
-/** Where each provider hands out keys, for the key step's hint. */
-const KEY_PAGES: Record<Provider, string> = {
-  groq: "console.groq.com/keys",
-  openai: "platform.openai.com/api-keys",
+const ACTION_LABELS: Record<StripAction, string> = {
+  cancel: "Cancel",
+  resume: "Resume",
+  retry: "Retry",
+  "use-key": "Use my own key",
 };
-
-/** How often the Try it step asks the app what the last dictation got through. */
-export const PROGRESS_POLL_MS = 400;
-
-const STAGE_NAMES: Record<DictationStage, string> = {
-  recorded: "recorded",
-  transcribed: "transcribed",
-  pasted: "pasted",
-};
-
-/** "recorded, transcribed and pasted": the stages the app reported, in order. */
-export function stagesText(stages: readonly DictationStage[]): string {
-  const names = stages.map((stage) => STAGE_NAMES[stage]);
-  if (names.length <= 1) return names.join("");
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1] ?? ""}`;
-}
-
-/** The hotkey as a person would name it. */
-export function hotkeyName(hotkey: string): string {
-  switch (hotkey) {
-    case "RightAlt":
-      return "the right Option key";
-    case "LeftAlt":
-      return "the left Option key";
-    case "RightCmd":
-      return "the right Command key";
-    case "LeftCmd":
-      return "the left Command key";
-    default:
-      return hotkey;
-  }
-}
-
-/** The permission a step waits for, if it is a permission step. */
-function permissionOf(step: Step): AppPermission | null {
-  return step === "microphone" || step === "accessibility" ? step : null;
-}
-
-function stateOf(status: OnboardingStatus, permission: AppPermission): PermissionState {
-  return permission === "microphone" ? status.microphone : status.accessibility;
-}
 
 interface Props {
   /** Called once the user is done and the app has hidden the window. */
@@ -76,50 +39,24 @@ interface Props {
 }
 
 /**
- * The first-run steps (M5.2): microphone, Accessibility, provider and key
- * (tested before it is saved), then a test dictation into a field here. The
- * app keeps the step and refuses to skip one that isn't done; this view
- * shows it, moves on by itself when a permission it waits for is granted,
- * and never shows a key back. The test dictation's text stays in the field.
+ * The first-run steps (U8): Welcome, Speech, Permissions, Try it, Ready. The
+ * app keeps the step and refuses to skip one that isn't done; it remembers
+ * the step across quits. This shell shows the rail, the persistent download
+ * strip and whichever step the app says, and each step decides its own
+ * primary action.
  */
 export function Onboarding({ onFinished }: Props) {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Why the last step change or permission request didn't work.
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [askedAccessibility, setAskedAccessibility] = useState(false);
-  // The key step.
   const [settings, setSettings] = useState<Settings_Serialize | null>(null);
-  // Why the settings didn't load; the key step offers Retry then.
-  const [settingsError, setSettingsError] = useState<string | null>(null);
-  // Bumped by Retry to load the settings again.
-  const [settingsTry, setSettingsTry] = useState(0);
-  const [provider, setProvider] = useState<Provider>("groq");
-  const [keyInput, setKeyInput] = useState("");
-  const [keySaved, setKeySaved] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
-  const [testing, setTesting] = useState(false);
-  // The last Test and continue passed: the Try step says so.
-  const [keyWorks, setKeyWorks] = useState(false);
-  // The test dictation lands here.
-  const [tryText, setTryText] = useState("");
-  const tryField = useRef<HTMLTextAreaElement>(null);
-  // What the app says the last dictation got through, and what it said when
-  // this step opened: only a dictation finished after that counts (U1). The
-  // practice box's text never does.
-  const [progress, setProgress] = useState<DictationProgressView | null>(null);
-  const [baseline, setBaseline] = useState<DictationProgressView | null>(null);
-  // "Skip for now" was pressed: Finish then says the test was skipped.
-  const [skipped, setSkipped] = useState(false);
-  // What the permission of the step on screen was when last seen, so the
-  // step moves on only when it turns granted here, not when the user comes
-  // back to a step that was already done.
-  const seen = useRef<{ step: Step; state: PermissionState } | null>(null);
-  // The provider on screen, for replies that arrive after it changed, and
-  // whether the user picked it, so a late settings reply doesn't undo that.
-  const shownProvider = useRef<Provider>("groq");
-  const providerPicked = useRef(false);
+  const { models, error: modelsError, refresh: refreshModels } = useModels();
+  const { engine, refresh: refreshEngine } = useEngineStatus();
+  const [downPolls, setDownPolls] = useState(0);
+  // The bytes on disk when this launch picked up an earlier download.
+  const [resumedFrom, setResumedFrom] = useState<number | null>(null);
+  const resumeChecked = useRef(false);
 
   const goTo = useCallback(async (step: Step) => {
     setBusy(true);
@@ -128,7 +65,6 @@ export function Onboarding({ onFinished }: Props) {
       if (result.status === "ok") {
         setStatus(result.data);
         setError(null);
-        setNotice(null);
       } else {
         setError(messageOf(result.error));
       }
@@ -139,260 +75,118 @@ export function Onboarding({ onFinished }: Props) {
     }
   }, []);
 
-  /**
-   * Asks the app where onboarding is. If the permission the step on screen
-   * waits for has just turned granted, moves on by itself; a step that was
-   * already done when the user came back to it stays.
-   */
   const refresh = useCallback(async () => {
-    let next: OnboardingStatus;
     try {
       const result = await commands.getOnboarding();
       if (result.status === "error") {
         setLoadError(messageOf(result.error));
         return;
       }
-      next = result.data;
+      setStatus(result.data);
+      setDownPolls((count) => (result.data.needs_relaunch ? count + 1 : 0));
+      setLoadError(null);
     } catch {
       setLoadError(BROKEN);
-      return;
     }
-    setStatus(next);
-    setLoadError(null);
-    const permission = permissionOf(next.step);
-    const before = seen.current;
-    if (permission === null) {
-      seen.current = null;
-      return;
-    }
-    const state = stateOf(next, permission);
-    seen.current = { step: next.step, state };
-    if (state === "granted" && before?.step === next.step && before.state !== "granted") {
-      const after = STEPS[STEPS.indexOf(next.step) + 1];
-      if (after !== undefined) await goTo(after);
-    }
-  }, [goTo]);
+  }, []);
 
-  // Load, and ask again whenever the window comes back.
+  const rereadSettings = useCallback(async () => {
+    try {
+      const result = await commands.getSettings();
+      if (result.status === "ok") setSettings(result.data);
+      else setError(messageOf(result.error));
+    } catch {
+      setError(BROKEN);
+    }
+  }, []);
+
+  // Load, and ask again whenever the window comes back or a second passes:
+  // the answers come from system prompts and System Settings, and from a
+  // download that goes on by itself.
   useEffect(() => {
-    const first = setTimeout(() => void refresh(), 0);
+    const first = setTimeout(() => {
+      void refresh();
+      void rereadSettings();
+    }, 0);
     const onShow = () => {
-      if (document.visibilityState !== "hidden") void refresh();
+      if (document.visibilityState !== "hidden") {
+        void refresh();
+        void rereadSettings();
+      }
     };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      void refresh();
+      void refreshEngine();
+      void refreshModels();
+    }, POLL_MS);
     window.addEventListener("focus", onShow);
     document.addEventListener("visibilitychange", onShow);
     return () => {
       clearTimeout(first);
+      window.clearInterval(timer);
       window.removeEventListener("focus", onShow);
       document.removeEventListener("visibilitychange", onShow);
     };
-  }, [refresh]);
+  }, [refresh, rereadSettings, refreshEngine, refreshModels]);
 
+  const chosen = chosenModel(settings, models);
+
+  const download = useCallback(
+    async (id: string) => {
+      try {
+        await commands.setDownloadPaused(false);
+        const result = await commands.downloadLocalModel(id);
+        if (result.status === "error") setError(messageOf(result.error));
+      } catch {
+        setError(BROKEN);
+      }
+      await refreshModels();
+    },
+    [refreshModels],
+  );
+
+  // A download that a quit interrupted picks up by itself, unless the user
+  // cancelled it. Once per launch, once everything it depends on is known.
   const step = status?.step ?? null;
-  const permission = step === null ? null : permissionOf(step);
-  const waiting =
-    status !== null && permission !== null && stateOf(status, permission) !== "granted";
-
-  // While a permission step waits, ask the app every second: the answer
-  // comes from a system prompt or System Settings, outside this window.
+  const paused = status?.download_paused ?? false;
   useEffect(() => {
-    if (!waiting) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "hidden") void refresh();
-    }, POLL_MS);
+    if (resumeChecked.current || models === null || settings === null || step === null) return;
+    resumeChecked.current = true;
+    if (chosen === null || paused || step === "welcome" || step === "speech") return;
+    if (chosen.state !== "partial" && chosen.state !== "missing") return;
+    if (chosen.error !== null) return;
+    const timer = window.setTimeout(() => {
+      setResumedFrom(chosen.downloaded_bytes ?? 0);
+      void download(chosen.id);
+    }, 0);
     return () => {
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
-  }, [waiting, refresh]);
+  }, [models, settings, step, chosen, paused, download]);
 
-  // The key step needs the settings (provider, hotkey) and whether a key is
-  // saved; the last step needs the hotkey's name.
-  useEffect(() => {
-    if (step !== "key" && step !== "try") return;
-    // An object, not a `let`, so the checks after each `await` see changes.
-    const state = { cancelled: false };
-    const current = () => !state.cancelled;
-    void (async () => {
-      try {
-        const result = await commands.getSettings();
-        if (!current()) return;
-        if (result.status === "error") {
-          setSettingsError(messageOf(result.error));
-          return;
-        }
-        // The key step tests and saves with this provider, so it changes
-        // only together with the typed key, and never after the user picked
-        // one.
-        if (!providerPicked.current && result.data.provider !== shownProvider.current) {
-          shownProvider.current = result.data.provider;
-          setProvider(result.data.provider);
-          setKeyInput("");
-        }
-        setSettings(result.data);
-        const shown = shownProvider.current;
-        const saved = await commands.hasApiKey(shown);
-        if (current() && shownProvider.current === shown) {
-          setKeySaved(saved.status === "ok" && saved.data);
-        }
-      } catch {
-        if (current()) setSettingsError(BROKEN);
-      }
-    })();
-    return () => {
-      state.cancelled = true;
-    };
-  }, [step, settingsTry]);
-
-  // The paste goes wherever the focus is: put it in the field.
-  useEffect(() => {
-    if (step === "try") tryField.current?.focus();
-  }, [step]);
-
-  // Try it asks the app what the last dictation got through. The first
-  // answer is the baseline; success is a completed dictation after it.
-  useEffect(() => {
-    if (step !== "try") return;
-    const state = { cancelled: false };
-    const poll = async () => {
-      try {
-        const result = await commands.dictationProgress();
-        if (state.cancelled || result.status !== "ok") return;
-        setProgress(result.data);
-        setBaseline((first) => first ?? result.data);
-      } catch {
-        // The next poll tries again; nothing shows success meanwhile.
-      }
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), PROGRESS_POLL_MS);
-    return () => {
-      state.cancelled = true;
-      window.clearInterval(timer);
-      // Leaving the step forgets the baseline; coming back takes a new one.
-      setProgress(null);
-      setBaseline(null);
-    };
-  }, [step]);
-
-  // Derived from the app's reports, never from the practice box.
-  const sinceOpen = progress !== null && baseline !== null;
-  const dictated = sinceOpen && progress.completed > baseline.completed;
-  const tryStarted = sinceOpen && progress.started > baseline.started;
-  const tryError = sinceOpen && progress.errors > baseline.errors ? progress.error : null;
-
-  async function ask(which: AppPermission) {
-    setBusy(true);
+  async function stripAction(action: StripAction, id: string) {
     setError(null);
-    try {
-      const result = await commands.requestPermission(which);
-      if (result.status === "ok") {
-        setStatus(result.data);
-        if (which === "accessibility") setAskedAccessibility(true);
-      } else {
-        setError(messageOf(result.error));
-      }
-    } catch {
-      setError(BROKEN);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function relaunch() {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await commands.relaunchApp();
-      if (result.status === "error") setError(messageOf(result.error));
-    } catch {
-      setError(BROKEN);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function changeProvider(next: Provider) {
-    providerPicked.current = true;
-    shownProvider.current = next;
-    setProvider(next);
-    setKeyInput("");
-    setNotice(null);
-    setKeySaved(false);
-    void (async () => {
-      let saved = false;
+    if (action === "cancel") {
       try {
-        const result = await commands.hasApiKey(next);
-        saved = result.status === "ok" && result.data;
+        await commands.setDownloadPaused(true);
+        await commands.cancelLocalModelDownload(id);
       } catch {
-        // Not saved, as far as the step knows.
+        setError(BROKEN);
       }
-      if (shownProvider.current === next) setKeySaved(saved);
-    })();
+      await refreshModels();
+      await refreshStatusOnly();
+    } else if (action === "use-key") {
+      await goTo("speech");
+    } else {
+      setResumedFrom(null);
+      await download(id);
+      await refreshStatusOnly();
+    }
   }
 
-  /**
-   * Tests the typed key (or the saved one), and only if it works saves it
-   * and the provider, then moves on. A failed test keeps the user here with
-   * the reason, and nothing is saved.
-   */
-  async function testAndContinue() {
-    // The step's controls wait for the settings, so this is only a guard.
-    if (settings === null) return;
-    const typed = keyInput.trim() === "" ? null : keyInput;
-    if (typed === null && !keySaved) {
-      setNotice({ kind: "error", text: "Paste your API key." });
-      return;
-    }
-    if (typed !== null) {
-      const problem = validateKey(typed);
-      if (problem !== null) {
-        setNotice({ kind: "error", text: problem });
-        return;
-      }
-    }
-    setBusy(true);
-    setTesting(true);
-    setNotice(null);
-    setKeyWorks(false);
-    try {
-      const outcome = await testKey(provider, typed);
-      if (outcome.kind === "error") {
-        setNotice(outcome);
-        return;
-      }
-      setKeyWorks(true);
-      // The provider first, so the key is never kept for a provider the
-      // app doesn't use.
-      if (provider !== settings.provider) {
-        const next: Settings_Serialize = {
-          ...settings,
-          provider,
-          model: providerInfo(provider).defaultModel,
-        };
-        const result = await commands.saveSettings(next);
-        if (result.status === "error") {
-          setNotice({ kind: "error", text: messageOf(result.error) });
-          return;
-        }
-        setSettings(next);
-      }
-      if (typed !== null) {
-        const saved = await commands.setApiKey(provider, typed);
-        if (saved.status === "error") {
-          setNotice({ kind: "error", text: messageOf(saved.error) });
-          return;
-        }
-        setKeyInput("");
-        setKeySaved(true);
-      }
-    } catch {
-      setNotice({ kind: "error", text: BROKEN });
-      return;
-    } finally {
-      setBusy(false);
-      setTesting(false);
-    }
-    await goTo("try");
+  async function refreshStatusOnly() {
+    await refresh();
   }
 
   async function finish() {
@@ -414,7 +208,7 @@ export function Onboarding({ onFinished }: Props) {
   if (status === null) {
     return (
       <main className="settings onboarding">
-        <h1>Set up dictation</h1>
+        <h1>Set up Vocet</h1>
         {loadError === null ? (
           <p>Loading…</p>
         ) : (
@@ -426,313 +220,137 @@ export function Onboarding({ onFinished }: Props) {
     );
   }
 
-  const index = STEPS.indexOf(status.step);
-  const previous = index > 0 ? STEPS[index - 1] : undefined;
+  const index = STEPS.findIndex((item) => item.id === status.step);
+  const previous = STEPS[index - 1];
   const next = STEPS[index + 1];
-  const info = providerInfo(provider);
-  const settingsLoading = settings === null && settingsError === null;
+  const strip = stripView(models, chosen, resumedFrom);
+  // A strip only for a running download on the first two steps: until the
+  // user has chosen, a stopped one isn't news.
+  const stripShown =
+    strip !== null &&
+    (strip.actions.includes("cancel") || index >= STEPS.findIndex((s) => s.id === "permissions"));
+  const downloading = models?.some((model) => model.state === "downloading") ?? false;
+
+  const parts: FrameParts = {
+    back:
+      previous === undefined
+        ? null
+        : () => {
+            void goTo(previous.id);
+          },
+    busy,
+    error,
+    strip: stripShown ? (
+      <div className="ob-strip" role="status" aria-label="Model download">
+        <div className="ob-strip-row">
+          <span className="ob-strip-text">{strip.text}</span>
+          {strip.percent !== null && (
+            <progress aria-label="Download progress" max={100} value={strip.percent} />
+          )}
+          {strip.actions.map((action) => (
+            <button
+              key={action}
+              type="button"
+              className="link"
+              onClick={() => void stripAction(action, strip.model.id)}
+            >
+              {ACTION_LABELS[action]}
+            </button>
+          ))}
+        </div>
+        {strip.note !== null && <p className="ob-caption">{strip.note}</p>}
+      </div>
+    ) : null,
+  };
+  const forward = () => {
+    if (next !== undefined) void goTo(next.id);
+  };
 
   return (
-    <main className="settings onboarding">
-      <h1>Set up dictation</h1>
-      <p className="hint" aria-label="progress">
-        Step {index + 1} of {STEPS.length}
-      </p>
-
-      {status.step === "microphone" && (
-        <section className="field">
-          <h2>Allow the microphone</h2>
-          <p>Vocet records only while you hold the hotkey.</p>
-          {status.microphone === "granted" ? (
-            <p role="status" className="notice ok">
-              The microphone is allowed.
-            </p>
-          ) : status.microphone === "denied" ? (
-            <>
-              <p className="hint">
-                The microphone is turned off for Vocet. Turn it on in System Settings → Privacy
-                &amp; Security → Microphone. This step moves on by itself once it&apos;s on.
-              </p>
-              <div className="row">
-                <button type="button" disabled={busy} onClick={() => void ask("microphone")}>
-                  Open System Settings
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="hint">macOS asks you once. Choose Allow.</p>
-              <div className="row">
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={busy}
-                  onClick={() => void ask("microphone")}
-                >
-                  Allow microphone
-                </button>
-              </div>
-            </>
-          )}
-        </section>
-      )}
-
-      {status.step === "accessibility" && (
-        <section className="field">
-          <h2>Allow Accessibility</h2>
-          <p>The hotkey and pasting the text into other apps need Accessibility.</p>
-          {status.accessibility === "granted" ? (
-            <p role="status" className="notice ok">
-              Accessibility is allowed.
-            </p>
-          ) : (
-            <>
-              <p className="hint">
-                In System Settings, turn on Vocet under Privacy &amp; Security → Accessibility. This
-                step moves on by itself once it&apos;s on.
-              </p>
-              <div className="row">
-                <button
-                  type="button"
-                  className={askedAccessibility ? undefined : "primary"}
-                  disabled={busy}
-                  onClick={() => void ask("accessibility")}
-                >
-                  Open System Settings
-                </button>
-              </div>
-              {askedAccessibility && (
-                <>
-                  <p className="hint">
-                    Relaunch to finish if you turned it on and this step doesn&apos;t move on. Vocet
-                    opens again here.
-                  </p>
-                  <div className="row">
-                    <button type="button" disabled={busy} onClick={() => void relaunch()}>
-                      Relaunch
-                    </button>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-        </section>
-      )}
-
-      {status.step === "key" && settings?.transcription === "local" && (
-        <section>
-          <h2>No key needed</h2>
-          <p>
-            Dictation runs on this Mac with the model chosen in Settings, so there is no API key to
-            add. If the model isn&apos;t downloaded yet, download it in Settings.
-          </p>
-        </section>
-      )}
-
-      {status.step === "key" && settings?.transcription !== "local" && (
-        <section>
-          <h2>Add your API key</h2>
-          {settingsError !== null ? (
-            <div className="field">
-              <p role="alert" className="notice error">
-                Couldn&apos;t load your settings, so the key can&apos;t be set up yet:{" "}
-                {settingsError}
-              </p>
-              <div className="row">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSettingsError(null);
-                    setSettingsTry((count) => count + 1);
-                  }}
-                >
-                  Retry
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="field">
-                <label htmlFor="onboarding-provider">Provider</label>
-                <select
-                  id="onboarding-provider"
-                  value={provider}
-                  disabled={busy || settingsLoading}
-                  onChange={(event) => {
-                    changeProvider(event.target.value as Provider);
-                  }}
-                >
-                  {PROVIDERS.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name}
-                    </option>
-                  ))}
-                </select>
-                <p className="hint">Speech is sent to this service to be turned into text.</p>
-              </div>
-              <div className="field">
-                <label htmlFor="onboarding-key">{info.name} API key</label>
-                <input
-                  id="onboarding-key"
-                  type="password"
-                  value={keyInput}
-                  autoComplete="off"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  disabled={busy || settingsLoading}
-                  placeholder={keySaved ? "Paste a new key to replace it" : "Paste your key"}
-                  aria-describedby="onboarding-key-hint"
-                  onChange={(event) => {
-                    setKeyInput(event.target.value);
-                    setNotice(null);
-                  }}
-                />
-                <p id="onboarding-key-hint" className="hint">
-                  {settingsLoading && "Loading… "}
-                  {keySaved
-                    ? "A key is saved. Continue to test it, or paste a new one. "
-                    : `Get one at ${KEY_PAGES[provider]}. `}
-                  It is tested first and then kept in the system keychain; it is never shown again.
-                </p>
-                {notice !== null && (
-                  <p
-                    role={notice.kind === "error" ? "alert" : "status"}
-                    className={`notice ${notice.kind}`}
-                  >
-                    {notice.text}
-                  </p>
-                )}
-              </div>
-            </>
-          )}
-        </section>
-      )}
-
-      {status.step === "try" && (
-        <section className="field">
-          <h2>Try it</h2>
-          {keyWorks && (
-            <p role="status" className="notice ok">
-              Key works ✓
-            </p>
-          )}
-          <div className="field">
-            <span className="label">Your dictation key</span>
-            <HotkeyRecorder
-              value={settings?.hotkey ?? "RightAlt"}
-              disabled={settings === null}
-              onRecording={setHotkeyRecording}
-              onChange={async (spec) => {
-                const result = await saveHotkey(spec);
-                if (result.settings !== null) setSettings(result.settings);
-                return result.error;
-              }}
-            />
-          </div>
-          <label htmlFor="try-field">
-            Hold {hotkeyName(settings?.hotkey ?? "RightAlt")} and say a few words. Let go, and the
-            text appears here.
-          </label>
-          <textarea
-            id="try-field"
-            ref={tryField}
-            rows={4}
-            value={tryText}
-            onChange={(event) => {
-              setTryText(event.target.value);
-            }}
-          />
-          {dictated ? (
-            <p role="status" className="notice ok">
-              It works: Vocet {stagesText(progress.stages)} your dictation. It pastes wherever your
-              cursor is.
-            </p>
-          ) : tryError !== null ? (
-            <p role="alert" className="notice error">
-              {tryError}
-            </p>
-          ) : skipped ? (
-            <p role="status" className="hint">
-              Test skipped. Vocet is set up, but nobody has checked that dictation works yet.
-            </p>
-          ) : tryStarted ? (
-            <p role="status" className="hint">
-              So far Vocet {stagesText(progress.stages)}. Waiting for the rest…
-            </p>
-          ) : (
-            <p className="hint">
-              Nothing yet. This confirms only after Vocet records, transcribes and pastes your
-              dictation.
-            </p>
-          )}
-        </section>
-      )}
-
-      {error !== null && (
-        <p role="alert" className="notice error">
-          {error}
-        </p>
-      )}
-
-      <div className="row actions">
-        {previous !== undefined && (
-          <button type="button" disabled={busy} onClick={() => void goTo(previous)}>
-            Back
-          </button>
-        )}
-        {status.step === "key" && settings?.transcription === "local" ? (
-          <button
-            type="button"
-            className="primary"
-            disabled={busy}
-            onClick={() => void goTo("try")}
-          >
-            Continue
-          </button>
-        ) : status.step === "key" ? (
-          <button
-            type="button"
-            className="primary"
-            disabled={busy || settings === null}
-            onClick={() => void testAndContinue()}
-          >
-            {testing ? "Testing…" : "Test and continue"}
-          </button>
-        ) : next !== undefined ? (
-          <button
-            type="button"
-            className="primary"
-            disabled={busy || waiting}
-            onClick={() => void goTo(next)}
-          >
-            Continue
-          </button>
-        ) : (
-          <>
-            {!dictated && (
-              <button
-                type="button"
-                className="secondary"
-                disabled={busy || skipped}
-                onClick={() => {
-                  setSkipped(true);
-                }}
+    <main className="onboarding ob">
+      <nav className="ob-rail" aria-label="Setup steps">
+        <ol>
+          {STEPS.map((item, position) => {
+            const state = position < index ? "done" : position === index ? "current" : "upcoming";
+            return (
+              <li
+                key={item.id}
+                className={`ob-step ${state}`}
+                aria-current={state === "current" ? "step" : undefined}
               >
-                Skip for now
-              </button>
-            )}
-            <button
-              type="button"
-              className="primary"
-              disabled={busy || !(dictated || skipped)}
-              onClick={() => void finish()}
-            >
-              {!dictated && skipped ? "Finish (test skipped)" : "Finish"}
-            </button>
-          </>
-        )}
-      </div>
+                <span className="ob-mark" aria-hidden="true">
+                  {state === "done" ? "✓" : String(position + 1)}
+                </span>
+                <span className="ob-step-text">
+                  <span>{item.name}</span>
+                  {item.id === "speech" && downloading && (
+                    <span className="ob-step-note">Download running</span>
+                  )}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
+
+      {status.step === "welcome" && (
+        <WelcomeStep
+          parts={parts}
+          settings={settings}
+          onStored={setSettings}
+          onContinue={forward}
+        />
+      )}
+      {status.step === "speech" && (
+        <SpeechStep
+          parts={parts}
+          settings={settings}
+          onStored={setSettings}
+          models={models}
+          modelsError={modelsError}
+          refreshModels={refreshModels}
+          refreshEngine={refreshEngine}
+          onContinue={forward}
+        />
+      )}
+      {status.step === "permissions" && (
+        <PermissionsStep
+          parts={parts}
+          status={status}
+          onStatus={setStatus}
+          needsRelaunch={downPolls >= RELAUNCH_AFTER_POLLS}
+          onContinue={forward}
+        />
+      )}
+      {status.step === "try" && (
+        <TryStep
+          parts={parts}
+          status={status}
+          settings={settings}
+          onStored={setSettings}
+          wait={modelWait(settings, models, engine)}
+          onContinue={forward}
+          onSkip={() => {
+            void (async () => {
+              await commands.setTryOutcome("skipped").catch(() => undefined);
+              await goTo("ready");
+            })();
+          }}
+          onBackToSpeech={() => void goTo("speech")}
+        />
+      )}
+      {status.step === "ready" && (
+        <ReadyStep
+          parts={parts}
+          status={status}
+          settings={settings}
+          onStored={setSettings}
+          models={models}
+          engine={engine}
+          onChangeSharing={() => void goTo("welcome")}
+          onFinish={() => void finish()}
+        />
+      )}
     </main>
   );
 }

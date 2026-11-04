@@ -42,6 +42,11 @@
     "allow-stop-microphone-test",
     "allow-open-link",
     "allow-get-app-info",
-    "allow-check-for-updates"
+    "allow-check-for-updates",
+    "allow-choose-local-model",
+    "allow-set-try-outcome",
+    "allow-set-download-paused",
+    "allow-practice-words",
+    "allow-copy-practice-words"
   ]
 }

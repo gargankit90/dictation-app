@@ -141,6 +141,33 @@ pub async fn use_local_model(
     .await
 }
 
+/// Chooses on-device model `id` before it is on this Mac (U8's "Download and
+/// continue"): the settings choose it now, so the choice survives a quit and
+/// the model becomes the engine as soon as its download finishes
+/// (`download_local_model` rebuilds the engine then). Until then the engine
+/// says the model isn't ready.
+#[tauri::command]
+#[specta::specta]
+pub async fn choose_local_model(
+    state: State<'_, AppConfig>,
+    engine: State<'_, LiveEngine>,
+    hotkey: State<'_, ActiveHotkey>,
+    usage: State<'_, Usage>,
+    id: String,
+) -> Result<(), String> {
+    let (live, control) = (engine.inner().clone(), hotkey.0.clone());
+    write(Arc::clone(&state.0), &usage, move |config| {
+        let model = local_models::find(&id)
+            .ok_or_else(|| format!("There is no on-device model {id:?}."))?;
+        commands::write_change(config, &live, &control, |settings| {
+            settings.transcription = Transcription::Local;
+            model.id.clone_into(&mut settings.local_model);
+        })
+        .map_err(|error| error.to_string())
+    })
+    .await
+}
+
 fn switch_to_local<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,

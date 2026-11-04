@@ -6,6 +6,11 @@
 //! never written to disk, logged, shown in the menu, reported or sent as an
 //! analytics event, and gone when the app quits. Neither type prints the text
 //! in `Debug`.
+//!
+//! The text of the last insert *attempt* is kept the same way
+//! ([`LastDictation::attempted`]), for Try it (U8): when a paste fails or
+//! lands elsewhere, the words are shown there to copy, and it is how Try it
+//! tells the result reached its practice box.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -15,6 +20,7 @@ use dictation_ports::{InsertError, TextInserter};
 #[derive(Clone, Default)]
 pub struct LastDictation {
     text: Arc<Mutex<Option<String>>>,
+    attempted: Arc<Mutex<Option<String>>>,
 }
 
 impl std::fmt::Debug for LastDictation {
@@ -40,6 +46,25 @@ impl LastDictation {
     /// Keeps `text` as the last dictation, replacing the one before.
     pub fn set(&self, text: &str) {
         *self.lock() = Some(text.to_owned());
+    }
+
+    /// Keeps `text` as the last one the pipeline tried to insert.
+    pub fn set_attempted(&self, text: &str) {
+        *self
+            .attempted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(text.to_owned());
+    }
+
+    /// The text of the last insert attempt, whether it worked or not, without
+    /// the smart leading space.
+    #[must_use]
+    pub fn attempted(&self) -> Option<String> {
+        self.attempted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_deref()
+            .map(|text| text.trim_start_matches(' ').to_owned())
     }
 
     /// The text to copy, if a dictation succeeded. The smart leading space
@@ -68,6 +93,7 @@ impl<I> Remembering<I> {
 
 impl<I: TextInserter> TextInserter for Remembering<I> {
     fn insert(&self, text: &str) -> Result<(), InsertError> {
+        self.last.set_attempted(text);
         self.inner.insert(text)?;
         self.last.set(text);
         Ok(())
@@ -92,6 +118,18 @@ mod tests {
         // The next one replaces it.
         inserter.insert(" and again").unwrap();
         assert_eq!(last.text().as_deref(), Some("and again"));
+    }
+
+    #[test]
+    fn u8_a_failed_insert_keeps_its_words_as_the_attempt_only() {
+        let last = LastDictation::default();
+        let fake = FakeInserter::new();
+        let inserter = Remembering::new(fake.clone(), last.clone());
+        assert_eq!(last.attempted(), None);
+        fake.fail_next(InsertError::Failed("no focus".into()));
+        assert!(inserter.insert(" my words").is_err());
+        assert_eq!(last.attempted().as_deref(), Some("my words"));
+        assert_eq!(last.text(), None, "the copy item still means a success");
     }
 
     #[test]

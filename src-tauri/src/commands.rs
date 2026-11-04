@@ -25,7 +25,7 @@
 
 use std::sync::Arc;
 
-use dictation_core::onboarding::Step;
+use dictation_core::onboarding::{Step, TryOutcome};
 use dictation_core::settings::{Provider, Settings};
 use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, UndoFailed};
@@ -37,8 +37,9 @@ use dictation_transcribe::openai_compat::{self, Preset};
 use serde::Serialize;
 use tauri::State;
 
+use crate::diagnostics::Diagnostics;
 use crate::engine::{self, LiveEngine};
-use crate::onboarding::{self, AppPermission, Onboarding, OnboardingStatus, OsPermissions};
+use crate::onboarding::{self, AppPermission, Onboarding, OnboardingStatus, OsPermissions, View};
 use crate::usage::{self, Usage};
 
 /// Where the bindings go, relative to `src-tauri/`.
@@ -101,6 +102,11 @@ pub struct LaunchNotice(pub Option<&'static str>);
 pub async fn launch_notice(state: State<'_, LaunchNotice>) -> Result<Option<String>, String> {
     Ok(state.0.map(str::to_owned))
 }
+
+/// The words Try it can show when a paste doesn't land (U8): the pipeline's
+/// last insert attempt, in memory only.
+#[derive(Debug, Clone, Default)]
+pub struct PracticeWords(pub dictation_pipeline::last_dictation::LastDictation);
 
 /// What the onboarding commands ask of the app itself (M5.2).
 pub trait Shell: Send + Sync {
@@ -735,8 +741,9 @@ pub async fn test_api_key(
 pub async fn get_onboarding(
     onboarding: State<'_, Arc<Onboarding>>,
     permissions: State<'_, OsPermissions>,
+    diagnostics: State<'_, Diagnostics>,
 ) -> Result<OnboardingStatus, String> {
-    Ok(onboarding.status(&*permissions.0))
+    Ok(onboarding.status(&*permissions.0, diagnostics.hotkey_is_down()))
 }
 
 /// Settings, Help, "Set up dictation…" (U5): opens the first-run steps at
@@ -754,7 +761,9 @@ pub async fn open_setup(
     let (onboarding, os) = (Arc::clone(&onboarding), Arc::clone(&permissions.0));
     let (config, live) = (Arc::clone(&config.0), live.inner().clone());
     tauri::async_runtime::spawn_blocking(move || {
-        let readiness = onboarding::readiness(&*os, true, || onboarding::key_saved(&config, &live));
+        let readiness = onboarding::readiness(&*os, onboarding.welcome_passed(), true, || {
+            onboarding::key_saved(&config, &live)
+        });
         let step = onboarding.open(readiness);
         tracing::info!(?step, "onboarding opened from Settings");
     })
@@ -773,6 +782,7 @@ pub async fn open_setup(
 pub async fn request_permission(
     onboarding: State<'_, Arc<Onboarding>>,
     permissions: State<'_, OsPermissions>,
+    diagnostics: State<'_, Diagnostics>,
     permission: AppPermission,
 ) -> Result<OnboardingStatus, String> {
     let os = Arc::clone(&permissions.0);
@@ -785,11 +795,12 @@ pub async fn request_permission(
     })
     .await
     .map_err(|_| "the permission task crashed".to_owned())??;
-    Ok(onboarding.status(&*permissions.0))
+    Ok(onboarding.status(&*permissions.0, diagnostics.hotkey_is_down()))
 }
 
 /// Moves onboarding to `step`, if every step before it is done (the key is
-/// read from the keychain only to move to the last step). An error says
+/// read from the keychain only to move past Speech). Moving past Welcome is
+/// the user's go-ahead for usage events (U8), if sharing is on. An error says
 /// which step comes first; the user stays where they were.
 #[tauri::command]
 #[specta::specta]
@@ -799,15 +810,20 @@ pub async fn set_onboarding_step(
     onboarding: State<'_, Arc<Onboarding>>,
     permissions: State<'_, OsPermissions>,
     usage: State<'_, Usage>,
+    diagnostics: State<'_, Diagnostics>,
     step: Step,
 ) -> Result<OnboardingStatus, String> {
+    if step > Step::Welcome && onboarding.pass_welcome() {
+        usage.left_welcome();
+    }
+    let welcome_passed = onboarding.welcome_passed();
     let (config, live, os) = (
         Arc::clone(&state.0),
         engine.inner().clone(),
         Arc::clone(&permissions.0),
     );
     let readiness = tauri::async_runtime::spawn_blocking(move || {
-        onboarding::readiness(&*os, step > Step::Key, || {
+        onboarding::readiness(&*os, welcome_passed, step > Step::Speech, || {
             onboarding::key_saved(&config, &live)
         })
     })
@@ -817,7 +833,64 @@ pub async fn set_onboarding_step(
         .go_to(step, readiness)
         .map_err(|not_yet| not_yet.to_string())?;
     usage::onboarding_step(&usage, step);
-    Ok(onboarding.status(&*permissions.0))
+    Ok(onboarding.status(&*permissions.0, diagnostics.hotkey_is_down()))
+}
+
+/// Keeps how the practice dictation went, for the Ready step and a relaunch.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_try_outcome(
+    onboarding: State<'_, Arc<Onboarding>>,
+    outcome: TryOutcome,
+) -> Result<(), String> {
+    onboarding.set_try_outcome(outcome);
+    Ok(())
+}
+
+/// Keeps that the user cancelled (or resumed) the model download, so a
+/// relaunch doesn't start a download they stopped.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_download_paused(
+    onboarding: State<'_, Arc<Onboarding>>,
+    paused: bool,
+) -> Result<(), String> {
+    onboarding.set_download_paused(paused);
+    Ok(())
+}
+
+/// The words of the last dictation the app tried to paste, for Try it only:
+/// `None` unless onboarding is on screen. Held in memory; never logged.
+#[tauri::command]
+#[specta::specta]
+pub async fn practice_words(
+    onboarding: State<'_, Arc<Onboarding>>,
+    words: State<'_, PracticeWords>,
+) -> Result<Option<String>, String> {
+    Ok(if onboarding.view() == View::Onboarding {
+        words.0.attempted()
+    } else {
+        None
+    })
+}
+
+/// Try it's Copy: puts [`practice_words`]'s text on the clipboard, and only
+/// when the user asks. Nothing is pasted.
+#[tauri::command]
+#[specta::specta]
+pub async fn copy_practice_words(
+    onboarding: State<'_, Arc<Onboarding>>,
+    words: State<'_, PracticeWords>,
+) -> Result<(), String> {
+    if onboarding.view() != View::Onboarding {
+        return Ok(());
+    }
+    let Some(text) = words.0.attempted() else {
+        return Ok(());
+    };
+    tauri::async_runtime::spawn_blocking(move || crate::tray_menu::copy_text(&text))
+        .await
+        .map_err(|_| "the copy task crashed".to_owned())?
 }
 
 /// Ends onboarding: the window goes back to the settings view and hides.
@@ -828,7 +901,7 @@ pub async fn finish_onboarding(
     onboarding: State<'_, Arc<Onboarding>>,
     usage: State<'_, Usage>,
 ) -> Result<(), String> {
-    onboarding.close();
+    onboarding.finish();
     usage::onboarding_completed(&usage);
     tracing::info!("onboarding finished");
     shell.0.hide_window();
@@ -905,6 +978,11 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::preferences::open_link,
         crate::preferences::get_app_info,
         crate::preferences::check_for_updates,
+        crate::preferences::choose_local_model,
+        set_try_outcome,
+        set_download_paused,
+        practice_words,
+        copy_practice_words,
         crate::overlay::get_overlay_level,
     ])
 }
@@ -1023,6 +1101,11 @@ mod tests {
             "openLink",
             "getAppInfo",
             "checkForUpdates",
+            "chooseLocalModel",
+            "setTryOutcome",
+            "setDownloadPaused",
+            "practiceWords",
+            "copyPracticeWords",
         ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
@@ -1031,7 +1114,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 39,
+            commands, 44,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -2642,6 +2725,7 @@ mod capability_tests {
         app.manage(crate::models::ModelDownloads::default());
         app.manage(super::ActiveHotkey(super::tests::hotkey::listening().0));
         app.manage(std::sync::Arc::new(crate::onboarding::Onboarding::new()));
+        app.manage(super::PracticeWords::default());
         app.manage(crate::onboarding::OsPermissions(std::sync::Arc::new(
             dictation_platform::fakes::FakePermissions::all_granted(),
         )));
@@ -2749,7 +2833,7 @@ mod capability_tests {
             "set_api_key" => serde_json::json!({ "provider": "groq", "key": "gsk_not_a_real_key" }),
             "has_api_key" | "test_api_key" => serde_json::json!({ "provider": "groq" }),
             "request_permission" => serde_json::json!({ "permission": "microphone" }),
-            "set_onboarding_step" => serde_json::json!({ "step": "microphone" }),
+            "set_onboarding_step" => serde_json::json!({ "step": "welcome" }),
             "set_share_usage_events" => serde_json::json!({ "share": true }),
             "set_hotkey_recording" => serde_json::json!({ "recording": false }),
             _ => serde_json::json!({}),
@@ -2872,7 +2956,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 39);
+        assert_eq!(COMMAND_NAMES.len(), 44);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

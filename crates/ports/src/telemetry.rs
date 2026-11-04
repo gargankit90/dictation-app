@@ -137,23 +137,26 @@ impl EngineChoice {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OnboardingStep {
-    /// Allow the microphone.
-    Microphone,
-    /// Allow Accessibility.
-    Accessibility,
-    /// Pick a provider and add a key.
-    Key,
+    /// What the app does, and the events switch.
+    Welcome,
+    /// Choose the language and the engine.
+    Speech,
+    /// Allow the microphone and Accessibility.
+    Permissions,
     /// Try a dictation.
     Try,
+    /// The summary.
+    Ready,
 }
 
 impl From<Step> for OnboardingStep {
     fn from(step: Step) -> Self {
         match step {
-            Step::Microphone => Self::Microphone,
-            Step::Accessibility => Self::Accessibility,
-            Step::Key => Self::Key,
+            Step::Welcome => Self::Welcome,
+            Step::Speech => Self::Speech,
+            Step::Permissions => Self::Permissions,
             Step::Try => Self::Try,
+            Step::Ready => Self::Ready,
         }
     }
 }
@@ -415,15 +418,15 @@ mod tests {
             ),
             (
                 Event::OnboardingStepReached {
-                    step: OnboardingStep::Key,
+                    step: OnboardingStep::Speech,
                 },
-                json!({"event":"onboarding_step_reached","properties":{"step":"key"}}),
+                json!({"event":"onboarding_step_reached","properties":{"step":"speech"}}),
             ),
             (
                 Event::OnboardingCompleted {
-                    step: OnboardingStep::Try,
+                    step: OnboardingStep::Ready,
                 },
-                json!({"event":"onboarding_completed","properties":{"step":"try"}}),
+                json!({"event":"onboarding_completed","properties":{"step":"ready"}}),
             ),
             (
                 Event::EngineSelected {

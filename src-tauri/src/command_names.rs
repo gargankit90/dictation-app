@@ -47,6 +47,11 @@ pub const COMMAND_NAMES: &[&str] = &[
     "open_link",
     "get_app_info",
     "check_for_updates",
+    "choose_local_model",
+    "set_try_outcome",
+    "set_download_paused",
+    "practice_words",
+    "copy_practice_words",
 ];
 
 /// The overlay window's commands (U4 round 2): `build.rs` adds their

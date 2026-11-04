@@ -1,41 +1,89 @@
-// M5.2 criterion 1: the onboarding steps, with the app's commands replaced
-// by a fake backend through `mockIPC` that keeps the step and refuses to
-// skip one, as the app does. The keys here are made up.
+// U8: the five onboarding steps, with the app's commands replaced by a fake
+// backend through `mockIPC` that keeps the step and refuses to skip one, as
+// the app does. The keys here are made up.
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "./App";
 import type {
   DictationProgressView,
   KeyTestError,
+  LocalModelInfo_Serialize,
   OnboardingStatus,
   PermissionState,
   Provider,
   Settings_Serialize,
   Step,
+  TryOutcome,
   View,
 } from "./bindings";
-import { hotkeyName, Onboarding, POLL_MS } from "./Onboarding";
+import { Onboarding, RELAUNCH_AFTER_POLLS, STEPS } from "./Onboarding";
+import css from "./settings.css?raw";
+import { NOT_TESTED } from "./onboarding/ReadyStep";
+import { KEY_REASON, MODEL_COPY } from "./onboarding/SpeechStep";
+import { BOTH_REASON } from "./onboarding/PermissionsStep";
+import { CONTINUE_REASON } from "./onboarding/TryStep";
+import { EVENTS_CAPTION } from "./onboarding/WelcomeStep";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
 const KEY = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
-const STEPS: Step[] = ["microphone", "accessibility", "key", "try"];
+const ORDER: Step[] = ["welcome", "speech", "permissions", "try", "ready"];
+const WORDS = "this is my first dictation";
+
+const PARAKEET: LocalModelInfo_Serialize = {
+  id: "parakeet-unified-en-0.6b-q4_k_m",
+  name: "Parakeet Unified 0.6B",
+  languages: "English only",
+  language_codes: ["en"],
+  size_bytes: 477_000_000,
+  downloaded_bytes: 0,
+  state: "missing",
+  error: null,
+  default: true,
+};
+
+const QWEN: LocalModelInfo_Serialize = {
+  id: "qwen3-asr-0.6b-q4_k_m",
+  name: "Qwen3-ASR 0.6B",
+  languages: "30 languages",
+  language_codes: ["en", "hi", "de"],
+  size_bytes: 590_000_000,
+  downloaded_bytes: 0,
+  state: "missing",
+  error: null,
+  default: false,
+};
 
 interface Call {
   command: string;
   args: Record<string, unknown>;
 }
 
-/** The app's side: permissions, the step it keeps, keys and settings. */
+const NO_PROGRESS: DictationProgressView = {
+  started: 0,
+  finished: 0,
+  completed: 0,
+  errors: 0,
+  stages: [],
+  error: null,
+  failure: null,
+  heard: false,
+};
+
+/** The app's side: permissions, the step it keeps, keys, settings and models. */
 class Backend {
   view: View = "onboarding";
-  step: Step = "microphone";
+  step: Step = "welcome";
+  welcomePassed = false;
   microphone: PermissionState = "not_determined";
   accessibility: PermissionState = "not_determined";
-  /** What the next microphone prompt answers. */
+  needsRelaunch = false;
+  tryOutcome: TryOutcome = "not_tried";
+  downloadPaused = false;
   micAnswer: PermissionState = "granted";
   keys: Record<Provider, boolean> = { groq: false, openai: false };
+  models: LocalModelInfo_Serialize[] = [{ ...PARAKEET }, { ...QWEN }];
   settings: Settings_Serialize = {
     version: 2,
     provider: "groq",
@@ -44,18 +92,15 @@ class Backend {
     hotkey: "RightAlt",
     launch_at_login: false,
     transcription: "cloud",
-    local_model: "parakeet-unified-en-0.6b-q4_k_m",
+    local_model: PARAKEET.id,
     share_usage_events: true,
   };
-  /** What the app says the last dictation got through (U1). */
-  progress: DictationProgressView = {
-    started: 0,
-    completed: 0,
-    errors: 0,
-    stages: [],
-    error: null,
+  engine: { state: "loading" | "ready" | "failed"; message: string | null } = {
+    state: "ready",
+    message: null,
   };
-  /** What `test_api_key` answers: `null` for success. */
+  progress: DictationProgressView = { ...NO_PROGRESS };
+  words: string | null = null;
   testResult: KeyTestError | null = null;
   calls: Call[] = [];
 
@@ -65,19 +110,27 @@ class Backend {
       step: this.step,
       microphone: this.microphone,
       accessibility: this.accessibility,
+      needs_relaunch: this.needsRelaunch,
+      try_outcome: this.tryOutcome,
+      download_paused: this.downloadPaused,
     };
   }
 
-  /** Whether every step before `step` is done, as `Readiness::allows`. */
   allows(step: Step): boolean {
     const done: Record<Step, boolean> = {
-      microphone: this.microphone === "granted",
-      accessibility: this.accessibility === "granted",
-      // L1: the on-device engine needs no key (the app counts it as saved).
-      key: this.settings.transcription === "local" || this.keys[this.settings.provider],
+      welcome: this.welcomePassed,
+      speech: this.settings.transcription === "local" || this.keys[this.settings.provider],
+      permissions: this.microphone === "granted" && this.accessibility === "granted",
       try: true,
+      ready: true,
     };
-    return STEPS.slice(0, STEPS.indexOf(step)).every((before) => done[before]);
+    return ORDER.slice(0, ORDER.indexOf(step)).every((before) => done[before]);
+  }
+
+  model(id: string): LocalModelInfo_Serialize {
+    const found = this.models.find((model) => model.id === id);
+    if (found === undefined) throw new Error(`no model ${id}`);
+    return found;
   }
 
   handle = (command: string, payload: unknown): unknown => {
@@ -93,9 +146,10 @@ class Backend {
         return this.status();
       case "set_onboarding_step": {
         const step = args.step as Step;
+        if (step !== "welcome") this.welcomePassed = true;
         // The app's `NotYet` message, sent as a string.
         // eslint-disable-next-line @typescript-eslint/only-throw-error
-        if (!this.allows(step)) throw "Allow the microphone first.";
+        if (!this.allows(step)) throw "Choose how speech becomes text first.";
         this.step = step;
         return this.status();
       }
@@ -106,16 +160,36 @@ class Backend {
         return null;
       case "dictation_progress":
         return this.progress;
+      case "practice_words":
+        return this.words;
+      case "copy_practice_words":
+      case "set_hotkey_recording":
+      case "start_microphone_test":
+      case "stop_microphone_test":
+      case "open_link":
+        return null;
+      case "read_microphone_test":
+        return { level: -20, device: "MacBook Microphone" };
+      case "set_try_outcome":
+        this.tryOutcome = args.outcome as TryOutcome;
+        return null;
+      case "set_download_paused":
+        this.downloadPaused = args.paused as boolean;
+        return null;
       case "get_settings":
         return this.settings;
-      case "save_settings":
-        this.settings = { ...(args.settings as Settings_Serialize), hotkey: this.settings.hotkey };
+      case "set_share_usage_events":
+        this.settings = { ...this.settings, share_usage_events: args.share as boolean };
+        return null;
+      case "set_language":
+        this.settings = { ...this.settings, language: args.language as string | null };
         return null;
       case "set_hotkey":
         this.settings = { ...this.settings, hotkey: args.spec as string };
         return null;
-      case "set_hotkey_recording":
-        return null;
+      case "set_launch_at_login":
+        this.settings = { ...this.settings, launch_at_login: args.enabled as boolean };
+        return args.enabled;
       case "has_api_key":
         return this.keys[args.provider as Provider];
       case "set_api_key":
@@ -125,6 +199,32 @@ class Backend {
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         if (this.testResult !== null) throw this.testResult;
         return null;
+      case "use_cloud_engine":
+        this.settings = {
+          ...this.settings,
+          transcription: "cloud",
+          provider: args.provider as Provider,
+        };
+        return null;
+      case "choose_local_model":
+        this.settings = {
+          ...this.settings,
+          transcription: "local",
+          local_model: args.id as string,
+        };
+        return null;
+      case "download_local_model":
+        this.model(args.id as string).state = "downloading";
+        return null;
+      case "cancel_local_model_download": {
+        const model = this.model(args.id as string);
+        model.state = model.downloaded_bytes ? "partial" : "missing";
+        return null;
+      }
+      case "list_local_models":
+        return this.models;
+      case "get_engine_status":
+        return this.engine;
       default:
         throw new Error(`unexpected command ${command}`);
     }
@@ -132,6 +232,17 @@ class Backend {
 
   named(command: string): Call[] {
     return this.calls.filter((call) => call.command === command);
+  }
+
+  /** Permissions granted and a local model ready: every step can be reached. */
+  allSet(step: Step) {
+    this.step = step;
+    this.welcomePassed = true;
+    this.microphone = "granted";
+    this.accessibility = "granted";
+    this.settings = { ...this.settings, transcription: "local", language: "en" };
+    this.model(PARAKEET.id).state = "ready";
+    this.model(PARAKEET.id).downloaded_bytes = PARAKEET.size_bytes;
   }
 }
 
@@ -143,550 +254,738 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  releaseAllKeys();
   cleanup();
   clearMocks();
-  vi.useRealTimers();
 });
 
-/** The window coming back to the front (the app asks again then). */
-function windowShown() {
-  fireEvent.focus(window);
+function show() {
+  return render(<Onboarding onFinished={() => undefined} />);
 }
 
-async function heading(name: string) {
-  return screen.findByRole("heading", { level: 2, name });
+/** What the window does when it comes back: asks the app again. */
+function refocus() {
+  act(() => {
+    window.dispatchEvent(new Event("focus"));
+  });
 }
 
-function button(name: string): HTMLButtonElement {
+function primary(name: string | RegExp): HTMLButtonElement {
   return screen.getByRole("button", { name });
 }
 
-/** The key step once its settings have loaded and Test can be pressed. */
-async function keyStepReady() {
-  await heading("Add your API key");
-  await waitFor(() => {
-    expect(button("Test and continue").disabled).toBe(false);
+const LONG = "ह".repeat(300);
+
+describe("the frame", () => {
+  it("criterion 1: exactly these five steps, in order, on the rail", async () => {
+    show();
+    const rail = await screen.findByRole("navigation", { name: "Setup steps" });
+    expect(
+      within(rail)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["1Welcome", "2Speech", "3Permissions", "4Try it", "5Ready"]);
+    expect(STEPS.map((step) => step.id)).toEqual(ORDER);
   });
-}
 
-describe("the microphone step", () => {
-  it("moves on only once the microphone is allowed, and then by itself", async () => {
-    render(<Onboarding onFinished={() => undefined} />);
-    await heading("Allow the microphone");
-    expect(screen.getByLabelText("progress").textContent).toBe("Step 1 of 4");
-    expect(button("Continue").disabled).toBe(true);
-    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  it("criterion 1: the rail marks done, current and upcoming", async () => {
+    backend.allSet("permissions");
+    show();
+    const rail = await screen.findByRole("navigation", { name: "Setup steps" });
+    const items = within(rail).getAllByRole("listitem");
+    expect(items[0]?.textContent).toBe("✓Welcome");
+    expect(items[1]?.textContent).toBe("✓Speech");
+    expect(items[2]?.getAttribute("aria-current")).toBe("step");
+    expect(items[3]?.className).toContain("upcoming");
+  });
 
-    // The prompt is up; the user hasn't answered yet.
-    backend.micAnswer = "not_determined";
-    fireEvent.click(button("Allow microphone"));
+  it("criterion 1: every step has Back except Welcome, and one primary", async () => {
+    for (const step of ORDER) {
+      backend = new Backend();
+      mockIPC(backend.handle);
+      backend.allSet(step);
+      const { unmount } = show();
+      await screen.findByRole("navigation", { name: "Setup steps" });
+      await waitFor(() => {
+        expect(document.querySelectorAll(".ob-footer .primary")).toHaveLength(1);
+      });
+      expect(screen.queryByRole("button", { name: "Back" }) === null).toBe(step === "welcome");
+      unmount();
+    }
+  });
+
+  it("criterion 1: a disabled primary always says why", async () => {
+    backend.allSet("permissions");
+    backend.accessibility = "not_determined";
+    show();
     await waitFor(() => {
-      expect(backend.named("request_permission")).toEqual([
-        { command: "request_permission", args: { permission: "microphone" } },
-      ]);
+      expect(primary("Continue").disabled).toBe(true);
     });
-    expect(button("Continue").disabled).toBe(true);
-    expect(backend.named("set_onboarding_step")).toEqual([]);
-
-    // Allowed in the prompt: the next poll moves on by itself.
-    backend.microphone = "granted";
-    windowShown();
-    await heading("Allow Accessibility");
-    expect(backend.named("set_onboarding_step").map((call) => call.args.step)).toEqual([
-      "accessibility",
-    ]);
+    expect(primary("Continue").getAttribute("aria-describedby")).toBe("ob-reason");
+    expect(screen.getByText(BOTH_REASON)).toBeTruthy();
   });
 
-  it("polls while it waits for the answer", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    render(<Onboarding onFinished={() => undefined} />);
-    await heading("Allow the microphone");
-    const asked = backend.named("get_onboarding").length;
-    await act(() => vi.advanceTimersByTimeAsync(POLL_MS * 2));
-    expect(backend.named("get_onboarding").length).toBeGreaterThanOrEqual(asked + 2);
-
-    backend.microphone = "granted";
-    await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
-    await heading("Allow Accessibility");
+  it("criterion 1: the layout holds: rail, scrolling content, fixed footer", () => {
+    const rule = (selector: string) => {
+      const found = new RegExp(`(^|\\n)${selector.replace(".", "\\.")} \\{([^}]*)\\}`).exec(css);
+      expect(found, selector).not.toBeNull();
+      return found?.[2] ?? "";
+    };
+    expect(rule(".ob-rail")).toContain("150px");
+    expect(rule(".ob-content")).toContain("overflow: hidden auto");
+    // Long words wrap instead of widening the window at 680×520.
+    expect(rule(".ob-content")).toContain("overflow-wrap: anywhere");
+    expect(rule(".ob-main")).toContain("min-width: 0");
+    expect(rule(".ob-footer")).toContain("flex: 0 0 auto");
+    expect(rule(".ob-reason")).toContain("overflow-wrap: anywhere");
   });
 
-  it("stays on the step when the microphone goes from not asked to refused (#159)", async () => {
-    // A permission that changes is not a permission that was granted: only
-    // "granted" moves the step on, so a refusal never asks for the next step.
-    render(<Onboarding onFinished={() => undefined} />);
-    await heading("Allow the microphone");
-
-    backend.microphone = "denied";
-    windowShown();
-    await screen.findByText(/The microphone is turned off for Vocet/u);
-    expect(await heading("Allow the microphone")).toBeTruthy();
-    expect(backend.named("set_onboarding_step")).toEqual([]);
-    expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("sends a refused microphone to System Settings", async () => {
-    backend.microphone = "denied";
-    render(<Onboarding onFinished={() => undefined} />);
-    await heading("Allow the microphone");
-    expect(screen.getByText(/The microphone is turned off for Vocet/u)).toBeTruthy();
-    fireEvent.click(button("Open System Settings"));
-    await waitFor(() => {
-      expect(backend.named("request_permission")).toHaveLength(1);
-    });
-    expect(button("Continue").disabled).toBe(true);
+  it("criterion 1: pseudo-long labels stay inside their elements", async () => {
+    backend.step = "speech";
+    backend.welcomePassed = true;
+    backend.models = [{ ...PARAKEET, name: `${LONG} x` }];
+    show();
+    // The long name is rendered as text in the wrapping column.
+    const title = await screen.findByText(new RegExp(LONG));
+    expect(title.closest(".ob-content")).not.toBeNull();
   });
 });
 
-describe("the Accessibility step", () => {
-  beforeEach(() => {
-    backend.microphone = "granted";
-    backend.step = "accessibility";
+describe("Welcome", () => {
+  it("criterion 2: the switch is on, with its caption and What's sent", async () => {
+    show();
+    const share = await screen.findByRole("switch", { name: "Share usage and error events" });
+    expect((share as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText(EVENTS_CAPTION)).toBeTruthy();
+    expect(screen.getByText("What's sent")).toBeTruthy();
+    expect(screen.getByText("Change any time in Settings → Privacy.")).toBeTruthy();
   });
 
-  it("opens System Settings, offers Relaunch, and moves on by itself once granted", async () => {
-    render(<Onboarding onFinished={() => undefined} />);
-    await heading("Allow Accessibility");
-    expect(button("Continue").disabled).toBe(true);
-    expect(screen.queryByRole("button", { name: "Relaunch" })).toBeNull();
+  it("criterion 2: the screen itself asks the app to record nothing", async () => {
+    show();
+    await screen.findByRole("switch", { name: "Share usage and error events" });
+    // Moving past Welcome is what opens the gate (ConsentGate, in Rust).
+    expect(backend.named("set_onboarding_step")).toEqual([]);
+  });
 
-    fireEvent.click(button("Open System Settings"));
-    await screen.findByText(/Relaunch to finish/u);
-    expect(backend.named("request_permission")).toEqual([
-      { command: "request_permission", args: { permission: "accessibility" } },
-    ]);
-    fireEvent.click(button("Relaunch"));
+  it("criterion 2: switching it off goes through A1's command, then Continue moves on", async () => {
+    show();
+    const share = await screen.findByRole("switch", { name: "Share usage and error events" });
+    fireEvent.click(share);
+    await waitFor(() => {
+      expect(backend.settings.share_usage_events).toBe(false);
+    });
+    expect(backend.named("set_share_usage_events")[0]?.args).toEqual({ share: false });
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Which language will you mostly speak?");
+    expect(backend.step).toBe("speech");
+  });
+});
+
+describe("Speech", () => {
+  beforeEach(() => {
+    backend.step = "speech";
+    backend.welcomePassed = true;
+  });
+
+  it("criterion 3: English preselects Parakeet English, with its real size", async () => {
+    show();
+    const name = await screen.findByText("Parakeet English · 477 MB");
+    expect(name).toBeTruthy();
+    expect(screen.getByText("Recommended for your language")).toBeTruthy();
+    expect(screen.getByText(MODEL_COPY)).toBeTruthy();
+    expect(primary("Download and continue").disabled).toBe(false);
+  });
+
+  it("criterion 3: Hindi recommends the multilingual model, with its real size", async () => {
+    show();
+    await screen.findByText("Parakeet English · 477 MB");
+    fireEvent.click(screen.getByRole("button", { name: "Hindi" }));
+    await screen.findByText("Qwen3-ASR Multilingual · 590 MB");
+    await waitFor(() => {
+      expect(backend.settings.language).toBe("hi");
+    });
+  });
+
+  it("criterion 3: More… offers the searchable picker", async () => {
+    show();
+    await screen.findByText("Parakeet English · 477 MB");
+    expect(screen.queryByRole("combobox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "More…" }));
+    expect(screen.getByRole("combobox")).toBeTruthy();
+  });
+
+  it("criterion 3: Download and continue chooses, starts the download and moves on", async () => {
+    show();
+    await screen.findByText("Parakeet English · 477 MB");
+    fireEvent.click(primary("Download and continue"));
+    await screen.findByText("Two permissions");
+    expect(backend.named("choose_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
+    expect(backend.named("download_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
+    expect(backend.settings.transcription).toBe("local");
+    expect(backend.step).toBe("permissions");
+  });
+
+  it("criterion 3: a model already here says Continue and downloads nothing", async () => {
+    backend.model(PARAKEET.id).state = "ready";
+    show();
+    await screen.findByText("Parakeet English · 477 MB");
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Two permissions");
+    expect(backend.named("download_local_model")).toEqual([]);
+    expect(backend.settings.transcription).toBe("local");
+  });
+
+  it("stays on the step and says why when the download can't start", async () => {
+    backend.handle = ((original) => (command: string, payload: unknown) => {
+      if (command === "choose_local_model") {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw "The disk is full.";
+      }
+      return original(command, payload);
+    })(backend.handle);
+    mockIPC(backend.handle);
+    show();
+    await screen.findByText("Parakeet English · 477 MB");
+    fireEvent.click(primary("Download and continue"));
+    await screen.findByText("The disk is full.");
+    expect(backend.step).toBe("speech");
+  });
+
+  async function chooseOwnKey() {
+    show();
+    await screen.findByText("Parakeet English · 477 MB");
+    fireEvent.click(screen.getByRole("radio", { name: /Use my own Groq or OpenAI key/ }));
+    return await screen.findByLabelText("Groq API key");
+  }
+
+  it("criterion 3: the own key path opens U6's panel, and Continue waits for Test & Save", async () => {
+    const field = await chooseOwnKey();
+    await screen.findByText("No key saved yet.", { exact: false });
+    expect(primary("Continue").disabled).toBe(true);
+    expect(screen.getByText(KEY_REASON)).toBeTruthy();
+    expect(field.getAttribute("type")).toBe("password");
+  });
+
+  it("criterion 3: a bad key keeps Continue locked, and saves nothing", async () => {
+    backend.testResult = { kind: "rejected", message: "Groq rejected this API key." };
+    const field = await chooseOwnKey();
+    fireEvent.change(field, { target: { value: KEY } });
+    fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
+    await screen.findByText("Groq rejected this API key.");
+    expect(backend.named("set_api_key")).toEqual([]);
+    expect(primary("Continue").disabled).toBe(true);
+  });
+
+  it("criterion 3: a good key unlocks Continue, and the provider is the engine", async () => {
+    const field = await chooseOwnKey();
+    fireEvent.change(field, { target: { value: KEY } });
+    fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
+    await screen.findByText("✓ Connected · saved in Keychain");
+    expect(primary("Continue").disabled).toBe(false);
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Two permissions");
+    expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "groq" });
+    expect(backend.named("download_local_model")).toEqual([]);
+    expect(document.body.textContent).not.toContain(KEY);
+  });
+
+  it("criterion 3: a key saved earlier is tested before moving on", async () => {
+    backend.keys.groq = true;
+    backend.testResult = { kind: "rejected", message: "Groq rejected this API key." };
+    await chooseOwnKey();
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Groq rejected this API key.");
+    expect(backend.step).toBe("speech");
+    expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "groq", key: null });
+  });
+});
+
+describe("the download strip", () => {
+  function downloading() {
+    backend.step = "permissions";
+    backend.welcomePassed = true;
+    backend.settings = { ...backend.settings, transcription: "local" };
+    const model = backend.model(PARAKEET.id);
+    model.state = "downloading";
+    model.downloaded_bytes = 212_000_000;
+  }
+
+  it("criterion 3: shows real progress and Cancel on every later step", async () => {
+    for (const step of ["permissions", "try", "ready"] as const) {
+      backend = new Backend();
+      mockIPC(backend.handle);
+      downloading();
+      backend.step = step;
+      backend.microphone = "granted";
+      backend.accessibility = "granted";
+      const { unmount } = show();
+      await screen.findByText("Downloading Parakeet English · 212 of 477 MB");
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+      expect(screen.getByText("Download running")).toBeTruthy();
+      unmount();
+    }
+  });
+
+  it("Cancel stops it, keeps that it was the user's choice, and offers Resume", async () => {
+    downloading();
+    show();
+    await screen.findByText("Downloading Parakeet English · 212 of 477 MB");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await screen.findByText("Download paused · 212 of 477 MB");
+    expect(backend.downloadPaused).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await screen.findByText("Downloading Parakeet English · 212 of 477 MB");
+    expect(backend.downloadPaused).toBe(false);
+  });
+
+  it("a failed download offers Retry and the own key", async () => {
+    downloading();
+    const model = backend.model(PARAKEET.id);
+    model.state = "partial";
+    model.error = "The disk is full.";
+    show();
+    await screen.findByText(/stopped: The disk is full\./);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Use my own key" }));
+    await screen.findByText("Which language will you mostly speak?");
+  });
+
+  it("criterion 7: a part left by a quit picks up by itself, and says so", async () => {
+    downloading();
+    const model = backend.model(PARAKEET.id);
+    model.state = "partial";
+    show();
+    await waitFor(() => {
+      expect(backend.named("download_local_model")).toHaveLength(1);
+    });
+    await screen.findByText("Continued from 212 MB.");
+  });
+
+  it("criterion 7: if the bytes went backwards, the strip says it started again", async () => {
+    downloading();
+    const model = backend.model(PARAKEET.id);
+    model.state = "partial";
+    show();
+    await screen.findByText("Continued from 212 MB.");
+    model.downloaded_bytes = 5_000_000;
+    refocus();
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText("The earlier download couldn't continue, so it started again."),
+        ).toBeTruthy();
+      },
+      { timeout: 2000 },
+    );
+  });
+
+  it("criterion 7: a download the user cancelled doesn't start again by itself", async () => {
+    downloading();
+    const model = backend.model(PARAKEET.id);
+    model.state = "partial";
+    backend.downloadPaused = true;
+    show();
+    await screen.findByText("Download paused · 212 of 477 MB");
+    expect(backend.named("download_local_model")).toEqual([]);
+  });
+});
+
+describe("Permissions", () => {
+  beforeEach(() => {
+    backend.step = "permissions";
+    backend.welcomePassed = true;
+    backend.keys.groq = true;
+  });
+
+  it("criterion 4: explains both before anything is asked", async () => {
+    show();
+    await screen.findByText("Records only while you hold your key.");
+    expect(
+      screen.getByText("Notices your key and pastes at your cursor. It doesn't read your screen."),
+    ).toBeTruthy();
+    expect(backend.named("request_permission")).toEqual([]);
+    expect(primary("Continue").disabled).toBe(true);
+    expect(screen.getByText(BOTH_REASON)).toBeTruthy();
+  });
+
+  it("criterion 4: Allow asks, and a grant is detected without pressing anything", async () => {
+    backend.micAnswer = "not_determined";
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: "Allow Microphone" }));
+    await screen.findByText("Waiting for macOS…");
+    backend.microphone = "granted";
+    refocus();
+    await screen.findByText("✓ Allowed");
+    expect(backend.step).toBe("permissions");
+  });
+
+  it("criterion 4: Continue unlocks only when both are allowed", async () => {
+    backend.microphone = "granted";
+    show();
+    await screen.findByText("✓ Allowed");
+    expect(primary("Continue").disabled).toBe(true);
+    backend.accessibility = "granted";
+    refocus();
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Your dictation key");
+  });
+
+  it("criterion 4: the mic card shows the live meter and input name after the grant only", async () => {
+    show();
+    await screen.findByRole("button", { name: "Allow Microphone" });
+    expect(document.querySelectorAll('[data-testid="mic-bar"]')).toHaveLength(0);
+    backend.microphone = "granted";
+    refocus();
+    await screen.findByText("MacBook Microphone: say something, the bars should move.", undefined, {
+      timeout: 2000,
+    });
+    expect(screen.getByText("No sound? Check System Settings → Sound.")).toBeTruthy();
+    expect(document.querySelectorAll('[data-testid="mic-bar"]').length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(backend.named("read_microphone_test").length).toBeGreaterThan(0);
+    });
+  });
+
+  it("criterion 4: leaving the step stops the meter", async () => {
+    backend.microphone = "granted";
+    backend.accessibility = "granted";
+    show();
+    await waitFor(() => {
+      expect(backend.named("start_microphone_test").length).toBeGreaterThan(0);
+    });
+    fireEvent.click(primary("Back"));
+    await screen.findByText("Which language will you mostly speak?");
+    expect(backend.named("stop_microphone_test").length).toBeGreaterThan(0);
+  });
+
+  it("criterion 4: denied gives Open System Settings, the exact path, and the relaunch", async () => {
+    backend.microphone = "denied";
+    show();
+    await screen.findByText("System Settings → Privacy & Security → Microphone → turn on Vocet.");
+    fireEvent.click(screen.getByRole("button", { name: "Open System Settings" }));
+    await waitFor(() => {
+      expect(backend.named("request_permission")[0]?.args).toEqual({ permission: "microphone" });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Relaunch and resume" }));
     await waitFor(() => {
       expect(backend.named("relaunch_app")).toHaveLength(1);
     });
-
-    backend.accessibility = "granted";
-    windowShown();
-    await heading("Add your API key");
   });
-});
 
-describe("the Accessibility step refused", () => {
-  it("stays on the step when Accessibility goes from not asked to refused (#159)", async () => {
-    backend.microphone = "granted";
-    backend.step = "accessibility";
-    render(<Onboarding onFinished={() => undefined} />);
-    await heading("Allow Accessibility");
-
-    backend.accessibility = "denied";
-    windowShown();
-    await waitFor(() => {
-      expect(backend.named("get_onboarding").length).toBeGreaterThanOrEqual(2);
-    });
-    expect(await heading("Allow Accessibility")).toBeTruthy();
-    expect(backend.named("set_onboarding_step")).toEqual([]);
-  });
-});
-
-describe("going back", () => {
-  it("goes back to a done step and stays there until the user moves on", async () => {
+  it("criterion 4: granted but not applied offers Relaunch only once it has lasted", async () => {
     backend.microphone = "granted";
     backend.accessibility = "granted";
-    backend.step = "key";
-    render(<Onboarding onFinished={() => undefined} />);
-    await heading("Add your API key");
-
-    fireEvent.click(button("Back"));
-    await heading("Allow Accessibility");
-    expect(screen.getByText("Accessibility is allowed.")).toBeTruthy();
-    // Done already: no moving on by itself, however often the app is asked.
-    windowShown();
-    windowShown();
-    await waitFor(() => {
-      expect(backend.named("get_onboarding").length).toBeGreaterThanOrEqual(3);
-    });
-    expect(backend.step).toBe("accessibility");
-    expect(button("Continue").disabled).toBe(false);
-
-    fireEvent.click(button("Continue"));
-    await heading("Add your API key");
-  });
-
-  it("shows the app's refusal when a step isn't done", async () => {
-    backend.step = "accessibility";
-    backend.accessibility = "granted";
-    // The microphone was turned off since; the app refuses the key step.
-    render(<Onboarding onFinished={() => undefined} />);
-    await heading("Allow Accessibility");
-    fireEvent.click(button("Continue"));
-    expect((await screen.findByRole("alert")).textContent).toBe("Allow the microphone first.");
-    expect(backend.step).toBe("accessibility");
+    backend.needsRelaunch = true;
+    show();
+    await screen.findByText("Two permissions");
+    expect(screen.queryByRole("button", { name: "Relaunch and resume" })).toBeNull();
+    for (let i = 0; i < RELAUNCH_AFTER_POLLS + 1; i += 1) {
+      refocus();
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+    await screen.findByRole("button", { name: "Relaunch and resume" });
   });
 });
 
-describe("the key step", () => {
+describe("Try it", () => {
   beforeEach(() => {
-    backend.microphone = "granted";
-    backend.accessibility = "granted";
-    backend.step = "key";
+    backend.allSet("try");
   });
 
-  it("stays on the step with the error when the key test fails, saving nothing", async () => {
-    backend.testResult = {
-      kind: "invalid_key",
-      message: "Groq rejected this API key. Check that you copied the whole key from Groq.",
-    };
-    render(<Onboarding onFinished={() => undefined} />);
-    await keyStepReady();
-    fireEvent.change(screen.getByLabelText("Groq API key"), { target: { value: KEY } });
-    fireEvent.click(button("Test and continue"));
-
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "Groq rejected this API key. Check that you copied the whole key from Groq.",
-    );
-    expect(backend.named("test_api_key")).toEqual([
-      { command: "test_api_key", args: { provider: "groq", key: KEY } },
-    ]);
-    expect(backend.named("set_api_key")).toEqual([]);
-    expect(backend.named("set_onboarding_step")).toEqual([]);
-    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Add your API key");
-  });
-
-  it("confirms the saved key works when nothing is typed", async () => {
-    backend.keys.groq = true;
-    render(<Onboarding onFinished={() => undefined} />);
-    await keyStepReady();
-    fireEvent.click(button("Test and continue"));
-    await heading("Try it");
-    expect(await screen.findByText("Key works ✓")).toBeTruthy();
-    expect(backend.named("test_api_key")).toEqual([
-      { command: "test_api_key", args: { provider: "groq", key: null } },
-    ]);
-  });
-
-  it("asks for a key before testing when none is saved or typed", async () => {
-    render(<Onboarding onFinished={() => undefined} />);
-    await keyStepReady();
-    fireEvent.click(button("Test and continue"));
-    expect((await screen.findByRole("alert")).textContent).toBe("Paste your API key.");
-    expect(backend.named("test_api_key")).toEqual([]);
-  });
-
-  it("saves a key that works and moves on", async () => {
-    render(<Onboarding onFinished={() => undefined} />);
-    await keyStepReady();
-    fireEvent.change(screen.getByLabelText("Groq API key"), { target: { value: KEY } });
-    fireEvent.click(button("Test and continue"));
-
-    await heading("Try it");
-    expect((await screen.findByText("Key works ✓")).getAttribute("role")).toBe("status");
-    expect(backend.named("set_api_key")).toEqual([
-      { command: "set_api_key", args: { provider: "groq", key: KEY } },
-    ]);
-    expect(backend.named("save_settings")).toEqual([]);
-    expect(backend.step).toBe("try");
-  });
-
-  it("saves a new provider with its default model", async () => {
-    render(<Onboarding onFinished={() => undefined} />);
-    await heading("Add your API key");
-    await waitFor(() => {
-      expect(backend.named("has_api_key")).toHaveLength(1);
-    });
-    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
-    fireEvent.change(await screen.findByLabelText("OpenAI API key"), {
-      target: { value: "sk-dummy-NOT-A-REAL-KEY" },
-    });
-    fireEvent.click(button("Test and continue"));
-
-    await heading("Try it");
-    expect(backend.settings.provider).toBe("openai");
-    expect(backend.settings.model).toBe("whisper-1");
-    expect(backend.keys.openai).toBe(true);
-  });
-
-  it("keeps the provider the user picked while the settings load, and tests with it", async () => {
-    let answer: (settings: Settings_Serialize) => void = () => undefined;
-    mockIPC((command, payload) =>
-      command === "get_settings"
-        ? new Promise((resolve) => {
-            backend.calls.push({ command, args: {} });
-            answer = resolve;
-          })
-        : backend.handle(command, payload),
-    );
-    render(<Onboarding onFinished={() => undefined} />);
-    await heading("Add your API key");
-    await waitFor(() => {
-      expect(backend.named("get_settings")).toHaveLength(1);
-    });
-    expect(screen.getByText(/Loading…/u)).toBeTruthy();
-    expect(button("Test and continue").disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
-    fireEvent.change(await screen.findByLabelText("OpenAI API key"), {
-      target: { value: "sk-dummy-NOT-A-REAL-KEY" },
-    });
-    // The settings arrive late, still on Groq.
-    act(() => {
-      answer(backend.settings);
-    });
-    await keyStepReady();
-    fireEvent.click(button("Test and continue"));
-
-    await heading("Try it");
-    expect(backend.named("test_api_key")).toEqual([
-      { command: "test_api_key", args: { provider: "openai", key: "sk-dummy-NOT-A-REAL-KEY" } },
-    ]);
-    expect(backend.settings.provider).toBe("openai");
-    expect(backend.keys).toEqual({ groq: false, openai: true });
-  });
-
-  it("says when the settings don't load, and sets up the key after Retry", async () => {
-    let failures = 1;
-    mockIPC((command, payload) => {
-      if (command === "get_settings" && failures > 0) {
-        failures -= 1;
-        backend.calls.push({ command, args: {} });
-        // eslint-disable-next-line @typescript-eslint/only-throw-error
-        throw "The settings file can't be read.";
-      }
-      return backend.handle(command, payload);
-    });
-    render(<Onboarding onFinished={() => undefined} />);
-    expect((await screen.findByRole("alert")).textContent).toMatch(
-      /Couldn.t load your settings.*The settings file can't be read\./u,
-    );
-    expect(screen.queryByLabelText("Provider")).toBeNull();
-    expect(button("Test and continue").disabled).toBe(true);
-
-    fireEvent.click(button("Retry"));
-    await keyStepReady();
-    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
-    fireEvent.change(await screen.findByLabelText("OpenAI API key"), {
-      target: { value: "sk-dummy-NOT-A-REAL-KEY" },
-    });
-    fireEvent.click(button("Test and continue"));
-
-    await heading("Try it");
-    expect(backend.named("save_settings")).toHaveLength(1);
-    expect(backend.settings.provider).toBe("openai");
-    expect(backend.keys.openai).toBe(true);
-    expect(backend.step).toBe("try");
-  });
-
-  it("says no key is needed with the on-device engine, and moves on (L1)", async () => {
-    backend.settings = { ...backend.settings, transcription: "local" };
-    render(<Onboarding onFinished={() => undefined} />);
-    await heading("No key needed");
-    expect(screen.queryByLabelText("Groq API key")).toBeNull();
-    fireEvent.click(button("Continue"));
-    await heading("Try it");
-    expect(backend.named("test_api_key")).toEqual([]);
-    expect(backend.named("set_api_key")).toEqual([]);
-    expect(backend.step).toBe("try");
-  });
-
-  it("tests the saved key when the box is empty", async () => {
-    backend.keys.groq = true;
-    render(<Onboarding onFinished={() => undefined} />);
-    await screen.findByText(/A key is saved/u);
-    fireEvent.click(button("Test and continue"));
-    await heading("Try it");
-    expect(backend.named("test_api_key")).toEqual([
-      { command: "test_api_key", args: { provider: "groq", key: null } },
-    ]);
-    expect(backend.named("set_api_key")).toEqual([]);
-  });
-});
-
-describe("the try step", () => {
-  beforeEach(() => {
-    backend.microphone = "granted";
-    backend.accessibility = "granted";
-    backend.keys.groq = true;
-    backend.step = "try";
-  });
-
-  /** The step has taken its first answer from the app (the baseline). */
   async function stepOpen() {
-    await heading("Try it");
+    show();
+    await screen.findByText("Your dictation key");
     await waitFor(() => {
       expect(backend.named("dictation_progress").length).toBeGreaterThan(0);
     });
-    // One more poll, so the baseline is set before the test changes things.
-    const polls = backend.named("dictation_progress").length;
-    await waitFor(() => {
-      expect(backend.named("dictation_progress").length).toBeGreaterThan(polls);
-    });
+    return screen.getByLabelText<HTMLTextAreaElement>(
+      "Click the box, hold the key, say a sentence, let go.",
+    );
   }
 
-  it("puts the focus in the field", async () => {
-    render(<Onboarding onFinished={() => undefined} />);
-    await heading("Try it");
-    const field = await screen.findByLabelText(/Hold the right Option key/u);
-    expect(document.activeElement).toBe(field);
+  function stage(name: string) {
+    return screen.getByText(name, { exact: false }).closest("li")?.className ?? "";
+  }
+
+  function report(update: Partial<DictationProgressView>) {
+    backend.progress = { ...backend.progress, ...update };
+  }
+
+  it("criterion 5: typing in the box never advances anything", async () => {
+    const box = await stepOpen();
+    fireEvent.change(box, { target: { value: WORDS } });
+    backend.words = WORDS;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    for (const name of ["Heard you", "Transcribed", "Pasted"]) {
+      expect(stage(name)).not.toContain("done");
+    }
+    expect(primary("Continue").disabled).toBe(true);
+    expect(screen.getByText(CONTINUE_REASON)).toBeTruthy();
   });
 
-  it("U1 criterion 6: typing in the box never shows success", async () => {
-    render(<Onboarding onFinished={() => undefined} />);
-    await stepOpen();
-    const field = screen.getByLabelText(/Hold the right Option key/u);
-    fireEvent.change(field, { target: { value: "hello world" } });
-    // Give the poll a chance to (wrongly) change its mind.
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-    expect(screen.queryByText(/It works/u)).toBeNull();
-    expect(button("Finish").disabled).toBe(true);
-  });
+  it("criterion 5: each stage needs its own real event", async () => {
+    const box = await stepOpen();
+    report({ started: 1, stages: ["recorded"] });
+    await waitFor(() => {
+      expect(backend.named("dictation_progress").length).toBeGreaterThan(1);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(stage("Heard you")).not.toContain("done");
 
-  it("U1 criterion 6: shows success, listing the stages seen, after a completed dictation", async () => {
-    const onFinished = vi.fn();
-    render(<Onboarding onFinished={onFinished} />);
-    await stepOpen();
+    report({ heard: true });
+    await waitFor(() => {
+      expect(stage("Heard you")).toContain("done");
+    });
+    expect(stage("Transcribed")).not.toContain("done");
 
-    // Half way: recorded and transcribed, not pasted yet. No success.
-    backend.progress = {
-      started: 1,
-      completed: 0,
-      errors: 0,
-      stages: ["recorded", "transcribed"],
-      error: null,
-    };
-    expect(
-      await screen.findByText(/So far Vocet recorded and transcribed/u, undefined, {
-        timeout: 3000,
-      }),
-    ).toBeTruthy();
-    expect(screen.queryByText(/It works/u)).toBeNull();
-    expect(button("Finish").disabled).toBe(true);
+    report({ stages: ["recorded", "transcribed"] });
+    await waitFor(() => {
+      expect(stage("Transcribed")).toContain("done");
+    });
+    expect(stage("Pasted")).not.toContain("done");
 
-    backend.progress = {
-      started: 1,
-      completed: 1,
-      errors: 0,
-      stages: ["recorded", "transcribed", "pasted"],
-      error: null,
-    };
-    expect(
-      await screen.findByText(/It works: Vocet recorded, transcribed and pasted/u, undefined, {
-        timeout: 3000,
-      }),
-    ).toBeTruthy();
+    // The paste landed in the box.
+    backend.words = WORDS;
+    fireEvent.change(box, { target: { value: WORDS } });
+    report({ finished: 1, completed: 1, stages: ["recorded", "transcribed", "pasted"] });
+    await waitFor(() => {
+      expect(stage("Pasted")).toContain("done");
+    });
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
+    expect(backend.tryOutcome).toBe("passed");
     expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
-
-    fireEvent.click(button("Finish"));
-    await waitFor(() => {
-      expect(onFinished).toHaveBeenCalledTimes(1);
-    });
-    expect(backend.named("finish_onboarding")).toHaveLength(1);
   });
 
-  it("U1 criterion 6: a dictation from before the step opened doesn't count", async () => {
+  it("criterion 5: a dictation from before the step opened doesn't count", async () => {
     backend.progress = {
-      started: 1,
-      completed: 1,
-      errors: 0,
+      ...NO_PROGRESS,
+      started: 3,
+      finished: 3,
+      completed: 3,
+      heard: true,
       stages: ["recorded", "transcribed", "pasted"],
-      error: null,
     };
-    render(<Onboarding onFinished={() => undefined} />);
     await stepOpen();
-    expect(screen.queryByText(/It works/u)).toBeNull();
-    expect(button("Finish").disabled).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(stage("Heard you")).not.toContain("done");
+    expect(primary("Continue").disabled).toBe(true);
   });
 
-  it("U1 criterion 6: Skip for now is secondary, and Finish says the test was skipped", async () => {
-    const onFinished = vi.fn();
-    render(<Onboarding onFinished={onFinished} />);
-    await stepOpen();
-    expect(button("Finish").disabled).toBe(true);
-    fireEvent.click(button("Skip for now"));
-    expect(screen.getByText(/Test skipped/u)).toBeTruthy();
-    expect(screen.queryByText(/It works/u)).toBeNull();
-    const finish = button("Finish (test skipped)");
-    expect(finish.disabled).toBe(false);
-    expect(finish.className).toContain("primary");
-    expect(button("Skip for now").className).not.toContain("primary");
-    fireEvent.click(finish);
+  it("criterion 5: while the model downloads, practice is blocked with progress", async () => {
+    const model = backend.model(PARAKEET.id);
+    model.state = "downloading";
+    model.downloaded_bytes = PARAKEET.size_bytes * 0.82;
+    const box = await stepOpen();
+    expect(box.disabled).toBe(true);
+    await screen.findByText("Getting the model ready: 82%");
     await waitFor(() => {
-      expect(onFinished).toHaveBeenCalledTimes(1);
+      expect(backend.named("set_hotkey_recording")[0]?.args).toEqual({ recording: true });
     });
   });
 
-  it("U1 criterion 7: a failed dictation shows its sentence inline, not the menu bar icon", async () => {
-    render(<Onboarding onFinished={() => undefined} />);
+  it("criterion 5: the key comes back when the model is ready", async () => {
+    const model = backend.model(PARAKEET.id);
+    model.state = "downloading";
+    const box = await stepOpen();
+    await waitFor(() => {
+      expect(box.disabled).toBe(true);
+    });
+    model.state = "ready";
+    await waitFor(
+      () => {
+        expect(box.disabled).toBe(false);
+      },
+      { timeout: 2500 },
+    );
+    expect(backend.named("set_hotkey_recording").at(-1)?.args).toEqual({ recording: false });
+  });
+
+  it("criterion 5: a paste that missed shows the words with Copy, and never pastes again", async () => {
     await stepOpen();
-    backend.progress = {
+    backend.words = WORDS;
+    report({
       started: 1,
-      completed: 0,
+      finished: 1,
+      completed: 1,
+      heard: true,
+      stages: ["recorded", "transcribed", "pasted"],
+    });
+    await screen.findByText(WORDS, undefined, { timeout: 2500 });
+    expect(stage("Pasted")).not.toContain("done");
+    expect(primary("Continue").disabled).toBe(true);
+    expect(screen.getByText(/Click the box and press ⌘V/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await screen.findByText("Copied.");
+    expect(backend.named("copy_practice_words")).toHaveLength(1);
+  });
+
+  it("criterion 5: a failed paste shows the words at once", async () => {
+    await stepOpen();
+    backend.words = WORDS;
+    report({
+      started: 1,
+      finished: 1,
       errors: 1,
+      heard: true,
+      stages: ["recorded", "transcribed"],
+      failure: "paste",
+      error: "Vocet couldn't paste.",
+    });
+    await screen.findByText(WORDS, undefined, { timeout: 2500 });
+    expect(primary("Continue").disabled).toBe(true);
+  });
+
+  it("no sound gives the microphone help", async () => {
+    await stepOpen();
+    report({ started: 1, finished: 1, heard: false, stages: ["recorded"] });
+    await screen.findByText(
+      "Vocet didn't hear anything. Check System Settings → Sound.",
+      undefined,
+      {
+        timeout: 2000,
+      },
+    );
+  });
+
+  it("a rejected key goes back to Speech", async () => {
+    await stepOpen();
+    report({
+      started: 1,
+      finished: 1,
+      errors: 1,
+      heard: true,
       stages: ["recorded"],
-      error: "Your API key was rejected. Open Settings → Speech to fix it.",
-    };
-    const alert = await screen.findByRole("alert", undefined, { timeout: 3000 });
-    expect(alert.textContent).toBe("Your API key was rejected. Open Settings → Speech to fix it.");
-    expect(screen.queryByText(/menu bar icon/u)).toBeNull();
-    expect(screen.queryByText(/key_rejected/u)).toBeNull();
-    expect(button("Finish").disabled).toBe(true);
+      failure: "key",
+      error: "Groq rejected the key.",
+    });
+    await screen.findByText("Groq rejected the key.", undefined, { timeout: 2000 });
+    fireEvent.click(screen.getByRole("button", { name: "Back to Speech" }));
+    await screen.findByText("Which language will you mostly speak?");
+  });
+
+  it("criterion 5: Skip for now leads to Ready with Not tested yet", async () => {
+    await stepOpen();
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    await screen.findByText("You're set");
+    expect(backend.tryOutcome).toBe("skipped");
+    expect(screen.getByText(NOT_TESTED)).toBeTruthy();
   });
 
   it("shows the dictation key and records a different one", async () => {
-    render(<Onboarding onFinished={vi.fn()} />);
-    await heading("Try it");
+    await stepOpen();
     await waitFor(() => {
       expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌥");
     });
-    fireEvent.click(button("Record a different key"));
+    fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
     keyDown("MetaRight");
     keyUp("MetaRight");
     await waitFor(() => {
       expect(backend.settings.hotkey).toBe("RightCmd");
     });
-    expect(await screen.findByLabelText(/Hold the right Command key/u)).toBeTruthy();
+    releaseAllKeys();
+  });
+});
+
+describe("Ready", () => {
+  beforeEach(() => {
+    backend.allSet("ready");
+    backend.tryOutcome = "passed";
   });
 
-  it("names the hotkey", () => {
-    expect(hotkeyName("RightAlt")).toBe("the right Option key");
-    expect(hotkeyName("LeftAlt")).toBe("the left Option key");
-    expect(hotkeyName("RightCmd")).toBe("the right Command key");
-    expect(hotkeyName("Ctrl+Shift+Space")).toBe("Ctrl+Shift+Space");
+  it("criterion 6: shows the real states", async () => {
+    show();
+    await screen.findByText("You're set");
+    await screen.findByText("Right ⌥ (hold)");
+    await screen.findByText("On this Mac · Parakeet English · ✓ Ready");
+    expect(screen.getByText("Find Vocet in the menu bar", { exact: false })).toBeTruthy();
+    expect(screen.queryByText(NOT_TESTED)).toBeNull();
+    expect(screen.getByRole<HTMLInputElement>("switch").checked).toBe(false);
+  });
+
+  it("criterion 6: while the model isn't ready it doesn't say Ready", async () => {
+    const model = backend.model(PARAKEET.id);
+    model.state = "downloading";
+    model.downloaded_bytes = PARAKEET.size_bytes / 2;
+    show();
+    await screen.findByText("On this Mac · Parakeet English · Getting the model ready: 50%");
+  });
+
+  it("criterion 6: the own key says Connected only with a key saved", async () => {
+    backend.settings = { ...backend.settings, transcription: "cloud", provider: "groq" };
+    backend.keys.groq = true;
+    show();
+    await screen.findByText("Groq · ✓ Connected");
+  });
+
+  it("criterion 6: the events line follows the switch, and Change goes to it", async () => {
+    backend.settings = { ...backend.settings, share_usage_events: false };
+    show();
+    await screen.findByText(/^Off/);
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    await screen.findByRole("switch", { name: "Share usage and error events" });
+  });
+
+  it("criterion 6: the login switch goes through S1's command", async () => {
+    show();
+    fireEvent.click(await screen.findByRole("switch", { name: "Open Vocet when I log in" }));
+    await waitFor(() => {
+      expect(backend.settings.launch_at_login).toBe(true);
+    });
+  });
+
+  it("criterion 6: Start dictating finishes setup and leaves onboarding", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start dictating" }));
+    await waitFor(() => {
+      expect(backend.named("finish_onboarding")).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("navigation", { name: "Setup steps" })).toBeNull();
+    });
   });
 });
 
 describe("the window", () => {
-  it("shows onboarding when the app says so, and settings once finished", async () => {
-    backend.microphone = "granted";
-    backend.accessibility = "granted";
-    backend.keys.groq = true;
-    backend.step = "try";
-    render(<App />);
-    await heading("Try it");
-    fireEvent.click(button("Skip for now"));
-    fireEvent.click(button("Finish (test skipped)"));
-    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
+  it("criterion 7: resumes at the step the app kept", async () => {
+    backend.allSet("permissions");
+    show();
+    await screen.findByText("Two permissions");
   });
 
-  it("reopened from the tray, resumes at the step the user went back to", async () => {
-    backend.microphone = "granted";
-    backend.accessibility = "granted";
-    backend.step = "key";
-    render(<App />);
-    await heading("Add your API key");
-    fireEvent.click(button("Back"));
-    await heading("Allow Accessibility");
-
-    // Settings… in the tray, then Set up dictation… again.
-    backend.view = "settings";
-    windowShown();
-    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
-    backend.view = "onboarding";
-    windowShown();
-    await heading("Allow Accessibility");
-    expect(screen.queryByRole("tablist", { name: "Settings sections" })).toBeNull();
-  });
-
-  it("falls back to settings if the app can't say", async () => {
-    clearMocks();
+  it("says when the setup can't load", async () => {
     mockIPC((command) => {
-      if (command === "get_onboarding") throw new Error("broken");
-      if (command === "get_settings") return backend.settings;
-      return false;
+      if (command === "get_onboarding") {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw "No state.";
+      }
+      return null;
     });
-    render(<App />);
-    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
+    show();
+    await screen.findByText(/Couldn't load the setup/);
+  });
+
+  it("shows the app's refusal when a step isn't done", async () => {
+    // Both permissions, but no engine chosen: the app won't go to Try it.
+    backend.step = "permissions";
+    backend.welcomePassed = true;
+    backend.microphone = "granted";
+    backend.accessibility = "granted";
+    show();
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Choose how speech becomes text first.");
+    expect(backend.step).toBe("permissions");
   });
 });

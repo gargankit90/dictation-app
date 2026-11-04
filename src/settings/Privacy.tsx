@@ -4,6 +4,43 @@ import type { Settings_Serialize } from "../bindings";
 import { messageOf } from "../keyTest";
 import { Group, Row, SaveStatus, Switch, useSave } from "./ui";
 
+/** What sharing sends, in words, with a link to the full notice. */
+export function WhatsSent() {
+  return (
+    <details className="row-details">
+      <summary>What&apos;s sent</summary>
+      <ul className="hint">
+        <li>That the app was opened, with its version, your macOS version and chip.</li>
+        <li>Which onboarding steps you reached, and that you finished.</li>
+        <li>Which speech engine you chose (for example Groq or OpenAI).</li>
+        <li>That a dictation worked, with its length and speed in rough ranges (not the words).</li>
+        <li>That a dictation failed, and the kind of failure (not the message).</li>
+        <li>
+          Error reports, sent to Sentry (US): when the app crashes (a panic) or a dictation fails,
+          the error code (for example mic_denied), the app version, your macOS major version and
+          chip, and for a crash the code locations and function names where it happened. Never the
+          error message, your words, file paths, your user name or computer name.
+        </li>
+        <li>Which setting you changed (not the new value).</li>
+        <li>That the app updated, from which version to which.</li>
+      </ul>
+      <p className="hint">
+        Each event carries a random ID made on this Mac, not tied to you or your computer. Turning
+        sharing off deletes it.
+      </p>
+      <button
+        type="button"
+        className="link"
+        onClick={() => {
+          void commands.openLink("privacy").catch(() => undefined);
+        }}
+      >
+        Read the full privacy notice
+      </button>
+    </details>
+  );
+}
+
 /**
  * Privacy: "Share usage and error events" (A1's own command: off stops
  * sending at once), what is sent (from docs/privacy.md), and a link to the
@@ -43,41 +80,7 @@ export function Privacy({
         below={
           <>
             <SaveStatus save={sharing.save} />
-            <details className="row-details">
-              <summary>What&apos;s sent</summary>
-              <ul className="hint">
-                <li>That the app was opened, with its version, your macOS version and chip.</li>
-                <li>Which onboarding steps you reached, and that you finished.</li>
-                <li>Which speech engine you chose (for example Groq or OpenAI).</li>
-                <li>
-                  That a dictation worked, with its length and speed in rough ranges (not the
-                  words).
-                </li>
-                <li>That a dictation failed, and the kind of failure (not the message).</li>
-                <li>
-                  Error reports, sent to Sentry (US): when the app crashes (a panic) or a dictation
-                  fails, the error code (for example mic_denied), the app version, your macOS major
-                  version and chip, and for a crash the code locations and function names where it
-                  happened. Never the error message, your words, file paths, your user name or
-                  computer name.
-                </li>
-                <li>Which setting you changed (not the new value).</li>
-                <li>That the app updated, from which version to which.</li>
-              </ul>
-              <p className="hint">
-                Each event carries a random ID made on this Mac, not tied to you or your computer.
-                Turning sharing off deletes it.
-              </p>
-              <button
-                type="button"
-                className="link"
-                onClick={() => {
-                  void commands.openLink("privacy").catch(() => undefined);
-                }}
-              >
-                Read the full privacy notice
-              </button>
-            </details>
+            <WhatsSent />
           </>
         }
       >
