@@ -166,6 +166,8 @@ e2e_launch_at_login() {
   expect "the app starts" wait_for_log 'INFO .*ready'
   login_setting on
   expect "Quit from the tray ends the app" quit_from_tray
+  # Kept for the timings of the OS calls (#238).
+  collect_log e2e_launch_at_login.on
   clear_app_log
   vm "sync"
 
@@ -199,6 +201,7 @@ posted up" hold_escape_release
   # 4. Off through Settings.
   login_setting off
   expect "Quit from the tray ends the app" quit_from_tray
+  collect_log e2e_launch_at_login.off
   clear_app_log
   vm "sync"
 
