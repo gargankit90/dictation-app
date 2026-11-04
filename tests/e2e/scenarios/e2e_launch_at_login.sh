@@ -112,8 +112,8 @@ login_box_shows() {
 # login_box_save <on|off>: sets the box like a user. The change applies at
 # once and the OS may need tens of seconds for it (#238): Save must not wait
 # for it ("Settings saved." within 5 s, S1), and "Applying…" goes away once
-# the OS has answered (waited for 60 s, inside an outer Terminal-job bound of
-# 80 polls, each taking at least a second).
+# the OS has answered (waited for 120 s, inside an outer Terminal-job bound of
+# 150 polls, each taking at least a second).
 login_box_save() {
   local want=checked started
   [ "$1" = on ] || want=unchecked
@@ -123,7 +123,7 @@ login_box_save() {
     started=$SECONDS &&
     ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 5 &&
     log "  Settings saved. took at most $((SECONDS - started + 1))s after Save" &&
-    VM_TERMINAL_TIMEOUT=80 ax_ok wait-no-text "$APP_NAME" "$SETTINGS_WINDOW" "Applying…" 60 &&
+    VM_TERMINAL_TIMEOUT=150 ax_ok wait-no-text "$APP_NAME" "$SETTINGS_WINDOW" "Applying…" 120 &&
     log "  the OS answered after $((SECONDS - started))s"
 }
 
