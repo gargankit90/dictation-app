@@ -22,7 +22,7 @@ pub enum LaunchProblem {
     Os(String),
     /// Registered, but the user has to allow it in the OS settings.
     #[error(
-        "Launch at login needs your approval: open System Settings, General, Login Items, and allow dictation-app."
+        "Launch at login needs your approval: open System Settings, General, Login Items, and allow Vocet."
     )]
     NeedsApproval,
     /// The OS said yes, but its state didn't change.
@@ -144,11 +144,9 @@ pub struct NotRestored {
 
 fn describe_not_restored(problem: &LaunchProblem, now: Option<LaunchAtLoginState>) -> String {
     let state = match now {
-        Some(LaunchAtLoginState::Enabled) => {
-            "so dictation-app still opens at login; Settings shows it on"
-        }
+        Some(LaunchAtLoginState::Enabled) => "so Vocet still opens at login; Settings shows it on",
         Some(LaunchAtLoginState::Disabled) => {
-            "so dictation-app doesn't open at login; Settings shows it off"
+            "so Vocet doesn't open at login; Settings shows it off"
         }
         Some(LaunchAtLoginState::RequiresApproval) => {
             "so it waits for your approval in System Settings, General, Login Items"

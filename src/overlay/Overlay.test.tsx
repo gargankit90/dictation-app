@@ -39,9 +39,11 @@ describe("criterion_m5_1_1 OverlayContent", () => {
     expect(status.dataset.state).toBe("transcribing");
   });
 
-  it("shows the error's stable code under its message", () => {
-    render(<OverlayContent view={{ state: "error", message: MESSAGE, code: "mic_denied" }} />);
-    expect(screen.getByRole("alert").textContent).toContain("mic_denied");
+  it("shows one sentence and no error code (U1)", () => {
+    // Even if a payload carried a code, parseView drops it and nothing renders it.
+    const view = parseView({ state: "error", message: MESSAGE, code: "mic_denied" });
+    render(<OverlayContent view={view} />);
+    expect(screen.getByRole("alert").textContent).toBe(MESSAGE);
   });
 
   it("shows an error with its message", () => {
@@ -141,7 +143,7 @@ describe("parseView", () => {
     ],
     [
       { state: "error", message: MESSAGE, code: "mic_denied" },
-      { state: "error", message: MESSAGE, code: "mic_denied" },
+      { state: "error", message: MESSAGE },
     ],
     [{ state: "hidden" }, { state: "hidden" }],
     // Anything unexpected hides the overlay rather than showing junk.

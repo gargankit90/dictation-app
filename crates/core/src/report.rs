@@ -127,7 +127,7 @@ pub fn utc(seconds: u64) -> String {
 pub fn render(input: &ReportInput<'_>) -> String {
     let mut out = String::new();
     // Writing to a String can't fail.
-    let _ = writeln!(out, "dictation-app diagnostics report");
+    let _ = writeln!(out, "Vocet diagnostics report");
     let _ = writeln!(
         out,
         "Built from a fixed list of fields. It holds no audio, transcripts, text you typed \

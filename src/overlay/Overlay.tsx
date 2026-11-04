@@ -71,7 +71,6 @@ export function OverlayContent({ view }: { view: OverlayView }) {
           </span>
           <span className="overlay-text">
             <span className="overlay-message">{view.message}</span>
-            {view.code === undefined ? null : <span className="overlay-code">{view.code}</span>}
           </span>
         </div>
       );

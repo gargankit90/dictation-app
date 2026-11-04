@@ -121,6 +121,11 @@ export const commands = {
 	 *  asking clears it.
 	 */
 	takeTroubleshootRequest: () => typedError<boolean, string>(__TAURI_INVOKE("take_troubleshoot_request")),
+	/**
+	 *  What the last dictation got through: onboarding's Try it shows success
+	 *  only when `completed` grows while its step is open.
+	 */
+	dictationProgress: () => typedError<DictationProgressView_Serialize, string>(__TAURI_INVOKE("dictation_progress")),
 };
 
 /* Types */
@@ -208,6 +213,55 @@ export type ConnectionResult_Serialize = {
 	/**  One plain sentence. */
 	message: string,
 };
+
+/**
+ *  What the last dictation got through (U1). Counts only grow, so a window
+ *  compares them with what it saw when it opened. No transcript, no code.
+ */
+export type DictationProgressView = DictationProgressView_Serialize | DictationProgressView_Deserialize;
+
+/**
+ *  What the last dictation got through (U1). Counts only grow, so a window
+ *  compares them with what it saw when it opened. No transcript, no code.
+ */
+export type DictationProgressView_Deserialize = {
+	/**  Dictations started since launch. */
+	started: number,
+	/**  Dictations that ended pasted with no error. */
+	completed: number,
+	/**  Errors shown. */
+	errors: number,
+	/**  The stages the current or last dictation got through, in order. */
+	stages: DictationStage[],
+	/**  The latest error's sentence, until the next recording starts. */
+	error?: string | null,
+};
+
+/**
+ *  What the last dictation got through (U1). Counts only grow, so a window
+ *  compares them with what it saw when it opened. No transcript, no code.
+ */
+export type DictationProgressView_Serialize = {
+	/**  Dictations started since launch. */
+	started: number,
+	/**  Dictations that ended pasted with no error. */
+	completed: number,
+	/**  Errors shown. */
+	errors: number,
+	/**  The stages the current or last dictation got through, in order. */
+	stages: DictationStage[],
+	/**  The latest error's sentence, until the next recording starts. */
+	error: string | null,
+};
+
+/**  A stage of a dictation, as onboarding's Try it names them. */
+export type DictationStage = 
+/**  Recorded. */
+"recorded" | 
+/**  Transcribed. */
+"transcribed" | 
+/**  Pasted. */
+"pasted";
 
 /**
  *  A stable name for a way dictation can fail. The `snake_case` text

@@ -753,8 +753,7 @@ pub async fn relaunch_app(
 ) -> Result<(), String> {
     onboarding::leave_resume_marker(&dirs.0).map_err(|error| {
         tracing::warn!(%error, "couldn't leave the onboarding marker");
-        "Couldn't prepare the relaunch. Quit dictation-app from the menu bar and open it again."
-            .to_owned()
+        "Couldn't prepare the relaunch. Quit Vocet from the menu bar and open it again.".to_owned()
     })?;
     tracing::info!("relaunching for onboarding");
     shell.0.restart();
@@ -798,6 +797,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::save_report,
         crate::diagnostics::open_issue,
         crate::diagnostics::take_troubleshoot_request,
+        crate::diagnostics::dictation_progress,
     ])
 }
 
@@ -898,6 +898,7 @@ mod tests {
             "saveReport",
             "openIssue",
             "takeTroubleshootRequest",
+            "dictationProgress",
         ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
@@ -906,7 +907,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 23,
+            commands, 24,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1369,7 +1370,7 @@ mod tests {
         /// T3 round 2: the OS turned the login item on and the hotkey
         /// switched, the write failed, and the login item refuses to turn
         /// off again. The error says the settings weren't saved and that
-        /// dictation-app still opens at login; Settings shows it on.
+        /// Vocet still opens at login; Settings shows it on.
         #[test]
         fn a_login_item_that_cannot_be_put_back_is_reported() {
             let (config, dir) = config();
@@ -2736,7 +2737,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 23);
+        assert_eq!(COMMAND_NAMES.len(), 24);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

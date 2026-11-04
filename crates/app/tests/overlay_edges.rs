@@ -48,7 +48,6 @@ fn failed() -> UiEvent {
 fn failed_view() -> OverlayView {
     OverlayView::Error {
         message: ErrorCode::NoSpeech.user_text(),
-        code: ErrorCode::NoSpeech,
     }
 }
 

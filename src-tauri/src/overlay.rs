@@ -180,10 +180,7 @@ enum Payload<'a> {
     Hidden,
     Recording,
     Transcribing,
-    Error {
-        message: &'a str,
-        code: &'static str,
-    },
+    Error { message: &'a str },
 }
 
 impl<'a> From<&'a OverlayView> for Payload<'a> {
@@ -192,10 +189,7 @@ impl<'a> From<&'a OverlayView> for Payload<'a> {
             OverlayView::Hidden => Self::Hidden,
             OverlayView::Recording => Self::Recording,
             OverlayView::Transcribing => Self::Transcribing,
-            OverlayView::Error { message, code } => Self::Error {
-                message,
-                code: code.as_str(),
-            },
+            OverlayView::Error { message } => Self::Error { message },
         }
     }
 }
@@ -237,7 +231,6 @@ mod tests {
         // The latest view, not the first one.
         let error = OverlayView::Error {
             message: "Microphone permission is missing.".to_owned(),
-            code: dictation_core::diagnostics::ErrorCode::MicDenied,
         };
         relay.send(&error, |_| {});
         let (_, again) = title_sends(&relay, &format!("{LISTENING_TITLE} 2"));
@@ -298,7 +291,6 @@ mod tests {
     fn payloads_match_the_page() {
         let error = OverlayView::Error {
             message: "No speech was recognised.".to_owned(),
-            code: dictation_core::diagnostics::ErrorCode::NoSpeech,
         };
         let cases = [
             (OverlayView::Hidden, r#"{"state":"hidden"}"#),
@@ -306,7 +298,7 @@ mod tests {
             (OverlayView::Transcribing, r#"{"state":"transcribing"}"#),
             (
                 error,
-                r#"{"state":"error","message":"No speech was recognised.","code":"no_speech"}"#,
+                r#"{"state":"error","message":"No speech was recognised."}"#,
             ),
         ];
         for (view, json) in cases {

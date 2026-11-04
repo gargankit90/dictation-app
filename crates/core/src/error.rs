@@ -48,7 +48,7 @@ pub enum DictationError {
     /// The global hotkey doesn't work (macOS: often because Accessibility
     /// is off). The app keeps trying and says when it works again.
     #[error(
-        "The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself."
+        "The dictation hotkey isn't working. Allow Vocet in System Settings, Privacy & Security, Accessibility; it comes back by itself."
     )]
     HotkeyFailed,
 }
@@ -120,7 +120,7 @@ mod tests {
             ),
             (
                 DictationError::HotkeyFailed,
-                "The dictation hotkey isn't working. Allow dictation-app in System Settings, Privacy & Security, Accessibility; it comes back by itself.",
+                "The dictation hotkey isn't working. Allow Vocet in System Settings, Privacy & Security, Accessibility; it comes back by itself.",
             ),
         ];
         for (error, message) in cases {
