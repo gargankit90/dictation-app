@@ -75,7 +75,9 @@ e2e_tray_error_clears_on_next_recording() {
   E2E_TRANSCRIBER=settings launch --debug-audio-file "$VM_TONE"
   expect "the app starts and logs ready" wait_for_log 'INFO .*ready'
   expect "the engine has no key" wait_for_log 'engine settings .*has_key=false' 30
-  expect "the tray starts ready, with no title" tray_is_clear
+  # U5: with no key the engine is not ready, so the menu says so from the
+  # start (the old title only appeared after an error).
+  expect "the tray starts with no title, saying the key is missing" tray_shows_no_key_error
   textedit_fresh
 
   expect "the first dictation ends Idle" dictate_once 1
@@ -90,7 +92,8 @@ e2e_tray_error_clears_on_next_recording() {
   launch --press
   expect "the next recording starts" \
     wait_for_log_count 'state changed phase=Recording' $((recordings + 1)) 10
-  expect "the tray is cleared as soon as it records" tray_is_clear
+  expect "the tray's icon shows recording as soon as it records" \
+    wait_for_log 'tray menu .*icon=Recording' 5
   local before
   before=$(idle_count)
   launch --release
