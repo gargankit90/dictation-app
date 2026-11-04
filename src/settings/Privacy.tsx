@@ -25,7 +25,9 @@ export function Privacy({
     setShown(share);
     await sharing.track(async () => {
       const result = await commands.setShareUsageEvents(share);
-      if (result.status === "ok") onStored({ ...settings, share_usage_events: share });
+      // What the app stores now, not a copy of what this pane was given.
+      const reread = await commands.getSettings();
+      if (reread.status === "ok") onStored(reread.data);
       return result.status === "error" ? messageOf(result.error) : null;
     });
     setShown(null);
