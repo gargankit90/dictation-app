@@ -156,7 +156,32 @@ pub const fn fix_for(code: ErrorCode) -> Fix {
 /// The one sentence the status line gives for `code`.
 #[must_use]
 pub fn problem_sentence(code: ErrorCode) -> &'static str {
-    code.info().message
+    // The table still names the old app (U1 renames it); the menu says Vocet.
+    match code {
+        ErrorCode::AccessibilityMissing => "Vocet needs Accessibility to hear your key.",
+        ErrorCode::MicDenied => "Vocet needs the microphone to hear you.",
+        _ => code.info().message,
+    }
+}
+
+/// Whether `code` comes from the engine, key or model, so changing any of
+/// them may have fixed it. Permissions, the hotkey and a single dictation's
+/// outcome (no speech, paste, password field) are not.
+#[must_use]
+pub const fn is_engine_error(code: ErrorCode) -> bool {
+    matches!(
+        code,
+        ErrorCode::KeyMissing
+            | ErrorCode::KeyRejected
+            | ErrorCode::KeyUnreadable
+            | ErrorCode::NetworkUnreachable
+            | ErrorCode::ProviderQuota
+            | ErrorCode::ProviderRedirect
+            | ErrorCode::ModelMissing
+            | ErrorCode::ModelLoading
+            | ErrorCode::ModelLoadingFailed
+            | ErrorCode::EngineFailed
+    )
 }
 
 /// The keycap text for a stored hotkey, as Settings' recorder shows it:
@@ -240,6 +265,10 @@ pub struct Ambient {
     pub problem: Option<ErrorCode>,
     /// Whether onboarding is incomplete.
     pub setup_incomplete: bool,
+    /// Which engine is built right now (changes when a key is saved, the
+    /// engine or model is switched, or a download finishes). An opaque,
+    /// non-secret number.
+    pub engine_generation: usize,
 }
 
 /// One entry of the menu.
@@ -368,6 +397,14 @@ impl TrayStatus {
         if self.ambient == ambient {
             return false;
         }
+        // The user changed the engine, its key or its model, or started a
+        // download: an error from the old setup no longer holds. Others stay.
+        let reconfigured = ambient.engine_generation != self.ambient.engine_generation
+            || ambient.engine != self.ambient.engine
+            || (ambient.download.is_some() && self.ambient.download.is_none());
+        if reconfigured && self.error.is_some_and(is_engine_error) {
+            self.error = None;
+        }
         self.ambient = ambient;
         true
     }
@@ -488,10 +525,12 @@ impl TrayStatus {
             enabled: true,
             accelerator: Some("CmdOrCtrl+Q"),
         });
-        let icon = if problem.is_some() {
-            TrayIcon::Attention
-        } else if self.recording {
+        // While the key is held the recording icon wins; the dot is back
+        // after, if the problem remains.
+        let icon = if self.recording {
             TrayIcon::Recording
+        } else if problem.is_some() {
+            TrayIcon::Attention
         } else {
             TrayIcon::Normal
         };
@@ -814,9 +853,140 @@ mod tests {
         assert_eq!(tray.fix(), Some(Fix::OpenAccessibilitySettings));
         assert_eq!(
             label_of(&menu, id::STATUS).as_deref(),
-            Some("! Accessibility is off for dictation-app.")
+            Some("! Vocet needs Accessibility to hear your key.")
         );
         assert!(label_of(&menu, id::FIX_KEY).is_none());
+    }
+
+    /// Design Lead: no "dictation-app" in any sentence the menu shows.
+    #[test]
+    fn no_problem_sentence_names_the_old_app() {
+        for code in ErrorCode::ALL {
+            assert!(!problem_sentence(code).contains("dictation-app"), "{code}");
+        }
+        assert_eq!(
+            problem_sentence(ErrorCode::AccessibilityMissing),
+            "Vocet needs Accessibility to hear your key."
+        );
+    }
+
+    /// Design Lead: recording beats the dot, and the dot returns after.
+    #[test]
+    fn the_recording_icon_wins_over_the_attention_dot() {
+        let mut tray = ready("RightAlt", "Groq");
+        tray.set_ambient(Ambient {
+            problem: Some(ErrorCode::KeyMissing),
+            ..ambient("RightAlt", "Groq")
+        });
+        assert_eq!(tray.menu().icon, TrayIcon::Attention);
+        tray.on_event(&UiEvent::StateChanged(Phase::Recording));
+        let menu = tray.menu();
+        assert_eq!(menu.icon, TrayIcon::Recording);
+        // The status still says what is wrong.
+        assert!(label_of(&menu, id::STATUS).unwrap().starts_with('!'));
+        tray.on_event(&UiEvent::StateChanged(Phase::Transcribing));
+        assert_eq!(tray.menu().icon, TrayIcon::Attention);
+    }
+
+    /// Codex round 1 #4: an error from the old key or engine goes when the
+    /// setting changes; unrelated errors stay.
+    #[test]
+    fn a_rejected_key_clears_when_the_engine_is_switched_or_the_key_replaced() {
+        let rejected = || transcription_failed("The provider rejected your API key.");
+        // Switched to the local engine.
+        let mut tray = ready("RightAlt", "Groq");
+        tray.on_event(&rejected());
+        assert_eq!(tray.problem(), Some(ErrorCode::KeyRejected));
+        tray.set_ambient(Ambient {
+            engine_generation: 2,
+            ..ambient("RightAlt", "On this Mac (Parakeet English)")
+        });
+        assert_eq!(tray.problem(), None);
+        assert_eq!(tray.menu().icon, TrayIcon::Normal);
+        // Same provider, new key: the engine is rebuilt.
+        let mut tray = TrayStatus::default();
+        tray.set_ambient(Ambient {
+            engine_generation: 1,
+            ..ambient("RightAlt", "Groq")
+        });
+        tray.on_event(&rejected());
+        assert!(tray.problem().is_some());
+        // An unrelated change keeps it.
+        tray.set_ambient(Ambient {
+            engine_generation: 1,
+            hotkey: "LeftAlt".to_owned(),
+            ..ambient("RightAlt", "Groq")
+        });
+        assert!(tray.problem().is_some());
+        tray.set_ambient(Ambient {
+            engine_generation: 2,
+            ..ambient("RightAlt", "Groq")
+        });
+        assert_eq!(tray.problem(), None);
+    }
+
+    #[test]
+    fn errors_unrelated_to_the_engine_survive_a_new_engine() {
+        for event in [
+            error(DictationError::PermissionMissing(Permission::Accessibility)),
+            error(DictationError::EmptyTranscript),
+            error(DictationError::HotkeyFailed),
+        ] {
+            let mut tray = TrayStatus::default();
+            tray.set_ambient(Ambient {
+                engine_generation: 1,
+                ..ambient("RightAlt", "Groq")
+            });
+            tray.on_event(&event);
+            let before = tray.problem();
+            assert!(before.is_some());
+            tray.set_ambient(Ambient {
+                engine_generation: 2,
+                ..ambient("RightAlt", "Groq")
+            });
+            assert_eq!(tray.problem(), before, "{event:?}");
+        }
+    }
+
+    /// Missing model, then a download starts, then the model is ready.
+    #[test]
+    fn a_missing_model_error_clears_when_its_download_starts_and_finishes() {
+        let mut tray = TrayStatus::default();
+        let local = "On this Mac (Parakeet English)";
+        tray.set_ambient(Ambient {
+            engine_generation: 1,
+            problem: Some(ErrorCode::ModelMissing),
+            ..ambient("RightAlt", local)
+        });
+        tray.on_event(&transcription_failed(
+            "The on-device model isn't downloaded. Download it in Settings.",
+        ));
+        assert_eq!(tray.problem(), Some(ErrorCode::ModelMissing));
+        tray.set_ambient(Ambient {
+            engine_generation: 1,
+            download: Some(Download {
+                name: "Parakeet English".to_owned(),
+                percent: 10,
+            }),
+            problem: Some(ErrorCode::ModelMissing),
+            ..ambient("RightAlt", local)
+        });
+        let menu = tray.menu();
+        assert!(
+            label_of(&menu, id::STATUS)
+                .unwrap()
+                .starts_with("↓ Downloading")
+        );
+        tray.set_ambient(Ambient {
+            engine_generation: 2,
+            ..ambient("RightAlt", local)
+        });
+        assert!(
+            label_of(&tray.menu(), id::STATUS)
+                .unwrap()
+                .starts_with("✓ Ready")
+        );
+        assert_eq!(tray.menu().icon, TrayIcon::Normal);
     }
 
     #[test]
