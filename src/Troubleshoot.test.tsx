@@ -189,16 +189,11 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
   });
 
   it("U1 criterion 8: hides Test connection for the local model and shows its readiness", async () => {
-    checks = [
-      ...HEALTHY.slice(0, 3),
-      check({
-        id: "engine",
-        label: "Transcription engine",
-        detail: "Ready.",
-        local_model: "Ready: the model is downloaded and loaded.",
-      }),
-      HEALTHY[4],
-    ];
+    checks = HEALTHY.map((row) =>
+      row.id === "engine"
+        ? { ...row, local_model: "Ready: the model is downloaded and loaded." }
+        : row,
+    );
     view();
     await screen.findByRole("list", { name: "Checks" });
     expect(screen.queryByRole("button", { name: "Test connection" })).toBeNull();
