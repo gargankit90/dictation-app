@@ -11,3 +11,8 @@ extend-exclude = [
     # Licence texts from the crates and packages we ship, as published.
     "THIRD-PARTY-LICENSES.txt",
 ]
+
+# ISO 639 language codes in src/languages.ts (Faroese, Bashkir).
+[default.extend-words]
+fo = "fo"
+ba = "ba"
