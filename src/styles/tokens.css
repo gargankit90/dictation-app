@@ -1,0 +1,128 @@
+/* Source: design-system/tokens.css, DS1 (copied verbatim below this line). */
+/* Vocet design tokens, DS1 draft 1 (Design Lead, 2026-11-03).
+   One file for the app (src/) and the website (site/). The app uses the
+   system font; the website adds Inter / Inter Tight for display type.
+   Every text/background pair below meets WCAG 4.5:1 (large text 3:1). */
+
+:root {
+  color-scheme: light dark;
+
+  /* Brand */
+  --vc-accent: #1f4fc9; /* buttons, links, focus, selection */
+  --vc-accent-hover: #163c9a;
+  --vc-accent-fg: #ffffff; /* text on accent */
+  --vc-accent-soft: #e8eefb; /* selected row, info background */
+
+  /* Neutrals */
+  --vc-ink: #1c1b19; /* primary text */
+  --vc-ink-2: #3b3a36; /* secondary text */
+  --vc-muted: #5c5a55; /* hints, captions */
+  --vc-faint: #6e6b64; /* placeholders (large or non-essential only) */
+  --vc-line: #e4e1d9; /* separators, card borders */
+  --vc-line-strong: #d6d2c8; /* control borders */
+  --vc-bg: #ffffff; /* app window */
+  --vc-bg-grouped: #f5f4f0; /* settings group background, site bands */
+  --vc-bg-site: #fbfaf7; /* website page */
+
+  /* States: always with an icon or word, never colour alone */
+  --vc-ready: #1e7a44; /* ready, success, "Pasted" */
+  --vc-ready-soft: #e6f4ec;
+  --vc-attention: #9a5300; /* needs attention, paused, skipped */
+  --vc-attention-soft: #fdf1e0;
+  --vc-danger: #c4261d; /* errors, destructive */
+  --vc-danger-soft: #fbe9e7;
+  --vc-recording: #e5484d; /* the recording dot only */
+
+  /* Overlay (recording pill): dark in both appearances */
+  --vc-overlay-bg: rgba(28, 27, 25, 0.92);
+  --vc-overlay-fg: #ffffff;
+  --vc-overlay-muted: #c9c6bf;
+  --vc-meter: #ffffff;
+  --vc-meter-idle: rgba(255, 255, 255, 0.28);
+
+  /* Type */
+  --vc-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --vc-font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  --vc-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  /* App scale (px). Devanagari falls back to the system's Kohinoor/Devanagari MT. */
+  --vc-text-xs: 11px; /* badges */
+  --vc-text-sm: 12px; /* captions, overlay hint */
+  --vc-text-md: 13px; /* body, controls (macOS default) */
+  --vc-text-lg: 15px; /* practice box, overlay label */
+  --vc-text-xl: 17px; /* section titles */
+  --vc-text-2xl: 22px; /* onboarding step titles */
+  --vc-text-3xl: 28px; /* onboarding welcome */
+  --vc-leading: 1.45;
+
+  /* Space: 4 px grid */
+  --vc-space-1: 4px;
+  --vc-space-2: 8px;
+  --vc-space-3: 12px;
+  --vc-space-4: 16px;
+  --vc-space-5: 20px;
+  --vc-space-6: 24px;
+  --vc-space-8: 32px;
+  --vc-space-12: 48px;
+
+  /* Shape */
+  --vc-radius-sm: 6px; /* controls, keycaps */
+  --vc-radius-md: 10px; /* settings groups, cards */
+  --vc-radius-lg: 14px; /* onboarding cards, site cards */
+  --vc-radius-pill: 999px;
+
+  /* Size */
+  --vc-control-h: 28px; /* settings buttons, fields */
+  --vc-control-h-lg: 44px; /* onboarding and website primary actions */
+  --vc-target-min: 44px; /* website touch targets */
+
+  /* Elevation */
+  --vc-shadow-card: 0 1px 2px rgba(28, 27, 25, 0.06);
+  --vc-shadow-pop: 0 12px 32px rgba(28, 27, 25, 0.18);
+
+  /* Motion */
+  --vc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --vc-dur-fast: 120ms;
+  --vc-dur: 200ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --vc-accent: #7ea2ff;
+    --vc-accent-hover: #a3bdff;
+    --vc-accent-fg: #0b1430;
+    --vc-accent-soft: #1c2747;
+
+    --vc-ink: #f2f1ee;
+    --vc-ink-2: #d9d6cf;
+    --vc-muted: #aaa69e;
+    --vc-faint: #8f8b83;
+    --vc-line: #3a3936;
+    --vc-line-strong: #4a4844;
+    --vc-bg: #1e1e1e;
+    --vc-bg-grouped: #262624;
+    --vc-bg-site: #161614;
+
+    --vc-ready: #4cc26a;
+    --vc-ready-soft: #17301f;
+    --vc-attention: #f2b544;
+    --vc-attention-soft: #33270f;
+    --vc-danger: #ff6b62;
+    --vc-danger-soft: #3a1a17;
+
+    --vc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --vc-shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --vc-dur-fast: 0ms;
+    --vc-dur: 0ms;
+  }
+}
+
+/* Website only: display type */
+.vc-site {
+  --vc-font-ui: Inter, system-ui, -apple-system, sans-serif;
+  --vc-font-display: "Inter Tight", Inter, system-ui, sans-serif;
+}
