@@ -5,16 +5,24 @@
 //! adapted from Handy's `src-tauri/src/input.rs` (MIT, commit 9e57a0d; see
 //! `NOTICE`), with the "scan for the key that types v with ⌘" idea it
 //! shares with Muesli's `PasteShortcut.swift` (MIT).
+//!
+//! The read receipt of a dictation write ([`PastePromise`], #239) is
+//! adapted from Handy's `src-tauri/src/paste_tx/macos.rs` (MIT, commit
+//! 9e57a0d): the text goes on the pasteboard as a promise
+//! (`declareTypes:owner:`), and AppKit asks the owner for it when an app
+//! reads it.
 
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use dictation_ports::{
     Clipboard, ClipboardError, ClipboardItem, ClipboardSnapshot, InsertError, SessionMarker,
 };
 use objc2::rc::{Retained, autoreleasepool};
-use objc2::runtime::ProtocolObject;
+use objc2::runtime::{NSObject, ProtocolObject};
+use objc2::{AnyThread, DefinedClass, define_class, msg_send};
 use objc2_app_kit::{NSPasteboard, NSPasteboardItem, NSPasteboardTypeString, NSPasteboardWriting};
 use objc2_core_graphics::{
     CGEvent, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation, CGEventType,
@@ -75,6 +83,66 @@ fn unavailable(what: &str) -> ClipboardError {
     ClipboardError::Unavailable(what.to_owned())
 }
 
+/// What a [`PastePromise`] hands out, and how often it did.
+#[derive(Debug)]
+struct PromiseIvars {
+    text: String,
+    reads: Arc<AtomicU64>,
+}
+
+define_class!(
+    // SAFETY: NSObject has no subclassing requirements, the class adds no
+    // Drop or dealloc logic, and its ivars are an immutable String and an
+    // atomic counter.
+    #[unsafe(super(NSObject))]
+    #[name = "DictationAppPastePromise"]
+    #[ivars = PromiseIvars]
+    #[derive(Debug)]
+    struct PastePromise;
+
+    impl PastePromise {
+        /// `NSPasteboardOwner`: an app reads the promised text now. Each
+        /// call is a read receipt (#239). Runs on the main thread.
+        #[unsafe(method(pasteboard:provideDataForType:))]
+        fn provide_data(&self, pasteboard: &NSPasteboard, data_type: &NSString) {
+            // SAFETY: as in MacPasteboard::read_text.
+            let string_type = unsafe { NSPasteboardTypeString };
+            // Only the text is promised; the markers are set at once.
+            if data_type.isEqualToString(string_type) {
+                let ivars = self.ivars();
+                ivars.reads.fetch_add(1, Ordering::SeqCst);
+                pasteboard.setString_forType(&NSString::from_str(&ivars.text), data_type);
+            }
+        }
+    }
+);
+
+impl PastePromise {
+    fn new(text: String, reads: Arc<AtomicU64>) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(PromiseIvars { text, reads });
+        // SAFETY: NSObject's init on a freshly allocated object with its
+        // ivars set, as `define_class!` requires.
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+thread_local! {
+    /// The owner of the dictation text promised on the general pasteboard.
+    /// The pasteboard doesn't keep its owner alive, so this does, until the
+    /// next dictation write replaces it: if no app read the text in time,
+    /// the transcript stays on the clipboard, and a later paste still gets
+    /// it. Only touched on the main thread.
+    static PROMISE: RefCell<Option<Retained<PastePromise>>> = const { RefCell::new(None) };
+}
+
+/// The read counter of the last dictation promised on the general
+/// pasteboard, with its session token.
+#[derive(Debug, Default)]
+struct PromiseReads {
+    token: String,
+    reads: Arc<AtomicU64>,
+}
+
 /// The general pasteboard. Saves and restores every item and every
 /// representation the copying app put on it (text, rich text, images,
 /// file URLs...), as data. Lazily promised data that the owning app can no
@@ -85,6 +153,8 @@ pub struct MacPasteboard {
     /// A named pasteboard instead of the general one (tests only, so they
     /// never touch the user's clipboard).
     name: Option<String>,
+    /// The reads of the last dictation write, if it was a promise.
+    promise: Mutex<Option<PromiseReads>>,
     #[cfg(test)]
     before_commit: Option<BeforeCommit>,
 }
@@ -159,6 +229,44 @@ impl MacPasteboard {
             .is_some_and(|s| s.to_string() == token)
     }
 
+    /// Puts `text` on the general pasteboard as a promise owned by a new
+    /// [`PastePromise`], with the markers and the session `token` set at
+    /// once, on the main thread (AppKit asks the owner for promised data on
+    /// the main run loop). Returns the change count after the write.
+    fn write_promise(text: &str, token: &str, reads: Arc<AtomicU64>) -> Option<isize> {
+        let (text, token) = (text.to_owned(), token.to_owned());
+        on_main(move || {
+            autoreleasepool(|_| {
+                // SAFETY: as in read_text.
+                let string_type = unsafe { NSPasteboardTypeString };
+                let mut types = vec![NSString::from_str(&string_type.to_string())];
+                types.extend(MARKER_TYPES.map(NSString::from_str));
+                types.push(NSString::from_str(SESSION_TYPE));
+                let types = NSArray::from_retained_slice(&types);
+                let promise = PastePromise::new(text, reads);
+                let pasteboard = NSPasteboard::generalPasteboard();
+                let _writing = writing();
+                // SAFETY: the owner is a PastePromise, which answers
+                // pasteboard:provideDataForType:, the one owner method
+                // AppKit requires; PROMISE keeps it alive below.
+                let count = unsafe { pasteboard.declareTypes_owner(&types, Some(&promise)) };
+                if count <= 0 {
+                    return None;
+                }
+                let empty = NSData::new();
+                let set = MARKER_TYPES.iter().all(|marker| {
+                    pasteboard.setData_forType(Some(&empty), &NSString::from_str(marker))
+                }) && pasteboard.setString_forType(
+                    &NSString::from_str(&token),
+                    &NSString::from_str(SESSION_TYPE),
+                );
+                PROMISE.with(|slot| *slot.borrow_mut() = Some(promise));
+                set.then(|| pasteboard.changeCount())
+            })
+        })
+        .flatten()
+    }
+
     fn snapshot_items(pasteboard: &NSPasteboard) -> Vec<ClipboardItem> {
         let Some(items) = pasteboard.pasteboardItems() else {
             return Vec::new();
@@ -229,6 +337,19 @@ impl Clipboard for MacPasteboard {
     }
 
     fn write_dictation(&self, text: &str) -> Result<SessionMarker, ClipboardError> {
+        if self.name.is_none() {
+            let token = self.next_token();
+            let reads = Arc::new(AtomicU64::new(0));
+            let count = Self::write_promise(text, &token, Arc::clone(&reads));
+            let mut promise = self.promise.lock().unwrap_or_else(PoisonError::into_inner);
+            *promise = None;
+            let count = count.ok_or_else(|| unavailable("the pasteboard refused the dictation"))?;
+            *promise = Some(PromiseReads {
+                token: token.clone(),
+                reads,
+            });
+            return Ok(SessionMarker::new(format!("{count}:{token}")));
+        }
         autoreleasepool(|_| {
             let token = self.next_token();
             let item = NSPasteboardItem::new();
@@ -264,6 +385,20 @@ impl Clipboard for MacPasteboard {
     ) -> Result<bool, ClipboardError> {
         let snapshot = ClipboardSnapshot::Text(previous.map(str::to_owned));
         self.restore_snapshot_if_unchanged(session, &snapshot)
+    }
+
+    fn text_reads(&self, session: &SessionMarker) -> Option<u64> {
+        let reads = {
+            let promise = self.promise.lock().unwrap_or_else(PoisonError::into_inner);
+            let promise = promise.as_ref()?;
+            let (_, token) = session.token().split_once(':')?;
+            if token != promise.token {
+                return None;
+            }
+            Arc::clone(&promise.reads)
+        };
+        autoreleasepool(|_| Self::holds(&self.pasteboard(), session))
+            .then(|| reads.load(Ordering::SeqCst))
     }
 
     fn snapshot(&self) -> Result<ClipboardSnapshot, ClipboardError> {

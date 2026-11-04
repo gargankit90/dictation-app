@@ -49,6 +49,17 @@ Handy (https://github.com/cjpais/Handy), src-tauri/src/input.rs at commit
   layout (crates/platform/src/insert/macos.rs, module `layout`).
   MIT License, Copyright (c) 2025 CJ Pais
 
+Handy (https://github.com/cjpais/Handy), src-tauri/src/paste_tx/macos.rs
+and paste_tx/mod.rs at commit 9e57a0d
+  Adapted: the dictation text written as a pasteboard promise
+  (declareTypes:owner: with an owner answering
+  pasteboard:provideDataForType:), whose data requests are read receipts,
+  and restoring the clipboard only after a read that follows the paste
+  chord and a quiet period, with a timeout
+  (crates/platform/src/insert/macos.rs `PastePromise`,
+  crates/platform/src/insert/mod.rs `wait_for_read`).
+  MIT License, Copyright (c) 2025 CJ Pais
+
 objc2-app-kit, objc2-foundation, objc2-core-graphics
 (https://github.com/madsmtm/objc2)
   NSPasteboard access and the paste key events

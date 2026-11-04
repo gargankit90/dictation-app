@@ -14,10 +14,16 @@
 //! 3. send the paste chord, asking a last time right before the keys go
 //!    out ([`PasteKeys::paste_unless`]); if Secure Input came on after the
 //!    write, the chord isn't sent and step 5 puts the clipboard back;
-//! 4. wait a short settle delay, so the target app reads the clipboard;
+//! 4. wait until the target app has read the text (#239): with a clipboard
+//!    that reports reads ([`Clipboard::text_reads`], the macOS one), until
+//!    a read after the chord and then [`READ_QUIET`] without another, at
+//!    most [`READ_TIMEOUT`]; with one that can't tell, a fixed settle delay;
 //! 5. put the saved contents back only if our session marker is still on
 //!    the clipboard ([`Clipboard::restore_snapshot_if_unchanged`]): if the
-//!    user (or an app) copied something meanwhile, it's left alone.
+//!    user (or an app) copied something meanwhile, it's left alone. If no
+//!    read came before the timeout, the transcript stays on the clipboard
+//!    instead, so a late paste still pastes it and the user can paste it by
+//!    hand: never their old clipboard, never nothing.
 //!
 //! The probes shrink the race with the user's focus; they can't close it.
 //! The OS has no "check focus and paste" in one step, so a password field
@@ -42,6 +48,20 @@ pub use macos::{MacPasteKeys, MacPasteboard};
 /// Apps read the pasteboard asynchronously; restoring too early would paste
 /// the user's old contents instead of the transcript.
 pub const DEFAULT_SETTLE: Duration = Duration::from_millis(300);
+
+/// How often the paste checks for the target's read of the clipboard.
+pub const READ_POLL: Duration = Duration::from_millis(10);
+
+/// After the target's last read, how long without another before the
+/// clipboard goes back: some apps read more than once per paste (a probe,
+/// then the read).
+pub const READ_QUIET: Duration = Duration::from_millis(150);
+
+/// How long the paste waits for the target to read the clipboard. A busy
+/// target (the first paste after launch, #239, read it more than 300 ms
+/// after the chord) still reads in time; if none reads by then, the
+/// transcript stays on the clipboard.
+pub const READ_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// macOS's `kVK_ANSI_V`: where V is on a US keyboard, and the fallback when
 /// the current layout can't be read.
@@ -192,6 +212,18 @@ impl SecureInputProbe for NeverSecure {
     }
 }
 
+/// What the wait after the chord found out (step 4 in the module docs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReadWait {
+    /// The target read the text, and then nothing read it for
+    /// [`READ_QUIET`]; or the clipboard stopped holding our write.
+    Read,
+    /// Nothing read the text after the chord within [`READ_TIMEOUT`].
+    NotRead,
+    /// The clipboard can't report reads; the fixed settle delay passed.
+    Unknown,
+}
+
 /// The paste flow (see the module docs) over any clipboard and key sender.
 #[derive(Debug)]
 pub struct PasteInserter<C, K, S = ThreadSettle, P = NeverSecure> {
@@ -265,12 +297,22 @@ impl<C: Clipboard, K: PasteKeys, S: Settle, P: SecureInputProbe> TextInserter
             .clipboard
             .write_dictation(text)
             .map_err(|e| failed("could not write the clipboard", &e))?;
+        // Reads before the chord are other apps reacting to the change (a
+        // clipboard manager), not the paste: only later ones count.
+        let before = self.clipboard.text_reads(&session);
         // The last check is inside `paste_unless`, after the key sender's
         // own preparation. If it trips, nothing is sent and the restore
         // below puts the user's clipboard back (unless they copied since).
         let pasted = self.keys.paste_unless(&blocked);
-        if pasted.is_ok() {
-            self.settle.settle(self.delay);
+        if pasted.is_ok() && self.wait_for_read(&session, before) == ReadWait::NotRead {
+            // Never put the old clipboard back under a paste that may still
+            // land: the target would paste the user's old text, not the
+            // transcript (#239). Leave the transcript for the user instead.
+            tracing::warn!(
+                timeout = ?READ_TIMEOUT,
+                "no app read the paste; the transcript stays on the clipboard"
+            );
+            return pasted;
         }
         match self
             .clipboard
@@ -282,6 +324,58 @@ impl<C: Clipboard, K: PasteKeys, S: Settle, P: SecureInputProbe> TextInserter
             Err(error) => tracing::warn!(%error, "could not restore the clipboard"),
         }
         pasted
+    }
+}
+
+impl<C: Clipboard, K, S: Settle, P> PasteInserter<C, K, S, P> {
+    /// Step 4: waits until the target has read the text written for
+    /// `session` (counting from `before`, the reads before the chord), or
+    /// the fixed settle delay if the clipboard can't tell.
+    fn wait_for_read(
+        &self,
+        session: &dictation_ports::SessionMarker,
+        before: Option<u64>,
+    ) -> ReadWait {
+        let Some(before) = before else {
+            self.settle.settle(self.delay);
+            return ReadWait::Unknown;
+        };
+        let mut last = before;
+        let mut first = None;
+        let mut waited = Duration::ZERO;
+        let mut quiet = Duration::ZERO;
+        while waited < READ_TIMEOUT {
+            self.settle.settle(READ_POLL);
+            waited += READ_POLL;
+            // `None`: the clipboard no longer holds our write (the user
+            // copied); the restore after this leaves it alone.
+            let Some(reads) = self.clipboard.text_reads(session) else {
+                tracing::info!("the clipboard changed while waiting for the paste's read");
+                return ReadWait::Read;
+            };
+            if reads != last {
+                last = reads;
+                first.get_or_insert(waited);
+                quiet = Duration::ZERO;
+            } else if first.is_some() {
+                quiet += READ_POLL;
+                if quiet >= READ_QUIET {
+                    break;
+                }
+            }
+        }
+        match first {
+            Some(first) => {
+                // Timing only, never the text: shows how late targets read.
+                tracing::info!(
+                    first_read_ms = first.as_millis(),
+                    reads = last - before,
+                    "the target read the paste"
+                );
+                ReadWait::Read
+            }
+            None => ReadWait::NotRead,
+        }
     }
 }
 
@@ -940,5 +1034,217 @@ mod tests {
         let started = std::time::Instant::now();
         ThreadSettle.settle(Duration::from_millis(1));
         assert!(started.elapsed() >= Duration::from_millis(1));
+    }
+
+    /// A [`MemClipboard`] that reports reads of the dictation text, like
+    /// the macOS promise: `reads` counts them, `read_at_write` reads it once
+    /// as it is written (a clipboard manager reacting before the chord).
+    #[derive(Clone, Default)]
+    struct ReadsClipboard {
+        inner: MemClipboard,
+        reads: Arc<std::sync::atomic::AtomicU64>,
+        read_at_write: bool,
+    }
+
+    impl ReadsClipboard {
+        fn with_text(text: &str) -> Self {
+            Self {
+                inner: MemClipboard::with_text(text),
+                ..Self::default()
+            }
+        }
+
+        fn read(&self) {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    impl Clipboard for ReadsClipboard {
+        fn read_text(&self) -> Result<Option<String>, ClipboardError> {
+            self.inner.read_text()
+        }
+        fn write_text(&self, text: &str) -> Result<(), ClipboardError> {
+            self.inner.write_text(text)
+        }
+        fn write_dictation(
+            &self,
+            text: &str,
+        ) -> Result<dictation_ports::SessionMarker, ClipboardError> {
+            let session = self.inner.write_dictation(text);
+            if self.read_at_write {
+                self.read();
+            }
+            session
+        }
+        fn restore_if_unchanged(
+            &self,
+            session: &dictation_ports::SessionMarker,
+            previous: Option<&str>,
+        ) -> Result<bool, ClipboardError> {
+            self.inner.restore_if_unchanged(session, previous)
+        }
+        fn text_reads(&self, session: &dictation_ports::SessionMarker) -> Option<u64> {
+            (self.inner.session().as_ref() == Some(session))
+                .then(|| self.reads.load(std::sync::atomic::Ordering::SeqCst))
+        }
+    }
+
+    /// A settle that runs `at(poll)` on every wait, counting from 1.
+    fn polls(at: impl Fn(u32) + Send + Sync + 'static) -> FakeSettle {
+        let count = Arc::new(Mutex::new(0_u32));
+        FakeSettle {
+            during: Some(Arc::new(move || {
+                let mut n = count.lock().unwrap();
+                *n += 1;
+                at(*n);
+            })),
+            ..FakeSettle::default()
+        }
+    }
+
+    fn waited(settle: &FakeSettle) -> Duration {
+        settle.waits.lock().unwrap().iter().sum()
+    }
+
+    fn read_flow(
+        clipboard: &ReadsClipboard,
+        settle: &FakeSettle,
+    ) -> (FakeKeys, Result<(), InsertError>) {
+        let keys = keys_for(&clipboard.inner);
+        let result = PasteInserter::new(
+            clipboard.clone(),
+            keys.clone(),
+            settle.clone(),
+            DEFAULT_SETTLE,
+        )
+        .insert("dictated words");
+        (keys, result)
+    }
+
+    const QUIET_POLLS: u32 = 15;
+
+    // P1 criterion 3 (#239): the target read the clipboard 500 ms after the
+    // chord, later than the old fixed 300 ms; the user's clipboard goes back
+    // only after that read (and the quiet period), not under the paste.
+    #[test]
+    fn the_restore_waits_for_a_late_read_by_the_target() {
+        assert_eq!(READ_QUIET, READ_POLL * QUIET_POLLS);
+        let clipboard = ReadsClipboard::with_text("the user's text");
+        let (probe, seen) = (clipboard.clone(), Arc::new(Mutex::new(None)));
+        let record = Arc::clone(&seen);
+        let settle = polls(move |n| {
+            if n == 50 {
+                // What the target pastes: the clipboard as it reads it.
+                *record.lock().unwrap() = probe.inner.read_text().unwrap();
+                probe.read();
+            }
+        });
+        let (_, result) = read_flow(&clipboard, &settle);
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(seen.lock().unwrap().as_deref(), Some("dictated words"));
+        assert_eq!(waited(&settle), READ_POLL * (50 + QUIET_POLLS));
+        assert_eq!(
+            clipboard.read_text().unwrap().as_deref(),
+            Some("the user's text")
+        );
+        assert_eq!(clipboard.inner.session(), None);
+    }
+
+    #[test]
+    fn another_read_restarts_the_quiet_period() {
+        let clipboard = ReadsClipboard::with_text("the user's text");
+        let probe = clipboard.clone();
+        let settle = polls(move |n| {
+            if n == 5 || n == 15 {
+                probe.read();
+            }
+        });
+        let (_, result) = read_flow(&clipboard, &settle);
+        assert_eq!(result, Ok(()));
+        assert_eq!(waited(&settle), READ_POLL * (15 + QUIET_POLLS));
+        assert_eq!(
+            clipboard.read_text().unwrap().as_deref(),
+            Some("the user's text")
+        );
+    }
+
+    // P1 criterion 4: no app read the paste in time, so it may still land
+    // late: the transcript stays on the clipboard (never the user's old
+    // text under a late paste, never nothing), and the paste isn't an error.
+    #[test]
+    fn without_a_read_the_transcript_stays_on_the_clipboard() {
+        let clipboard = ReadsClipboard::with_text("the user's text");
+        let settle = FakeSettle::default();
+        let (keys, result) = read_flow(&clipboard, &settle);
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(
+            *keys.pastes.lock().unwrap(),
+            [Some("dictated words".to_owned())]
+        );
+        assert_eq!(waited(&settle), READ_TIMEOUT);
+        assert_eq!(
+            clipboard.read_text().unwrap().as_deref(),
+            Some("dictated words")
+        );
+        assert_eq!(clipboard.inner.markers(), ClipboardMarkers::DICTATION);
+    }
+
+    // A read before the chord is another app reacting to the change (a
+    // clipboard manager), not the paste.
+    #[test]
+    fn a_read_before_the_chord_is_not_the_paste() {
+        let clipboard = ReadsClipboard {
+            read_at_write: true,
+            ..ReadsClipboard::with_text("the user's text")
+        };
+        let settle = FakeSettle::default();
+        let (_, result) = read_flow(&clipboard, &settle);
+        assert_eq!(result, Ok(()));
+        assert_eq!(waited(&settle), READ_TIMEOUT);
+        assert_eq!(
+            clipboard.read_text().unwrap().as_deref(),
+            Some("dictated words")
+        );
+    }
+
+    // The user copies while the paste waits: the wait ends and their copy
+    // stays.
+    #[test]
+    fn a_copy_while_waiting_ends_the_wait_and_is_kept() {
+        let clipboard = ReadsClipboard::with_text("the user's text");
+        let probe = clipboard.clone();
+        let settle = polls(move |n| {
+            if n == 3 {
+                probe.inner.user_copies("copied meanwhile");
+            }
+        });
+        let (_, result) = read_flow(&clipboard, &settle);
+        assert_eq!(result, Ok(()));
+        assert_eq!(waited(&settle), READ_POLL * 3);
+        assert_eq!(
+            clipboard.read_text().unwrap().as_deref(),
+            Some("copied meanwhile")
+        );
+    }
+
+    // A failed chord waits for nothing: the clipboard goes back at once.
+    #[test]
+    fn a_failed_chord_does_not_wait_for_a_read() {
+        let clipboard = ReadsClipboard::with_text("the user's text");
+        let keys = FakeKeys {
+            fail: Some(InsertError::PermissionDenied),
+            ..keys_for(&clipboard.inner)
+        };
+        let settle = FakeSettle::default();
+        let result = PasteInserter::new(clipboard.clone(), keys, settle.clone(), DEFAULT_SETTLE)
+            .insert("dictated words");
+        assert_eq!(result, Err(InsertError::PermissionDenied));
+        assert!(settle.waits.lock().unwrap().is_empty());
+        assert_eq!(
+            clipboard.read_text().unwrap().as_deref(),
+            Some("the user's text")
+        );
     }
 }
