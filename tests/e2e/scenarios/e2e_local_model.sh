@@ -8,11 +8,25 @@
 
 textedit_has_phrase() { textedit_text | grep -qi "dictation test"; }
 
-# Waits (up to 25 min) for the model to show as downloaded. The Terminal job
-# that runs the wait is killed after VM_TERMINAL_TIMEOUT (30 s by default),
-# so it must outlast the 1500 s wait inside it.
+# Waits (up to 25 min) for the model to show as downloaded. It looks every
+# 60 s; if the download broke (a flaky network: the row says "Paused at" and
+# Download continues it) it presses Download again, so one dropped connection
+# doesn't end the run. Each ax call is its own short Terminal job: one longer
+# than VM_TERMINAL_TIMEOUT (30 s by default) is killed, which is what ended
+# the old single 1500 s wait early.
 download_wait() {
-  VM_TERMINAL_TIMEOUT=1560 ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" Downloaded 1500
+  local deadline=$((SECONDS + 1500))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if VM_TERMINAL_TIMEOUT=90 ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" Downloaded 60; then
+      return 0
+    fi
+    if ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Paused at" 2 ||
+      ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Not downloaded" 2; then
+      log "  the download stopped part way; pressing Download to continue it"
+      ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Download || true
+    fi
+  done
+  return 1
 }
 
 e2e_local_model() {
