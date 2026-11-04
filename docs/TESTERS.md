@@ -145,6 +145,10 @@ You install from the DMG once. After that, Vocet updates itself:
   com.dictationapp.desktop"; enter your Mac password. Until you answer,
   Vocet can't read the key and says so. It can come back after any update
   of this build, not only this one.
+- **Login Items may still say `dictation-app`.** If you had the old build
+  with Launch at login on, the entry in System Settings → General → Login
+  Items keeps the name macOS stored when it was added. It is the same item
+  and opens Vocet; the name is cosmetic.
 - Every update is signed with our update key, and the app refuses one whose
   signature doesn't match (_"The update's signature didn't match this app's
   update key, so it was not installed."_). If you see that, report it (see "Report a bug").

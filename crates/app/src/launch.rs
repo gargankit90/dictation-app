@@ -98,57 +98,6 @@ pub fn apply(login: &dyn LaunchAtLogin, settings: &mut Settings) -> Result<(), L
     }
 }
 
-/// The file in the config folder that remembers what the login item was last
-/// registered as.
-pub const LOGIN_ITEM_MARKER: &str = "login-item-registered";
-
-/// What the login item is registered as: the app's name and where it is.
-/// macOS keeps the name and path an item was first registered with (a build
-/// renamed from dictation-app still showed "dictation-app" in Login Items,
-/// U1), so a change in either means the item is registered again.
-#[must_use]
-pub fn login_identity(app_name: &str, bundle_path: &str) -> String {
-    format!("{app_name}\n{bundle_path}")
-}
-
-/// Registers an enabled login item again when the app's name or place
-/// differs from what it was last registered as, so System Settings shows the
-/// current ones (U1). Idempotent: with the same `current` as `previous`, or
-/// with the item off or unknown, it does nothing. Returns whether the
-/// caller should now remember `current`: true after a refresh and when
-/// there was nothing to refresh; false if the OS refused (it is tried again
-/// at the next launch).
-///
-/// Unregistering can take many seconds (#238): call it off the main thread.
-pub fn refresh_login_item(
-    login: &dyn LaunchAtLogin,
-    previous: Option<&str>,
-    current: &str,
-) -> bool {
-    if previous == Some(current) {
-        return true;
-    }
-    // Only an item that is on has a name to refresh. A first launch of the
-    // app with it off just remembers who it is.
-    if !matches!(login.state(), Ok(LaunchAtLoginState::Enabled)) {
-        return true;
-    }
-    if let Err(error) = login
-        .set_enabled(false)
-        .and_then(|()| login.set_enabled(true))
-    {
-        tracing::warn!(%error, "could not register the login item again; will try at the next launch");
-        return false;
-    }
-    let after = login.state().ok();
-    if after != Some(LaunchAtLoginState::Enabled) {
-        tracing::warn!(?after, "the login item isn't on after registering it again");
-        return false;
-    }
-    tracing::info!("login item registered again under the current name and place");
-    true
-}
-
 /// Puts the login item back to `before` (what [`LaunchAtLogin::state`] said
 /// before [`apply`]), for a save whose settings file couldn't be written
 /// after the OS was changed (T3, #121): the file and the OS then still agree
@@ -235,50 +184,6 @@ mod tests {
             launch_at_login,
             ..Settings::default()
         }
-    }
-
-    #[test]
-    fn a_changed_name_or_place_registers_the_item_again_once() {
-        let login = FakeLaunchAtLogin::new();
-        login.set_state(LaunchAtLoginState::Enabled);
-        let old = login_identity("dictation-app", "/Applications/dictation-app.app");
-        let new = login_identity("Vocet", "/Applications/dictation-app.app");
-        assert_ne!(old, new);
-        // First launch of the renamed build: off, then on again.
-        assert!(refresh_login_item(&login, Some(&old), &new));
-        assert_eq!(login.calls(), [false, true]);
-        assert_eq!(login.state().ok(), Some(LaunchAtLoginState::Enabled));
-        // The next launch remembers it: nothing more happens.
-        assert!(refresh_login_item(&login, Some(&new), &new));
-        assert_eq!(login.calls(), [false, true]);
-        // A move to another path counts too, and so does no memory at all.
-        let moved = login_identity("Vocet", "/Applications/Vocet.app");
-        assert!(refresh_login_item(&login, Some(&new), &moved));
-        assert!(refresh_login_item(&login, None, &new));
-        assert_eq!(login.calls(), [false, true, false, true, false, true]);
-    }
-
-    #[test]
-    fn an_item_that_is_off_or_unapproved_is_left_alone() {
-        for state in [
-            LaunchAtLoginState::Disabled,
-            LaunchAtLoginState::RequiresApproval,
-        ] {
-            let login = FakeLaunchAtLogin::new();
-            login.set_state(state);
-            assert!(refresh_login_item(&login, None, "Vocet\n/x.app"));
-            assert!(login.calls().is_empty(), "{state:?}");
-            assert_eq!(login.state().ok(), Some(state));
-        }
-    }
-
-    #[test]
-    fn a_refresh_that_does_not_end_enabled_is_retried_at_the_next_launch() {
-        let login = FakeLaunchAtLogin::new();
-        login.set_state(LaunchAtLoginState::Enabled);
-        // Registering again ends needing approval: not remembered.
-        login.enabling_gives(LaunchAtLoginState::RequiresApproval);
-        assert!(!refresh_login_item(&login, None, "Vocet\n/x.app"));
     }
 
     #[test]

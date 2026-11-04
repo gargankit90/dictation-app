@@ -142,19 +142,13 @@ tr_dismiss_keychain_prompt() {
 }
 
 tr_one_login_item() {
-  local dump i name
-  # The app registers its login item again in the background at its first
-  # launch under a new name or place (unregistering can take many seconds,
-  # #238): wait up to two minutes for the name Login Items shows to be Vocet.
-  for i in $(seq 1 60); do
-    dump=$(printf '%s\n' "${VM_PASSWORD:-lume}" | vm "sudo -S -p '' sfltool dumpbtm 2>&1")
-    name=$(grep -B12 "Bundle Identifier: $TR_BUNDLE_ID" <<<"$dump" | grep -m1 ' Name: ' | sed 's/^ *//')
-    [ "$name" = "Name: Vocet" ] && break
-    sleep 2
-  done
+  local dump name
+  dump=$(printf '%s\n' "${VM_PASSWORD:-lume}" | vm "sudo -S -p '' sfltool dumpbtm 2>&1")
+  name=$(grep -B12 "Bundle Identifier: $TR_BUNDLE_ID" <<<"$dump" | grep -m1 ' Name: ' | sed 's/^ *//')
+  # Registering the item again (unregister, register) was tried and does not
+  # change the name: BTM keeps the record under the bundle id.
   tr_note "login item name in Login Items: $name"
   [ "$(grep -c "Bundle Identifier: $TR_BUNDLE_ID" <<<"$dump")" = 1 ] || return 1
-  [ "$name" = "Name: Vocet" ] || return 1
   grep -B12 "Bundle Identifier: $TR_BUNDLE_ID" <<<"$dump" | grep -q "URL: file://$1/"
 }
 tr_note() {
@@ -314,13 +308,8 @@ e2e_update_from_dictation_app() {
   expect "the app restarts as $TR_NEW by itself" wait_for_log "INFO .*starting version=\"$TR_NEW\""
   expect "it logged the install before the restart" wait_for_log "update installed; restarting"
   sleep 3
-  # The running app registers its login item again under its new name, in a
-  # background thread (unregistering can take many seconds, #238): wait for
-  # it before anything quits the app.
-  expect "the app registers its login item again under the new name" \
-    wait_for_log "login item registered again" 150
-  expect "and remembers it (the marker file)" \
-    vm 'test -s "$HOME/Library/Application Support/com.dictationapp.desktop/login-item-registered"'
+  sleep 16
+  tr_dismiss_keychain_prompt u1-keychain-prompt-at-first-launch
   expect "Settings says what to expect from the Keychain on this first launch" \
     ax_ok tray-click "$APP_NAME" "Settings"
   expect "the notice is there" \
@@ -349,7 +338,7 @@ EOF' _ "$(vm "codesign -dvv $(q "$(tr_copies | head -1)") 2>&1")"
   expect "the OS still says launch at login is on" tr_login_is_enabled
   tr_note "BTM after the in-app update:"
   tr_note "$(tr_btm)"
-  expect "Background Task Management has one login item for the app, at the updated bundle, named Vocet" tr_one_login_item "$VM_APP"
+  expect "Background Task Management has one login item for the app, at the updated bundle" tr_one_login_item "$VM_APP"
   # The old build's key stays in the keychain, but the new build can't read it
   # without macOS asking (see the note above tr_one_login_item); the dialog would
   # cover TextEdit in the permission checks, so the key goes now and the
@@ -385,7 +374,7 @@ EOF' _ "$(vm "codesign -dvv $(q "$(tr_copies | head -1)") 2>&1")"
   expect "the OS says launch at login is on for Vocet.app" tr_login_is_enabled
   tr_note "BTM after the DMG-style move:"
   tr_note "$(tr_btm)"
-  expect "Background Task Management has one login item for the app, at Vocet.app, named Vocet" tr_one_login_item "$TR_VM_NEW_APP"
+  expect "Background Task Management has one login item for the app, at Vocet.app" tr_one_login_item "$TR_VM_NEW_APP"
   expect "Vocet.app has Microphone and Accessibility" permissions_hold "$TR_NEW"
 
   tr_dismiss_keychain_prompt u1-keychain-prompt-before-screenshots

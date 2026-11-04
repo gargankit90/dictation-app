@@ -66,7 +66,6 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context as _;
 use dictation_pipeline::debug_audio::SavingAudio;
 use dictation_pipeline::hotkey_setting::{self, ConfigurableHotkey, HotkeyControl};
-use dictation_pipeline::launch;
 use dictation_pipeline::pipeline::{Config, CursorReader, Pipeline, Ports, UiEvent};
 use dictation_pipeline::stand_ins::{GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
@@ -447,7 +446,6 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
     app.manage(commands::AppConfig(Arc::clone(&config)));
     app.manage(commands::LoginItem(Arc::new(SystemLaunchAtLogin::new())));
-    refresh_login_item_in_background(app, &config_dir);
     let app_name = app
         .config()
         .product_name
@@ -769,48 +767,6 @@ fn tray_action(id: &str) -> Option<TrayAction> {
         QUIT_ID => TrayAction::Quit,
         _ => return None,
     })
-}
-
-/// The `.app` this process runs from, if it runs from a bundle (a debug run
-/// from `target/` doesn't).
-fn bundle_path() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
-    exe.ancestors()
-        .find(|path| path.extension().is_some_and(|ext| ext == "app"))
-        .map(|path| path.display().to_string())
-}
-
-/// U1: macOS keeps the name a login item was first registered with, so a
-/// build renamed from dictation-app still showed that name in Login Items.
-/// On launch, in the background (unregistering can take many seconds,
-/// #238), an enabled login item is registered again if the app's name or
-/// place differs from what the config folder says it was last registered as.
-fn refresh_login_item_in_background(app: &App, config_dir: &std::path::Path) {
-    let Some(path) = bundle_path() else {
-        return;
-    };
-    let name = app
-        .config()
-        .product_name
-        .clone()
-        .unwrap_or_else(|| "Vocet".to_owned());
-    let current = launch::login_identity(&name, &path);
-    let marker = config_dir.join(launch::LOGIN_ITEM_MARKER);
-    let login = SystemLaunchAtLogin::new();
-    let spawned = std::thread::Builder::new()
-        .name("login-item-refresh".into())
-        .spawn(move || {
-            let previous = std::fs::read_to_string(&marker).ok();
-            if launch::refresh_login_item(&login, previous.as_deref(), &current)
-                && previous.as_deref() != Some(current.as_str())
-                && let Err(error) = std::fs::write(&marker, &current)
-            {
-                tracing::warn!(%error, "could not remember the login item's name");
-            }
-        });
-    if let Err(error) = spawned {
-        tracing::warn!(%error, "could not start the login item refresh");
-    }
 }
 
 fn build_tray(app: &App) -> tauri::Result<()> {
