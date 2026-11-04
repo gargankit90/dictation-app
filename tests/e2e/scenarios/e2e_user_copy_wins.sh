@@ -1,18 +1,19 @@
 # T2 criterion 7 (P2-05): the user copies something while a dictation's
 # paste is pending. The paste borrows the clipboard (it writes the
-# transcript, sends Cmd-V, waits 300 ms, then puts the old clipboard back),
+# transcript, sends Cmd-V, and 1.5 s later, on a timer, puts the old
+# clipboard back: RESTORE_DELAY since P1),
 # and the restore must not undo a copy made in that window: the user's newer
 # copy is what's on the clipboard at the end, not the old clipboard and not
 # the transcript (crates/platform/src/insert: restore_snapshot_if_unchanged).
 #
 # The copy is timed from inside the VM: fixtures/clipboard-race.js watches
 # the clipboard for the app's dictation write (its private session type),
-# waits COPY_DELAY seconds (after the Cmd-V, well inside the 300 ms), checks
+# waits COPY_DELAY seconds (after the Cmd-V, well inside the 1.5 s), checks
 # the dictation's item is still there (so the restore hasn't run yet) and
 # copies. It also reports the clipboard's change count after its copy, so
 # the scenario can tell that nothing wrote to the clipboard afterwards.
 
-USER_COPY_DELAY=${E2E_USER_COPY_DELAY:-0.2}
+USER_COPY_DELAY=${E2E_USER_COPY_DELAY:-0.5}
 
 e2e_user_copy_wins() {
   local old="e2e-old-clipboard-$$" mine="e2e-user-copy-$$"
@@ -42,7 +43,8 @@ e2e_user_copy_wins() {
   text=$(textedit_trimmed)
   log "  TextEdit holds: [$text]"
   expect "the paste used the transcript, not the user's copy" test "$text" = "$MOCK_TEXT"
-  # Idle comes after the insert returned, so its restore (or not) is done.
+  # The restore (or not) runs 1.5 s after the chord, after Idle: wait past it.
+  sleep 2
   now=$(clipboard)
   log "  clipboard at the end: [$now]"
   expect "the user's copy is on the clipboard at the end" test "$now" = "$mine"

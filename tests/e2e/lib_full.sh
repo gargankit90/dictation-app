@@ -100,8 +100,31 @@ set_clipboard() {
   printf '%s' "$1" | vm "pbcopy"
 }
 
+# The clipboard's text, once the app's last paste is settled: since P1 the
+# app gives the user's clipboard back RESTORE_DELAY (1.5 s) after the chord,
+# on a timer, after the dictation is already Idle. So this first waits (up
+# to 4 s) until the app's dictation write (its com.dictationapp.session
+# item) is off the clipboard: restored, or replaced by a copy. A failed
+# paste leaves the transcript there for good; then it reads it after 4 s.
 clipboard() {
+  clipboard_settled
   vm "pbpaste"
+}
+
+# Waits (up to 4 s) until the app's dictation write is off the clipboard;
+# for scenarios that read the clipboard their own way (images, types).
+clipboard_settled() {
+  local i
+  for i in $(seq 1 20); do
+    clipboard_has_dictation || return 0
+    sleep 0.2
+  done
+}
+
+# Whether the app's dictation write is on the clipboard now.
+clipboard_has_dictation() {
+  vm "osascript -l JavaScript -e 'ObjC.import(\"AppKit\"); \$.NSPasteboard.generalPasteboard.stringForType(\$(\"com.dictationapp.session\")).isNil() ? \"no\" : \"yes\"'" 2>/dev/null |
+    grep -qx yes
 }
 
 # --- Dictating ----------------------------------------------------------------
