@@ -21,5 +21,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
+    // The overlay test reads its stylesheet as text (U4: Reduce Motion).
+    css: { include: [/overlay\.css/] },
   },
 });
