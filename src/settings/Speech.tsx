@@ -9,7 +9,7 @@ import type {
 import { BROKEN, messageOf } from "../keyTest";
 import { PROVIDERS, providerInfo } from "../providers";
 import { validateKey } from "../validation";
-import { modelRow } from "./modelRow";
+import { modelCaption, modelRow, modelTitle } from "./modelRow";
 import type { ModelAction } from "./modelRow";
 import { Chip, Group, Row, SaveStatus, useSave } from "./ui";
 
@@ -64,11 +64,6 @@ function actionLabel(action: ModelAction): string {
 /** `record` without `key`. */
 function without(record: Record<string, string>, key: string): Record<string, string> {
   return Object.fromEntries(Object.entries(record).filter(([name]) => name !== key));
-}
-
-/** A plain caption for a model row: languages, offline (the chip shows the size). */
-function modelCaption(model: LocalModelInfo_Serialize): string {
-  return `${model.languages} · works offline, nothing is sent`;
 }
 
 /**
@@ -273,6 +268,17 @@ export function Speech({
   const steps = KEY_STEPS[provider];
   // While a model loads after "Use this", the own key stays the engine in use.
   const cloudActive = !onDevice;
+  // Active means it can dictate: with no saved key it can't (Design Lead,
+  // round 1). It becomes ✓ Active once Test & Save has saved one.
+  const stored = provider === settings.provider ? keyStatus.state : "checking";
+  const ownKeyChip =
+    stored === "saved" ? (
+      <Chip tone="ready">✓ Active</Chip>
+    ) : stored === "checking" ? (
+      <Chip tone="plain">Checking…</Chip>
+    ) : (
+      <Chip tone="attention">! Needs a key</Chip>
+    );
 
   return (
     <>
@@ -305,14 +311,14 @@ export function Speech({
             return (
               <Row
                 key={model.id}
-                label={model.name}
+                label={modelTitle(model)}
                 labelId={labelId}
                 caption={modelCaption(model)}
                 below={
                   <>
                     {row.progress === null ? null : (
                       <progress
-                        aria-label={`${model.name} download`}
+                        aria-label={`${modelTitle(model)} download`}
                         max={row.progress.max}
                         value={row.progress.value}
                       />
@@ -346,7 +352,7 @@ export function Speech({
                     <button
                       type="button"
                       className="menu-button"
-                      aria-label={`More actions for ${model.name}`}
+                      aria-label={`More actions for ${modelTitle(model)}`}
                       aria-haspopup="menu"
                       aria-expanded={menuOpen === model.id}
                       onClick={() => {
@@ -363,7 +369,7 @@ export function Speech({
                           className="destructive"
                           onClick={() => void modelAction("delete", model)}
                         >
-                          Delete {model.name}
+                          Delete {modelTitle(model)}
                         </button>
                       </span>
                     )}
@@ -503,7 +509,7 @@ export function Speech({
           }
         >
           {cloudActive ? (
-            <Chip tone="ready">✓ Active</Chip>
+            ownKeyChip
           ) : (
             <button
               type="button"

@@ -101,3 +101,25 @@ export function modelRow(model: LocalModelInfo_Serialize, context: RowContext): 
   }
   return row("Downloaded", "plain", ["use"], { canDelete: true });
 }
+
+/** A model's title: the language choice, not the checkpoint (Design Lead, round 1). */
+export function modelTitle(model: LocalModelInfo_Serialize): string {
+  return model.language_codes.join() === "en" ? "English" : "Multilingual";
+}
+
+/** Its languages in words, counted from the codes the language picker uses. */
+export function languagesLabel(codes: readonly string[]): string {
+  if (codes.join() === "en") return "English only";
+  const count = `${String(codes.length)} languages`;
+  return codes.includes("en") && codes.includes("hi")
+    ? `${count}, including English and Hindi`
+    : count;
+}
+
+/**
+ * The caption: the catalogue name, the languages, and what stays local.
+ * Not "nothing is sent": usage events may be on; the audio never leaves.
+ */
+export function modelCaption(model: LocalModelInfo_Serialize): string {
+  return `${model.name} · ${languagesLabel(model.language_codes)} · works offline · audio stays on this Mac`;
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LocalModelInfo_Serialize } from "../bindings";
-import { modelRow } from "./modelRow";
+import { languagesLabel, modelCaption, modelRow, modelTitle } from "./modelRow";
 import type { RowContext } from "./modelRow";
 
 const SIZE = 477_274_496;
@@ -112,5 +112,24 @@ describe("criterion_u6_4 the model state machine", () => {
     const tried = modelRow(model({ state: "ready" }), { ...IDLE, loadError: "Couldn't load it." });
     expect(tried.chip.text).toBe("! Couldn't load");
     expect(tried.actions).toEqual(["retry-load", "delete"]);
+  });
+});
+
+describe("Design Lead round 1: model titles and captions", () => {
+  it("titles are the language choice, the catalogue name goes in the caption", () => {
+    expect(modelTitle(model())).toBe("English");
+    expect(modelCaption(model())).toBe(
+      "Parakeet English · English only · works offline · audio stays on this Mac",
+    );
+    const multi = model({ name: "Qwen3-ASR 0.6B", language_codes: ["en", "hi", "de", "fr"] });
+    expect(modelTitle(multi)).toBe("Multilingual");
+    expect(modelCaption(multi)).toBe(
+      "Qwen3-ASR 0.6B · 4 languages, including English and Hindi · works offline · audio stays on this Mac",
+    );
+  });
+
+  it("counts the languages from the codes, and never claims nothing is sent", () => {
+    expect(languagesLabel(["de", "fr", "es"])).toBe("3 languages");
+    expect(modelCaption(model())).not.toContain("nothing is sent");
   });
 });

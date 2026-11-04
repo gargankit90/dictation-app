@@ -494,10 +494,34 @@ describe("criterion_u6_3 launch at login never blocks", () => {
 
 describe("criterion_u6_4 Speech: exactly one Active engine", () => {
   const actives = () => screen.queryAllByText("✓ Active");
+  // The own key is Active only with a key saved (Design Lead, round 1).
+  beforeEach(() => {
+    backend.keys.groq = true;
+  });
+
+  it("the own key without a saved key says Needs a key until Test & Save works", async () => {
+    backend.keys.groq = false;
+    await open("speech");
+    expect(await screen.findByText("! Needs a key")).toBeTruthy();
+    expect(actives()).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+    click("Test & Save");
+    expect(await screen.findByText("✓ Active")).toBeTruthy();
+    expect(screen.queryByText("! Needs a key")).toBeNull();
+  });
+
+  it("titles are English and Multilingual, with honest captions", async () => {
+    await open("speech");
+    expect(await screen.findByText("Multilingual")).toBeTruthy();
+    expect(
+      screen.getByText(/3 languages, including English and Hindi · works offline/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/nothing is sent/)).toBeNull();
+  });
 
   it("the own key is Active with the cloud; models show their size and Download", async () => {
     await open("speech");
-    await screen.findByText("Parakeet English");
+    await screen.findByText("English");
     expect(actives()).toHaveLength(1);
     expect(screen.getByText("477 MB")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Download" })).toHaveLength(2);
@@ -505,12 +529,12 @@ describe("criterion_u6_4 Speech: exactly one Active engine", () => {
 
   it("Download starts at once and shows progress with Cancel", async () => {
     await open("speech");
-    await screen.findByText("Parakeet English");
+    await screen.findByText("English");
     const [download] = screen.getAllByRole("button", { name: "Download" });
     if (download === undefined) throw new Error("no Download button");
     fireEvent.click(download);
     expect(await screen.findByText("↓ 212 of 477 MB")).toBeTruthy();
-    expect(screen.getByRole("progressbar", { name: "Parakeet English download" })).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "English download" })).toBeTruthy();
     click("Cancel");
     await waitFor(() => {
       expect(backend.named("cancel_local_model_download")[0]?.args).toEqual({ id: ENGLISH });
@@ -555,11 +579,11 @@ describe("criterion_u6_4 Speech: exactly one Active engine", () => {
     backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
     backend.models = [model(ENGLISH, { state: "ready" }), model(MULTI, { state: "ready" })];
     await open("speech");
-    await screen.findByText("Parakeet English");
+    await screen.findByText("English");
     expect(actives()).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "More actions for Parakeet English" })).toBeNull();
-    click("More actions for Qwen3-ASR multilingual");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Delete Qwen3-ASR multilingual" }));
+    expect(screen.queryByRole("button", { name: "More actions for English" })).toBeNull();
+    click("More actions for Multilingual");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete Multilingual" }));
     await waitFor(() => {
       expect(backend.named("delete_local_model")[0]?.args).toEqual({ id: MULTI });
     });
@@ -579,7 +603,7 @@ describe("criterion_u6_4 Speech: exactly one Active engine", () => {
     backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
     backend.models = [model(ENGLISH, { state: "ready" })];
     await open("speech");
-    await screen.findByText("Parakeet English");
+    await screen.findByText("English");
     click("Use this");
     await waitFor(() => {
       expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "groq" });
