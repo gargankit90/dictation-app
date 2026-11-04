@@ -103,6 +103,11 @@ STUB
 cat >"$stubs/gh" <<'STUB'
 #!/usr/bin/env bash
 echo "gh $*" >>"$STUB_CALLS/gh"
+# Keep the --notes text apart: it spans lines.
+while [ $# -gt 0 ]; do
+  [ "$1" = --notes ] && printf '%s' "$2" >"$STUB_CALLS/gh-notes"
+  shift
+done
 exit 0
 STUB
 # The build: an app, a DMG and the updater bundle, signed with whatever key
@@ -153,6 +158,27 @@ jq -n --arg v "$VERSION" --arg k "$PUBKEY" \
 jq -n --arg v "$VERSION" '{name: "dictation-app", version: $v}' >"$repo/package.json"
 printf '[workspace.package]\nversion = "%s"\n' "$VERSION" >"$repo/Cargo.toml"
 echo "# Testers" >"$repo/docs/TESTERS.md"
+cat >"$repo/CHANGELOG.md" <<EOF
+# Changelog
+
+## [Unreleased]
+
+## [$VERSION] — [date set at release]
+
+First line of the notes.
+
+### Known limitations
+
+- A limit.
+
+## [0.0.9] — 2020-01-01
+
+Older notes, never shown.
+
+[Unreleased]: https://example.invalid/compare
+[$VERSION]: https://example.invalid/tag
+EOF
+CHANGELOG_NOTES=$'First line of the notes.\n\n### Known limitations\n\n- A limit.'
 echo "licences" >"$repo/THIRD-PARTY-LICENSES.txt"
 printf 'target/\n' >"$repo/.gitignore"
 (
@@ -221,6 +247,31 @@ if grep -rqF -- "$KEY" "$repo" || grep -rqF -- "$KEY_PASSWORD" "$repo"; then
   fail "a secret was written to a file in the repository"
 fi
 pass "a dry run builds, verifies, writes latest.json, uploads nothing and never prints the secrets"
+
+# 1b. Without --notes, the CHANGELOG section is the notes (R2): its text only,
+# not the heading, the next version's section or the link definitions.
+run_release "$VERSION" || fail "the dry run from the CHANGELOG failed"
+[ "$(jq -r .notes "$out/latest.json")" = "$CHANGELOG_NOTES" ] ||
+  fail "latest.json's notes aren't the CHANGELOG section: $(jq -r .notes "$out/latest.json")"
+[ ! -e "$calls/gh" ] || fail "a dry run called gh"
+# A version with no section, or an empty one, is refused before anything is built.
+sed "s/^## \[$VERSION\].*/## [0.0.1] — x/" "$repo/CHANGELOG.md" >"$work/CHANGELOG.missing"
+cp "$repo/CHANGELOG.md" "$work/CHANGELOG.good"
+cp "$work/CHANGELOG.missing" "$repo/CHANGELOG.md"
+run_release "$VERSION" && fail "a version with no CHANGELOG section passed"
+grep -q "CHANGELOG.md has no \"## \[$VERSION\]\" section" "$work/out.txt" || fail "no missing-section message"
+[ ! -e "$calls/npm" ] && [ ! -e "$calls/security" ] || fail "a missing section built or read the Keychain"
+printf '# Changelog\n\n## [%s] — x\n\n## [0.0.9] — y\n\nOlder.\n' "$VERSION" >"$repo/CHANGELOG.md"
+run_release "$VERSION" && fail "an empty CHANGELOG section passed"
+grep -q 'has no "## \[' "$work/out.txt" || fail "no empty-section message"
+rm "$repo/CHANGELOG.md"
+run_release "$VERSION" && fail "a missing CHANGELOG.md passed"
+grep -q 'no CHANGELOG.md' "$work/out.txt" || fail "no missing-file message"
+# --notes still wins.
+run_release "$VERSION" --notes "Other." || fail "--notes without a CHANGELOG failed"
+[ "$(jq -r .notes "$out/latest.json")" = "Other." ] || fail "--notes didn't win"
+cp "$work/CHANGELOG.good" "$repo/CHANGELOG.md"
+pass "the notes are the CHANGELOG section; a missing file or section is refused before the build; --notes overrides"
 
 # 2. A build that prints them is filtered, also under bash -x.
 FAKE_LEAK=1 run_release "$VERSION" || fail "the leaking dry run failed"
@@ -302,6 +353,7 @@ grep -q "^gh release create v$VERSION --repo gargankit90/dictation-app --target 
   fail "gh wasn't asked to create v$VERSION in this repository at $head: $(cat "$calls/gh" 2>/dev/null)"
 ! grep -q 'dictation-app-releases' "$calls/gh" || fail "gh was pointed at the old repository"
 grep -q "$base.app.tar.gz.sig" "$calls/gh" && grep -q latest.json "$calls/gh" || fail "gh wasn't given the bundle files"
+[ "$(cat "$calls/gh-notes")" = "$CHANGELOG_NOTES" ] || fail "gh wasn't given the CHANGELOG section as the release notes"
 no_secret_in_output "publish"
 pass "--publish on a merged, clean commit hands the release to gh at that commit (a stub here)"
 

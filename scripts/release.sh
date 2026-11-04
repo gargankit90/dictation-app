@@ -4,6 +4,11 @@
 #   scripts/release.sh <version> [--notes <text>]             # dry run
 #   scripts/release.sh <version> [--notes <text>] --publish   # and upload
 #
+# The release notes (the GitHub release's body and the "Update available"
+# text in latest.json) are the "## [<version>]" section of CHANGELOG.md, minus
+# its heading, unless --notes gives other text. A version with no section (or
+# an empty one) is refused before anything is built.
+#
 # Both build the signed release (`dictation-app Dev`, not notarised) and put
 # into target/release-out/v<version>/:
 #
@@ -85,7 +90,29 @@ done
 [ -n "$version" ] || usage
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] ||
   die "version must look like 1.2.3 or 1.2.3-alpha.1, not '$version'"
-[ -n "$notes" ] || notes="$APP $version"
+
+# changelog_notes <version> <file>: the body of the "## [<version>]" (or
+# "## <version>") section: everything up to the next "## " heading or the
+# link definitions at the end, without surrounding blank lines.
+changelog_notes() {
+  awk -v v="$1" '
+    /^## / {
+      if (on) exit
+      h = $2
+      gsub(/[][]/, "", h)
+      if (h == v) on = 1
+      next
+    }
+    on && /^\[[^]]+\]: / { exit }
+    on { lines[++n] = $0 }
+    END {
+      s = 1
+      while (s <= n && lines[s] ~ /^[ \t]*$/) s++
+      while (n >= s && lines[n] ~ /^[ \t]*$/) n--
+      for (i = s; i <= n; i++) print lines[i]
+    }
+  ' "$2"
+}
 
 cd "$(git rev-parse --show-toplevel)"
 
@@ -104,6 +131,14 @@ cargo_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
   die "$conf has version $conf_version, not $version (bump it in a PR first)"
 [ "$npm_version" = "$version" ] || die "package.json has version $npm_version, not $version"
 [ "$cargo_version" = "$version" ] || die "Cargo.toml has version $cargo_version, not $version"
+
+# The notes: --notes, else this version's CHANGELOG section (before the build
+# and the Keychain, so a missing section costs nothing).
+if [ -z "$notes" ]; then
+  [ -f CHANGELOG.md ] || die "no CHANGELOG.md (write it, or pass --notes <text>)"
+  notes=$(changelog_notes "$version" CHANGELOG.md)
+  [ -n "$notes" ] || die "CHANGELOG.md has no \"## [$version]\" section with text; write it first (or pass --notes <text>)"
+fi
 
 pubkey=$(jq -r '.plugins.updater.pubkey // ""' "$conf")
 [ -n "$pubkey" ] || die "$conf has no plugins.updater.pubkey"

@@ -47,7 +47,8 @@ body {
   margin-bottom: 18px;
 }
 
-.field label {
+.field label,
+.field .label {
   display: block;
   margin-bottom: 4px;
   font-weight: 600;
@@ -230,4 +231,28 @@ pre.report {
     monospace;
   white-space: pre-wrap;
   user-select: text;
+}
+
+.hotkey-recorder {
+  margin-bottom: 10px;
+}
+
+.keycap {
+  display: inline-block;
+  min-width: 56px;
+  margin-bottom: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-bottom-width: 3px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 16px;
+  text-align: center;
+}
+
+.keycap.recording {
+  border-color: var(--accent, var(--fg));
+  color: var(--muted);
 }

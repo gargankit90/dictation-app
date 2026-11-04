@@ -16,6 +16,7 @@ import type {
   View,
 } from "./bindings";
 import { hotkeyName, Onboarding, POLL_MS } from "./Onboarding";
+import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
 const KEY = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
 const STEPS: Step[] = ["microphone", "accessibility", "key", "try"];
@@ -97,7 +98,12 @@ class Backend {
       case "get_settings":
         return this.settings;
       case "save_settings":
-        this.settings = args.settings as Settings_Serialize;
+        this.settings = { ...(args.settings as Settings_Serialize), hotkey: this.settings.hotkey };
+        return null;
+      case "set_hotkey":
+        this.settings = { ...this.settings, hotkey: args.spec as string };
+        return null;
+      case "set_hotkey_recording":
         return null;
       case "has_api_key":
         return this.keys[args.provider as Provider];
@@ -126,6 +132,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  releaseAllKeys();
   cleanup();
   clearMocks();
   vi.useRealTimers();
@@ -502,9 +509,25 @@ describe("the try step", () => {
     expect(backend.named("finish_onboarding")).toHaveLength(1);
   });
 
+  it("shows the dictation key and records a different one", async () => {
+    render(<Onboarding onFinished={vi.fn()} />);
+    await heading("Try it");
+    await waitFor(() => {
+      expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌥");
+    });
+    fireEvent.click(button("Record a different key"));
+    keyDown("MetaRight");
+    keyUp("MetaRight");
+    await waitFor(() => {
+      expect(backend.settings.hotkey).toBe("RightCmd");
+    });
+    expect(await screen.findByLabelText(/Hold the right Command key/u)).toBeTruthy();
+  });
+
   it("names the hotkey", () => {
     expect(hotkeyName("RightAlt")).toBe("the right Option key");
     expect(hotkeyName("LeftAlt")).toBe("the left Option key");
+    expect(hotkeyName("RightCmd")).toBe("the right Command key");
     expect(hotkeyName("Ctrl+Shift+Space")).toBe("Ctrl+Shift+Space");
   });
 });
