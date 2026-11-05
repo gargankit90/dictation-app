@@ -68,10 +68,18 @@ e2e_onboarding_five_steps() {
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading Parakeet English" 30
   expect "and says what happened to the earlier one" five_download_picked_up
   expect "allowed" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Allowed" 10
-  expect "press Continue" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Continue
 
-  expect "Try it waits for the model" \
-    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Getting the model ready" 15
+  # Try it waits for a model that isn't here. The VM may download in seconds,
+  # so the wait is made sure of: stop the download, if it still runs, and
+  # remove what was fetched.
+  ax press "$APP_NAME" "$FIVE_WINDOW" Cancel >/dev/null 2>&1 || true
+  vm "rm -rf $(q "$FIVE_MODELS")"
+  expect "the strip offers to resume" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "isn't downloaded yet" 15
+  expect "press Continue" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Continue
+  expect "Try it blocks practice while the model is missing" \
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Practice starts once it is" 15
+  expect "press Resume in the strip" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Resume
+  expect "the wait moves on" ax_ok wait-no-text "$APP_NAME" "$FIVE_WINDOW" "Practice starts once it is" 15
   expect "the model finishes and practice opens" five_model_ready
   expect "the model loaded" wait_for_log 'on-device model loaded' 120
 
