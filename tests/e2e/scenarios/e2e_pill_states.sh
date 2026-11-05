@@ -5,19 +5,19 @@
 # 1. Speech (the speech fixture, so the bars move): the pill renders
 #    Listening with its hint while held, and still Listening after 2.5 s
 #    (speech never says "No sound"). On release the mock pastes, and the
-#    pill renders "Paste sent", for 800 ms by the log, then hides.
+#    pill renders "Done", for 800 ms by the log, then hides.
 # 2. The silence fixture: the pill renders Listening, then "No sound" with
-#    "Check your microphone" about 1.5 s after the press (the file source
+#    "Check your microphone" about 2.5 s after the press (the file source
 #    has no device name). Nothing is pasted, so on release it goes
-#    Transcribing, then hides without "Paste sent".
+#    Transcribing, then hides without "Done".
 #
 # The meter's bars carry no text (aria-hidden); the screenshots show them.
 
-# The pill's Paste sent time (crates/app/src/overlay.rs PASTE_SENT_VISIBLE_FOR) and
+# The pill's Done time (crates/app/src/overlay.rs PASTE_SENT_VISIBLE_FOR) and
 # the No sound wait (dictation_core::level::NO_SOUND_AFTER), with slack for
 # the log's timestamps and a 50 ms level interval.
 PILL_PASTE_SENT_MS=800
-PILL_NO_SOUND_MS=1500
+PILL_NO_SOUND_MS=2500
 PILL_SLACK_MS=300
 
 # pill_near <ms> <want>: within PILL_SLACK_MS of <want>.
@@ -43,7 +43,7 @@ pill_log_mark() {
 }
 
 # Screenshots e2e_pill_states.paste_sent.<n> 0.3, 0.6, 0.9 and 1.2 s from now,
-# in the background: one call takes about a second, longer than Paste sent
+# in the background: one call takes about a second, longer than Done
 # shows, so one of them catches it (the PR shows that one).
 pill_paste_sent_screenshots() {
   local n
@@ -59,7 +59,7 @@ e2e_pill_states() {
   expect "the app starts and logs ready" wait_for_log 'INFO .*ready'
   textedit_fresh
 
-  # 1. Sound: Listening, then Paste sent, then hidden.
+  # 1. Sound: Listening, then Done, then hidden.
   mark=$(pill_log_mark)
   launch --press
   expect "the pill renders Listening with its hint" overlay_shows "$OVERLAY_RECORDING"
@@ -72,12 +72,12 @@ e2e_pill_states() {
   launch --release
   pill_paste_sent_screenshots
   expect "the dictation gets back to Idle" wait_for_idle_count 1
-  expect "the pill renders Paste sent" wait_for_log 'overlay shown state="?paste_sent' 5
+  expect "the pill renders Done" wait_for_log 'overlay shown state="?paste_sent' 5
   wait
   expect "then hides" wait_for_log_count 'overlay hidden' 1 5
   gap=$(log_gap_ms 'overlay shown state="?paste_sent' 'overlay (hidden|shown)') || gap=""
-  log "  Paste sent showed for ${gap:-?} ms by the log"
-  expect "Paste sent stayed up for ${PILL_PASTE_SENT_MS} ms" pill_near "$gap" "$PILL_PASTE_SENT_MS"
+  log "  Done showed for ${gap:-?} ms by the log"
+  expect "Done stayed up for ${PILL_PASTE_SENT_MS} ms" pill_near "$gap" "$PILL_PASTE_SENT_MS"
   expect "the pill went recording, transcribing, paste_sent, hidden" \
     test "$(pill_log_since "$mark")" = "recording transcribing paste_sent hidden"
   # The pill says the paste was sent, not that it landed (U4 review): the
@@ -87,7 +87,7 @@ e2e_pill_states() {
   if pill_textedit_has_text; then log "  the text landed in TextEdit"; else log "  note: TextEdit is empty after the paste (see #239)"; fi
   collect_log e2e_pill_states.sound
 
-  # 2. Silence: Listening, then No sound, then hidden without Paste sent.
+  # 2. Silence: Listening, then No sound, then hidden without Done.
   fresh_app_state
   launch_full "$VM_SILENCE"
   expect "the app starts again and logs ready" wait_for_log 'INFO .*ready'
@@ -95,7 +95,7 @@ e2e_pill_states() {
   mark=$(pill_log_mark)
   launch --press
   # Listening by the log: reading the overlay starts a Terminal job, which
-  # on a busy VM can take longer than the 1.5 s before No sound.
+  # on a busy VM can take longer than the 2.5 s before No sound.
   expect "the pill shows Listening first" wait_for_log 'overlay shown state="?recording' 5
   expect "then renders No sound with its hint" overlay_shows "$OVERLAY_NO_SOUND" 5
   screenshot e2e_pill_states.no_sound
