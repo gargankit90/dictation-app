@@ -809,6 +809,7 @@ main.ob {
 .ob-footer {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--vc-space-3);
   padding: var(--vc-space-3) var(--vc-space-4);
@@ -816,7 +817,7 @@ main.ob {
 }
 
 .ob-reason {
-  flex: 1 1 0;
+  flex: 1 1 120px;
   min-width: 0;
   margin: 0;
   color: var(--vc-muted);
@@ -829,13 +830,20 @@ main.ob {
   width: 0;
 }
 
+.ob-footer button {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* The primary stays at the right, also when the footer wraps. */
 .ob-footer .primary {
-  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .ob-back,
 .ob-secondary {
-  flex-shrink: 0;
   min-height: var(--vc-control-h-lg);
   padding: 0 var(--vc-space-4);
   border-radius: var(--vc-radius-md);
