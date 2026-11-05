@@ -9,7 +9,14 @@ import type {
 } from "../bindings";
 import { BROKEN, messageOf } from "../keyTest";
 import { providerInfo } from "../providers";
-import { MODEL_CAPTION, megabytes, modelDetails, modelRow, modelTitle } from "./modelRow";
+import {
+  MODEL_CAPTION,
+  megabytes,
+  modelDetails,
+  modelRow,
+  modelTitle,
+  ownKeyCaption,
+} from "./modelRow";
 import type { ModelAction } from "./modelRow";
 import { OwnKeySheet, useOwnKey } from "./ownKey";
 import { Chip, Group, Row, SaveStatus, useSave } from "./ui";
@@ -309,10 +316,10 @@ export function Speech({
         <div role="radiogroup" aria-label="Speech engine">
           {models === null ? (
             modelsError === null ? (
-              <Row label={MODEL_CAPTION} caption="Loading the models…" />
+              <Row label="On this Mac" caption="Loading the models…" />
             ) : (
               <Row
-                label={MODEL_CAPTION}
+                label="On this Mac"
                 below={
                   <p role="alert" className="error row-error">
                     Couldn&apos;t list the models: {modelsError}
@@ -431,7 +438,7 @@ export function Speech({
           <EngineRow
             id="engine-own-key"
             name="Your own key"
-            caption={`${info.name} · uses internet`}
+            caption={ownKeyCaption(info.name, stored === "saved")}
             checked={cloudActive && switching === null}
             blockedBecause={busy && !cloudActive ? waitReason : null}
             disabled={busy}

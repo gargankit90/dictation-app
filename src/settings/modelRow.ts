@@ -146,8 +146,15 @@ export function languagesLabel(codes: readonly string[]): string {
     : count;
 }
 
-/** The smaller line under a model's title: where it runs. */
-export const MODEL_CAPTION = "On this Mac";
+/** The smaller line under a model's title (owner-approved wording, U12). */
+export const MODEL_CAPTION = "On this Mac · works offline";
+
+/** The smaller line under "Your own key" (owner-approved wording, U12). */
+export function ownKeyCaption(provider: string, saved: boolean): string {
+  return saved
+    ? `${provider} · about 100 languages · speech is sent to ${provider}`
+    : "About 100 languages · uses internet";
+}
 
 /**
  * What the "…" menu says about the model: the catalogue name, the languages,

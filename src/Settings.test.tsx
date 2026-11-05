@@ -523,8 +523,10 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     expect(
       within(screen.getByRole("radiogroup", { name: "Speech engine" })).getAllByRole("radio"),
     ).toHaveLength(3);
-    expect(screen.getAllByText("On this Mac")).toHaveLength(2);
-    expect(screen.getByText("Groq · uses internet")).toBeTruthy();
+    expect(screen.getAllByText("On this Mac · works offline")).toHaveLength(2);
+    expect(
+      await screen.findByText("Groq · about 100 languages · speech is sent to Groq"),
+    ).toBeTruthy();
     for (const gone of ["Downloaded", "✓ Active", "Use this", "Hide", "Set up…", "Multilingual"]) {
       expect(screen.queryByText(gone), gone).toBeNull();
     }
@@ -714,6 +716,7 @@ describe("u12_criterion_4 the key sheet", () => {
     await open("speech");
     expect(await screen.findByRole("dialog", { name: "Your own key" })).toBeTruthy();
     expect(screen.getByText("! Needs a key")).toBeTruthy();
+    expect(screen.getByText("About 100 languages · uses internet")).toBeTruthy();
     click("Done");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByText("! Needs a key")).toBeTruthy();
