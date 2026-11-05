@@ -16,7 +16,9 @@
 //!   without it loads with the default. L1 added `transcription`
 //!   (`"cloud"` or `"local"`, default `"cloud"`) and `local_model` (an id
 //!   from [`crate::local_models::CATALOGUE`]) the same way.
-//!   A1 added `share_usage_events` (default `true`) the same way.
+//!   A1 added `share_usage_events` (default `true`) the same way. U7 added
+//!   `history_limit` (one of [`HISTORY_LIMITS`], default
+//!   [`DEFAULT_HISTORY_LIMIT`]) the same way.
 //!
 //! Fields this version doesn't know (from a newer build, or a hand edit) are
 //! ignored, and missing ones take their defaults, so an old or partial file
@@ -37,6 +39,12 @@ pub const CURRENT_VERSION: u32 = 2;
 
 /// The longest model name accepted.
 pub const MAX_MODEL_LEN: usize = 100;
+
+/// How many recent dictations the user can choose to keep; 0 is Off (U7).
+pub const HISTORY_LIMITS: [u32; 5] = [0, 10, 25, 50, 100];
+
+/// How many recent dictations are kept unless the user chooses otherwise.
+pub const DEFAULT_HISTORY_LIMIT: u32 = 25;
 
 /// The cloud speech-to-text provider.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -125,6 +133,9 @@ pub struct Settings {
     /// Whether anonymous usage events are shared (A1, `docs/privacy.md`).
     /// On by default; a file without it loads with `true`.
     pub share_usage_events: bool,
+    /// How many recent dictations are kept, one of [`HISTORY_LIMITS`] (U7).
+    /// A file without it loads with [`DEFAULT_HISTORY_LIMIT`].
+    pub history_limit: u32,
 }
 
 impl Default for Settings {
@@ -140,6 +151,7 @@ impl Default for Settings {
             transcription: Transcription::default(),
             local_model: local_models::DEFAULT_MODEL.to_owned(),
             share_usage_events: true,
+            history_limit: DEFAULT_HISTORY_LIMIT,
         }
     }
 }
@@ -174,7 +186,8 @@ impl Settings {
     /// [`SettingsError::Invalid`] for the first field that's wrong:
     /// `version` other than [`CURRENT_VERSION`], an empty, over-long or
     /// whitespace-holding `model` or `local_model`, a `language` that isn't
-    /// 2–3 lowercase letters, or a `hotkey` that doesn't parse.
+    /// 2–3 lowercase letters, a `hotkey` that doesn't parse, or a
+    /// `history_limit` not in [`HISTORY_LIMITS`].
     pub fn validate(&self) -> Result<(), SettingsError> {
         if self.version != CURRENT_VERSION {
             return Err(invalid(
@@ -196,6 +209,12 @@ impl Settings {
         }
         if let Err(error) = self.hotkey.parse::<HotkeySpec>() {
             return Err(invalid("hotkey", error.to_string()));
+        }
+        if !HISTORY_LIMITS.contains(&self.history_limit) {
+            return Err(invalid(
+                "history_limit",
+                format!("{} is not one of 0, 10, 25, 50, 100", self.history_limit),
+            ));
         }
         Ok(())
     }
@@ -357,6 +376,58 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(from_json(&to_json(&off).unwrap()).unwrap(), off);
+    }
+
+    /// U7 criterion 1: new installs and files from before U7 get 25.
+    #[test]
+    fn u7_criterion_1_the_history_limit_defaults_to_25_for_old_files() {
+        assert_eq!(DEFAULT_HISTORY_LIMIT, 25);
+        assert_eq!(Settings::default().history_limit, 25);
+        let old = r#"{"version": 2, "provider": "openai", "model": "whisper-1"}"#;
+        assert_eq!(from_json(old).unwrap().history_limit, 25);
+        // v1 migrates to v2 and gets it too.
+        let v1 = r#"{"version": 1, "engine": "groq", "whisper_model": "whisper-1"}"#;
+        assert_eq!(from_json(v1).unwrap().history_limit, 25);
+    }
+
+    #[test]
+    fn u7_criterion_1_every_allowed_limit_round_trips_and_others_are_rejected() {
+        for limit in HISTORY_LIMITS {
+            let settings = Settings {
+                history_limit: limit,
+                ..Settings::default()
+            };
+            let json = to_json(&settings).unwrap();
+            assert_eq!(from_json(&json).unwrap(), settings);
+        }
+        for limit in [1, 9, 11, 24, 26, 101, u32::MAX] {
+            let settings = Settings {
+                history_limit: limit,
+                ..Settings::default()
+            };
+            assert!(
+                matches!(
+                    settings.validate(),
+                    Err(SettingsError::Invalid {
+                        field: "history_limit",
+                        ..
+                    })
+                ),
+                "{limit}"
+            );
+            assert!(to_json(&settings).is_err(), "{limit}: saved anyway");
+        }
+        assert!(matches!(
+            from_json(r#"{"version": 2, "history_limit": 7}"#),
+            Err(SettingsError::Invalid {
+                field: "history_limit",
+                ..
+            })
+        ));
+        assert!(matches!(
+            from_json(r#"{"version": 2, "history_limit": "25"}"#),
+            Err(SettingsError::Malformed(_))
+        ));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { commands } from "../bindings";
 import type { Settings_Serialize } from "../bindings";
 import { messageOf } from "../keyTest";
@@ -42,6 +42,52 @@ export function WhatsSent() {
 }
 
 /**
+ * The sharing switch's writes, one at a time and the last choice wins: the app
+ * doesn't promise to apply overlapping commands in the order they were sent,
+ * so a slow "on" could otherwise land after the user's final "off" (U8 review).
+ * `save` stays "saving" until the queue is empty, and shows the outcome of the
+ * last write.
+ */
+export function useSharingSwitch(
+  stored: boolean,
+  onStored: (settings: Settings_Serialize) => void,
+) {
+  const sharing = useSave();
+  // Shown at once; the stored value comes back after the writes.
+  const [shown, setShown] = useState<boolean | null>(null);
+  const wanted = useRef<boolean | null>(null);
+  const writing = useRef(false);
+
+  async function setSharing(share: boolean) {
+    setShown(share);
+    wanted.current = share;
+    if (writing.current) return;
+    writing.current = true;
+    await sharing.track(async () => {
+      let problem: string | null = null;
+      try {
+        while (wanted.current !== null) {
+          const next = wanted.current;
+          wanted.current = null;
+          const result = await commands.setShareUsageEvents(next);
+          problem = result.status === "error" ? messageOf(result.error) : null;
+        }
+      } finally {
+        wanted.current = null;
+        writing.current = false;
+      }
+      // What the app stores now, not a copy of what this pane was given.
+      const reread = await commands.getSettings();
+      if (reread.status === "ok") onStored(reread.data);
+      return problem;
+    });
+    setShown(null);
+  }
+
+  return { save: sharing.save, checked: shown ?? stored, setSharing };
+}
+
+/**
  * Privacy: "Share usage and error events" (A1's own command: off stops
  * sending at once), what is sent (from docs/privacy.md), and a link to the
  * full list.
@@ -53,22 +99,7 @@ export function Privacy({
   settings: Settings_Serialize;
   onStored: (settings: Settings_Serialize) => void;
 }) {
-  const sharing = useSave();
-  // Shown at once; the stored value comes back after the write.
-  const [shown, setShown] = useState<boolean | null>(null);
-  const checked = shown ?? settings.share_usage_events;
-
-  async function setSharing(share: boolean) {
-    setShown(share);
-    await sharing.track(async () => {
-      const result = await commands.setShareUsageEvents(share);
-      // What the app stores now, not a copy of what this pane was given.
-      const reread = await commands.getSettings();
-      if (reread.status === "ok") onStored(reread.data);
-      return result.status === "error" ? messageOf(result.error) : null;
-    });
-    setShown(null);
-  }
+  const { save, checked, setSharing } = useSharingSwitch(settings.share_usage_events, onStored);
 
   return (
     <Group>
@@ -79,7 +110,7 @@ export function Privacy({
         captionId="share-usage-events-hint"
         below={
           <>
-            <SaveStatus save={sharing.save} />
+            <SaveStatus save={save} />
             <WhatsSent />
           </>
         }

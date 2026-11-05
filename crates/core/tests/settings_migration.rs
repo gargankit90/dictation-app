@@ -105,6 +105,7 @@ fn expected(known: &Known) -> Settings {
         transcription: Default::default(),
         local_model: dictation_core::local_models::DEFAULT_MODEL.to_owned(),
         share_usage_events: true,
+        history_limit: dictation_core::settings::DEFAULT_HISTORY_LIMIT,
     }
 }
 

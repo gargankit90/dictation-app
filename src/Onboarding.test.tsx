@@ -102,6 +102,7 @@ class Backend {
     transcription: "cloud",
     local_model: PARAKEET.id,
     share_usage_events: true,
+    history_limit: 25,
   };
   engine: { state: "loading" | "ready" | "failed"; message: string | null } = {
     state: "ready",
@@ -163,8 +164,11 @@ class Backend {
         return this.status();
       }
       case "finish_onboarding":
+      case "leave_setup_for_settings":
         this.view = "settings";
         return null;
+      case "list_history":
+        return { entries: [], unreadable: false, write_error: null };
       case "relaunch_app":
         return null;
       case "dictation_progress":
@@ -440,6 +444,89 @@ describe("Welcome's switch before Continue (finding 1)", () => {
     expect(backend.settings.share_usage_events).toBe(false);
     fireEvent.click(primary("Continue"));
     await screen.findByText("Which language will you mostly speak?");
+  });
+
+  /**
+   * Holds every sharing write, applying each only when it is released, as the
+   * app's blocking pool may: nothing orders commands sent one after another.
+   */
+  function holdEveryWrite() {
+    const pending: (() => void)[] = [];
+    const original = backend.handle;
+    mockIPC((command, payload) => {
+      if (command !== "set_share_usage_events") return original(command, payload);
+      return new Promise((resolve) => {
+        pending.push(() => {
+          resolve(original(command, payload));
+        });
+      });
+    });
+    return pending;
+  }
+
+  /** Releases the newest write first, until none is left. */
+  async function releaseNewestFirst(pending: (() => void)[]) {
+    for (let round = 0; round < 8; round += 1) {
+      await act(async () => {
+        pending.pop()?.();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+    }
+  }
+
+  it("round 2: a slow on can't land after the final off", async () => {
+    backend.settings = { ...backend.settings, share_usage_events: false };
+    const pending = holdEveryWrite();
+    show();
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    await waitFor(() => {
+      expect(share.checked).toBe(false);
+    });
+    fireEvent.click(share); // on
+    fireEvent.click(share); // off, the user's last word
+    expect(share.checked).toBe(false);
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(true);
+    });
+    // With overlapping writes, this applies off and then on.
+    await releaseNewestFirst(pending);
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
+    expect(backend.settings.share_usage_events).toBe(false);
+    expect(share.checked).toBe(false);
+  });
+
+  it("round 2: on, off, on ends on, and Continue waits for all of it", async () => {
+    const pending = holdEveryWrite();
+    show();
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    fireEvent.click(share); // off
+    fireEvent.click(share); // on
+    fireEvent.click(share); // off
+    fireEvent.click(share); // on
+    expect(pending).toHaveLength(1);
+    expect(primary("Continue").disabled).toBe(true);
+    await act(async () => {
+      pending.pop()?.();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    // The first write done: only the last choice is sent next, and Continue waits for it.
+    expect(pending).toHaveLength(1);
+    expect(primary("Continue").disabled).toBe(true);
+    await releaseNewestFirst(pending);
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
+    expect(backend.settings.share_usage_events).toBe(true);
+    expect(backend.named("set_share_usage_events").map((call) => call.args.share)).toEqual([
+      false,
+      true,
+    ]);
   });
 
   it("stays locked after a failed opt-out, and the switch shows what is saved", async () => {
@@ -1051,9 +1138,30 @@ describe("Ready", () => {
   it("criterion 6: the events line follows the switch, and Change goes to it", async () => {
     backend.settings = { ...backend.settings, share_usage_events: false };
     show();
-    await screen.findByText(/^Off/);
-    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    const row = (await screen.findByText("Usage and error events")).closest("div");
+    await within(row as HTMLElement).findByText(/^Off/);
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "Change" }));
     await screen.findByRole("switch", { name: "Share usage and error events" });
+  });
+
+  it("criterion 6: shows the real history limit, and Change opens Settings → History", async () => {
+    backend.settings = { ...backend.settings, history_limit: 50 };
+    render(<App />);
+    await screen.findByText(/Keeps your last 50 dictations on this Mac/);
+    const row = screen.getByText("History").closest("div");
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "Change" }));
+    await waitFor(() => {
+      expect(backend.named("leave_setup_for_settings")).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("navigation", { name: "Setup steps" })).toBeNull();
+    });
+  });
+
+  it("criterion 6: says when history is off", async () => {
+    backend.settings = { ...backend.settings, history_limit: 0 };
+    show();
+    await screen.findByText(/^Off/);
   });
 
   it("criterion 6: the login switch goes through S1's command", async () => {

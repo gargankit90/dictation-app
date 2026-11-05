@@ -92,6 +92,10 @@ adapter. Tauri is a thin layer on top.
 - API keys only in the OS keychain (`keyring`). Never in settings files, logs,
   the repo, test fixtures, PR comments or reports.
 - Audio stays in memory; written to disk only in debug mode.
+- Recent dictations (U7, `docs/privacy.md`): text only, in a 0600 file in the
+  app's data folder. Never in logs (neither an entry's text nor its length),
+  analytics, Sentry or the report, and a paste Secure Input refused is never
+  kept. `Entry` has no field for an app or window.
 - Anonymous usage events (A1) are **on by default**, with an off switch in
   Settings → Privacy that stops sending at once, clears the queue and deletes
   the install ID. They go only to PostHog Cloud US, sent from Rust through

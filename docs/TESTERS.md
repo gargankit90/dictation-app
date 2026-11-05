@@ -6,6 +6,8 @@ dictation, and says what to send us when something goes wrong.
 
 What is new in each version is in the [changelog](../CHANGELOG.md).
 
+New: Vocet now keeps your last 25 dictations on this Mac so you can get the words back. Text only, never sent. Change or turn it off in Settings → History.
+
 You need an **Apple Silicon Mac (M1 or newer; Intel Macs are not supported)**
 with **macOS 13 (Ventura) or newer**, and one of two ways to turn speech into
 text:

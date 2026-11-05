@@ -7,6 +7,13 @@ tms_appearance() {
   vm "osascript -e 'tell application \"System Events\" to tell appearance preferences to set dark mode to $1'"
 }
 
+TMS_SETTINGS_FILE="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/settings.json"
+
+# tms_settings_file <json>: what the settings file holds at the next launch.
+tms_settings_file() {
+  printf '%s\n' "$1" | vm "mkdir -p $(q "$(dirname "$TMS_SETTINGS_FILE")") && cat >$(q "$TMS_SETTINGS_FILE")"
+}
+
 # tms_shot <name>: the menu opened, photographed, closed.
 tms_shot() {
   ax_ok tray-open "$APP_NAME" || return 1
@@ -44,7 +51,9 @@ tms_states() {
 }
 
 # Copy last dictation: disabled before any dictation, enabled after one, copies
-# exactly the dictated text, and disabled again after a relaunch (memory only).
+# exactly the dictated text. It comes from the history (U7), so after a relaunch
+# it still copies it; with history Off (the settings file says 0) nothing is
+# stored, so it is disabled again after a relaunch (memory only, as U5 had it).
 tms_copy_last() {
   fresh_app_state
   launch_full
@@ -68,9 +77,38 @@ tms_copy_last() {
   launch_full
   expect "copy-last: the app is back" wait_for_log 'INFO .*ready'
   sleep 3
-  expect "copy-last: disabled again after a relaunch" \
+  expect "copy-last: still enabled after a relaunch (from the history)" \
+    sh -c "printf '%s' \"\$1\" | grep -qE '^Copy last dictation\$'" _ "$(tray_menu)"
+  set_clipboard "something else"
+  expect "copy-last: pressed after the relaunch" ax_ok tray-click "$APP_NAME" "Copy last dictation"
+  sleep 1
+  expect "copy-last: it copied the stored dictation" test "$(clipboard)" = "$MOCK_TEXT"
+  expect "the app quits" quit_from_tray
+
+  # History Off: memory only.
+  fresh_app_state
+  tms_settings_file '{"version": 2, "history_limit": 0}'
+  launch_full
+  expect "copy-last off: the app starts" wait_for_log 'INFO .*ready'
+  textedit_fresh
+  expect "copy-last off: a dictation ends Idle" dictate_once 1
+  sleep 2
+  expect "copy-last off: enabled after a dictation" \
+    sh -c "printf '%s' \"\$1\" | grep -qE '^Copy last dictation\$'" _ "$(tray_menu)"
+  set_clipboard "something else"
+  expect "copy-last off: pressed in the tray" ax_ok tray-click "$APP_NAME" "Copy last dictation"
+  sleep 1
+  expect "copy-last off: the clipboard holds exactly the dictation" test "$(clipboard)" = "$MOCK_TEXT"
+  expect "copy-last off: nothing is stored" vm "test ! -e $(q "$VM_HISTORY_FILE")"
+  textedit_close
+  expect "the app quits" quit_from_tray
+  launch_full
+  expect "copy-last off: the app is back" wait_for_log 'INFO .*ready'
+  sleep 3
+  expect "copy-last off: disabled again after a relaunch" \
     sh -c "printf '%s' \"\$1\" | grep -qF '(off) Copy last dictation'" _ "$(tray_menu)"
   expect "the app quits" quit_from_tray
+  vm "rm -f $(q "$TMS_SETTINGS_FILE")"
 }
 
 e2e_tray_menu_screenshots() {

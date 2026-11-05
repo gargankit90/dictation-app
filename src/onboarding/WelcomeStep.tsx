@@ -1,10 +1,7 @@
-import { useState } from "react";
-import { commands } from "../bindings";
 import type { Settings_Serialize } from "../bindings";
 import { keycapLabel } from "../hotkeyKeys";
-import { messageOf } from "../keyTest";
-import { WhatsSent } from "../settings/Privacy";
-import { SaveStatus, Switch, useSave } from "../settings/ui";
+import { useSharingSwitch, WhatsSent } from "../settings/Privacy";
+import { SaveStatus, Switch } from "../settings/ui";
 import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";
 
@@ -29,21 +26,11 @@ interface Props {
  * all if they switch it off here (`ConsentGate`).
  */
 export function WelcomeStep({ parts, settings, onStored, onContinue }: Props) {
-  const sharing = useSave();
-  const [shown, setShown] = useState<boolean | null>(null);
-  const checked = shown ?? settings?.share_usage_events ?? true;
+  const { save, checked, setSharing } = useSharingSwitch(
+    settings?.share_usage_events ?? true,
+    onStored,
+  );
   const key = keycapLabel(settings?.hotkey ?? "RightAlt");
-
-  async function setSharing(share: boolean) {
-    setShown(share);
-    await sharing.track(async () => {
-      const result = await commands.setShareUsageEvents(share);
-      const reread = await commands.getSettings();
-      if (reread.status === "ok") onStored(reread.data);
-      return result.status === "error" ? messageOf(result.error) : null;
-    });
-    setShown(null);
-  }
 
   return (
     <StepFrame
@@ -55,9 +42,9 @@ export function WelcomeStep({ parts, settings, onStored, onContinue }: Props) {
         blockedBecause:
           settings === null
             ? "Loading…"
-            : sharing.save.state === "saving"
+            : save.state === "saving"
               ? SAVING_REASON
-              : sharing.save.state === "error"
+              : save.state === "error"
                 ? SAVE_FAILED_REASON
                 : null,
       }}
@@ -82,7 +69,7 @@ export function WelcomeStep({ parts, settings, onStored, onContinue }: Props) {
         <p className="ob-caption" id="ob-share-caption">
           {EVENTS_CAPTION}
         </p>
-        <SaveStatus save={sharing.save} />
+        <SaveStatus save={save} />
         <WhatsSent />
         <p className="ob-caption">Change any time in Settings → Privacy.</p>
       </div>

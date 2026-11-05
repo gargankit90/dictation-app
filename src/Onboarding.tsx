@@ -36,6 +36,8 @@ const ACTION_LABELS: Record<StripAction, string> = {
 interface Props {
   /** Called once the user is done and the app has hidden the window. */
   onFinished: () => void;
+  /** Called once the app has left the steps for Settings → History. */
+  onOpenHistory?: () => void;
 }
 
 /**
@@ -45,7 +47,7 @@ interface Props {
  * strip and whichever step the app says, and each step decides its own
  * primary action.
  */
-export function Onboarding({ onFinished }: Props) {
+export function Onboarding({ onFinished, onOpenHistory }: Props) {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -339,6 +341,17 @@ export function Onboarding({ onFinished }: Props) {
           models={models}
           engine={engine}
           onChangeSharing={() => void goTo("welcome")}
+          onChangeHistory={() => {
+            void (async () => {
+              try {
+                const left = await commands.leaveSetupForSettings();
+                if (left.status === "error") setError(messageOf(left.error));
+                else onOpenHistory?.();
+              } catch {
+                setError(BROKEN);
+              }
+            })();
+          }}
           onFinish={() => void finish()}
         />
       )}

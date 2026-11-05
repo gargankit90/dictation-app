@@ -8,6 +8,7 @@ pub mod coordinator;
 pub mod diagnostics;
 pub mod error;
 pub mod events;
+pub mod history;
 pub mod hotkey_spec;
 pub mod level;
 pub mod local_models;

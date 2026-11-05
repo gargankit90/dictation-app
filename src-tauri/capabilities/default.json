@@ -48,6 +48,12 @@
     "allow-set-download-paused",
     "allow-practice-words",
     "allow-copy-practice-words",
-    "allow-set-speech-choice"
+    "allow-set-speech-choice",
+    "allow-leave-setup-for-settings",
+    "allow-list-history",
+    "allow-copy-history-entry",
+    "allow-delete-history-entry",
+    "allow-clear-history",
+    "allow-set-history-limit"
   ]
 }

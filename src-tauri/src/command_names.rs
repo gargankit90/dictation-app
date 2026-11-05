@@ -53,6 +53,12 @@ pub const COMMAND_NAMES: &[&str] = &[
     "practice_words",
     "copy_practice_words",
     "set_speech_choice",
+    "leave_setup_for_settings",
+    "list_history",
+    "copy_history_entry",
+    "delete_history_entry",
+    "clear_history",
+    "set_history_limit",
 ];
 
 /// The overlay window's commands (U4 round 2): `build.rs` adds their

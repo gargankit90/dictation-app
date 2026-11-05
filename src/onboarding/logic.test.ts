@@ -53,6 +53,7 @@ const SETTINGS = {
   transcription: "local" as const,
   local_model: "parakeet",
   share_usage_events: true,
+  history_limit: 25,
 };
 
 describe("recommendedModel", () => {

@@ -9,6 +9,10 @@ the release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- New: Vocet now keeps your last 25 dictations on this Mac so you can get the words back. Text only, never sent. Change or turn it off in Settings → History.
+
 ### Changed
 
 - The app is now called **Vocet** (menu, windows, prompts). Your settings,

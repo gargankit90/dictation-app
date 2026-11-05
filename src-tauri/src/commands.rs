@@ -39,6 +39,7 @@ use tauri::State;
 
 use crate::diagnostics::Diagnostics;
 use crate::engine::{self, LiveEngine};
+use crate::history::AppHistory;
 use crate::onboarding::{self, AppPermission, Onboarding, OnboardingStatus, OsPermissions, View};
 use crate::usage::{self, Usage};
 
@@ -103,11 +104,6 @@ pub async fn launch_notice(state: State<'_, LaunchNotice>) -> Result<Option<Stri
     Ok(state.0.map(str::to_owned))
 }
 
-/// The words Try it can show when a paste doesn't land (U8): the pipeline's
-/// last insert attempt, in memory only.
-#[derive(Debug, Clone, Default)]
-pub struct PracticeWords(pub dictation_pipeline::last_dictation::LastDictation);
-
 /// What the onboarding commands ask of the app itself (M5.2).
 pub trait Shell: Send + Sync {
     /// Hides the settings window.
@@ -116,6 +112,8 @@ pub trait Shell: Send + Sync {
     fn restart(&self);
     /// Shows the window on its first-run steps.
     fn show_onboarding_window(&self);
+    /// Shows the window on the settings form.
+    fn show_settings_window(&self);
 }
 
 /// The app, for the onboarding commands.
@@ -271,7 +269,7 @@ fn save_with<S: SecretStore + 'static>(
 /// read and their write.
 static SETTINGS_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn settings_write() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn settings_write() -> std::sync::MutexGuard<'static, ()> {
     SETTINGS_WRITE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -285,8 +283,10 @@ fn settings_write() -> std::sync::MutexGuard<'static, ()> {
 /// [`set_share_usage_events`] changes it, so a Save can never undo a newer
 /// opt-out (A1 review, round 1). The same goes for the hotkey, which only
 /// [`set_hotkey`] changes (K1 review, round 1): a form loaded before the key
-/// was recorded can't switch it back, and for `launch_at_login`, which only
-/// [`set_launch_at_login`] changes (S1).
+/// was recorded can't switch it back, for `launch_at_login`, which only
+/// [`set_launch_at_login`] changes (S1), and for `history_limit`, which only
+/// [`crate::history::set_history_limit`] changes (U7), since lowering it
+/// deletes entries only after the user confirms.
 #[tauri::command]
 #[specta::specta]
 pub async fn save_settings(
@@ -323,6 +323,7 @@ fn save_keeping_sharing<S: SecretStore + 'static>(
         settings.share_usage_events = before.share_usage_events;
         settings.launch_at_login = before.launch_at_login;
         settings.hotkey.clone_from(&before.hotkey);
+        settings.history_limit = before.history_limit;
     }
     save_locked(config, live, hotkey, settings, before)
 }
@@ -860,6 +861,19 @@ fn leave_welcome<S: SecretStore>(config: &Config<S>, onboarding: &Onboarding, us
     }
 }
 
+/// Ready's History "Change": leaves the steps for Settings. Setup stays where
+/// it was, and "Resume setup…" comes back to it.
+#[tauri::command]
+#[specta::specta]
+pub async fn leave_setup_for_settings(
+    shell: State<'_, AppShell>,
+    onboarding: State<'_, Arc<Onboarding>>,
+) -> Result<(), String> {
+    onboarding.close();
+    shell.0.show_settings_window();
+    Ok(())
+}
+
 /// Keeps the engine selected on the Speech step, so a quit before Continue
 /// comes back to it. Never the key.
 #[tauri::command]
@@ -901,10 +915,10 @@ pub async fn set_download_paused(
 #[specta::specta]
 pub async fn practice_words(
     onboarding: State<'_, Arc<Onboarding>>,
-    words: State<'_, PracticeWords>,
+    history: State<'_, AppHistory>,
 ) -> Result<Option<String>, String> {
     Ok(if onboarding.view() == View::Onboarding {
-        words.0.attempted()
+        history.0.attempted()
     } else {
         None
     })
@@ -916,12 +930,12 @@ pub async fn practice_words(
 #[specta::specta]
 pub async fn copy_practice_words(
     onboarding: State<'_, Arc<Onboarding>>,
-    words: State<'_, PracticeWords>,
+    history: State<'_, AppHistory>,
 ) -> Result<(), String> {
     if onboarding.view() != View::Onboarding {
         return Ok(());
     }
-    let Some(text) = words.0.attempted() else {
+    let Some(text) = history.0.attempted() else {
         return Ok(());
     };
     tauri::async_runtime::spawn_blocking(move || crate::tray_menu::copy_text(&text))
@@ -1020,6 +1034,12 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         practice_words,
         copy_practice_words,
         set_speech_choice,
+        leave_setup_for_settings,
+        crate::history::list_history,
+        crate::history::copy_history_entry,
+        crate::history::delete_history_entry,
+        crate::history::clear_history,
+        crate::history::set_history_limit,
         crate::overlay::get_overlay_level,
     ])
 }
@@ -1073,6 +1093,7 @@ mod tests {
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
         fn show_onboarding_window(&self) {}
+        fn show_settings_window(&self) {}
     }
 
     /// M5.7 criterion 2: the tray's Relaunch restarts the app once, through
@@ -1144,6 +1165,12 @@ mod tests {
             "practiceWords",
             "copyPracticeWords",
             "setSpeechChoice",
+            "leaveSetupForSettings",
+            "listHistory",
+            "copyHistoryEntry",
+            "deleteHistoryEntry",
+            "clearHistory",
+            "setHistoryLimit",
         ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
@@ -1152,7 +1179,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 45,
+            commands, 51,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1242,7 +1269,8 @@ mod tests {
                 "launch_at_login",
                 "transcription",
                 "local_model",
-                "share_usage_events"
+                "share_usage_events",
+                "history_limit"
             ]
         );
         // L1: the model list carries no key either.
@@ -1326,6 +1354,27 @@ mod tests {
             assert!(!saved.share_usage_events, "the opt-out was undone");
             assert_eq!(saved.language.as_deref(), Some("fr"), "the rest saved");
             assert_eq!(change.unwrap().sharing, None, "no re-enabling");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// U7: only `set_history_limit` changes the limit, since lowering it
+        /// deletes entries, so a stale form can't bring back or lower it.
+        #[test]
+        fn a_save_keeps_the_stored_history_limit() {
+            let (config, dir) = config("history");
+            let (hotkey, _keys) = listening();
+            let mut stored = config.settings().unwrap();
+            stored.history_limit = 0;
+            config.save_settings(&stored).unwrap();
+            let stale = Settings {
+                history_limit: 100,
+                language: Some("fr".into()),
+                ..Settings::default()
+            };
+            save_keeping_sharing(&config, &LiveEngine::fixed(), &hotkey, stale).unwrap();
+            let saved = config.settings().unwrap();
+            assert_eq!(saved.history_limit, 0, "Off was undone");
+            assert_eq!(saved.language.as_deref(), Some("fr"), "the rest saved");
             let _ = std::fs::remove_dir_all(dir);
         }
 
@@ -2826,7 +2875,6 @@ mod capability_tests {
         app.manage(crate::models::ModelDownloads::default());
         app.manage(super::ActiveHotkey(super::tests::hotkey::listening().0));
         app.manage(std::sync::Arc::new(crate::onboarding::Onboarding::new()));
-        app.manage(super::PracticeWords::default());
         app.manage(crate::onboarding::OsPermissions(std::sync::Arc::new(
             dictation_platform::fakes::FakePermissions::all_granted(),
         )));
@@ -2837,6 +2885,12 @@ mod capability_tests {
         app.manage(crate::LogDir(dir.join("logs")));
         app.manage(super::LaunchNotice(None));
         app.manage(crate::overlay::OverlayLevel::default());
+        app.manage(crate::history::AppHistory(std::sync::Arc::new(
+            dictation_pipeline::history::History::open(
+                dictation_platform::fakes::MemHistoryStore::new(),
+                Some(25),
+            ),
+        )));
         // U6: a microphone that never opens, and no update check.
         app.manage(crate::preferences::AppMicTest(
             dictation_pipeline::mic_test::MicTest::new(Box::new(|| {
@@ -2904,6 +2958,7 @@ mod capability_tests {
         fn hide_window(&self) {}
         fn restart(&self) {}
         fn show_onboarding_window(&self) {}
+        fn show_settings_window(&self) {}
     }
 
     fn invoke(
@@ -2937,6 +2992,8 @@ mod capability_tests {
             "set_onboarding_step" => serde_json::json!({ "step": "welcome" }),
             "set_share_usage_events" => serde_json::json!({ "share": true }),
             "set_hotkey_recording" => serde_json::json!({ "recording": false }),
+            "copy_history_entry" | "delete_history_entry" => serde_json::json!({ "id": "1" }),
+            "set_history_limit" => serde_json::json!({ "limit": 25 }),
             _ => serde_json::json!({}),
         }
     }
@@ -3057,7 +3114,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 45);
+        assert_eq!(COMMAND_NAMES.len(), 51);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

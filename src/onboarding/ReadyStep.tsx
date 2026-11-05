@@ -24,7 +24,14 @@ interface Props {
   models: LocalModelInfo_Serialize[] | null;
   engine: EngineStatus | null;
   onChangeSharing: () => void;
+  onChangeHistory: () => void;
   onFinish: () => void;
+}
+
+/** What the history limit means, in words. */
+export function historyLine(limit: number): string {
+  if (limit === 0) return "Off";
+  return `Keeps your last ${String(limit)} dictations on this Mac`;
 }
 
 /** "On this Mac · Parakeet English · ✓ Ready", or where it really is. */
@@ -78,6 +85,7 @@ export function ReadyStep({
   models,
   engine,
   onChangeSharing,
+  onChangeHistory,
   onFinish,
 }: Props) {
   const login = useSave();
@@ -124,6 +132,17 @@ export function ReadyStep({
             </button>
           </dd>
         </div>
+        {settings !== null && (
+          <div>
+            <dt>History</dt>
+            <dd>
+              {historyLine(settings.history_limit)} ·{" "}
+              <button type="button" className="link" onClick={onChangeHistory}>
+                Change
+              </button>
+            </dd>
+          </div>
+        )}
       </dl>
       {status.try_outcome !== "passed" && <p className="ob-attention">{NOT_TESTED}</p>}
       <p className="ob-menubar">

@@ -58,6 +58,7 @@ const settings: Settings_Serialize = {
   transcription: view === "speech-key" ? "cloud" : "local",
   local_model: "parakeet",
   share_usage_events: true,
+  history_limit: 25,
 };
 
 const status: OnboardingStatus = {

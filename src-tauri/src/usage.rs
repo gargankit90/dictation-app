@@ -206,6 +206,9 @@ pub fn settings_change(before: &Settings, after: &Settings) -> SettingsChange {
     if before.launch_at_login != after.launch_at_login {
         changed(SettingName::LaunchAtLogin);
     }
+    if before.history_limit != after.history_limit {
+        changed(SettingName::HistoryLimit);
+    }
     // The engine: on-device or cloud (L1), or another cloud provider.
     let engine_changed = before.transcription != after.transcription
         || (after.transcription == Transcription::Cloud && before.provider != after.provider);

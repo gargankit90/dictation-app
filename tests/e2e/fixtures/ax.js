@@ -43,6 +43,12 @@
 //                                    checks only that it holds as many
 //                                    characters; prints "typed"
 //   press <app> <window> <button>    presses a button
+//   press-first <app> <window> <start>  presses the first button whose name
+//                                    starts with <start> (a row's button, whose
+//                                    name holds a time)
+//   popup-pick <app> <window> <option>  opens the window's one popup and
+//                                    chooses <option>, as a person would; prints
+//                                    "picked <option>"
 //   radio-press <app> <window> <label>  presses a radio button by its label
 //   check-get <app> <window> <box>   "checked" or "unchecked" (a checkbox,
 //                                    matched like a field)
@@ -414,6 +420,43 @@ function findField(window, field) {
   return found;
 }
 
+// Chooses an option of the window's one popup with the keyboard, as a person can:
+// focus it, Space opens its menu, the option's first character moves to it, Return
+// chooses. WebKit's popup doesn't open for AXPress and its menu isn't in the tree.
+const POPUP_KEYS = { 1: 18, 2: 19, 5: 23, O: 31 };
+
+function pickPopup(appEl, window, option) {
+  const popup = walk(window, (element) => text(element, "AXRole") === "AXPopUpButton");
+  if (popup === undefined) fail("no popup");
+  const key = POPUP_KEYS[option[0]];
+  if (key === undefined) fail("no key for option " + JSON.stringify(option));
+  // In front, so the keys go to it: the script runs in Terminal, which is.
+  setAttr(appEl, "AXFrontmost", $(true));
+  setAttr(window, "AXMain", $(true));
+  setAttr(popup, "AXFocused", $(true));
+  delay(0.5);
+  if (ObjC.unwrap(get(popup, "AXFocused")) !== true) {
+    fail("could not focus the popup (frontmost=" + ObjC.unwrap(get(appEl, "AXFrontmost")) + ")");
+  }
+  postKey(49, 0); // Space
+  delay(0.5);
+  postKey(key, 0);
+  delay(0.3);
+  postKey(36, 0); // Return
+  return "picked " + option;
+}
+
+function findButtonStarting(window, start) {
+  const want = start.toLowerCase();
+  const found = walk(window, (element) => {
+    if (text(element, "AXRole") !== "AXButton") return false;
+    const names = [text(element, "AXTitle"), text(element, "AXDescription")];
+    return names.some((name) => name.trim().toLowerCase().startsWith(want));
+  });
+  if (found === undefined) fail("no button starting " + JSON.stringify(start));
+  return found;
+}
+
 function findButton(window, title) {
   const want = title.toLowerCase();
   const found = walk(window, (element) => {
@@ -635,6 +678,13 @@ function run(argv) {
     }
     case "press": {
       const err = press(findButton(findWindow(appEl, rest[0]), rest[1]), 5.0);
+      if (err !== 0) fail("pressing " + rest[1] + " failed (AX error " + err + ")");
+      return "pressed " + rest[1];
+    }
+    case "popup-pick":
+      return pickPopup(appEl, findWindow(appEl, rest[0]), rest[1]);
+    case "press-first": {
+      const err = press(findButtonStarting(findWindow(appEl, rest[0]), rest[1]), 5.0);
       if (err !== 0) fail("pressing " + rest[1] + " failed (AX error " + err + ")");
       return "pressed " + rest[1];
     }

@@ -23,19 +23,27 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use dictation_core::coordinator::Phase;
-use dictation_core::settings::Provider;
+use dictation_core::settings::{Provider, Settings};
 use dictation_pipeline::config::Config;
+use dictation_pipeline::history::{HISTORY_FILE, History, Recording};
 use dictation_pipeline::pipeline::{Config as PipelineConfig, Pipeline, Ports, UiEvent};
 use dictation_pipeline::ui_events::UiReceiver;
+use dictation_pipeline::usage::UsageTracker;
 use dictation_platform::fakes::{
-    FakeClock, FakeHotkey, FakeInserter, FakePermissions, FileAudioSource, MemSecretStore,
+    FakeClock, FakeErrorReporter, FakeHotkey, FakeInserter, FakePermissions, FakeTelemetry,
+    FileAudioSource, MemSecretStore,
 };
-use dictation_ports::{Audio, HotkeyEvent, TranscribeError, Transcriber, Transcript};
+use dictation_platform::history_file::HistoryFile;
+use dictation_ports::{
+    Audio, EngineKind, HotkeyEvent, InsertError, PermissionStatus, TranscribeError, Transcriber,
+    Transcript,
+};
 use dictation_transcribe::engine::Transcribers;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::{LEVEL_VARIABLE, LOG_FILE_PREFIX, Limits, init_with};
+use crate::diagnostics::{Diagnostics, Environment, report_text};
 use crate::engine::{LiveEngine, changed, starting};
 
 /// Fake keys that look like no provider's, so only the registry of keys
@@ -352,8 +360,13 @@ async fn dictate_everything(dir: &Path) {
     let wav_bytes = dictation_core::wav::encode_f32(&vec![0.25; 8_000], 16_000).unwrap();
     std::fs::write(&wav, wav_bytes).unwrap();
     let armed = Arc::new(AtomicBool::new(false));
+    let history = Arc::new(History::open(
+        HistoryFile::new(dir.join(HISTORY_FILE)),
+        Some(25),
+    ));
     let mut run = Run::spawn(
         &wav,
+        Arc::clone(&history),
         Panicky {
             inner: transcribers.clone(),
             armed: Arc::clone(&armed),
@@ -367,6 +380,7 @@ async fn dictate_everything(dir: &Path) {
         "{events:?}"
     );
     assert!(run.inserter.inserted().is_empty());
+    run.seen.extend(events);
 
     // Settings saves the new key; the rebuild runs on a blocking thread,
     // as the command does.
@@ -396,7 +410,21 @@ async fn dictate_everything(dir: &Path) {
             "{events:?}"
         );
         assert_eq!(run.inserter.inserted().len(), n);
+        run.seen.extend(events);
     }
+    // U7: a paste that fails, whose text is kept as not pasted, and one
+    // Secure Input refuses, which isn't kept.
+    run.inserter
+        .fail_next(InsertError::Failed("no focus".to_owned()));
+    let events = run.dictate().await;
+    run.seen.extend(events);
+    let kept = history.entries().len();
+    assert!(history.entries().first().is_some_and(|e| !e.pasted));
+    run.inserter.fail_next(InsertError::SecureInput);
+    let events = run.dictate().await;
+    run.seen.extend(events);
+    assert_eq!(history.entries().len(), kept);
+    history_stays_out_of_events_and_reports(dir, &history, &run.seen);
     assert!(
         run.inserter
             .inserted()
@@ -422,6 +450,44 @@ async fn dictate_everything(dir: &Path) {
         .unwrap();
 }
 
+/// U7 criterion 4: with the entries really in the file, what those same
+/// dictations produce for analytics, for Sentry and for "Report a problem"
+/// doesn't hold their text. The log files are searched by the parent.
+fn history_stays_out_of_events_and_reports(dir: &Path, history: &History, seen: &[UiEvent]) {
+    let stored = std::fs::read_to_string(dir.join(HISTORY_FILE)).unwrap();
+    assert!(
+        stored.contains(TRANSCRIPT),
+        "the entries aren't in the file"
+    );
+    assert!(history.entries().iter().all(|e| e.text == TRANSCRIPT));
+
+    let telemetry = Arc::new(FakeTelemetry::new());
+    let reporter = Arc::new(FakeErrorReporter::new());
+    let mut tracker =
+        UsageTracker::new(telemetry.clone(), EngineKind::Cloud).with_reporter(reporter.clone());
+    let diagnostics = Diagnostics::default();
+    for (n, event) in (0_u64..).zip(seen) {
+        tracker.on_event(event, Duration::from_millis(n * 100));
+        diagnostics.record_event(event);
+    }
+    let events = telemetry.events();
+    assert!(!events.is_empty(), "no usage events to check");
+    assert!(!reporter.codes().is_empty(), "no error reports to check");
+    let wire = serde_json::to_string(&events).unwrap();
+    let codes = format!("{:?}", reporter.codes());
+    let report = report_text(
+        &Environment::read("1.0.0"),
+        &Settings::default(),
+        (PermissionStatus::Granted, PermissionStatus::Granted),
+        Some(true),
+        &diagnostics.recent(),
+    );
+    assert!(report.contains("1.0.0"), "{report}");
+    for (what, text) in [("events", &wire), ("reports", &codes), ("report", &report)] {
+        assert!(!text.contains(TRANSCRIPT), "{what}: {text}");
+    }
+}
+
 /// A running pipeline with a fake hotkey and inserter.
 struct Run {
     pipeline: Pipeline,
@@ -429,10 +495,12 @@ struct Run {
     hotkey: FakeHotkey,
     clock: FakeClock,
     inserter: FakeInserter,
+    /// The UI events of the dictations so far.
+    seen: Vec<UiEvent>,
 }
 
 impl Run {
-    fn spawn<T: Transcriber + 'static>(wav: &Path, transcriber: T) -> Self {
+    fn spawn<T: Transcriber + 'static>(wav: &Path, history: Arc<History>, transcriber: T) -> Self {
         let hotkey = FakeHotkey::new();
         let clock = FakeClock::at(Duration::from_secs(100));
         let inserter = FakeInserter::new();
@@ -440,7 +508,7 @@ impl Run {
             hotkey: hotkey.clone(),
             audio: FileAudioSource::new(wav),
             transcriber,
-            inserter: inserter.clone(),
+            inserter: Recording::new(inserter.clone(), history, || "Groq".to_owned()),
             permissions: FakePermissions::all_granted(),
             clock: clock.clone(),
         };
@@ -451,6 +519,7 @@ impl Run {
             hotkey,
             clock,
             inserter,
+            seen: Vec::new(),
         }
     }
 

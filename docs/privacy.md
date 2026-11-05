@@ -1,4 +1,4 @@
-# Privacy: usage events and error reports
+# Privacy: usage events, error reports and dictation history
 
 Vocet can share anonymous usage events and error reports so we can see
 what works and what breaks. This page lists everything it sends. The list is
@@ -51,8 +51,8 @@ be cleaned. If that changes it will be listed here first.
 
 ## Never sent
 
-Audio. Transcripts. Anything you type or paste. API keys. The names, bundle
-IDs or window titles of the apps you use. File paths. Host names. Your user
+Audio. Transcripts, and your dictation history. Anything you type or paste. API
+keys. The names, bundle IDs or window titles of the apps you use. File paths. Host names. Your user
 name. Error messages (only the kind of failure). Setting values (only which
 setting changed). Your IP address: the app sends no `$ip` and sets
 `$geoip_disable`; the PostHog project must also be set to discard client IP
@@ -86,7 +86,7 @@ links one install's events together. Turning sharing off deletes it.
 | `engine_selected` | You pick a provider or save its key, or switch between On this Mac and Your own key | `kind` (`cloud`, `local`), `provider` (`groq`, `openai`; cloud only; which local model is never sent) |
 | `dictation_finished` | A dictation was pasted | `engine_kind` (`cloud`, `local`), `duration_bucket` (`under2s`, `from2_to5s`, `from5_to15s`, `from15_to60s`, `over60s`), `latency_bucket` (`under500ms`, `from500_to1000ms`, `from1_to2s`, `from2_to5s`, `over5s`) |
 | `dictation_failed` | A dictation failed | `error_type` (`transcription`, `empty_transcript`, `insert`, `secure_input`, `microphone_permission`, `accessibility_permission`, `hotkey`) |
-| `setting_changed` | You save a changed setting | `setting` (`provider`, `model`, `language`, `hotkey`, `launch_at_login`, `share_usage_events`). Turning sharing off sends nothing, not even this. |
+| `setting_changed` | You save a changed setting | `setting` (`provider`, `model`, `language`, `hotkey`, `launch_at_login`, `share_usage_events`, `history_limit`). Turning sharing off sends nothing, not even this. |
 | `update_installed` | The first launch after an update | `from_version`, `to_version` |
 
 Versions hold only digits, letters, dots, dashes and plus signs, at most 32
@@ -98,6 +98,36 @@ Events are queued in memory (at most 200), sent in batches of up to 20 at least
 once a minute and when you quit, with one attempt and a 10 second timeout. If
 that fails, the queued events are dropped. Nothing is retried and dictation
 never waits for it.
+
+## Dictation history
+
+Settings → History keeps your recent dictations, so you can get the words back
+when a paste fails or you want a sentence again. Choose how many under "Keep
+recent dictations": Off, 10, 25, 50 or 100. The default is the last 25.
+
+- **Text only.** Audio is never stored (it stays in memory unless you turn on
+  debug mode).
+- **Only on this Mac.** It is kept in `history.json` in the app's data folder,
+  in a file only your user can read (mode 0600). It is not encrypted, so
+  anything running as your user, and any backup of that folder, can read it.
+- **Never sent.** It is not in analytics events, not in Sentry reports, not in
+  "Report a problem", and not in logs at any level (neither an entry's text nor
+  its length).
+- **What each entry holds:** the text, the time, the engine's name, and whether
+  it was pasted. Not the app or window it was pasted into.
+- **Password fields:** if a paste is refused because a password field has focus
+  (Secure Input), those words are not kept at all, in the file or in memory.
+  Other failed pastes are kept, marked "Not pasted".
+- **Deleting.** Delete removes one entry and "Clear history…" removes them all.
+  Lowering the number deletes the oldest at once, after asking. Off deletes all
+  of them and saves nothing more.
+- **A file that can't be read** (damaged, or from a newer version of the app) is
+  left as it is, because it may still hold your dictations. Settings → History
+  says so; new dictations are then kept only until you quit. "Clear history…"
+  or Off deletes the file.
+- **"Copy last dictation"** in the menu copies the newest entry. With history
+  Off it copies the last pasted text, which is kept in memory only and is gone
+  when you quit.
 
 ## Troubleshoot and "Report a problem" (separate from analytics)
 
@@ -121,7 +151,7 @@ when you press it.
 - whether anonymous usage events are on
 - the last ten error codes (for example `mic_denied`) with the time of each
 
-It never holds audio, transcripts, anything you typed or copied, API keys, app
+It never holds audio, transcripts, your dictation history, anything you typed or copied, API keys, app
 names or window titles, file paths, your user name, log lines, or what a
 provider answered. A text field that isn't plain (a path, a key, odd
 characters) shows `unknown` instead. Error codes are kept in memory only
