@@ -740,19 +740,24 @@ button.menu-button {
   line-clamp: 2;
 }
 
-/* Hidden by opacity only, so the keyboard and VoiceOver always reach them. */
+/* Hidden by opacity only, so the keyboard and VoiceOver always reach them.
+   Copy stays visible on a row whose paste failed. */
 .history-actions {
   position: absolute;
   top: var(--vc-space-3);
   right: var(--vc-space-4);
   display: flex;
   gap: var(--vc-space-2);
+}
+
+.history-actions button {
   opacity: 0;
   transition: opacity var(--vc-dur-fast) var(--vc-ease);
 }
 
-.history-row:hover .history-actions,
-.history-row:focus-within .history-actions {
+.history-row:hover .history-actions button,
+.history-row:focus-within .history-actions button,
+.history-actions button.always-shown {
   opacity: 1;
 }
 

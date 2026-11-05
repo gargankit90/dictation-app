@@ -46,6 +46,16 @@ export function relativeTime(createdAt: number, now: number): string {
   return `${date} ${clock}`;
 }
 
+/**
+ * What a row shows. The stylesheet cuts it to two lines; when line breaks make
+ * the cut here instead, the last full stop goes, so it doesn't read "tomorrow....".
+ */
+export function previewOf(text: string): string {
+  const lines = text.split("\n");
+  if (lines.length <= 2) return text;
+  return `${lines.slice(0, 2).join("\n").replace(/\.+$/, "")}…`;
+}
+
 function dictations(count: number): string {
   return count === 1 ? "1 dictation" : `${String(count)} dictations`;
 }
@@ -371,10 +381,12 @@ export function History({
                     <span className="history-time">{time}</span>
                     {row.pasted ? null : <Chip tone="attention">Not pasted</Chip>}
                   </div>
-                  <p className="history-text">{row.text}</p>
+                  <p className="history-text">{previewOf(row.text)}</p>
                   <div className="history-actions">
                     <button
                       type="button"
+                      // Getting the words back is why a failed paste is kept.
+                      className={row.pasted ? undefined : "always-shown"}
                       aria-label={`Copy dictation from ${time}`}
                       onClick={() => void copy(row.id)}
                     >

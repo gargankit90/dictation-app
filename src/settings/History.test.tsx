@@ -6,7 +6,8 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryRow, Settings_Serialize } from "../bindings";
-import { History, HISTORY_POLL_MS, limitQuestion, relativeTime } from "./History";
+import { History, HISTORY_POLL_MS, limitQuestion, previewOf, relativeTime } from "./History";
+import settingsCss from "../settings.css?raw";
 
 const MINUTE = 60_000;
 
@@ -136,7 +137,37 @@ describe("what lowering the limit asks", () => {
   });
 });
 
+describe("the preview", () => {
+  it("drops the full stop before its own ellipsis, only when it cuts lines", () => {
+    expect(previewOf("One.\nTwo.\nThree.")).toBe("One.\nTwo…");
+    expect(previewOf("One\nTwo\nThree")).toBe("One\nTwo…");
+    expect(previewOf("One.\nTwo.")).toBe("One.\nTwo.");
+    expect(previewOf("Just one sentence.")).toBe("Just one sentence.");
+  });
+});
+
 describe("Settings → History", () => {
+  // Design Lead: getting the words back is why a failed paste is kept, so its
+  // Copy needs no hover. With the real stylesheet, as nothing hovers or has focus.
+  it("keeps Copy visible on a Not pasted row, and only there, at rest", async () => {
+    const style = document.createElement("style");
+    style.textContent = settingsCss;
+    document.head.append(style);
+    try {
+      backend.entries = [row(1, "failed", false), row(2, "worked")];
+      await show();
+      const opacity = (name: string) =>
+        getComputedStyle(screen.getByRole("button", { name })).opacity;
+      await screen.findByText("failed");
+      expect(opacity("Copy dictation from 1 min ago")).toBe("1");
+      expect(opacity("Delete dictation from 1 min ago")).toBe("0");
+      expect(opacity("Copy dictation from 2 min ago")).toBe("0");
+      expect(opacity("Delete dictation from 2 min ago")).toBe("0");
+    } finally {
+      style.remove();
+    }
+  });
+
   it("criterion 5: the empty state names the user's own key, and there is nothing to clear", async () => {
     await show();
     expect(await screen.findByText("No dictations yet. Hold Right ⌥ and speak.")).toBeTruthy();
