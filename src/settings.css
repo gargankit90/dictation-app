@@ -394,6 +394,7 @@ pre.report {
   z-index: 10;
   left: 0;
   right: 0;
+  box-sizing: border-box;
   max-height: 220px;
   margin: var(--vc-space-2) 0 0;
   padding: var(--vc-space-1);
