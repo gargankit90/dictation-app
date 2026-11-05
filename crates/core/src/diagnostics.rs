@@ -469,6 +469,16 @@ mod tests {
         }
     }
 
+    /// U12 criterion 6: one word for the key in every sentence the user reads.
+    #[test]
+    fn the_sentences_say_dictation_key() {
+        for code in ErrorCode::ALL {
+            let text = code.user_text().to_lowercase();
+            assert!(!text.contains("hotkey"), "{code}: {text}");
+            assert!(!text.contains("shortcut"), "{code}: {text}");
+        }
+    }
+
     #[test]
     fn every_code_says_what_to_do() {
         for code in ErrorCode::ALL {

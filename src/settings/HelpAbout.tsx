@@ -13,7 +13,7 @@ export interface HelpActions {
   onSetup?: () => void;
 }
 
-/** Help: Troubleshoot…, Report a problem…, Show log file, Run setup again. */
+/** Help: Troubleshoot, Report a problem, the log file, Run setup again. */
 export function Help({ onTroubleshoot, onReport, onShowLog, onSetup }: HelpActions) {
   const [logError, setLogError] = useState<string | null>(null);
   return (
@@ -22,10 +22,10 @@ export function Help({ onTroubleshoot, onReport, onShowLog, onSetup }: HelpActio
         <Row
           label="Troubleshoot"
           labelId="troubleshoot-label"
-          caption="Checks the microphone, Accessibility, the shortcut and the speech engine."
+          caption="Checks the microphone, Accessibility, the dictation key and the speech engine."
         >
           <button type="button" aria-describedby="troubleshoot-label" onClick={onTroubleshoot}>
-            Troubleshoot…
+            Open…
           </button>
         </Row>
       )}
@@ -36,7 +36,7 @@ export function Help({ onTroubleshoot, onReport, onShowLog, onSetup }: HelpActio
           caption="Builds a short report you can read before sending. Nothing is sent by itself."
         >
           <button type="button" aria-describedby="report-label" onClick={onReport}>
-            Report a problem…
+            Preview…
           </button>
         </Row>
       )}
@@ -65,18 +65,18 @@ export function Help({ onTroubleshoot, onReport, onShowLog, onSetup }: HelpActio
                 });
             }}
           >
-            Show log file
+            Show in Finder
           </button>
         </Row>
       )}
       {onSetup === undefined ? null : (
         <Row
-          label="Setup"
+          label="Run setup again"
           labelId="setup-label"
-          caption="Go through the first-run steps again: permissions, engine and a test."
+          caption="Go through the first-run steps again: speech, permissions and a test."
         >
           <button type="button" aria-describedby="setup-label" onClick={onSetup}>
-            Run setup again
+            Start…
           </button>
         </Row>
       )}
@@ -90,7 +90,6 @@ function LinkButton({ link, children }: { link: Link; children: string }) {
     <>
       <button
         type="button"
-        className="link"
         onClick={() => {
           setError(null);
           void commands

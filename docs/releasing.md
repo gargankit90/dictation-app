@@ -14,7 +14,7 @@ unless the owner decides so.
 | Third-party licence notice, bundled and checked        | `THIRD-PARTY-LICENSES.txt`, `scripts/gen-licences.sh`, `scripts/check-licences.sh` |
 | Tester guide (attached to each release as README.md)   | `docs/TESTERS.md`                                                            |
 | Release build, signature check, upload                 | `scripts/release.sh` (tests: `scripts/test-release.sh`, in the gate)         |
-| Updater (tray "Check for updates…")                    | `src-tauri/src/updater.rs`, `plugins.updater` in `src-tauri/tauri.conf.json` |
+| Updater (Settings → General → Check now)               | `src-tauri/src/updater.rs`, `plugins.updater` in `src-tauri/tauri.conf.json` |
 | Manifest maker, throwaway-key updater test             | `scripts/make-latest-json.sh`, `scripts/updater-test.sh`                     |
 
 The updater trusts one **minisign public key** from `tauri.conf.json`
@@ -25,7 +25,7 @@ version differs from the announced one (`requireSignedVersion`). It fetches
 (this repository's own releases; the separate `gargankit90/dictation-app-releases`
 is archived and was never used for a release), once at launch
 (quietly: a dialog only when there is an update) and from the tray's
-**Check for updates…**.
+Settings → General → **Check now**.
 
 ## Signing, in one place
 
@@ -104,7 +104,7 @@ or written to a file. See `docs/privacy.md` for the project settings to turn on.
    it runs `gh release create v0.2.0 --repo gargankit90/dictation-app
    --target <the commit it built>` with those files (the owner's own `gh`
    login; no new token), which creates the tag on that commit. Installed apps
-   find the new `latest.json` at their next launch or **Check for updates…**.
+   find the new `latest.json` at their next launch or Settings → General → **Check now**.
 
    **Tags are immutable here**: a ruleset blocks moving or deleting them. If
    a publish fails after the tag was created, do not retry the same version:
@@ -127,7 +127,7 @@ scripts/updater-test.sh serve     # leave running
 
 In the Lume VM (reachable from the VM at `192.168.64.1`, the default `HOST`):
 copy `target/updater-test/old/Vocet.app` to `~/Applications`, open it,
-menu-bar icon > **Check for updates…** > **Install and restart**. The app
+menu-bar icon > **Settings…** > General > **Check now** > **Install and restart**. The app
 restarts as 0.1.1 (the log says `starting version="0.1.1"`).
 `tests/e2e/scenarios/e2e_update_keeps_permissions.sh` does all of this in the
 VM, on its own throwaway key and a fixture server inside the VM. On your own Mac use

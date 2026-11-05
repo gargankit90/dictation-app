@@ -151,7 +151,7 @@ pub fn render(input: &ReportInput<'_>) -> String {
     let _ = writeln!(out, "arch: {}", field(input.arch));
     let _ = writeln!(out, "microphone: {}", input.microphone.as_str());
     let _ = writeln!(out, "accessibility: {}", input.accessibility.as_str());
-    let _ = writeln!(out, "hotkey: {}", hotkey_label(input.hotkey));
+    let _ = writeln!(out, "dictation_key: {}", hotkey_label(input.hotkey));
     let _ = match input.engine {
         EngineInfo::Cloud(provider) => writeln!(out, "engine: cloud ({provider})"),
         EngineInfo::Local(model) => writeln!(out, "engine: local ({})", field(model)),
@@ -235,7 +235,10 @@ mod tests {
             let mut data = input(&[]);
             data.hotkey = stored;
             let text = render(&data);
-            assert!(text.contains(&format!("hotkey: {shown}\n")), "{text}");
+            assert!(
+                text.contains(&format!("dictation_key: {shown}\n")),
+                "{text}"
+            );
         }
     }
 
@@ -245,7 +248,10 @@ mod tests {
             let mut data = input(&[]);
             data.hotkey = stored;
             let text = render(&data);
-            assert!(text.contains("hotkey: unknown\n"), "{stored}: {text}");
+            assert!(
+                text.contains("dictation_key: unknown\n"),
+                "{stored}: {text}"
+            );
             assert!(stored.is_empty() || !text.contains(stored), "{text}");
         }
     }
@@ -253,8 +259,11 @@ mod tests {
     #[test]
     fn the_keycap_label_survives_the_issue_link() {
         let url = issue_url(&render(&input(&[])));
-        // "hotkey: Right ⌥", percent-encoded as UTF-8.
-        assert!(url.contains("hotkey%3A%20Right%20%E2%8C%A5"), "{url}");
+        // "dictation_key: Right ⌥", percent-encoded as UTF-8.
+        assert!(
+            url.contains("dictation_key%3A%20Right%20%E2%8C%A5"),
+            "{url}"
+        );
     }
 
     #[test]
@@ -278,7 +287,7 @@ mod tests {
                 "arch",
                 "microphone",
                 "accessibility",
-                "hotkey",
+                "dictation_key",
                 "engine",
                 "engine_ready",
                 "analytics",

@@ -217,6 +217,9 @@ fresh_app_state() {
   local name i
   name=$(q "$PROC_NAME")
   vm "pkill -x $name; pkill -x $OLD_PROC_NAME; sleep 1; pkill -9 -x $name; pkill -9 -x $OLD_PROC_NAME; rm -rf $(q "$VM_LOG_DIR"); rm -f $(q "$VM_HISTORY_FILE") $(q "$VM_HISTORY_FILE.tmp")" || true
+  # The window's own storage: the section it remembers and "Got it". Left over,
+  # Speech would reopen first, with the key sheet over the sidebar (U12).
+  vm "rm -rf ~/Library/WebKit/com.dictationapp.desktop ~/Library/WebKit/Vocet" || true
   for i in 1 2 3 4 5; do
     [ "$(app_count)" = 0 ] && return 0
     sleep 1

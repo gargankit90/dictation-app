@@ -1,18 +1,18 @@
-//! M5.4: "Check for updates…" in the tray, on top of `tauri-plugin-updater`.
+//! M5.4: Check for updates, on top of `tauri-plugin-updater`. U12 moved the
+//! button from the tray to Settings → General.
 //!
 //! The plugin reads its endpoint list and the minisign **public** key from
 //! `plugins.updater` in `tauri.conf.json` and refuses any package whose
 //! signature doesn't verify against that key. The key is the owner's
-//! (M5.4); an empty `pubkey` would mean a build without one, and the menu item
+//! (M5.4); an empty `pubkey` would mean a build without one, and Check now
 //! then says so instead of failing in a way a tester can't read.
 //!
 //! The app checks once at launch (quietly: it speaks up only to offer an
-//! update) and whenever the tray item is chosen. Nothing is installed until
+//! update) and whenever Check now is pressed. Nothing is installed until
 //! the user picks "Install and restart".
 //!
 //! The plugin's own commands (`check`, `download`, `install`) are not in any
-//! capability, so no window can call them: only this module, from the tray,
-//! starts an update.
+//! capability, so no window can call them: only this module starts an update.
 
 use reqwest::Url;
 use reqwest::redirect::Policy;
@@ -120,9 +120,8 @@ pub fn failure_reason(error: &tauri_plugin_updater::Error) -> String {
         Error::TargetNotFound(_) | Error::TargetsNotFound(_) => {
             "The newest release has no download for this Mac.".to_owned()
         }
-        _ => {
-            "The update check failed. The log has the details (tray menu > Reveal log).".to_owned()
-        }
+        _ => "The update check failed. The log has the details (Settings → Help → Show in Finder)."
+            .to_owned(),
     }
 }
 
@@ -318,7 +317,7 @@ pub async fn install<R: Runtime>(app: &AppHandle<R>, update: &Update) -> Result<
     Ok(())
 }
 
-/// Who asked for a check: the tray item tells the user every outcome; the
+/// Who asked for a check: Check now tells the user every outcome; the
 /// check at launch speaks up only when there is an update to offer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Trigger {
@@ -366,7 +365,7 @@ pub fn last_checked() -> Option<std::time::SystemTime> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The tray item: checks, tells the user, and installs if they say yes.
+/// Check now: checks, tells the user, and installs if they say yes.
 /// Runs on the async runtime; the dialogs are native and don't block it.
 pub fn check_from_tray<R: Runtime>(app: &AppHandle<R>) {
     spawn_check(app, Trigger::Tray);
@@ -542,7 +541,7 @@ mod tests {
         assert!(failure_reason(&Error::EmptyEndpoints).contains("no update server"));
         assert!(failure_reason(&Error::TargetNotFound("darwin".into())).contains("this Mac"));
         let other = failure_reason(&Error::UnsupportedOs);
-        assert!(other.contains("Reveal log"), "{other}");
+        assert!(other.contains("Show in Finder"), "{other}");
         assert!(!other.contains("UnsupportedOs"));
     }
 

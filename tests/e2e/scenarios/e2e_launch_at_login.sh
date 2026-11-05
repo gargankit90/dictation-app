@@ -125,7 +125,7 @@ login_box_save() {
     job_says "$want" ax check-set "$APP_NAME" "$SETTINGS_WINDOW" launch-at-login "$1" &&
     started=$SECONDS &&
     ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Dictation &&
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Record a different key" 5 &&
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Change…" 5 &&
     ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" General &&
     log "  the window answered within $((SECONDS - started + 1))s while the OS applied it" &&
     VM_TERMINAL_TIMEOUT=180 ax_ok wait-no-text "$APP_NAME" "$SETTINGS_WINDOW" "Applying…" 150 &&

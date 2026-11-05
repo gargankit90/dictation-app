@@ -44,6 +44,7 @@
     "allow-open-link",
     "allow-get-app-info",
     "allow-check-for-updates",
+    "allow-set-window-page",
     "allow-choose-local-model",
     "allow-set-try-outcome",
     "allow-practice-paste-missed",
