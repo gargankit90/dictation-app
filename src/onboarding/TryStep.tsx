@@ -198,7 +198,7 @@ export function TryStep({
         }}
       />
       {wait !== null && (
-        <p role="status" className="ob-caption">
+        <p role="status" className="ob-sr">
           {wait}
         </p>
       )}
