@@ -400,6 +400,8 @@ impl<I: TextInserter> TextInserter for Recording<I> {
         result
     }
 
+    /// Forwarded: the wrapped inserter's quit-time clipboard restore must
+    /// run, not the trait's no-op default (#241).
     fn finish(&self) {
         self.inner.finish();
     }
@@ -931,8 +933,12 @@ mod tests {
     fn the_inserter_passes_finish_through() {
         let fake = FakeInserter::new();
         let history = Arc::new(open(&MemHistoryStore::new(), 25));
-        Recording::new(fake.clone(), history, String::new).finish();
+        Recording::new(fake.clone(), Arc::clone(&history), String::new).finish();
         assert_eq!(fake.finished(), 1);
+        // Exactly once more through the boxed inserter the app really wraps.
+        let boxed: Box<dyn TextInserter> = Box::new(fake.clone());
+        Recording::new(boxed, history, String::new).finish();
+        assert_eq!(fake.finished(), 2);
     }
 
     #[test]
