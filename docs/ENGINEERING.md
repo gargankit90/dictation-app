@@ -234,7 +234,7 @@ Every testable behaviour gets a test, at the cheapest level that catches it.
 ## Quality gate
 
 Runs in git's pre-push hook (`lefthook run pre-push-gate`) and CI (from M0.3);
-every finding is fixed.
+every finding is fixed. Locally it skips work it has already done, see below.
 
 | Check | Tool | Gate |
 | --- | --- | --- |
@@ -248,6 +248,37 @@ every finding is fixed.
 
 A suppression (`#[allow]`, `eslint-disable`) needs a comment explaining why,
 and the Code Reviewer must agree.
+
+### Not running the same checks twice (G2)
+
+The rule stays: run the gate before you push. `scripts/gate.sh` (helpers in
+`scripts/gate-lib.sh`, tests in `scripts/test-gate.sh`) decides what that costs:
+
+- **Receipt.** A full pass on a clean tree writes a receipt (atomically, at the
+  very end; a failure or interruption writes none) in the worktree's git
+  directory, outside the tracked tree. A later run on identical input is
+  skipped. The key covers the tree (a dirty tree, untracked non-ignored files
+  included, never reuses or writes a receipt), the gate scripts, OS and
+  architecture, Rust, Node and check-tool versions, env flags and profiles
+  (`NEXTEST_*`, `CARGO_*`, `RUST*`, `DICTATION_*`, `LLVM_*`), and the installed
+  npm packages. It expires after 4 hours (`GATE_RECEIPT_TTL`, seconds) so
+  advisory and dependency checks don't go stale.
+- **Prose shortcut.** When every file changed against the merge base of
+  `origin/main` is on a short allowlist of plain Markdown, only prettier, typos
+  and the link check run. Unknown paths, deletions or renames out of the
+  allowlist, an empty diff, a dirty tree, a detached HEAD, a shallow clone, a
+  missing `origin/main`, or several merge bases run the full gate; the base,
+  candidate, mode and reason are printed. Not on the allowlist: `AGENTS.md`,
+  `CLAUDE.md`, `SECURITY.md`, `CHANGELOG.md`, `NOTICE`, licences,
+  `docs/TESTERS.md`, `docs/releasing.md`, `docs/privacy.md`, `docs/agents/`,
+  `site/`, `.github/`, `scripts/`, `.claude/`.
+- **`scripts/gate.sh --full`** ignores both. **CI** (`CI` or `GITHUB_ACTIONS`
+  set) always runs everything and never reads or writes a receipt. Tag pushes
+  get no special case: a receipt either matches or it doesn't.
+- **Only on the owner's Mac** (the macOS CI job runs the Rust checks only):
+  coverage thresholds and the shell self-tests (`test-guards`, `test-release`,
+  `test-check-licences`, `test-coverage`, `test-gate`, the e2e stub tests) run
+  in the full gate on Linux CI and locally, not on the macOS runner.
 
 ## CI
 
@@ -265,7 +296,8 @@ reach the owner's Mac**: there is no self-hosted runner, and
   cargo-nextest, cargo-llvm-cov, typos) with `Swatinem/rust-cache`. `macos`
   builds, lints and tests `dictation-platform` and `dictation-transcribe` (the Metal build of the on-device engine, #219) on `macos-15` (Apple Silicon,
   checked with `uname -m`), the `#[cfg(target_os = "macos")]` code Linux
-  compiles out. `dmg.yml` builds the tester DMG on `macos-15`, signed ad hoc
+  compiles out, then also runs workspace clippy, nextest and doctests with
+  `DICTATION_NO_LAUNCH=1` (G2), so every crate's tests run on a Mac too. `dmg.yml` builds the tester DMG on `macos-15`, signed ad hoc
   (`DMG_ADHOC=1`): there is no certificate and no secret in CI.
 - **Job names are stable** (they become required status checks): `Quality gate (Linux)`,
   `Platform crate (macOS)` and, for packaging changes, `DMG (macOS)`. Renaming

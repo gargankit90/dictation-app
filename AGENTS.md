@@ -64,7 +64,20 @@ push guard, and CI runs it on every PR. Run it before you push:
 
 ```sh
 scripts/gate.sh                        # the whole gate, stops at the first failure
+scripts/gate.sh --full                 # ignore receipts and the prose shortcut
 ```
+
+Locally the gate does not repeat work (G2). After a full pass on a clean tree
+it stores a receipt in the worktree's git directory; the same input (tree,
+gate scripts, OS and architecture, tool versions, env flags, installed npm
+packages) within 4 hours is skipped with a message, so the manual run and the
+pre-push run cost one run. A dirty tree never reuses or writes a receipt. If
+every file changed against the merge base of `origin/main` is plain prose
+(README, CONTRIBUTING, `docs/ENGINEERING.md`, `docs/review-checklist.md`,
+`docs/history/**/*.md`), only formatting, spelling and link checks run; any
+other path, an empty diff, a dirty tree, a detached HEAD, a shallow clone or a
+missing `origin/main` runs everything, and the reason is printed. CI always
+runs everything and never reads a receipt. Tag pushes get no special case.
 
 ## Workflow: every change goes through a pull request
 

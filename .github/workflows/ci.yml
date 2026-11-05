@@ -27,9 +27,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # The full gate runs on Linux: macOS minutes cost 10x and often queue for a
-  # runner. The `macos` job below covers the #[cfg(target_os = "macos")] code
-  # in crates/platform, which Linux compiles out. Windows comes with M-W.1.
+  # The full gate runs on Linux: the runners are fast and rarely queue (macOS
+  # runners are free for this public repository, but fewer, so they queue and
+  # every added check lengthens the job). The `macos` job below covers the
+  # #[cfg(target_os = "macos")] code in crates/platform, which Linux compiles
+  # out, and runs the Rust workspace's tests on a Mac. Windows comes with M-W.1.
   gate:
     name: Quality gate (Linux)
     runs-on: ubuntu-24.04
@@ -107,7 +109,8 @@ jobs:
 
   # The Mac-only code in dictation-platform (hotkey, Accessibility, Secure
   # Input): build, lint and test it on its own, with --all-features (#10), then
-  # lint and doctest it without feature `testing` (#48).
+  # lint and doctest it without feature `testing` (#48). Then the whole Rust
+  # workspace: clippy, nextest and doctests (G2), as the gate runs them.
   macos:
     name: Platform crate (macOS)
     # Apple Silicon (arm64) image; the next step checks it.
@@ -116,6 +119,8 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       NEXTEST_PROFILE: ci
+      # F1: no test launches a browser or Finder, or reads the real Keychain.
+      DICTATION_NO_LAUNCH: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -153,6 +158,11 @@ jobs:
       - run: cargo build -p dictation-transcribe --all-targets
       - run: cargo clippy -p dictation-transcribe --all-targets -- -D warnings
       - run: cargo nextest run -p dictation-transcribe --profile ci
+      # The whole workspace on a Mac (G2), as scripts/gate.sh runs it: core,
+      # ports, pipeline, telemetry and the Tauri shell had tests only on Linux.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo nextest run --workspace --profile ci
+      - run: cargo test --workspace --doc
 
       - name: Collect test evidence
         if: always()
