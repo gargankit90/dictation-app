@@ -31,12 +31,14 @@ const SETTLE_MS = 1800;
 
 // Which step: a page per step, since macOS's `open` drops a file URL's query.
 const view = document.body.dataset.step ?? "welcome";
+const isMore = view === "speech-more" || view === "speech-more-plain";
 const steps: Record<string, Step> = {
   welcome: "welcome",
   speech: "speech",
   "speech-key": "speech",
   permissions: "permissions",
   "speech-more": "speech",
+  "speech-more-plain": "speech",
   try: "try",
   "try-plain": "try",
   "try-default": "try",
@@ -44,10 +46,14 @@ const steps: Record<string, Step> = {
 };
 const size = view === "try-default" ? DEFAULT : MIN;
 const isTry = steps[view] === "try";
-const isLanguage = view === "speech-more" || view === "settings-language";
+const isLanguage = isMore || view === "settings-language";
 
 /** The owner's Try it, as it is, not pseudo-long. */
-const plain = view === "try-plain" || view === "try-default" || view === "settings-language";
+const plain =
+  view === "try-plain" ||
+  view === "try-default" ||
+  view === "speech-more-plain" ||
+  view === "settings-language";
 
 const model: LocalModelInfo_Serialize = {
   id: "parakeet",
@@ -68,7 +74,7 @@ const settings: Settings_Serialize = {
   version: 2,
   provider: "groq",
   model: "whisper-large-v3-turbo",
-  language: view === "speech-more" ? "fr" : "hi",
+  language: isMore ? "fr" : "hi",
   // The owner's state on Try it: a recorded two-key shortcut.
   hotkey: isTry ? "RightAlt+RightCmd" : "RightAlt",
   launch_at_login: false,
@@ -121,6 +127,10 @@ mockIPC((command) => {
       return settings;
     case "get_launch_at_login":
       return false;
+    case "get_hotkey_notice":
+      return view === "settings-language"
+        ? "The hotkey Right ⌥ is saved, but Vocet can't listen to the keyboard yet: allow it in System Settings → Privacy & Security → Accessibility, and Right ⌥ starts working by itself."
+        : null;
     case "get_app_info":
       return { version: "0.1.0", last_update_check_ms: null };
     case "list_local_models":
@@ -233,12 +243,14 @@ function problems(root: HTMLElement): string[] {
   ) {
     found.push("the fix panel isn't scrolled into view");
   }
+  // Put back after: the run's picture shows what the user would be looking at.
+  const scrolled = content.scrollTop;
   content.scrollTop = content.scrollHeight;
   const last = content.lastElementChild?.getBoundingClientRect();
   if (last !== undefined && last.bottom > area.bottom + 1) {
     found.push("the end of the content can't be scrolled to");
   }
-  content.scrollTop = 0;
+  content.scrollTop = scrolled;
 
   const rail = root.querySelector<HTMLElement>(".ob-rail");
   if (rail === null) found.push("the rail is missing");
@@ -452,7 +464,10 @@ async function languageProblems(root: HTMLElement): Promise<string[]> {
   if (box.top < area.top - 1) found.push("the field is scrolled out of its area");
   if (rows.bottom > area.bottom + 1) found.push("the list is cut off by its area");
   if (rows.right > area.right + 1) found.push("the list sticks out sideways");
-  if (!reachable(first)) found.push("the list's first row can't be clicked");
+  // The row it opens at: the selected language, which may be far down the list.
+  const opened = field.getAttribute("aria-activedescendant");
+  const start = opened === null ? first : document.getElementById(opened);
+  if (start === null || !reachable(start)) found.push("the list's active row can't be clicked");
 
   const key = (name: string) =>
     field.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
@@ -473,13 +488,18 @@ async function languageProblems(root: HTMLElement): Promise<string[]> {
   key("Escape");
   await settle();
   if (field.getAttribute("aria-expanded") !== "false") found.push("Esc doesn't close the list");
+  // For the pictures: setup's shows the list open, Settings' the field closed.
+  if (isMore) {
+    key("ArrowDown");
+    await settle();
+  }
   return found;
 }
 
 /** Everything U9 measures for this page, on top of the frame's own checks. */
 async function viewProblems(root: HTMLElement): Promise<string[]> {
   const found: string[] = [];
-  if (view === "speech" || view === "speech-more") found.push(...(await chipProblems(root)));
+  if (view === "speech" || isMore) found.push(...(await chipProblems(root)));
   if (isTry) found.push(...(await tryProblems(root)));
   if (isLanguage) found.push(...(await languageProblems(root)));
   return found;
