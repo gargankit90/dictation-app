@@ -21,6 +21,7 @@
 //! `relaunch_app` leaves a marker in the config directory and restarts the
 //! app, and the new launch shows onboarding again ([`take_resume_marker`]).
 
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -190,8 +191,11 @@ impl Onboarding {
     #[must_use]
     pub fn load(config_dir: &Path) -> Self {
         let file = config_dir.join(PROGRESS_FILE);
-        let kept = std::fs::read_to_string(&file).ok();
-        let (progress, opened) = match kept {
+        let read = std::fs::read_to_string(&file);
+        // Only "there is no file" says nothing was kept. Any other failure hides
+        // what the file said about sharing.
+        let unknown = matches!(&read, Err(error) if error.kind() != ErrorKind::NotFound);
+        let (mut progress, opened) = match read.ok() {
             // A file that can't be understood starts over, and what it said
             // about sharing is unknown.
             Some(text) => (
@@ -206,6 +210,7 @@ impl Onboarding {
             }
             None => (SetupProgress::default(), false),
         };
+        progress.sharing_was_off |= unknown;
         Self::with(progress, opened, Some(file))
     }
 
@@ -616,6 +621,27 @@ mod tests {
         std::fs::write(dir.join(PROGRESS_FILE), "{ not json").unwrap();
         assert!(!throughout(&dir), "a file that can't be read");
         let _ = std::fs::remove_dir_all(&dir);
+
+        // Read failures, not just bad contents: not UTF-8, and a directory in
+        // the file's place; with no settings file, and with one.
+        for settings_file in [false, true] {
+            let dir = temp(&format!("history-not-utf8-{settings_file}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(PROGRESS_FILE), [0xff, 0xfe, 0x00]).unwrap();
+            if settings_file {
+                std::fs::write(dir.join(SETTINGS_FILE), "{}").unwrap();
+            }
+            assert!(!throughout(&dir), "not UTF-8, settings {settings_file}");
+            let _ = std::fs::remove_dir_all(&dir);
+
+            let dir = temp(&format!("history-directory-{settings_file}"));
+            std::fs::create_dir_all(dir.join(PROGRESS_FILE)).unwrap();
+            if settings_file {
+                std::fs::write(dir.join(SETTINGS_FILE), "{}").unwrap();
+            }
+            assert!(!throughout(&dir), "a directory, settings {settings_file}");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
 
         let dir = temp("history-fresh");
         assert!(throughout(&dir), "a fresh install has no unknown history");
