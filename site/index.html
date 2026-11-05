@@ -2448,24 +2448,24 @@
         <h2 class="h2">Setup ends with a test dictation</h2>
         <ol class="setup-steps">
           <li>
-            <span class="num">1</span><strong>Allow two permissions</strong
+            <span class="num">1</span><strong>Choose how speech becomes text</strong
+            ><span
+              >The model on your Mac, which downloads during setup, or your own Groq or OpenAI
+              key.</span
+            >
+          </li>
+          <li>
+            <span class="num">2</span><strong>Allow two permissions</strong
             ><span
               >Microphone, and Accessibility to paste at your cursor — it doesn’t read your
               screen.</span
             >
           </li>
           <li>
-            <span class="num">2</span><strong>Choose how speech becomes text</strong
+            <span class="num">3</span><strong>Say a sentence</strong
             ><span
-              >Paste a Groq or OpenAI key, or use the model on your Mac (download it once in
-              Settings).</span
-            >
-          </li>
-          <li>
-            <span class="num">3</span><strong>Try your key</strong
-            ><span
-              >Right Option (⌥) by default, or record a different one. Hold it, say a sentence, and
-              let go.</span
+              >Hold Right Option (⌥) or a key you choose, say a sentence and let go, so you know it
+              works.</span
             >
           </li>
         </ol>
@@ -2480,12 +2480,19 @@
               <p>
                 Anonymous usage events go to PostHog and error reports to Sentry, so we can see
                 where setup and dictation break. They carry a random install ID, not your name or
-                account. Turn them off any time in Settings → Privacy; one switch covers both.
+                account. Turn them off on the first setup screen, or any time in Settings → Privacy;
+                one switch covers both.
               </p>
+
               <p>
                 <a href="https://github.com/gargankit90/dictation-app/blob/main/docs/privacy.md"
                   >See the full list of what's sent</a
                 >
+              </p>
+              <h3 style="margin-top: var(--vc-space-5)">Recent dictations stay on your Mac</h3>
+              <p>
+                Vocet keeps your last 25 dictations, text only, so you can get the words back. They
+                are never sent. Change the number or turn it off in Settings → History.
               </p>
             </div>
             <div>
