@@ -28,10 +28,11 @@ five_model_ready() {
   VM_TERMINAL_TIMEOUT=1510 ax_ok wait-no-text "$APP_NAME" "$FIVE_WINDOW" "Getting the model ready" 1500
 }
 
-# The download picked up: either claim is the one the bytes back.
+# The server's answer about the earlier part, from the log: on a fast
+# connection the download can be over before the strip's note can be read. The
+# note's wording follows this answer and is tested in logic.test.ts.
 five_download_picked_up() {
-  ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Continued from" 30 ||
-    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "couldn't continue" 5
+  wait_for_log 'model download answered resume=(Continued|Restarted)' 30
 }
 
 e2e_onboarding_five_steps() {
@@ -66,7 +67,7 @@ e2e_onboarding_five_steps() {
     wait_for_log 'onboarding shown at launch step=Permissions' 30
   expect "the download picks up by itself" \
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading Parakeet English" 30
-  expect "and says what happened to the earlier one" five_download_picked_up
+  expect "and the server answered about the earlier part" five_download_picked_up
   expect "allowed" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Allowed" 10
 
   # Try it waits for a model that isn't here. The VM may download in seconds,

@@ -501,6 +501,8 @@ impl ModelStore {
             .open(part)
             .await
             .map_err(|e| disk(&e))?;
+        // This line's text is what the e2e scenario waits for.
+        tracing::info!(?resume, "model download answered");
         let mut reported = have;
         on_progress(Progress {
             downloaded: have,

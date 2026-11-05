@@ -45,6 +45,8 @@ layout_step() {
   layout_quit_safari
   sleep 1
   vm "open -a Safari $(q "$LAYOUT_DIR/$step.html")" || return 1
+  # After a VM reset, Safari's first launch takes a while to show a window.
+  ax wait-window Safari "" 30 >/dev/null 2>&1 || true
   said=$(ax wait-text Safari "" "LAYOUT $step OK" 15 2>&1) && return 0
   log "  $step: $said"
   ax dump Safari 2>/dev/null | grep -a "LAYOUT" | head -14 | while IFS= read -r line; do
