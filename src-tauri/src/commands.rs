@@ -172,10 +172,14 @@ pub(crate) struct Saved {
 }
 
 impl Saved {
-    /// What to tell the user instead of a plain "saved", if anything.
+    /// What failed, to tell the user instead of a plain "saved". A hotkey
+    /// that's saved and only waiting to listen, such as for Accessibility,
+    /// isn't a failed save: Settings says so from [`get_hotkey_notice`] (U9).
     pub(crate) fn problem(&self) -> Option<String> {
-        let problems: Vec<String> = self.hotkey.problem().into_iter().collect();
-        (!problems.is_empty()).then(|| problems.join(" "))
+        match self.hotkey {
+            HotkeyChange::NotListening { .. } => None,
+            _ => self.hotkey.problem(),
+        }
     }
 }
 
@@ -449,6 +453,18 @@ pub fn set_hotkey_recording(
         hotkey.0.resume();
     }
     Ok(())
+}
+
+/// What Settings says about the hotkey while it's saved but can't listen yet
+/// (U9); `None` while it listens. Off the event loop: a switch in progress
+/// holds the hotkey's lock while the old listener stops.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_hotkey_notice(hotkey: State<'_, ActiveHotkey>) -> Result<Option<String>, String> {
+    let control = hotkey.0.clone();
+    tauri::async_runtime::spawn_blocking(move || control.notice())
+        .await
+        .map_err(|_| "the hotkey task crashed".to_owned())
 }
 
 /// Turns sharing anonymous usage events on or off, and nothing else. Off
@@ -1054,6 +1070,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         set_share_usage_events,
         set_hotkey,
         set_hotkey_recording,
+        get_hotkey_notice,
         set_launch_at_login,
         crate::diagnostics::run_checks,
         crate::diagnostics::test_connection,
@@ -1186,6 +1203,7 @@ mod tests {
             "setShareUsageEvents",
             "setHotkey",
             "setHotkeyRecording",
+            "getHotkeyNotice",
             "setLaunchAtLogin",
             "runChecks",
             "testConnection",
@@ -1227,7 +1245,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 52,
+            commands, 53,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -2378,7 +2396,7 @@ mod tests {
                 problem.contains("Couldn't switch the hotkey to F6"),
                 "{problem}"
             );
-            assert!(problem.contains("RightAlt still works"), "{problem}");
+            assert!(problem.contains("Right ⌥ still works"), "{problem}");
             // The other settings are saved; the hotkey in the file is the
             // one still listening.
             let stored = config.settings().unwrap();
@@ -2386,6 +2404,19 @@ mod tests {
             assert_eq!(stored.hotkey, "RightAlt");
             assert!(keys.listening("RightAlt"));
             let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// U9: a key saved while nothing can listen isn't a failed save; it
+        /// is what `get_hotkey_notice` is for.
+        #[test]
+        fn a_hotkey_saved_while_waiting_to_listen_is_no_failure() {
+            let saved = Saved {
+                hotkey: HotkeyChange::NotListening {
+                    wanted: "F6".parse().unwrap(),
+                    reason: Some(HotkeyError::PermissionDenied),
+                },
+            };
+            assert_eq!(saved.problem(), None);
         }
 
         #[test]
@@ -2448,7 +2479,7 @@ mod tests {
                 message.starts_with("settings file prefs: disk full. Your settings weren't saved."),
                 "{message}"
             );
-            assert!(message.contains("back to RightAlt failed ("), "{message}");
+            assert!(message.contains("back to Right ⌥ failed ("), "{message}");
             assert!(message.contains("taken by another app"), "{message}");
             assert!(
                 message.contains("F6 is the hotkey that works now"),
@@ -3554,7 +3585,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 52);
+        assert_eq!(COMMAND_NAMES.len(), 53);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

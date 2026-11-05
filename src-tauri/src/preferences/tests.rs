@@ -60,6 +60,17 @@ fn hotkey() -> HotkeyControl {
     control
 }
 
+/// A started hotkey that can't listen: Accessibility isn't allowed.
+fn waiting_for_accessibility() -> HotkeyControl {
+    let (mut hotkey, control) = ConfigurableHotkey::new(HotkeySpec::default(), |_| {
+        let fake = FakeHotkey::new();
+        fake.fail_next_start(dictation_ports::HotkeyError::PermissionDenied);
+        fake
+    });
+    hotkey.start(Box::new(|_| {})).unwrap();
+    control
+}
+
 struct Rig {
     dir: TempDir,
     config: Arc<Config<MemSecretStore>>,
@@ -367,4 +378,69 @@ fn criterion_u6_7b_no_sentence_names_a_transcription_section() {
         named.is_empty(),
         "say Settings → Speech instead in: {named:?}"
     );
+}
+
+/// U9 criterion 1: the owner's stuck setup. A hotkey waiting for Accessibility
+/// isn't a failed save, for any of the writes that go through [`write`].
+#[tokio::test]
+async fn a_hotkey_waiting_for_accessibility_fails_no_write() {
+    let rig = rig("waiting", loads());
+    let usage = Usage::disabled();
+    let control = waiting_for_accessibility();
+    // The first try has failed by the time `start` returns.
+    assert!(
+        control
+            .notice()
+            .is_some_and(|said| said.contains("Accessibility"))
+    );
+
+    let (live, keys) = (rig.live.clone(), control.clone());
+    write(Arc::clone(&rig.config), &usage, move |config| {
+        language_change(config, &live, &keys, Some("hi".into()))
+    })
+    .await
+    .expect("the language is saved");
+    assert_eq!(
+        rig.config.settings().unwrap().language.as_deref(),
+        Some("hi")
+    );
+
+    let (live, keys) = (rig.live.clone(), control.clone());
+    write(Arc::clone(&rig.config), &usage, move |config| {
+        commands::write_change(config, &live, &keys, |settings| {
+            choose_cloud(settings, Provider::OpenAi);
+        })
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .expect("the own-key route's engine is saved");
+    assert_eq!(rig.config.settings().unwrap().provider, Provider::OpenAi);
+
+    let (live, keys) = (rig.live.clone(), control.clone());
+    write(Arc::clone(&rig.config), &usage, move |config| {
+        choose_local(config, &live, &keys, ENGLISH)
+    })
+    .await
+    .expect("Download and continue's choice is saved");
+    assert_eq!(
+        rig.config.settings().unwrap().transcription,
+        Transcription::Local
+    );
+
+    // Settings still has the message to show, in the key's label.
+    let said = control.notice().expect("Settings tells the user");
+    assert!(said.contains("Right ⌥"), "{said}");
+    assert!(!said.contains("RightAlt"), "{said}");
+}
+
+/// A write that really failed still says so.
+#[tokio::test]
+async fn a_write_that_fails_is_still_an_error() {
+    let rig = rig("fails", loads());
+    let error = write(Arc::clone(&rig.config), &Usage::disabled(), |_| {
+        Err("not saved".to_owned())
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(error, "not saved");
 }

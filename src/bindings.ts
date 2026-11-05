@@ -102,6 +102,12 @@ export const commands = {
 	 */
 	setHotkeyRecording: (recording: boolean) => typedError<null, string>(__TAURI_INVOKE("set_hotkey_recording", { recording })),
 	/**
+	 *  What Settings says about the hotkey while it's saved but can't listen yet
+	 *  (U9); `None` while it listens. Off the event loop: a switch in progress
+	 *  holds the hotkey's lock while the old listener stops.
+	 */
+	getHotkeyNotice: () => typedError<string | null, string>(__TAURI_INVOKE("get_hotkey_notice")),
+	/**
 	 *  Turns launch at login on or off, and nothing else. It returns at once
 	 *  with the OS's answer for the latest choice: the OS can take 40 s to
 	 *  unregister the login item (#238), so the window must not wait on it and

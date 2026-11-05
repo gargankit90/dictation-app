@@ -331,7 +331,8 @@ pub fn download_problem(error: &DownloadError) -> Option<SetupProblem> {
         DownloadError::NoSpace { .. } => Some(SetupProblem::DownloadFailedNoSpace),
         DownloadError::Network(_) => Some(SetupProblem::DownloadFailedNetwork),
         DownloadError::Checksum => Some(SetupProblem::DownloadFailedChecksum),
-        DownloadError::Disk(_) => Some(SetupProblem::DownloadFailedDisk),
+        // U9 split the file vanishing out of `Disk`; to the reason, it's the same.
+        DownloadError::Disk(_) | DownloadError::Removed => Some(SetupProblem::DownloadFailedDisk),
         DownloadError::Cancelled => None,
     }
 }
@@ -723,6 +724,7 @@ mod tests {
                     DownloadError::Disk(PLANTED.into()),
                     Some(P::DownloadFailedDisk),
                 ),
+                (DownloadError::Removed, Some(P::DownloadFailedDisk)),
                 (DownloadError::Cancelled, None),
             ];
             for (error, expected) in cases {

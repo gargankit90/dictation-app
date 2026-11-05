@@ -1007,6 +1007,18 @@ describe("Speech", () => {
   });
 });
 
+describe("Speech with More… open (U9, Design Lead's fix 2)", () => {
+  it("gives no reason in the footer before a language is chosen", async () => {
+    backend.step = "speech";
+    show();
+    fireEvent.click(await screen.findByRole("radio", { name: "More…" }));
+    await screen.findByRole("combobox");
+    const reason = document.querySelector(".ob-reason");
+    expect(reason?.textContent).toBe("");
+    expect(screen.queryByText(/No on-device model speaks this language/)).toBeNull();
+  });
+});
+
 describe("the download strip", () => {
   function downloading() {
     backend.step = "permissions";
@@ -1209,9 +1221,7 @@ describe("Try it", () => {
     await waitFor(() => {
       expect(backend.named("dictation_progress").length).toBeGreaterThan(0);
     });
-    return screen.getByLabelText<HTMLTextAreaElement>(
-      "Click the box, hold the key, say a sentence, let go.",
-    );
+    return screen.getByLabelText<HTMLTextAreaElement>("Hold the key, say a sentence, let go.");
   }
 
   function stage(name: string) {
@@ -1466,6 +1476,112 @@ describe("Try it", () => {
       expect(backend.settings.hotkey).toBe("RightCmd");
     });
     releaseAllKeys();
+  });
+
+  describe("the box's focus (U9 criterion 6)", () => {
+    it("has it on arriving, so the first dictation needs no click", async () => {
+      const box = await stepOpen();
+      expect(document.activeElement).toBe(box);
+    });
+
+    it("gets it back after a new key is recorded, and stays empty", async () => {
+      const box = await stepOpen();
+      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      box.blur();
+      keyDown("MetaRight");
+      keyUp("MetaRight");
+      await waitFor(() => {
+        expect(backend.settings.hotkey).toBe("RightCmd");
+      });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(box);
+      });
+      expect(box.value).toBe("");
+      releaseAllKeys();
+    });
+
+    it("gets it back after a cancelled recording, by Cancel and by Esc", async () => {
+      const box = await stepOpen();
+      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      box.blur();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      await waitFor(() => {
+        expect(document.activeElement).toBe(box);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      box.blur();
+      keyDown("Escape");
+      keyUp("Escape");
+      await waitFor(() => {
+        expect(document.activeElement).toBe(box);
+      });
+      expect(box.value).toBe("");
+      releaseAllKeys();
+    });
+
+    it("gets it back after Reset to default", async () => {
+      const box = await stepOpen();
+      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      keyDown("MetaRight");
+      keyUp("MetaRight");
+      await waitFor(() => {
+        expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌘");
+      });
+      releaseAllKeys();
+      box.blur();
+      fireEvent.click(screen.getByRole("button", { name: "Reset to default" }));
+      await waitFor(() => {
+        expect(backend.settings.hotkey).toBe("RightAlt");
+      });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(box);
+      });
+    });
+
+    it("gets it back when the window becomes active again", async () => {
+      const box = await stepOpen();
+      box.blur();
+      expect(document.activeElement).not.toBe(box);
+      window.dispatchEvent(new Event("focus"));
+      expect(document.activeElement).toBe(box);
+    });
+
+    it("isn't taken during a recording, not even by the window returning", async () => {
+      const box = await stepOpen();
+      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      await screen.findByText("Press a key…");
+      box.blur();
+      const button = screen.getByRole("button", { name: "Cancel" });
+      button.focus();
+      window.dispatchEvent(new Event("focus"));
+      expect(document.activeElement).toBe(button);
+      expect(box.value).toBe("");
+      fireEvent.click(button);
+    });
+
+    it("keeps the failed paste's panel in view while it refocuses", async () => {
+      const box = await stepOpen();
+      backend.words = WORDS;
+      report({
+        started: 1,
+        finished: 1,
+        errors: 1,
+        stages: ["recorded", "transcribed"],
+        error: "Vocet couldn't paste the text.",
+        failure: "paste",
+        heard: true,
+      });
+      const panel = await screen.findByText(/didn't reach the box/);
+      const area = panel.closest(".ob-fix-area");
+      const focus = vi.spyOn(box, "focus");
+      const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+      box.blur();
+      window.dispatchEvent(new Event("focus"));
+      expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+      expect(scroll.mock.instances).toContain(area);
+      scroll.mockRestore();
+    });
   });
 });
 

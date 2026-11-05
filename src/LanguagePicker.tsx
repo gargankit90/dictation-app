@@ -1,6 +1,15 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { AUTO_LABEL, englishName, languageLabel, languageMatches, sortedByName } from "./languages";
+
+/** Where the picker can be: what scrolls around it, in setup and in Settings. */
+const SCROLL_AREAS = ".ob-content, .settings-pane";
+/** Room kept around the list: its gap below the field, and the area's edge. */
+const LIST_MARGIN_PX = 32;
+/** Three rows, however short the area is: it scrolls for the rest. */
+const MIN_LIST_PX = 96;
+/** However tall the area is. */
+const MAX_LIST_PX = 220;
 
 interface Option {
   /** The stored value: `""` for automatic, otherwise the ISO code. */
@@ -39,21 +48,21 @@ export function LanguagePicker({
   invalid = false,
 }: Props) {
   const listId = useId();
+  const flagId = useId();
+  const field = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
 
   const unsupported = value !== "" && engineName !== null && !supported.includes(value);
-  const selectedLabel =
-    value === ""
-      ? AUTO_LABEL
-      : unsupported
-        ? `${englishName(value)}, not supported by ${engineName}`
-        : languageLabel(value);
+  const flag = unsupported ? `${englishName(value)}, not supported by ${engineName}` : null;
+  // A field cuts off what doesn't fit, so the flag has its own line below it:
+  // it's what tells someone why their language won't work.
+  const selectedLabel = value === "" ? AUTO_LABEL : languageLabel(value);
 
   const options = useMemo(() => {
     const all: Option[] = [{ value: "", label: AUTO_LABEL }];
-    if (unsupported) all.push({ value, label: selectedLabel });
+    if (flag !== null) all.push({ value, label: flag });
     for (const code of sortedByName(supported)) {
       all.push({ value: code, label: languageLabel(code) });
     }
@@ -63,12 +72,33 @@ export function LanguagePicker({
       if (option.value === "") return AUTO_LABEL.toLowerCase().includes(q);
       return languageMatches(option.value, q);
     });
-  }, [supported, unsupported, value, selectedLabel, query]);
+  }, [supported, flag, value, query]);
 
-  // Keep the keyboard-active option visible in the scrollable list.
+  // The field and the list both show when it opens, in a short window too: the
+  // list is only as tall as what is left of the area it scrolls in.
+  useEffect(() => {
+    const list = document.getElementById(listId);
+    const box = field.current;
+    if (!open || list === null || box === null) return;
+    const area = list.closest(SCROLL_AREAS);
+    if (area !== null) {
+      const room = area.clientHeight - box.offsetHeight - LIST_MARGIN_PX;
+      list.style.maxHeight = `${String(Math.min(MAX_LIST_PX, Math.max(room, MIN_LIST_PX)))}px`;
+    }
+    box.scrollIntoView({ block: "nearest" });
+    list.scrollIntoView({ block: "nearest" });
+  }, [open, listId]);
+
+  // Keep the keyboard-active option visible, moving only the list: an option's
+  // own scrollIntoView also scrolls the page and can hide the field.
   useEffect(() => {
     if (!open) return;
-    document.getElementById(`${listId}-${String(active)}`)?.scrollIntoView({ block: "nearest" });
+    const list = document.getElementById(listId);
+    const row = document.getElementById(`${listId}-${String(active)}`);
+    if (list === null || row === null) return;
+    if (row.offsetTop < list.scrollTop) list.scrollTop = row.offsetTop;
+    const below = row.offsetTop + row.offsetHeight - list.clientHeight;
+    if (below > list.scrollTop) list.scrollTop = below;
   }, [open, active, listId, options]);
 
   function close() {
@@ -118,31 +148,56 @@ export function LanguagePicker({
 
   return (
     <div className="language-picker">
-      <input
-        id={id}
-        type="text"
-        role="combobox"
-        aria-expanded={open}
-        aria-controls={listId}
-        aria-autocomplete="list"
-        aria-activedescendant={activeId}
-        aria-describedby={describedBy}
-        aria-invalid={invalid}
-        autoComplete="off"
-        spellCheck={false}
-        disabled={disabled}
-        value={open ? query : selectedLabel}
-        placeholder={open ? "Search languages" : undefined}
-        onFocus={openList}
-        onClick={openList}
-        onBlur={close}
-        onChange={(event) => {
-          if (!open) setOpen(true);
-          setQuery(event.target.value);
-          setActive(0);
-        }}
-        onKeyDown={onKeyDown}
-      />
+      <div className="language-field">
+        <input
+          ref={field}
+          id={id}
+          type="text"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={activeId}
+          aria-describedby={flag === null ? describedBy : `${flagId} ${describedBy ?? ""}`.trim()}
+          aria-invalid={invalid}
+          autoComplete="off"
+          spellCheck={false}
+          disabled={disabled}
+          value={open ? query : selectedLabel}
+          placeholder={open ? "Search languages" : undefined}
+          onFocus={openList}
+          onClick={openList}
+          onBlur={close}
+          onChange={(event) => {
+            const typed = event.target.value;
+            // Closed, the field holds the language's name: only what was added
+            // to it is a search.
+            if (open) setQuery(typed);
+            else {
+              setOpen(true);
+              setQuery(typed.startsWith(selectedLabel) ? typed.slice(selectedLabel.length) : "");
+            }
+            setActive(0);
+          }}
+          onKeyDown={onKeyDown}
+        />
+        <svg
+          className={open ? "language-chevron open" : "language-chevron"}
+          aria-hidden="true"
+          viewBox="0 0 12 12"
+          width="12"
+          height="12"
+        >
+          <path
+            d="M2.5 4.5 6 8l3.5-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
       {open && (
         <ul id={listId} role="listbox" aria-label="Languages" className="language-list">
           {options.length === 0 && <li className="language-empty">No language matches.</li>}
@@ -166,6 +221,11 @@ export function LanguagePicker({
             </li>
           ))}
         </ul>
+      )}
+      {flag !== null && (
+        <p id={flagId} className="language-flag">
+          {flag}
+        </p>
       )}
     </div>
   );

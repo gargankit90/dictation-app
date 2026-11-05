@@ -44,6 +44,7 @@ use dictation_core::settings::Settings;
 use dictation_ports::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource, Permission};
 
 use crate::config::ConfigError;
+use crate::tray::keycap_label;
 
 /// Builds the real source for a spec; it listens only once started.
 pub type HotkeyFactory<H> = Box<dyn Fn(HotkeySpec) -> H + Send + Sync>;
@@ -305,6 +306,7 @@ trait Switch: Send + Sync {
     fn spec(&self) -> HotkeySpec;
     fn switch(&self, spec: HotkeySpec) -> Result<Switched, HotkeyError>;
     fn pause(&self, lease: Option<Duration>);
+    fn waiting_for(&self) -> Option<HotkeyError>;
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -617,6 +619,16 @@ impl<H: HotkeySource + 'static> Switch for Shared<H> {
         lock(&self.delivery).pause(lease);
     }
 
+    fn waiting_for(&self) -> Option<HotkeyError> {
+        let state = lock(&self.state);
+        let dead = lock(&self.delivery).dead;
+        // Before the first failed try there's nothing to say yet: the
+        // supervisor tries within half a second.
+        (state.started && dead)
+            .then(|| state.last_error.clone())
+            .flatten()
+    }
+
     fn switch(&self, spec: HotkeySpec) -> Result<Switched, HotkeyError> {
         let mut state = lock(&self.state);
         let dead = lock(&self.delivery).dead;
@@ -700,6 +712,19 @@ impl HotkeyControl {
     pub fn resume(&self) {
         self.switch.pause(None);
     }
+
+    /// What to tell the user while the started hotkey is down and waiting to
+    /// come back, such as for Accessibility; `None` while it listens. Saving
+    /// a setting doesn't fail for this, so Settings asks here (U9).
+    #[must_use]
+    pub fn notice(&self) -> Option<String> {
+        let reason = self.switch.waiting_for()?;
+        HotkeyChange::NotListening {
+            wanted: self.spec(),
+            reason: Some(reason),
+        }
+        .problem()
+    }
 }
 
 /// The hotkey to start with: the saved one, or the default if the settings
@@ -760,23 +785,28 @@ impl HotkeyChange {
     pub fn problem(&self) -> Option<String> {
         match self {
             Self::Unchanged | Self::Switched { .. } | Self::Invalid => None,
-            Self::NotListening { wanted, reason } => Some(match reason {
-                Some(HotkeyError::PermissionDenied) => format!(
-                    "The hotkey {wanted} is saved, but Vocet can't listen to the keyboard yet: allow it in System Settings → Privacy & Security → Accessibility, and {wanted} starts working by itself."
-                ),
-                Some(error) => format!(
-                    "The hotkey {wanted} is saved, but no hotkey is listening right now ({error}). {wanted} starts working as soon as it can."
-                ),
-                None => format!(
-                    "The hotkey {wanted} is saved, but no hotkey is listening right now. Restart Vocet to use it."
-                ),
-            }),
+            Self::NotListening { wanted, reason } => {
+                let key = shown(wanted);
+                Some(match reason {
+                    Some(HotkeyError::PermissionDenied) => format!(
+                        "The hotkey {key} is saved, but Vocet can't listen to the keyboard yet: allow it in System Settings → Privacy & Security → Accessibility, and {key} starts working by itself."
+                    ),
+                    Some(error) => format!(
+                        "The hotkey {key} is saved, but no hotkey is listening right now ({error}). {key} starts working as soon as it can."
+                    ),
+                    None => format!(
+                        "The hotkey {key} is saved, but no hotkey is listening right now. Restart Vocet to use it."
+                    ),
+                })
+            }
             Self::Kept {
                 kept,
                 wanted,
                 error,
             } => Some(format!(
-                "Couldn't switch the hotkey to {wanted} ({error}). {kept} still works, and your other settings were saved."
+                "Couldn't switch the hotkey to {} ({error}). {} still works, and your other settings were saved.",
+                shown(wanted),
+                shown(kept),
             )),
         }
     }
@@ -816,11 +846,18 @@ impl HotkeyChange {
     }
 }
 
+/// A hotkey as the user sees it: its keycap label, never its stored name.
+fn shown(spec: &HotkeySpec) -> String {
+    keycap_label(&spec.to_string())
+}
+
 /// Why [`HotkeyChange::undo`] couldn't put the previous hotkey back. The
 /// text is for the user and says which hotkey works now.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(
-    "Switching the hotkey back to {previous} failed ({error}), so {active} is the hotkey that works now; Settings shows it, and saving again keeps it."
+    "Switching the hotkey back to {} failed ({error}), so {} is the hotkey that works now; Settings shows it, and saving again keeps it.",
+    shown(.previous),
+    shown(.active)
 )]
 pub struct UndoFailed {
     /// The hotkey from before the save, which couldn't start again.

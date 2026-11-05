@@ -118,6 +118,10 @@ pub enum DownloadError {
     /// [`DownloadCancel::cancel`] stopped it. What was fetched is kept.
     #[error("the download was cancelled")]
     Cancelled,
+    /// The file being downloaded, or its folder, was removed meanwhile.
+    /// Trying again starts over.
+    #[error("the file being downloaded was removed")]
+    Removed,
     /// The models folder couldn't be read or written.
     #[error("couldn't write the model to disk: {}", redact::summary(.0))]
     Disk(String),
@@ -139,6 +143,9 @@ impl DownloadError {
                 "The downloaded file was damaged and has been removed. Try again.".to_owned()
             }
             Self::Cancelled => "Download cancelled.".to_owned(),
+            Self::Removed => {
+                "The download was removed from this Mac before it finished. Try again.".to_owned()
+            }
             Self::Disk(_) => {
                 "Couldn't save the model to disk. Check the free space and try again.".to_owned()
             }
@@ -432,7 +439,7 @@ impl ModelStore {
         let path = self.final_path(model);
         tokio::fs::rename(&part, &path)
             .await
-            .map_err(|e| disk(&e))?;
+            .map_err(|e| gone_or_disk(&e))?;
         if let Some(stamp) = Stamp::of(&path) {
             self.lock_verified().insert(path.clone(), stamp);
         }
@@ -518,6 +525,11 @@ impl ModelStore {
             }
             file.write_all(&chunk).await.map_err(|e| disk(&e))?;
             if have - reported >= PROGRESS_STEP {
+                // Writing to a removed file succeeds: without this the rest
+                // of the model is fetched for nothing.
+                if let Err(error) = tokio::fs::metadata(part).await {
+                    return Err(gone_or_disk(&error));
+                }
                 reported = have;
                 on_progress(Progress {
                     downloaded: have,
@@ -538,7 +550,7 @@ async fn verify(part: &Path, expected: &str) -> Result<(), DownloadError> {
     let hashed = tokio::task::spawn_blocking(move || sha256_file(&path))
         .await
         .map_err(|_| DownloadError::Disk("the checksum task crashed".to_owned()))?
-        .map_err(|e| disk(&e))?;
+        .map_err(|e| gone_or_disk(&e))?;
     if hashed != expected {
         tracing::warn!("a downloaded model failed its checksum; deleted");
         tokio::fs::remove_file(part).await.map_err(|e| disk(&e))?;
@@ -565,6 +577,16 @@ pub fn sha256_file(path: &Path) -> io::Result<String> {
 
 fn disk(error: &io::Error) -> DownloadError {
     DownloadError::Disk(error.to_string())
+}
+
+/// For a file this download made: not there any more means someone removed it,
+/// which free space has nothing to do with.
+fn gone_or_disk(error: &io::Error) -> DownloadError {
+    if error.kind() == io::ErrorKind::NotFound {
+        DownloadError::Removed
+    } else {
+        disk(error)
+    }
 }
 
 /// The error without its URL: a signed CDN URL carries tokens.
