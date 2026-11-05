@@ -45,6 +45,8 @@ e2e_local_model() {
   textedit_fresh
   expect "Settings opens" open_settings
   expect "open the Speech section" ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Speech
+  # No key saved, and the own key is the engine: its sheet opens by itself (U12).
+  expect "Done closes the key sheet" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Done
   expect "the models are listed" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "On this Mac" 15
   expect "press Download (first model)" ax_ok press-first "$APP_NAME" "$SETTINGS_WINDOW" Download
   expect "progress is shown" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "↓ " 30
