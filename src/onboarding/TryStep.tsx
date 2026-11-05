@@ -186,6 +186,16 @@ export function TryStep({
 
   const view = tryView(progress, baseline, check);
 
+  // Only this window can see the box, so it tells the app the paste missed,
+  // once per dictation. The app records it, if sharing is on (U10).
+  const missTold = useRef<number | null>(null);
+  const missed = view.fix.kind === "paste";
+  useEffect(() => {
+    if (!missed || missTold.current === startedNow) return;
+    missTold.current = startedNow;
+    void commands.practicePasteMissed().catch(() => undefined);
+  }, [missed, startedNow]);
+
   // role="alert" announces it but doesn't scroll: the panel lands below the
   // fold in a short window. Again when the words arrive and it grows, and when
   // what is above it changes size. Not during a recording: the user is at the

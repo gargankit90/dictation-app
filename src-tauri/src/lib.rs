@@ -295,6 +295,7 @@ pub fn run() {
             // again; destroying it would leave the tray nothing to show.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
+                setup_left(window.app_handle());
                 if let Err(error) = window.hide() {
                     tracing::warn!(%error, "could not hide the settings window");
                 }
@@ -442,15 +443,9 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         false,
     );
     // Anonymous usage events (A1): on by default, a no-op without a build
-    // key, silent in scripted test launches, and held until the user has
-    // left onboarding's first screen (U8).
-    let usage = usage::start(
-        &data_dir,
-        &config.settings().unwrap_or_default(),
-        scripted,
-        &version,
-        setup.welcome_passed(),
-    );
+    // key, silent in scripted test launches. They follow the stored choice
+    // from here on, first setup included (U10).
+    let usage = usage::start(&data_dir, usage::stored_choice(&config), scripted, &version);
     usage::launched(usage.clone(), &data_dir, &version);
     app.manage(usage.clone());
     let recordings = data_dir.join("debug-recordings");
@@ -622,7 +617,7 @@ fn onboarding_at_launch(
                 tracing::info!(?readiness, ?launch, "onboarding not shown at launch");
                 return;
             }
-            let step = onboarding.open(readiness);
+            let step = usage::setup_opened(&app.state::<usage::Usage>(), &onboarding, readiness);
             // This line's text is what the e2e scenario waits for.
             tracing::info!(?step, ?readiness, ?launch, "onboarding shown at launch");
             window::show(&app, onboarding::View::Onboarding);
@@ -652,12 +647,23 @@ fn show_onboarding(app: &AppHandle) {
                 onboarding::readiness(&SystemPermissions::new(), welcome_passed, true, || {
                     onboarding::key_saved(&config, &live)
                 });
-            let step = onboarding.open(readiness);
+            let step = usage::setup_opened(&app.state::<usage::Usage>(), &onboarding, readiness);
             tracing::info!(?step, "onboarding opened from the tray");
             window::show(&app, onboarding::View::Onboarding);
         });
     if let Err(error) = spawned {
         tracing::error!(%error, "could not open onboarding");
+    }
+}
+
+/// Setup's window was closed or the app is quitting: where the user stopped.
+fn setup_left(app: &AppHandle) {
+    if let (Some(usage), Some(onboarding), Some(permissions)) = (
+        app.try_state::<usage::Usage>(),
+        app.try_state::<Arc<onboarding::Onboarding>>(),
+        app.try_state::<onboarding::OsPermissions>(),
+    ) {
+        usage::setup_left(&usage, &onboarding, &*permissions.0);
     }
 }
 
@@ -897,6 +903,7 @@ fn shut_down(app: &AppHandle) {
             tracing::info!("stopped");
         }
     }
+    setup_left(app);
     if let Some(usage) = app.try_state::<usage::Usage>() {
         usage::flush_on_quit(&usage, std::time::Duration::from_secs(2));
     }

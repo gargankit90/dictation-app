@@ -46,6 +46,7 @@
     "allow-check-for-updates",
     "allow-choose-local-model",
     "allow-set-try-outcome",
+    "allow-practice-paste-missed",
     "allow-set-download-paused",
     "allow-practice-words",
     "allow-copy-practice-words",

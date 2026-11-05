@@ -11,7 +11,6 @@ import { TryStep } from "./onboarding/TryStep";
 import { WelcomeStep } from "./onboarding/WelcomeStep";
 import type { FrameParts } from "./onboarding/StepFrame";
 import { FINISH_REASON } from "./onboarding/ReadyStep";
-import { SAVE_FAILED_REASON } from "./onboarding/WelcomeStep";
 import { sharingBlock, useSharingSwitch } from "./settings/Privacy";
 import { useEngineStatus, useModels } from "./Settings";
 import "./settings.css";
@@ -62,12 +61,12 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
   const resumeChecked = useRef(false);
 
   // Here, not in a step: the writes outlive any one step, and every way out
-  // of a step waits for them, since leaving can send an event.
+  // of a step waits for them, since leaving can send an event. Only Ready has
+  // the switch, so only Ready can hold on a failed write: on any other step
+  // (one made in Settings, say) there would be no way to try again. An off that
+  // failed to save has already stopped sending.
   const sharing = useSharingSwitch(settings?.share_usage_events ?? true, setSettings);
-  const exitBlock = sharingBlock(
-    sharing.save,
-    status?.step === "ready" ? FINISH_REASON : SAVE_FAILED_REASON,
-  );
+  const exitBlock = sharingBlock(sharing.save, status?.step === "ready" ? FINISH_REASON : null);
   /**
    * The one way out of a step: moving, finishing, or leaving for Settings all
    * go through here, so a new exit can't overtake the user's sharing choice.
@@ -311,7 +310,7 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
       </nav>
 
       {status.step === "welcome" && (
-        <WelcomeStep parts={parts} settings={settings} onContinue={forward} sharing={sharing} />
+        <WelcomeStep parts={parts} settings={settings} onContinue={forward} />
       )}
       {status.step === "speech" && (
         <SpeechStep
