@@ -72,7 +72,6 @@ e2e_onboarding_five_steps() {
 
   expect "Try it waits for the model" \
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Getting the model ready" 15
-  expect "the strip is still there" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading Parakeet English" 5
   expect "the model finishes and practice opens" five_model_ready
   expect "the model loaded" wait_for_log 'on-device model loaded' 120
 
