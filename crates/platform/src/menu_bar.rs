@@ -9,6 +9,10 @@
 //! Accessory on the [`App`] before [`App::run`] hands it to tao before
 //! launch finishes, so the app is never Regular. The two halves:
 //! [`builder`] before `build`, [`app`] between `build` and `run`.
+//!
+//! One more part is in `src-tauri/tauri.conf.json`: the settings window has
+//! `"focus": false`, or wry activates the app when it creates the window's
+//! webview, however hidden the window is (#266).
 
 use tauri::{App, Builder, Runtime};
 
