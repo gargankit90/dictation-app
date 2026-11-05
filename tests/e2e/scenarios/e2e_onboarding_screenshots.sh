@@ -109,6 +109,9 @@ obs_mode() {
   ax_ok press "$APP_NAME" "$OBS_WINDOW" Continue
   ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Your dictation key" 10
   VM_TERMINAL_TIMEOUT=1510 ax_ok wait-no-text "$APP_NAME" "$OBS_WINDOW" "Getting the model ready" 1500
+  # The test hook's press isn't held back while practice waits, as the key is.
+  expect "$mode: the model loaded" wait_for_log 'on-device model loaded' 120
+  sleep 2
   obs_shot "4-try-open-$mode"
   textedit_fresh
   dictate_once 2
