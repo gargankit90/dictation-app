@@ -603,8 +603,12 @@ button.menu-button {
 }
 
 .row-popover {
-  max-width: 280px;
+  width: 260px;
   white-space: normal;
+}
+
+.row-popover button {
+  margin: var(--vc-space-1) var(--vc-space-2);
 }
 
 .row-popover-info {
