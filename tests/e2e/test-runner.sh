@@ -158,7 +158,7 @@ if [ "${STUB_REAL_VM:-0}" != 1 ]; then
         ;;
       *"ps -u "*)
         # vm_load: "<processes> <login>"
-        echo "${STUB_PROCS:-300} ${STUB_LOGINS:-0}"
+        echo "     ${STUB_PROCS:-300} ${STUB_LOGINS:-0}" # padded, as wc -l pads it
         ;;
       *"ApplePersistenceIgnoreState"*)
         echo "$cmd" >>"$STUB/defaults-writes"

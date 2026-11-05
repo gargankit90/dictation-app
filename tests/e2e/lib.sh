@@ -134,10 +134,10 @@ VM_PEAK_LOGINS=0
 vm_load() {
   local when=$1 out procs logins max_procs=${E2E_MAX_PROCS:-800} max_logins=${E2E_MAX_LOGINS:-100}
   out=$(vm "p=\$(ps -u $VM_USER -o comm= | wc -l); l=\$(ps -u $VM_USER -o comm= | grep -Ec '(^|/)login\$' || true); echo \$p \$l" 2>/dev/null || true)
-  procs=${out%% *}
-  logins=${out##* }
-  case $procs$logins in
-    '' | *[!0-9]*)
+  # wc pads its count with spaces on macOS; read drops them.
+  read -r procs logins <<<"$out" || true
+  case "$procs/$logins" in
+    '/'* | *'/' | *[!0-9/]*)
       log "warning: could not read $VM's process counts ($when)"
       return 0
       ;;
