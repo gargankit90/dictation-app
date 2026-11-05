@@ -21,7 +21,12 @@ import type {
 } from "./bindings";
 import { Onboarding, RELAUNCH_AFTER_POLLS, STEPS } from "./Onboarding";
 import css from "./settings.css?raw";
-import { EVENTS_CAPTION, FINISH_REASON, NOT_TESTED } from "./onboarding/ReadyStep";
+import {
+  EVENTS_CAPTION,
+  EVENTS_OFF_CAPTION,
+  FINISH_REASON,
+  NOT_TESTED,
+} from "./onboarding/ReadyStep";
 import { KEY_REASON, MODEL_COPY } from "./onboarding/SpeechStep";
 import { BOTH_REASON } from "./onboarding/PermissionsStep";
 import { CONTINUE_REASON } from "./onboarding/TryStep";
@@ -439,6 +444,8 @@ describe("the sharing switch across setup (U10)", () => {
     await waitFor(() => {
       expect(share.checked).toBe(false);
     });
+    expect(screen.getByText(EVENTS_OFF_CAPTION)).toBeTruthy();
+    expect(screen.queryByText(EVENTS_CAPTION)).toBeNull();
     fireEvent.click(primary("Start dictating"));
     await waitFor(() => {
       expect(backend.named("finish_onboarding")).toHaveLength(1);
@@ -456,7 +463,8 @@ describe("the sharing switch across setup (U10)", () => {
     expect(words).toContain("deletes what is waiting");
     expect(words).toContain("can't recall what was already sent");
     expect(words).toContain("where you stopped");
-    expect(EVENTS_CAPTION).toContain("from the first setup screen");
+    expect(EVENTS_CAPTION).toContain("have been on since setup began");
+    expect(EVENTS_CAPTION).toContain("Off stops them from now on");
     expect(EVENTS_CAPTION).not.toMatch(/nothing is sent|until you/i);
   });
 

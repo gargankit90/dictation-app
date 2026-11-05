@@ -19,7 +19,10 @@ import type { FrameParts } from "./StepFrame";
 export const FINISH_REASON =
   "Start dictating unlocks once your choice is saved. Try the switch again.";
 export const EVENTS_CAPTION =
-  "While this is on, anonymous usage events (with a random install ID) and error reports are sent, from the first setup screen on, so we can see where setup goes wrong and fix what breaks. Never audio, transcripts, typed text, keys or app names. Off stops them and deletes what's waiting and the install ID; it can't recall what was already sent.";
+  "Anonymous usage events (with a random install ID) and error reports have been on since setup began, so we can see where setup goes wrong and fix what breaks. Never audio, transcripts, typed text, keys or app names. Off stops them from now on and deletes what's waiting and the install ID; it can't recall what was already sent.";
+/** Off may be a stored choice, with nothing ever sent, so this can't say "since setup began". */
+export const EVENTS_OFF_CAPTION =
+  "Off: nothing more is sent, and there is no install ID. On shares anonymous usage events and error reports, so we can see where setup goes wrong and fix what breaks. Never audio, transcripts, typed text, keys or app names.";
 export const NOT_TESTED = "Not tested yet: try it from the menu bar any time";
 
 interface Props {
@@ -186,7 +189,7 @@ export function ReadyStep({
           />
         </div>
         <p className="ob-caption" id="ob-share-ready-caption">
-          {EVENTS_CAPTION}
+          {sharing.checked ? EVENTS_CAPTION : EVENTS_OFF_CAPTION}
         </p>
         <SaveStatus save={sharing.save} />
         <WhatsSent />
