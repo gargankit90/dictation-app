@@ -59,7 +59,7 @@ blocked += [
     "gh api -f 'body=-X GET' -X PUT repos/o/r/pulls/12/merge",
 ]
 for verb in ("checkout --", "checkout origin/main --", "restore", "rm", "mv"):
-    blocked.append(f"git {verb} scripts/pre-push")
+    blocked.append(f"git {verb} scripts/pre-push" + (" /tmp/x" if verb == "mv" else ""))
 for repo in ("o/r", "{owner}/{repo}", ":owner/:repo", "$OWNER/$REPO", "$GITHUB_REPOSITORY"):
     for path in ("pulls/12/merge", "rulesets/1", "branches/main", "tags/v1", "git/refs/heads/work", "settings"):
         for options in ("-X PUT {endpoint}", "{endpoint} --method=delete"):
