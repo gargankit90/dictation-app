@@ -181,14 +181,14 @@ export function OverlayContent({
         </div>
       );
     case "paste_sent":
-      // "sent", not "pasted": the inserter can't tell whether the focused
-      // app took the text (U4 review).
+      // "Done", not "Pasted": Vocet finished its part, but the inserter can't
+      // tell whether the focused app took the text (U4 review, U13).
       return (
         <div className="overlay overlay-paste-sent" role="status" data-state="paste_sent">
           <span className="overlay-check" aria-hidden="true">
             ✓
           </span>
-          <span className="overlay-label">Paste sent</span>
+          <span className="overlay-label">Done</span>
         </div>
       );
     case "error":

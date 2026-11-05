@@ -4,11 +4,11 @@
 //! [`OverlayModel`] is the pure part: it turns each event and level into the
 //! view the overlay should show. [`run`] drives it against an
 //! [`OverlaySurface`] (the shell's overlay window), hides an error after
-//! [`ERROR_VISIBLE_FOR`] and "Paste sent" after [`PASTE_SENT_VISIBLE_FOR`];
+//! [`ERROR_VISIBLE_FOR`] and "Done" after [`PASTE_SENT_VISIBLE_FOR`];
 //! [`run_with_levels`] also passes each input level to the surface for the
 //! meter, and says "No sound" after [`NO_SOUND_AFTER`] of quiet.
 //!
-//! "Paste sent" follows the pipeline's paste result through the
+//! "Done" follows the pipeline's paste result through the
 //! coordinator: it goes Inserting → Idle only when the inserter returned
 //! success (`InsertDone`); a failed or blocked paste shows its error first,
 //! and a transcript with nothing to paste never reaches Inserting. It says
@@ -37,9 +37,9 @@ use crate::pipeline::{LevelReceiver, UiEvent};
 use crate::ui_events::UiReceiver;
 
 /// How long an error stays on screen unless something newer replaces it.
-pub const ERROR_VISIBLE_FOR: Duration = Duration::from_secs(4);
+pub const ERROR_VISIBLE_FOR: Duration = Duration::from_secs(6);
 
-/// How long "Paste sent" stays on screen after a paste was sent (U4).
+/// How long "Done" stays on screen after a paste was sent (U4).
 pub const PASTE_SENT_VISIBLE_FOR: Duration = Duration::from_millis(800);
 
 /// What the overlay shows.
@@ -76,7 +76,7 @@ pub struct Change {
     /// The new view.
     pub view: OverlayView,
     /// Whether this view hides by itself: an error after
-    /// [`ERROR_VISIBLE_FOR`], "Paste sent" after [`PASTE_SENT_VISIBLE_FOR`]. A later
+    /// [`ERROR_VISIBLE_FOR`], "Done" after [`PASTE_SENT_VISIBLE_FOR`]. A later
     /// change cancels the timer.
     pub expires: bool,
 }
@@ -191,7 +191,7 @@ impl OverlayModel {
         )
     }
 
-    /// The timer of an error or "Paste sent" ran out: hides it if it still
+    /// The timer of an error or "Done" ran out: hides it if it still
     /// shows.
     pub fn on_error_expired(&mut self) -> Option<Change> {
         match self.view {
@@ -295,7 +295,7 @@ impl OverlayEvents for tokio::sync::mpsc::UnboundedReceiver<UiEvent> {
 }
 
 /// Shows each event on `surface` until `events` closes; an error hides
-/// after `error_visible_for`, "Paste sent" after [`PASTE_SENT_VISIBLE_FOR`]. No
+/// after `error_visible_for`, "Done" after [`PASTE_SENT_VISIBLE_FOR`]. No
 /// levels: see [`run_with_levels`].
 pub async fn run<S: OverlaySurface>(
     events: impl OverlayEvents,
@@ -400,7 +400,7 @@ mod tests {
         assert_eq!(OverlayModel::default().view(), &OverlayView::Hidden);
     }
 
-    /// U4 criterion 5: a successful paste ends on "Paste sent", which expires.
+    /// U4 criterion 5: a successful paste ends on "Done", which expires.
     #[test]
     fn criterion_u4_5_a_dictation_shows_recording_then_transcribing_then_paste_sent() {
         let mut model = OverlayModel::default();
@@ -439,7 +439,7 @@ mod tests {
     }
 
     /// U4 criterion 5: a failed or blocked paste shows its error, never
-    /// "Paste sent".
+    /// "Done".
     #[test]
     fn criterion_u4_5_a_failed_paste_shows_the_error_not_paste_sent() {
         for failure in [
@@ -469,7 +469,7 @@ mod tests {
         }
     }
 
-    /// U4 criterion 5: a new recording replaces "Paste sent", and its timer
+    /// U4 criterion 5: a new recording replaces "Done", and its timer
     /// then hides nothing.
     #[test]
     fn criterion_u4_5_a_new_recording_replaces_paste_sent() {
@@ -504,34 +504,35 @@ mod tests {
         Duration::from_millis(millis)
     }
 
-    /// U4 criterion 4: 1.5 s of quiet while recording says "No sound" with
-    /// the device's name; sound brings Listening back at once.
+    /// U4 criterion 4, U13 criterion 1: 2.5 s of quiet from the start of a
+    /// recording says "No sound" with the device's name; sound brings
+    /// Listening back at once, and quiet after that never says it again.
     #[test]
     fn criterion_u4_4_quiet_shows_no_sound_and_sound_brings_listening_back() {
         let mut model = OverlayModel::default();
         model.on_event(&UiEvent::StateChanged(Phase::Recording));
         let mic = Some("MacBook Pro Microphone");
         let mut at = 0;
-        while at < 1_500 {
+        while at < 2_500 {
             assert_eq!(model.on_level(-90.0, mic, ms(at)), None, "{at} ms");
             at += 50;
         }
         assert_eq!(
-            model.on_level(-90.0, mic, ms(1_500)),
+            model.on_level(-90.0, mic, ms(2_500)),
             shown(OverlayView::NoSound {
                 device: Some("MacBook Pro Microphone".into())
             })
         );
-        assert_eq!(model.on_level(-90.0, mic, ms(1_550)), None);
+        assert_eq!(model.on_level(-90.0, mic, ms(2_550)), None);
         assert!(model.is_recording());
         assert_eq!(
-            model.on_level(-25.0, mic, ms(1_600)),
+            model.on_level(-25.0, mic, ms(2_600)),
             shown(OverlayView::Recording)
         );
-        // Quiet again: another full 1.5 s.
-        assert_eq!(model.on_level(-90.0, mic, ms(1_650)), None);
-        assert_eq!(model.on_level(-90.0, mic, ms(3_100)), None);
-        assert!(model.on_level(-90.0, mic, ms(3_150)).is_some());
+        // Quiet again after speech: a thinking pause, never "No sound".
+        assert_eq!(model.on_level(-90.0, mic, ms(2_650)), None);
+        assert_eq!(model.on_level(-90.0, mic, ms(9_000)), None);
+        assert_eq!(model.view(), &OverlayView::Recording);
     }
 
     #[test]
@@ -877,7 +878,7 @@ mod tests {
         })
     }
 
-    /// U4 criterion 5: "Paste sent" shows for 800 ms after a paste, then hides.
+    /// U4 criterion 5: "Done" shows for 800 ms after a paste, then hides.
     #[tokio::test(start_paused = true)]
     async fn criterion_u4_5_run_shows_paste_sent_for_800_ms() {
         assert_eq!(PASTE_SENT_VISIBLE_FOR, Duration::from_millis(800));
@@ -909,7 +910,7 @@ mod tests {
     }
 
     /// U4 criteria 2 and 4: levels reach the surface while recording, after
-    /// the view; 1.5 s of quiet (on the paused clock) says "No sound" and
+    /// the view; 2.5 s of quiet (on the paused clock) says "No sound" and
     /// sound brings Listening back; nothing reaches the meter once the
     /// recording ends.
     #[tokio::test(start_paused = true)]
@@ -924,10 +925,10 @@ mod tests {
         tokio::time::sleep(ms(10)).await;
         tx.send(UiEvent::StateChanged(Phase::Recording));
         tokio::time::sleep(ms(10)).await;
-        levels_tx.send_replace(reading(-30.0));
+        levels_tx.send_replace(reading(-90.0));
         tokio::time::sleep(ms(50)).await;
-        // Quiet, a reading every 50 ms, for 1.6 s.
-        for _ in 0..32 {
+        // Quiet, a reading every 50 ms, for 2.6 s.
+        for _ in 0..51 {
             levels_tx.send_replace(reading(-90.0));
             tokio::time::sleep(ms(50)).await;
         }
@@ -953,10 +954,10 @@ mod tests {
             ]
         );
         let levels = recorder.levels();
-        assert_eq!(levels.len(), 34, "{levels:?}");
-        assert_eq!(levels.first(), Some(&-30.0));
+        assert_eq!(levels.len(), 53, "{levels:?}");
+        assert_eq!(levels.first(), Some(&-90.0));
         assert_eq!(levels.last(), Some(&-20.0));
-        // "No sound" came 1.5 s (±one reading) after the quiet began.
+        // "No sound" came 2.5 s (±one reading) after the quiet began.
         let shown = recorder.shown();
         let at = |wanted: &OverlayView| {
             shown.iter().find_map(|shown| match shown {
