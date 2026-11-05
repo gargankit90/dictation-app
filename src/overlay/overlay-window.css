@@ -1,0 +1,17 @@
+/* The overlay window is transparent; only the pill is drawn. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+#root {
+  display: flex;
+  height: 100%;
+  align-items: flex-end;
+  justify-content: center;
+}

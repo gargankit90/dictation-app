@@ -1088,20 +1088,178 @@ main.ob {
   min-width: 60px;
 }
 
-.ob-demo {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--vc-space-3);
-  padding: var(--vc-space-4);
-  border-radius: var(--vc-radius-md);
-  background: var(--vc-bg-grouped);
+.ob-content h1.ob-title-large {
+  font-size: var(--vc-text-3xl);
+  letter-spacing: -0.02em;
+}
+
+.ob-lede {
+  color: var(--vc-ink-2);
   font-size: var(--vc-text-lg);
 }
 
-.ob-demo span {
-  flex: 1 1 200px;
+/* Welcome's demo (U11): a small app with the real pill over its lower edge. */
+.ob-demo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vc-space-3);
+  padding: var(--vc-space-4);
+  border: 1px solid var(--vc-line);
+  border-radius: var(--vc-radius-lg);
+  background: var(--vc-bg-grouped);
+}
+
+.ob-demo-app {
+  position: relative;
+  display: flex;
+  height: 112px;
+  box-sizing: border-box;
+  flex-direction: column;
+  gap: var(--vc-space-2);
+  margin-bottom: 20px; /* the half of the pill below the app */
+  padding: var(--vc-space-3);
+  border: 1px solid var(--vc-line);
+  border-radius: var(--vc-radius-md);
+  background: var(--vc-bg);
+}
+
+.ob-demo-message {
+  display: flex;
+  align-items: center;
+  gap: var(--vc-space-2);
+  color: var(--vc-ink-2);
+  font-size: var(--vc-text-sm);
+}
+
+.ob-demo-avatar {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--vc-radius-sm);
+  background: var(--vc-bg-grouped);
+  font-size: var(--vc-text-xs);
+  font-weight: 700;
+}
+
+.ob-demo-box {
+  min-height: 32px;
+  box-sizing: border-box;
+  padding: 6px var(--vc-space-2);
+  border: 1.5px solid var(--vc-accent);
+  border-radius: var(--vc-radius-sm);
+  color: var(--vc-ink);
+  white-space: nowrap;
+}
+
+.ob-demo-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 14px;
+  background: var(--vc-accent);
+  vertical-align: -2px;
+  animation: ob-caret 1.1s steps(1) infinite;
+}
+
+@keyframes ob-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Where the pill goes; its own margin is the overlay window's, so it's measured
+   from there. The pill itself is overlay.css, unchanged. */
+.ob-demo-pill {
+  position: absolute;
+  right: 0;
+  bottom: calc(-20px - var(--vc-space-3));
+  left: 0;
+  display: flex;
+  height: 52px;
+  align-items: flex-end;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* In the app the pill floats over whatever is there. Here it can sit on the dark
+   window, nearly its own colour, so it gets an edge. */
+.ob-demo-pill .overlay {
+  max-width: 100%;
+  outline: 1px solid var(--vc-line-strong);
+}
+
+.ob-beats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vc-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Keycap and caption stand on one baseline (the owner's complaint about U8's). */
+.ob-beat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--vc-space-1) var(--vc-space-2);
+  color: var(--vc-muted);
+}
+
+.ob-beat.lit {
+  color: var(--vc-ink);
+  font-weight: 600;
+}
+
+.ob-beat .keycap {
+  margin-bottom: 0;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The key's row on Try it: all on one line, down to the smallest window. */
+.ob-key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--vc-space-1) var(--vc-space-3);
+}
+
+.ob-key-row .hotkey-recorder {
   min-width: 0;
+  align-items: flex-start;
+  margin-bottom: 0;
+}
+
+.recorder-line button.link {
+  align-self: baseline;
+}
+
+/* Connect your key: the panel renders in the page, not a sheet. */
+.ob-key-panel .own-key-panel {
+  margin-top: 0;
+}
+
+.ob-key-panel .panel-row:last-child {
+  margin-bottom: 0;
+}
+
+.ob-key-saved {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vc-space-3);
+}
+
+.ob-key-saved-title {
+  color: var(--vc-ready);
+  font-weight: 600;
+}
+
+.ob-sub {
+  color: var(--vc-muted);
 }
 
 .ob-card {
@@ -1476,4 +1634,10 @@ button.ob-chip[aria-checked="true"]:hover:not(:disabled) {
   display: flex;
   justify-content: flex-end;
   gap: var(--vc-space-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-demo-caret {
+    animation: none;
+  }
 }

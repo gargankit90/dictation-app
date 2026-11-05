@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { INITIAL_RECORDER, keycapLabel, recorderStep } from "./hotkeyKeys";
+import {
+  INITIAL_RECORDER,
+  keyLongLabel,
+  keySpokenName,
+  keycapLabel,
+  recorderStep,
+} from "./hotkeyKeys";
 import type { RecorderOutcome } from "./hotkeyKeys";
 
 const FLAG_OF: Record<string, "ctrl" | "alt" | "shift" | "meta"> = {
@@ -198,5 +204,40 @@ describe("keycapLabel", () => {
     expect(keycapLabel("alt+cmd+k")).toBe("⌥⌘k");
     expect(keycapLabel("Ctrl+Right")).toBe("⌃Right");
     expect(keycapLabel("F5")).toBe("F5");
+  });
+});
+
+describe("keyLongLabel (U11)", () => {
+  it.each([
+    ["RightAlt", "Right Option (⌥)"],
+    ["LeftAlt", "Left Option (⌥)"],
+    ["RightCmd", "Right Command (⌘)"],
+    ["LeftCmd", "Left Command (⌘)"],
+    ["RightCtrl", "Right Control (⌃)"],
+    ["LeftShift", "Left Shift (⇧)"],
+    ["RightAlt+RightCmd", "Right Option (⌥) + Right Command (⌘)"],
+    ["Ctrl+Shift+Space", "Control (⌃) + Shift (⇧) + Space"],
+    ["Cmd+F5", "Command (⌘) + F5"],
+    ["F13", "F13"],
+    // The arrow keys start like a side, and aren't one.
+    ["Ctrl+Left", "Control (⌃) + Left"],
+  ])("%s reads %s", (spec, label) => {
+    expect(keyLongLabel(spec)).toBe(label);
+  });
+
+  it("never shows a modifier's raw name", () => {
+    for (const spec of ["RightAlt", "LeftCmd", "RightCtrl", "LeftShift"]) {
+      expect(keyLongLabel(spec)).not.toBe(spec);
+      expect(keyLongLabel(spec)).not.toMatch(/Alt|Cmd|Ctrl/);
+    }
+  });
+
+  it("has a form in words only, for a sentence read aloud", () => {
+    expect(keySpokenName("RightAlt")).toBe("Right Option");
+    expect(keySpokenName("Ctrl+Shift+Space")).toBe("Control + Shift + Space");
+  });
+
+  it("leaves the keycap's short form as it was", () => {
+    expect(keycapLabel("RightAlt")).toBe("Right ⌥");
   });
 });

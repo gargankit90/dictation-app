@@ -15,10 +15,14 @@
 # download strip showing: the sharing switch's row is in view without scrolling
 # (U10).
 #
+# U11: Welcome's demo with the real pill on one line, unclipped, at the minimum and
+# the usual size, its keycap and caption on one baseline; Connect your key in both
+# states; the key's row on Try it on one line.
+#
 # Pictures of each step, light and dark, go to the run's output.
 
 LAYOUT_DIR="/Users/$VM_USER/onboarding-layout"
-LAYOUT_STEPS="welcome speech speech-more speech-more-plain speech-key permissions try try-plain try-default ready ready-strip settings-language"
+LAYOUT_STEPS="welcome welcome-plain welcome-default key-none key-saved speech speech-more speech-more-plain speech-key permissions try try-plain try-default ready ready-strip settings-language"
 
 layout_build() {
   local out=target/onboarding-layout

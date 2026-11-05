@@ -266,29 +266,49 @@ export function useOwnKey({
 export type OwnKey = ReturnType<typeof useOwnKey>;
 
 /** The panel itself: provider, how-to, field, one status line, Test & Save, Remove key. */
-export function OwnKeyPanel({ ownKey }: { ownKey: OwnKey }) {
+export function OwnKeyPanel({
+  ownKey,
+  canRemove = true,
+  providerOnly = false,
+}: {
+  ownKey: OwnKey;
+  /** Setup has no Remove key (U11); it stays in Settings. */
+  canRemove?: boolean;
+  /** A saved key in setup (U11): only the Provider row, until Replace. */
+  providerOnly?: boolean;
+}) {
   const { provider, keyInput, keyStatus, keyNotice, keyBusy } = ownKey;
   const info = providerInfo(provider);
   const steps = KEY_STEPS[provider];
+  const providerRow = (
+    <div className="panel-row provider-row">
+      <label htmlFor="provider">Provider</label>
+      <select
+        id="provider"
+        value={provider}
+        disabled={keyBusy === "saving" || keyBusy === "removing"}
+        onChange={(event) => {
+          ownKey.changeProvider(event.target.value as Provider);
+        }}
+      >
+        {PROVIDERS.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+  if (providerOnly) {
+    return (
+      <div className="own-key-panel" id="own-key-panel">
+        {providerRow}
+      </div>
+    );
+  }
   return (
     <div className="own-key-panel" id="own-key-panel">
-      <div className="panel-row provider-row">
-        <label htmlFor="provider">Provider</label>
-        <select
-          id="provider"
-          value={provider}
-          disabled={keyBusy === "saving" || keyBusy === "removing"}
-          onChange={(event) => {
-            ownKey.changeProvider(event.target.value as Provider);
-          }}
-        >
-          {PROVIDERS.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      {providerRow}
       <ol className="key-steps">
         <li>
           Open{" "}
@@ -340,7 +360,7 @@ export function OwnKeyPanel({ ownKey }: { ownKey: OwnKey }) {
         >
           {keyBusy === "testing" ? "Testing…" : keyBusy === "saving" ? "Saving…" : "Test & Save"}
         </button>
-        {keyStatus.state === "saved" && (
+        {canRemove && keyStatus.state === "saved" && (
           <button
             type="button"
             className="destructive"

@@ -40,12 +40,14 @@ export interface FrameParts {
 interface Props {
   parts: FrameParts;
   title: string;
+  /** Welcome's larger title. */
+  large?: boolean;
   primary: Primary;
   secondary?: Secondary;
   children: ReactNode;
 }
 
-export function StepFrame({ parts, title, primary, secondary, children }: Props) {
+export function StepFrame({ parts, title, large = false, primary, secondary, children }: Props) {
   const content = useRef<HTMLDivElement>(null);
   // A new step starts at its top.
   useEffect(() => {
@@ -56,7 +58,7 @@ export function StepFrame({ parts, title, primary, secondary, children }: Props)
   return (
     <div className="ob-main">
       <div className="ob-content" ref={content}>
-        <h1>{title}</h1>
+        <h1 className={large ? "ob-title-large" : undefined}>{title}</h1>
         {children}
         {parts.error !== null && (
           <p role="alert" className="notice error">

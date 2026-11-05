@@ -89,7 +89,7 @@ describe("stripView", () => {
 
   it("says the spec's sentence while downloading, with Cancel", () => {
     const strip = stripView([running], running);
-    expect(strip?.text).toBe("Downloading Parakeet English · 212 of 477 MB");
+    expect(strip?.text).toBe("Downloading English · 212 of 477 MB");
     expect(strip?.percent).toBe(44);
     expect(strip?.actions).toEqual(["cancel"]);
     expect(strip?.note).toBeNull();

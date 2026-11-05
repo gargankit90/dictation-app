@@ -50,16 +50,16 @@ e2e_onboarding_five_steps() {
   expect "its window is on screen" ax_ok wait-window "$APP_NAME" "$FIVE_WINDOW" 10
   expect "Welcome" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Talk instead of type" 10
   expect "the rail has the five steps" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Permissions" 5
-  expect "press Continue" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Continue
+  expect "press Get started" ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Get started"
 
-  expect "Speech recommends Parakeet English" \
-    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Parakeet English" 15
+  expect "Speech recommends the English model" \
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "English · 477 MB" 15
   expect "with its real size" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "477 MB" 5
   expect "press Download and continue" \
     ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Download and continue"
   expect "Permissions" \
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Records only while you hold your key" 15
-  expect "the strip shows the download" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading Parakeet English" 15
+  expect "the strip shows the download" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading English" 15
   expect "the rail says it runs" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Download running" 5
   expect "the settings choose the model already" settings_file_has transcription local
   expect "some of it is on disk" wait_for_part
@@ -71,7 +71,7 @@ e2e_onboarding_five_steps() {
   expect "it comes back at Permissions" \
     wait_for_log 'onboarding shown at launch step=Permissions' 30
   expect "the download picks up by itself" \
-    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading Parakeet English" 30
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading English" 30
   expect "and the server answered about the earlier part" five_download_picked_up
   expect "the server was asked for the rest only" model_server_saw_resume
   expect "allowed" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Allowed" 10

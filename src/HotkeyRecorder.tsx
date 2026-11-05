@@ -26,6 +26,12 @@ interface Props {
   compact?: boolean;
   /** What describes the compact row's button, by id. */
   describedBy?: string;
+  /**
+   * Try it (U11): the same row with a small plain "Change key" and no "Use
+   * default". The step puts the focus back in its box, so the button doesn't
+   * take it.
+   */
+  setup?: boolean;
 }
 
 /** How often recording tells the app it still goes on (its pause lapses). */
@@ -43,6 +49,7 @@ export function HotkeyRecorder({
   onRecording,
   compact = false,
   describedBy,
+  setup = false,
 }: Props) {
   const [recording, setRecording] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -122,32 +129,36 @@ export function HotkeyRecorder({
   // When recording ends, the button that started it is back; the keyboard goes there.
   const wasRecording = useRef(false);
   useEffect(() => {
-    if (wasRecording.current && !recording) changeButton.current?.focus();
+    if (wasRecording.current && !recording && !setup) changeButton.current?.focus();
     wasRecording.current = recording;
-  }, [recording]);
+  }, [recording, setup]);
 
-  if (compact) {
+  if (compact || setup) {
+    const buttonClass = setup ? "link" : undefined;
     return (
-      <div className="hotkey-recorder compact">
+      <div className={setup ? "hotkey-recorder compact setup" : "hotkey-recorder compact"}>
         <div className="recorder-line">
           <kbd className={recording ? "keycap recording" : "keycap"} aria-label="Dictation key">
             {recording ? "Press a key…" : keycapLabel(value)}
           </kbd>
           {recording ? (
             <>
+              {!setup && (
+                <button
+                  type="button"
+                  disabled={value === DEFAULT_HOTKEY}
+                  onClick={() => {
+                    setRecording(false);
+                    setProblem(null);
+                    void apply(DEFAULT_HOTKEY);
+                  }}
+                >
+                  Use default
+                </button>
+              )}
               <button
                 type="button"
-                disabled={value === DEFAULT_HOTKEY}
-                onClick={() => {
-                  setRecording(false);
-                  setProblem(null);
-                  void apply(DEFAULT_HOTKEY);
-                }}
-              >
-                Use default
-              </button>
-              <button
-                type="button"
+                className={buttonClass}
                 onClick={() => {
                   setRecording(false);
                 }}
@@ -159,6 +170,7 @@ export function HotkeyRecorder({
             <button
               ref={changeButton}
               type="button"
+              className={buttonClass}
               aria-describedby={describedBy}
               disabled={disabled || busy}
               onClick={() => {
@@ -166,7 +178,7 @@ export function HotkeyRecorder({
                 setRecording(true);
               }}
             >
-              Change…
+              {setup ? "Change key" : "Change…"}
             </button>
           )}
         </div>
