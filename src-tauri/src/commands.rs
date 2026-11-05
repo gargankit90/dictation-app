@@ -1181,7 +1181,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 51,
+            commands, 52,
             "a command was added; check it doesn't return a key"
         );
     }
