@@ -145,7 +145,7 @@ when you press it.
 
 - the app version, macOS version and chip
 - whether the microphone and Accessibility permissions are granted
-- your hotkey, as the setting writes it
+- your hotkey, as its keycap label (for example `Right ⌥`)
 - the engine: cloud with the provider's name, or on this Mac with the model id
 - whether the engine is ready
 - whether anonymous usage events are on
