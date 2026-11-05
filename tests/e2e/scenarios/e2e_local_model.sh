@@ -9,6 +9,28 @@
 
 textedit_has_phrase() { textedit_text | grep -qi "dictation test"; }
 
+# Waits (up to 25 min) for the model to show as downloaded. It looks every
+# 60 s; if the download broke (a flaky network: the row says "Paused at" and
+# Download continues it) it presses Download again, so one dropped connection
+# doesn't end the run. Each ax call is its own short Terminal job: one longer
+# than VM_TERMINAL_TIMEOUT (30 s by default) is killed, which is what ended
+# the old single 1500 s wait early.
+download_wait() {
+  local deadline=$((SECONDS + 1500))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if VM_TERMINAL_TIMEOUT=90 ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" Downloaded 60; then
+      return 0
+    fi
+    # Only "Paused at": "Not downloaded" is also what the other models' rows say.
+    if ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Paused at" 2; then
+      # The paused model's button says "Resume download" (the others "Download").
+      log "  the download stopped part way; pressing Resume download"
+      ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Resume download" || true
+    fi
+  done
+  return 1
+}
+
 e2e_local_model() {
   local t0 t1 ms
   fresh_app_state
@@ -22,7 +44,7 @@ e2e_local_model() {
   expect "the models are listed" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Parakeet Unified 0.6B" 15
   expect "press Download (first model)" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Download
   expect "progress is shown" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "↓ " 30
-  expect "the model finishes downloading" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Downloaded" 1500
+  expect "the model finishes downloading" download_wait
   expect "press Use this (first model)" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Use this"
   expect "the model loads" wait_for_log 'on-device model loaded' 120
   expect "the settings choose it" settings_file_has transcription local
