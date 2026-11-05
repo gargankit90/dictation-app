@@ -126,6 +126,7 @@ if [ $reset = 1 ]; then
   reset_vm
 else
   wait_for_vm
+  terminal_ignore_saved_state
 fi
 install_app "$APP_PATH"
 install_fixtures "$E2E_DIR/fixtures"

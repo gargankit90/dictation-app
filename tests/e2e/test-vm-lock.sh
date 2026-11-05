@@ -92,6 +92,7 @@ lume() {
   esac
 }
 wait_for_vm() { :; }
+terminal_ignore_saved_state() { :; }
 HARNESS
 
 # run_case <name> <script> [env...]: runs the script after the harness,
