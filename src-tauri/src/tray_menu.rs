@@ -30,7 +30,7 @@ use tauri::{App, AppHandle, Manager, Wry};
 
 use crate::diagnostics::WindowRequest;
 use crate::models::{ModelDownloads, ModelState};
-use crate::{commands, diagnostics, engine, onboarding, updater};
+use crate::{commands, diagnostics, engine, onboarding};
 
 /// The tray icon's id.
 pub const TRAY_ID: &str = "main";
@@ -94,10 +94,8 @@ impl TrayHub {
 pub enum Action {
     Quit,
     Settings,
-    Troubleshoot,
-    Report,
+    Help,
     ResumeSetup,
-    CheckForUpdates,
     CopyLast,
     History,
     Fix(Fix),
@@ -109,10 +107,8 @@ pub fn action_for(item: &str) -> Option<Action> {
     Some(match item {
         id::QUIT => Action::Quit,
         id::SETTINGS => Action::Settings,
-        id::TROUBLESHOOT => Action::Troubleshoot,
-        id::REPORT => Action::Report,
+        id::HELP => Action::Help,
         id::RESUME_SETUP => Action::ResumeSetup,
-        id::CHECK_UPDATES => Action::CheckForUpdates,
         id::COPY_LAST => Action::CopyLast,
         id::HISTORY => Action::History,
         other => Action::Fix(Fix::from_id(other)?),
@@ -243,6 +239,8 @@ fn read_ambient(app: &AppHandle) -> Ambient {
                 .find(|model| model.state == ModelState::Downloading)
                 .map(|model| Download {
                     percent: percent(model.downloaded_bytes, model.size_bytes),
+                    chosen: settings.transcription == Transcription::Local
+                        && settings.local_model == model.id,
                     name: model.name,
                 })
         });
@@ -420,11 +418,10 @@ fn click(app: &AppHandle, item: &str) {
             tracing::info!("quit from the tray");
             app.exit(0);
         }
-        Action::Settings => crate::show_settings(app),
-        Action::Troubleshoot => ask_window(app, WindowRequest::Troubleshoot),
-        Action::Report => ask_window(app, WindowRequest::Report),
+        // Settings itself, even if Troubleshoot was showing when it was hidden.
+        Action::Settings => ask_window(app, WindowRequest::Settings),
+        Action::Help => ask_window(app, WindowRequest::Help),
         Action::ResumeSetup => crate::show_onboarding(app),
-        Action::CheckForUpdates => updater::check_from_tray(app),
         Action::CopyLast => copy_last(app),
         Action::History => ask_window(app, WindowRequest::History),
         Action::Fix(fix) => run_fix(app, fix),
@@ -572,13 +569,27 @@ mod tests {
             }
         }
         for item in ids {
-            if item == "-" || item == id::STATUS || item == id::ENGINE {
+            if item == "-" || item == id::STATUS {
                 continue;
             }
             assert!(action_for(&item).is_some(), "{item} does nothing");
         }
         assert_eq!(action_for("reveal-log"), None);
         assert_eq!(action_for("relaunch"), None);
+    }
+
+    /// U12 criterion 7: Help… opens Settings on Help, Settings… opens Settings,
+    /// and a fix row can still open Troubleshoot.
+    #[test]
+    fn u12_criterion_7_help_and_settings_go_through_the_window_request() {
+        assert_eq!(action_for(id::HELP), Some(Action::Help));
+        assert_eq!(WindowRequest::Help.as_str(), "help");
+        assert_eq!(action_for(id::SETTINGS), Some(Action::Settings));
+        assert_eq!(WindowRequest::Settings.as_str(), "settings");
+        assert_eq!(
+            effect_of(Fix::Troubleshoot),
+            Effect::Window(WindowRequest::Troubleshoot)
+        );
     }
 
     /// U7 criterion 6: "History…" opens Settings on the History section.

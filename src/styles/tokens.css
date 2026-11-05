@@ -12,6 +12,11 @@
   --vc-accent-hover: #163c9a;
   --vc-accent-fg: #ffffff; /* text on accent */
   --vc-accent-soft: #e8eefb; /* selected row, info background */
+  --vc-selection-bg: #1f4fc9; /* selected sidebar row */
+  --vc-selection-fg: #ffffff;
+  --vc-primary-bg: #1f4fc9; /* primary button fill */
+  --vc-primary-hover: #163c9a;
+  --vc-primary-fg: #ffffff;
 
   /* Neutrals */
   --vc-ink: #1c1b19; /* primary text */
@@ -94,6 +99,11 @@
     --vc-accent-hover: #a3bdff;
     --vc-accent-fg: #0b1430;
     --vc-accent-soft: #1c2747;
+    --vc-selection-bg: #1c2747; /* setup's navy (owner, U12): DS1 has #2f4fa3 */
+    --vc-selection-fg: #ffffff;
+    --vc-primary-bg: #3b6be0; /* white 4.8:1; 3.5:1 against the window */
+    --vc-primary-hover: #3461cf;
+    --vc-primary-fg: #ffffff;
 
     --vc-ink: #f2f1ee;
     --vc-ink-2: #d9d6cf;

@@ -47,6 +47,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "open_link",
     "get_app_info",
     "check_for_updates",
+    "set_window_page",
     "choose_local_model",
     "set_try_outcome",
     "set_download_paused",

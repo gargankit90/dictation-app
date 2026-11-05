@@ -23,7 +23,7 @@ hr_open() {
   ax_ok tray-click "$APP_NAME" Settings && ax_ok wait-window "$APP_NAME" "$SETTINGS_WINDOW" 10 &&
     ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Dictation
 }
-hr_record() { ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Record a different key" && hr_text "Press a key" 5; }
+hr_record() { ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Change…" && hr_text "Press a key" 5; }
 
 # hr_hold_dictates <key>: a hold gives one dictation, pasted into TextEdit.
 hr_hold_dictates() {
@@ -57,12 +57,12 @@ e2e_hotkey_recorder() {
   expect "the keycap shows Right ⌥" hr_text "Right ⌥"
 
   # A plain letter is refused with a reason and recording goes on; Esc cancels.
-  expect "Record a different key starts recording" hr_record
+  expect "Change… starts recording" hr_record
   expect "a plain letter is refused and recording goes on" \
     hr_job_shows "$VM_TYPE_KEYS" a 'Press a key'
   expect "the refusal says why" hr_text "plain" 5
   expect "Esc cancels recording" \
-    hr_job_shows "$VM_KEYS" escape 'Record a different key'
+    hr_job_shows "$VM_KEYS" escape 'Change…'
   expect "Esc cancelled: keycap back to Right ⌥" hr_text "Right ⌥" 5
   expect "nothing was saved" test "$(vm "test -e $(q "$SETTINGS_FILE_VM") && echo yes || echo no")" = no
 
@@ -74,7 +74,7 @@ e2e_hotkey_recorder() {
   local before_phases hold
   textedit_fresh
   before_phases=$(logged_phases | wc -l | tr -d ' ')
-  hold=$(vm_terminal "open -a $(q "$APP_NAME"); sleep 1; osascript -l JavaScript $(q "$VM_AX") press $(q "$APP_NAME") $(q "$SETTINGS_WINDOW") 'Record a different key'; sleep 1; osascript -l JavaScript $(q "$VM_AX") dump $(q "$APP_NAME") $(q "$SETTINGS_WINDOW") | grep -q 'Press a key' || { echo NOT-LISTENING; exit 3; }; echo LISTENING; down=0; release() { if [ \$down = 1 ]; then osascript -l JavaScript $(q "$VM_POST_KEY") right-option up; fi; }; trap release EXIT; trap 'exit 1' INT TERM HUP; down=1; osascript -l JavaScript $(q "$VM_POST_KEY") right-option down || exit; sleep 1.5 & wait \$!; osascript -l JavaScript $(q "$VM_POST_KEY") right-option up || exit; down=0; echo HELD" 2>&1) || true
+  hold=$(vm_terminal "open -a $(q "$APP_NAME"); sleep 1; osascript -l JavaScript $(q "$VM_AX") press $(q "$APP_NAME") $(q "$SETTINGS_WINDOW") 'Change…'; sleep 1; osascript -l JavaScript $(q "$VM_AX") dump $(q "$APP_NAME") $(q "$SETTINGS_WINDOW") | grep -q 'Press a key' || { echo NOT-LISTENING; exit 3; }; echo LISTENING; down=0; release() { if [ \$down = 1 ]; then osascript -l JavaScript $(q "$VM_POST_KEY") right-option up; fi; }; trap release EXIT; trap 'exit 1' INT TERM HUP; down=1; osascript -l JavaScript $(q "$VM_POST_KEY") right-option down || exit; sleep 1.5 & wait \$!; osascript -l JavaScript $(q "$VM_POST_KEY") right-option up || exit; down=0; echo HELD" 2>&1) || true
   log "OBS: hold job said: $(printf '%s' "$hold" | tr '\n' ' ')"
   expect "the recorder was listening when the key went down" \
     sh -c 'printf "%s" "$1" | grep -q LISTENING && printf "%s" "$1" | grep -q HELD' _ "$hold"
@@ -91,7 +91,7 @@ e2e_hotkey_recorder() {
   vm "pkill -x TextEdit; true" >/dev/null 2>&1
   expect "back in Settings" hr_open
   ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Cancel || true
-  expect "Record a different key" hr_record
+  expect "Change…" hr_record
   job_says "posted down
 posted up" post_key_hold right-command 0.4 "$APP_NAME"
   expect "the keycap shows Right ⌘" hr_text "Right ⌘" 10

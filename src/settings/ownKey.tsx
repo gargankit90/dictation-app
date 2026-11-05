@@ -1,8 +1,9 @@
-// The own-key panel (U6), shared by Settings' Speech section and onboarding's
+// The own-key panel (U6), shared by Settings' sheet (U12) and onboarding's
 // Speech step (U8): pick the provider, the how-to, the field and Test & Save
 // (saved only if the test passes).
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { commands } from "../bindings";
 import type { Provider, Settings_Serialize } from "../bindings";
 import { BROKEN, messageOf } from "../keyTest";
@@ -11,6 +12,8 @@ import { validateKey } from "../validation";
 
 /** Shown after Test & Save, once the provider accepted the key and the Keychain kept it. */
 export const CONNECTED = "✓ Connected · saved in Keychain";
+/** A key is saved and nothing has been tested since. */
+export const SAVED_LINE = "A key is saved in your Keychain.";
 /** A good key the Keychain wouldn't keep (U6 criterion 5). */
 export const KEY_NOT_SAVED = "Key works, but couldn't be saved to your Keychain";
 
@@ -45,10 +48,18 @@ interface Options {
   switchToCloud: (which: Provider) => Promise<void>;
   /** Reads the engine's status again. */
   refreshEngine: () => Promise<void>;
+  /** A key for `which` passed its test and the Keychain kept it. */
+  onConnected?: (which: Provider) => Promise<void>;
 }
 
 /** The panel's state and actions. */
-export function useOwnKey({ settings, onDevice, switchToCloud, refreshEngine }: Options) {
+export function useOwnKey({
+  settings,
+  onDevice,
+  switchToCloud,
+  refreshEngine,
+  onConnected,
+}: Options) {
   const [provider, setProvider] = useState<Provider>(settings.provider);
   const [keyInput, setKeyInput] = useState("");
   const [keyStatus, setKeyStatus] = useState<KeyStatus>({ state: "checking" });
@@ -108,6 +119,11 @@ export function useOwnKey({ settings, onDevice, switchToCloud, refreshEngine }: 
     setKeyNotice(null);
   }
 
+  /** The panel closes: an unfinished test is dropped, and so is what was typed. */
+  function abandon() {
+    editKey("");
+  }
+
   async function testAndSave() {
     const typed = keyInput.trim();
     if (typed === "") {
@@ -155,6 +171,7 @@ export function useOwnKey({ settings, onDevice, switchToCloud, refreshEngine }: 
       setKeyInput("");
       keyCheck.current += 1; // any lookup still running predates this key
       setKeyStatus({ state: "saved" });
+      await onConnected?.(which);
       await refreshEngine();
     }
   }
@@ -188,6 +205,7 @@ export function useOwnKey({ settings, onDevice, switchToCloud, refreshEngine }: 
     connected: keyNotice?.text === CONNECTED,
     changeProvider,
     editKey,
+    abandon,
     testAndSave,
     removeKey,
     checkKeySaved,
@@ -196,14 +214,14 @@ export function useOwnKey({ settings, onDevice, switchToCloud, refreshEngine }: 
 
 export type OwnKey = ReturnType<typeof useOwnKey>;
 
-/** The panel itself: provider, how-to, field, Test & Save, Remove key. */
+/** The panel itself: provider, how-to, field, one status line, Test & Save, Remove key. */
 export function OwnKeyPanel({ ownKey }: { ownKey: OwnKey }) {
   const { provider, keyInput, keyStatus, keyNotice, keyBusy } = ownKey;
   const info = providerInfo(provider);
   const steps = KEY_STEPS[provider];
   return (
     <div className="own-key-panel" id="own-key-panel">
-      <div className="panel-row">
+      <div className="panel-row provider-row">
         <label htmlFor="provider">Provider</label>
         <select
           id="provider"
@@ -261,21 +279,8 @@ export function OwnKeyPanel({ ownKey }: { ownKey: OwnKey }) {
           }}
         />
       </div>
-      <p id="api-key-status" className="hint">
-        {keyStatus.state === "saved" ? (
-          <strong className="saved">A key is saved in your Keychain.</strong>
-        ) : keyStatus.state === "none" ? (
-          "No key saved yet."
-        ) : keyStatus.state === "checking" ? (
-          "Checking for a saved key…"
-        ) : (
-          <span role="alert" className="error">
-            Couldn&apos;t check for a saved key: {keyStatus.message}
-          </span>
-        )}{" "}
-        The key is never shown again.
-      </p>
-      <div className="row">
+      <KeyStatusLine id="api-key-status" ownKey={ownKey} />
+      <div className="row own-key-actions">
         <button
           type="button"
           className="primary"
@@ -300,14 +305,94 @@ export function OwnKeyPanel({ ownKey }: { ownKey: OwnKey }) {
           </button>
         )}
       </div>
-      {keyNotice !== null && (
-        <p
-          role={keyNotice.kind === "error" ? "alert" : "status"}
-          className={`notice ${keyNotice.kind}`}
-        >
-          {keyNotice.text}
-        </p>
-      )}
     </div>
+  );
+}
+
+/** The panel's one status line: what just happened, otherwise what is saved (U12). */
+function KeyStatusLine({ id, ownKey }: { id: string; ownKey: OwnKey }) {
+  const { keyStatus, keyNotice } = ownKey;
+  if (keyNotice !== null) {
+    return (
+      <p
+        id={id}
+        role={keyNotice.kind === "error" ? "alert" : "status"}
+        className={`notice ${keyNotice.kind}`}
+      >
+        {keyNotice.text}
+      </p>
+    );
+  }
+  if (keyStatus.state === "error") {
+    return (
+      <p id={id} role="alert" className="notice error">
+        Couldn&apos;t check for a saved key: {keyStatus.message}
+      </p>
+    );
+  }
+  return (
+    <p id={id} className="hint">
+      {keyStatus.state === "saved"
+        ? SAVED_LINE
+        : keyStatus.state === "none"
+          ? "No key saved yet."
+          : "Checking for a saved key…"}
+    </p>
+  );
+}
+
+/**
+ * The own-key panel as a sheet over the window (U12): modal, Tab stays inside,
+ * Esc and Done close it, except while the key is being written.
+ */
+export function OwnKeySheet({ ownKey, onDone }: { ownKey: OwnKey; onDone: () => void }) {
+  const sheet = useRef<HTMLDivElement>(null);
+  const saving = ownKey.keyBusy === "saving";
+  useEffect(() => {
+    sheet.current?.querySelector<HTMLInputElement>("#api-key")?.focus();
+  }, []);
+  function onKey(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!saving) onDone();
+    } else if (event.key === "Tab") {
+      const focusable = [
+        ...(sheet.current?.querySelectorAll<HTMLElement>(
+          "button:not(:disabled), input, select:not(:disabled)",
+        ) ?? []),
+      ];
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (first === undefined || last === undefined) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  }
+  return (
+    <>
+      <div className="confirm-backdrop" />
+      <div
+        ref={sheet}
+        className="key-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="key-sheet-title"
+        onKeyDown={onKey}
+      >
+        <h2 id="key-sheet-title">Your own key</h2>
+        <OwnKeyPanel ownKey={ownKey} />
+        <div className="confirm-actions">
+          <button type="button" disabled={saving} onClick={onDone}>
+            Done
+          </button>
+        </div>
+      </div>
+    </>
   );
 }

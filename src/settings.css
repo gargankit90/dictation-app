@@ -92,7 +92,7 @@ body {
 }
 
 .field label.check input[type="checkbox"]:checked {
-  background: var(--vc-accent);
+  background: var(--vc-primary-bg);
 }
 
 .field label.check input[type="checkbox"]:checked::after {
@@ -158,14 +158,14 @@ button:hover:not(:disabled) {
 }
 
 button.primary {
-  border-color: var(--vc-accent);
-  background: var(--vc-accent);
-  color: var(--vc-accent-fg);
+  border-color: var(--vc-primary-bg);
+  background: var(--vc-primary-bg);
+  color: var(--vc-primary-fg);
 }
 
 button.primary:hover:not(:disabled) {
-  border-color: var(--vc-accent-hover);
-  background: var(--vc-accent-hover);
+  border-color: var(--vc-primary-hover);
+  background: var(--vc-primary-hover);
 }
 
 button.plain {
@@ -422,8 +422,19 @@ button.link {
 }
 
 .settings-sidebar button.selected {
-  background: var(--vc-accent);
-  color: var(--vc-accent-fg);
+  background: var(--vc-selection-bg);
+  color: var(--vc-selection-fg);
+}
+
+/* Inside the row, so it can't run into the next one; never on a mouse click. */
+.settings-sidebar button:focus-visible {
+  outline: 2px solid var(--vc-accent);
+  outline-offset: -2px;
+}
+
+.settings-sidebar button.selected:focus-visible {
+  outline-color: var(--vc-selection-fg);
+  outline-offset: -4px;
 }
 
 .settings-pane {
@@ -559,7 +570,7 @@ input.switch::after {
 }
 
 input.switch:checked {
-  background: var(--vc-accent);
+  background: var(--vc-primary-bg);
 }
 
 input.switch:checked::after {
@@ -588,11 +599,106 @@ button.menu-button {
   white-space: nowrap;
 }
 
-/* The own-key panel, under its row. */
+.row-popover {
+  max-width: 280px;
+  white-space: normal;
+}
+
+.row-popover-info {
+  display: block;
+  padding: var(--vc-space-1) var(--vc-space-2);
+  color: var(--vc-muted);
+  font-size: var(--vc-text-sm);
+}
+
+/* U12: Speech's pick-one list. The whole left of a row selects it. */
+.engine-pick {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: var(--vc-space-3);
+  cursor: default;
+}
+
+.engine-pick input {
+  flex: none;
+  margin: 0;
+  accent-color: var(--vc-primary-bg);
+}
+
+/* U12: a sheet from the top of the window. */
+.key-sheet {
+  position: fixed;
+  z-index: 11;
+  top: 0;
+  left: 50%;
+  box-sizing: border-box;
+  width: min(440px, calc(100vw - var(--vc-space-12)));
+  max-height: calc(100vh - var(--vc-space-6));
+  padding: var(--vc-space-4) var(--vc-space-5);
+  overflow-y: auto;
+  border: 1px solid var(--vc-line);
+  border-top: 0;
+  border-radius: 0 0 var(--vc-radius-md) var(--vc-radius-md);
+  background: var(--vc-bg);
+  box-shadow: var(--vc-shadow-pop);
+  transform: translateX(-50%);
+}
+
+.key-sheet h2 {
+  margin: 0 0 var(--vc-space-3);
+  font-size: var(--vc-text-md);
+  font-weight: 600;
+}
+
+.key-sheet .confirm-actions {
+  margin-top: var(--vc-space-4);
+}
+
+.key-sheet .key-steps {
+  font-size: var(--vc-text-sm);
+}
+
+/* The Keychain notice: advice, not a success. */
+.notice-info {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--vc-space-3);
+  margin-bottom: var(--vc-space-4);
+  padding: var(--vc-space-3);
+  border-radius: var(--vc-radius-md);
+  background: var(--vc-accent-soft);
+  color: var(--vc-ink);
+}
+
+.notice-info p {
+  margin: 0;
+}
+
+.notice-info button {
+  flex: none;
+}
+
+/* The own-key panel: in the sheet, and in setup's Speech step. */
 .own-key-panel {
   margin-top: var(--vc-space-3);
-  padding-top: var(--vc-space-3);
-  border-top: 1px solid var(--vc-line);
+}
+
+.key-sheet .own-key-panel {
+  margin-top: 0;
+}
+
+/* Provider: a normal row with a compact, native popup, like History's. */
+.panel-row.provider-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.own-key-actions {
+  margin-top: var(--vc-space-3);
 }
 
 .panel-row {
@@ -606,8 +712,7 @@ button.menu-button {
   font-weight: 600;
 }
 
-.panel-row input,
-.panel-row select {
+.panel-row input {
   box-sizing: border-box;
   width: 100%;
   min-height: var(--vc-control-h);
@@ -685,6 +790,32 @@ button.menu-button {
 
 .row-control .hotkey-recorder .row {
   margin-top: var(--vc-space-1);
+}
+
+/* U12: Settings' dictation key, on one line at the window's smallest. */
+.hotkey-recorder.compact {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.recorder-line {
+  display: flex;
+  align-items: center;
+  gap: var(--vc-space-2);
+  white-space: nowrap;
+}
+
+.recorder-line .keycap {
+  margin-bottom: 0;
+}
+
+/* As wide as the line above, not the sentence. */
+.hotkey-recorder.compact p {
+  width: 0;
+  min-width: 100%;
+  text-align: right;
 }
 
 /* U8: the five-step onboarding. Rail, scrolling content, fixed footer. */
@@ -1182,6 +1313,11 @@ main.ob {
   padding: 0;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+.history-clear {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* The question before deleting. */

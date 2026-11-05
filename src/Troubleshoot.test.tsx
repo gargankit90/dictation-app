@@ -21,6 +21,7 @@ function check(partial: Partial<Check> & Pick<Check, "id" | "label">): Check {
     ok: true,
     detail: "Allowed.",
     code: null,
+    details: partial.code ?? null,
     fix: null,
     fix_label: null,
     local_model: null,
@@ -31,8 +32,8 @@ function check(partial: Partial<Check> & Pick<Check, "id" | "label">): Check {
 const HEALTHY: Check[] = [
   check({ id: "microphone", label: "Microphone" }),
   check({ id: "accessibility", label: "Accessibility" }),
-  check({ id: "hotkey", label: "Hotkey", detail: "Registered." }),
-  check({ id: "engine", label: "Transcription engine", detail: "Ready." }),
+  check({ id: "hotkey", label: "Dictation key", detail: "Registered." }),
+  check({ id: "engine", label: "Speech engine", detail: "Ready." }),
   check({ id: "last_error", label: "Last error", detail: "None since the app started." }),
 ];
 
@@ -81,7 +82,12 @@ function backend(command: string, payload: unknown): unknown {
 
 function view(props: Partial<Parameters<typeof Troubleshoot>[0]> = {}) {
   return render(
-    <Troubleshoot onBack={() => undefined} onOpenSettings={() => undefined} {...props} />,
+    <Troubleshoot
+      onBack={() => undefined}
+      onOpenSettings={() => undefined}
+      onReport={() => undefined}
+      {...props}
+    />,
   );
 }
 
@@ -116,9 +122,10 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
     view();
     const list = await screen.findByRole("list", { name: "Checks" });
     expect(within(list).getAllByRole("img", { name: "Problem" })).toHaveLength(1);
-    expect(within(list).getByText(/Vocet can't use the microphone/).textContent).toContain(
-      "(mic_denied)",
+    expect(within(list).getByText(/Vocet can't use the microphone/).textContent).not.toContain(
+      "mic_denied",
     );
+    expect(within(list).getByText("mic_denied").closest("details")).toBeTruthy();
     fireEvent.click(within(list).getByRole("button", { name: "Open Microphone Settings" }));
     await waitFor(() => {
       expect(calls).toContain("request_permission");
@@ -144,7 +151,7 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
       }),
       check({
         id: "engine",
-        label: "Transcription engine",
+        label: "Speech engine",
         ok: false,
         detail: "No API key is saved.",
         code: "key_missing",
@@ -155,8 +162,9 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
         id: "last_error",
         label: "Last error",
         ok: false,
-        detail: "network_unreachable at 2026-11-03T10:11:12Z. Check your internet connection.",
+        detail: "No internet connection. Check your internet connection.",
         code: "network_unreachable",
+        details: "network_unreachable at 2026-11-03T10:11:12Z",
         fix: "try_again",
         fix_label: "Try again",
       }),
@@ -168,7 +176,7 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
-    // The last error shows its code and time, and "try again" has no button.
+    // Details hold the last error's code and time, and "try again" has no button.
     expect(screen.getByText(/network_unreachable at 2026-11-03T10:11:12Z/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
@@ -184,7 +192,8 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
     expect(calls).not.toContain("test_connection");
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
     const status = await screen.findByText(/The provider rejected your API key/);
-    expect(status.textContent).toContain("(key_rejected)");
+    expect(status.textContent).not.toContain("key_rejected");
+    expect(screen.getByText("key_rejected").closest("details")?.open).toBe(false);
     expect(calls.filter((call) => call === "test_connection")).toHaveLength(1);
   });
 
@@ -262,71 +271,40 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
   });
 });
 
-describe("criterion_e1_3 Report a problem", () => {
-  it("shows nothing and sends nothing until the report is previewed", async () => {
-    view();
+describe("u12_criterion_2 Troubleshoot is checks and fixes only", () => {
+  it("has no report and no report actions; only a failed check links to Report", async () => {
+    const onReport = vi.fn();
+    view({ onReport });
     await screen.findByRole("list", { name: "Checks" });
-    expect(screen.queryByRole("button", { name: "Open a GitHub issue" })).toBeNull();
+    for (const gone of [
+      "Open a GitHub issue",
+      "Save report…",
+      "Copy",
+      "Preview report",
+      "Show log file",
+    ]) {
+      expect(screen.queryByRole("button", { name: gone }), gone).toBeNull();
+    }
     expect(screen.queryByLabelText("Report")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Report a problem…" })).toBeNull();
+    expect(calls).not.toContain("build_report");
+    cleanup();
+    checks = MIC_DENIED;
+    view({ onReport });
+    fireEvent.click(await screen.findByRole("button", { name: "Report a problem…" }));
+    expect(onReport).toHaveBeenCalledOnce();
     expect(calls).not.toContain("build_report");
   });
 
-  it("shows the exact report, then saves, copies or opens an issue on request", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  it("keeps the code behind a closed Details", async () => {
+    checks = MIC_DENIED;
     view();
-    fireEvent.click(await screen.findByRole("button", { name: "Preview report" }));
-    const shown = await screen.findByLabelText("Report");
-    expect(shown.textContent).toBe(REPORT);
-
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-    await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith(REPORT);
-    });
-    expect(calls).not.toContain("save_report");
-
-    fireEvent.click(screen.getByRole("button", { name: "Save report…" }));
-    expect(await screen.findByText("Saved as vocet-report.txt.")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Open a GitHub issue" }));
-    await waitFor(() => {
-      expect(calls).toContain("open_issue");
-    });
-    expect(await screen.findByText(/submit it yourself/)).toBeTruthy();
-  });
-
-  it("says nothing was saved when the user cancels the dialog", async () => {
-    mockIPC((command) => {
-      if (command === "build_report") return REPORT;
-      if (command === "save_report") return null;
-      if (command === "run_checks") return HEALTHY;
-      return null;
-    });
-    view();
-    fireEvent.click(await screen.findByRole("button", { name: "Preview report" }));
-    await screen.findByLabelText("Report");
-    fireEvent.click(screen.getByRole("button", { name: "Save report…" }));
-    await waitFor(() => {
-      expect(screen.queryByText(/Saved as/)).toBeNull();
-    });
-  });
-
-  it("reports a failed save in words", async () => {
-    mockIPC((command) => {
-      if (command === "build_report") return REPORT;
-      if (command === "save_report") {
-        // The app sends its errors as strings.
-        // eslint-disable-next-line @typescript-eslint/only-throw-error
-        throw "Couldn't save the report there. Try another folder.";
-      }
-      if (command === "run_checks") return HEALTHY;
-      return null;
-    });
-    view();
-    fireEvent.click(await screen.findByRole("button", { name: "Preview report" }));
-    await screen.findByLabelText("Report");
-    fireEvent.click(screen.getByRole("button", { name: "Save report…" }));
-    expect(await screen.findByText(/Couldn't save the report there/)).toBeTruthy();
+    const row = (await screen.findByText("Microphone")).closest("li");
+    if (row === null) throw new Error("no row");
+    const details = row.querySelector("details");
+    expect(details?.open).toBe(false);
+    expect(details?.textContent).toContain("mic_denied");
+    expect(row.querySelector(".check-body p")?.textContent).not.toContain("mic_denied");
   });
 
   it("goes back to Settings", async () => {
@@ -334,33 +312,5 @@ describe("criterion_e1_3 Report a problem", () => {
     view({ onBack });
     fireEvent.click(await screen.findByRole("button", { name: "Back to Settings" }));
     expect(onBack).toHaveBeenCalledOnce();
-  });
-});
-
-// U5 criterion 6: "Reveal log" left the tray menu; Troubleshoot has it.
-describe("criterion_u5_6 Show log file", () => {
-  it("opens the log folder through the app", async () => {
-    view();
-    fireEvent.click(await screen.findByRole("button", { name: "Show log file" }));
-    await waitFor(() => {
-      expect(calls).toContain("reveal_log_file");
-    });
-  });
-
-  it("says so when the folder can't be opened", async () => {
-    mockIPC((command, payload) => {
-      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the app rejects with a plain string
-      if (command === "reveal_log_file") return Promise.reject("Couldn't open the log folder.");
-      return backend(command, payload);
-    });
-    view();
-    fireEvent.click(await screen.findByRole("button", { name: "Show log file" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("log folder");
-  });
-
-  it("builds the report at once when the tray's Report a problem opened it", async () => {
-    view({ autoReport: true });
-    expect(await screen.findByLabelText("Report")).toBeTruthy();
-    expect(calls.filter((command) => command === "build_report")).toHaveLength(1);
   });
 });

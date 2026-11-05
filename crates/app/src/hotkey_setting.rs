@@ -762,13 +762,13 @@ impl HotkeyChange {
             Self::Unchanged | Self::Switched { .. } | Self::Invalid => None,
             Self::NotListening { wanted, reason } => Some(match reason {
                 Some(HotkeyError::PermissionDenied) => format!(
-                    "The hotkey {wanted} is saved, but Vocet can't listen to the keyboard yet: allow it in System Settings → Privacy & Security → Accessibility, and {wanted} starts working by itself."
+                    "The dictation key {wanted} is saved, but Vocet can't listen to the keyboard yet: allow it in System Settings → Privacy & Security → Accessibility, and {wanted} starts working by itself."
                 ),
                 Some(error) => format!(
-                    "The hotkey {wanted} is saved, but no hotkey is listening right now ({error}). {wanted} starts working as soon as it can."
+                    "The dictation key {wanted} is saved, but no dictation key is listening right now ({error}). {wanted} starts working as soon as it can."
                 ),
                 None => format!(
-                    "The hotkey {wanted} is saved, but no hotkey is listening right now. Restart Vocet to use it."
+                    "The dictation key {wanted} is saved, but no dictation key is listening right now. Restart Vocet to use it."
                 ),
             }),
             Self::Kept {
@@ -776,7 +776,7 @@ impl HotkeyChange {
                 wanted,
                 error,
             } => Some(format!(
-                "Couldn't switch the hotkey to {wanted} ({error}). {kept} still works, and your other settings were saved."
+                "Couldn't switch the dictation key to {wanted} ({error}). {kept} still works, and your other settings were saved."
             )),
         }
     }
@@ -820,7 +820,7 @@ impl HotkeyChange {
 /// text is for the user and says which hotkey works now.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(
-    "Switching the hotkey back to {previous} failed ({error}), so {active} is the hotkey that works now; Settings shows it, and saving again keeps it."
+    "Switching the dictation key back to {previous} failed ({error}), so {active} is the dictation key that works now; Settings shows it, and saving again keeps it."
 )]
 pub struct UndoFailed {
     /// The hotkey from before the save, which couldn't start again.

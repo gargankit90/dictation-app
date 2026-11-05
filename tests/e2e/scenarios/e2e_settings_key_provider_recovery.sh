@@ -94,6 +94,7 @@ e2e_settings_key_provider_recovery() {
   # Fix it in Settings, as a user would.
   expect "Settings… in the tray opens the window" open_settings
   expect "the Speech section opens" ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Speech
+  expect "Change key… opens the sheet" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Change key…"
   expect "it says a key is saved" \
     ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "A key is saved in your Keychain." 10
   expect "there is no Save button" sh -c '! ax press "$1" "$2" Save >/dev/null 2>&1' _ "$APP_NAME" "$SETTINGS_WINDOW"

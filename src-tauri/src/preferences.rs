@@ -418,11 +418,27 @@ pub fn get_app_info() -> Result<AppInfo, String> {
     })
 }
 
-/// Starts the tray's update check (a dialog says what it found). Managed
-/// state, so the command needn't name the runtime.
+/// Starts the update check that says what it found in a dialog (Settings →
+/// General). Managed state, so the command needn't name the runtime.
 pub struct UpdateCheck(pub Arc<dyn Fn() + Send + Sync>);
 
-/// Checks for updates as the tray's item does: a dialog says what it found.
+/// Retitles the window for the screen it shows. Managed state, so the command
+/// needn't name the runtime.
+pub struct WindowPages(
+    pub Arc<dyn Fn(crate::window::WindowPage) -> Result<(), String> + Send + Sync>,
+);
+
+/// The page says which screen it shows, for the window's title (U12).
+#[tauri::command]
+#[specta::specta]
+pub fn set_window_page(
+    pages: State<'_, WindowPages>,
+    page: crate::window::WindowPage,
+) -> Result<(), String> {
+    (pages.0)(page)
+}
+
+/// Check now, in Settings → General: a dialog says what it found.
 #[tauri::command]
 #[specta::specta]
 pub fn check_for_updates(check: State<'_, UpdateCheck>) -> Result<(), String> {

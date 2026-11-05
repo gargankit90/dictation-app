@@ -539,7 +539,7 @@ async fn a_failed_undo_names_the_hotkey_that_still_works() {
         "{message}"
     );
     assert!(
-        message.contains("F6 is the hotkey that works now"),
+        message.contains("F6 is the dictation key that works now"),
         "{message}"
     );
 

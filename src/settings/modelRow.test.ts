@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LocalModelInfo_Serialize } from "../bindings";
-import { languagesLabel, modelCaption, modelRow, modelTitle } from "./modelRow";
+import { languagesLabel, modelDetails, modelRow, modelTitle } from "./modelRow";
 import type { RowContext } from "./modelRow";
 
 const SIZE = 477_274_496;
@@ -30,18 +30,21 @@ const IDLE: RowContext = {
 };
 
 describe("criterion_u6_4 the model state machine", () => {
-  it("not downloaded: the real size and Download", () => {
+  it("not downloaded: Download, and it can't be chosen", () => {
     const row = modelRow(model(), IDLE);
-    expect(row.chip).toEqual({ text: "477 MB", tone: "plain" });
+    expect(row.chip).toBeNull();
     expect(row.actions).toEqual(["download"]);
     expect(row.canDelete).toBe(false);
+    expect(row.hasMenu).toBe(false);
+    expect(row.blockedBecause).toBe("Download it to choose it.");
   });
 
-  it("downloading: progress in MB and Cancel", () => {
+  it("downloading: progress in MB and the button that stops it", () => {
     const row = modelRow(model({ state: "downloading", downloaded_bytes: 212_000_000 }), IDLE);
     expect(row.chip).toEqual({ text: "↓ 212 of 477 MB", tone: "info" });
     expect(row.actions).toEqual(["cancel"]);
     expect(row.progress).toEqual({ value: 212_000_000, max: SIZE });
+    expect(row.blockedBecause).not.toBeNull();
   });
 
   it("paused without a connection: Retry", () => {
@@ -60,8 +63,9 @@ describe("criterion_u6_4 the model state machine", () => {
 
   it("paused by Cancel: where it stopped, and Retry", () => {
     const row = modelRow(model({ state: "partial", downloaded_bytes: 212_000_000 }), IDLE);
-    expect(row.chip.text).toBe("Download paused, 212 of 477 MB");
+    expect(row.chip?.text).toBe("Download paused, 212 of 477 MB");
     expect(row.actions).toEqual(["resume"]);
+    expect(row.blockedBecause).not.toBeNull();
   });
 
   it("failed: Download failed and Retry", () => {
@@ -69,18 +73,22 @@ describe("criterion_u6_4 the model state machine", () => {
     expect(failed.chip).toEqual({ text: "Download failed", tone: "error" });
     expect(failed.actions).toEqual(["retry"]);
     const damaged = modelRow(model({ state: "partial", error: "The file was damaged." }), IDLE);
-    expect(damaged.chip.text).toBe("Download failed");
+    expect(damaged.chip?.text).toBe("Download failed");
+    expect(failed.blockedBecause).not.toBeNull();
+    expect(damaged.blockedBecause).not.toBeNull();
   });
 
-  it("downloaded, not active: Use this, and Delete in the menu", () => {
+  it("downloaded, not active: nothing to say, it can be chosen, Delete in the menu", () => {
     const row = modelRow(model({ state: "ready", downloaded_bytes: SIZE }), IDLE);
-    expect(row.chip).toEqual({ text: "Downloaded", tone: "plain" });
-    expect(row.actions).toEqual(["use"]);
+    expect(row.chip).toBeNull();
+    expect(row.actions).toEqual([]);
     expect(row.canDelete).toBe(true);
+    expect(row.hasMenu).toBe(true);
     expect(row.active).toBe(false);
+    expect(row.blockedBecause).toBeNull();
   });
 
-  it("loading after Use this: no action", () => {
+  it("loading after it was chosen: no action", () => {
     const row = modelRow(model({ state: "ready" }), { ...IDLE, switching: true });
     expect(row.chip).toEqual({ text: "Loading…", tone: "info" });
     expect(row.actions).toEqual([]);
@@ -92,14 +100,15 @@ describe("criterion_u6_4 the model state machine", () => {
       chosen: true,
       engine: { state: "loading", message: null },
     });
-    expect(row.chip.text).toBe("Loading…");
+    expect(row.chip?.text).toBe("Loading…");
   });
 
-  it("active: ✓ Active in green, no action and no Delete", () => {
+  it("active: nothing to say, no action, a menu without Delete", () => {
     const row = modelRow(model({ state: "ready" }), { ...IDLE, chosen: true });
-    expect(row.chip).toEqual({ text: "✓ Active", tone: "ready" });
+    expect(row.chip).toBeNull();
     expect(row.actions).toEqual([]);
     expect(row.canDelete).toBe(false);
+    expect(row.hasMenu).toBe(true);
     expect(row.active).toBe(true);
   });
 
@@ -110,28 +119,30 @@ describe("criterion_u6_4 the model state machine", () => {
       engine: { state: "failed", message: "The model couldn't be loaded." },
     });
     expect(chosen.chip).toEqual({ text: "! Couldn't load", tone: "error" });
-    expect(chosen.actions).toEqual(["retry-load", "delete"]);
+    expect(chosen.actions).toEqual(["retry-load"]);
+    expect(chosen.canDelete).toBe(true);
     const tried = modelRow(model({ state: "ready" }), { ...IDLE, loadError: "Couldn't load it." });
-    expect(tried.chip.text).toBe("! Couldn't load");
-    expect(tried.actions).toEqual(["retry-load", "delete"]);
+    expect(tried.chip?.text).toBe("! Couldn't load");
+    expect(tried.actions).toEqual(["retry-load"]);
+    expect(tried.canDelete).toBe(true);
   });
 });
 
 describe("Design Lead round 1: model titles and captions", () => {
-  it("titles are the language choice, the catalogue name goes in the caption", () => {
+  it("titles are the language choice, the catalogue name goes in the menu", () => {
     expect(modelTitle(model())).toBe("English");
-    expect(modelCaption(model())).toBe(
+    expect(modelDetails(model())).toBe(
       "Parakeet English · English only · works offline · audio stays on this Mac",
     );
     const multi = model({ name: "Qwen3-ASR 0.6B", language_codes: ["en", "hi", "de", "fr"] });
-    expect(modelTitle(multi)).toBe("Multilingual");
-    expect(modelCaption(multi)).toBe(
+    expect(modelTitle(multi)).toBe("All languages");
+    expect(modelDetails(multi)).toBe(
       "Qwen3-ASR 0.6B · 4 languages, including English and Hindi · works offline · audio stays on this Mac",
     );
   });
 
   it("counts the languages from the codes, and never claims nothing is sent", () => {
     expect(languagesLabel(["de", "fr", "es"])).toBe("3 languages");
-    expect(modelCaption(model())).not.toContain("nothing is sent");
+    expect(modelDetails(model())).not.toContain("nothing is sent");
   });
 });

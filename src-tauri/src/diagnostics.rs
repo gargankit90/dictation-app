@@ -45,8 +45,10 @@ pub struct AppOpener(pub Arc<dyn dictation_ports::Opener>);
 pub enum WindowRequest {
     /// The Troubleshoot page.
     Troubleshoot,
-    /// The Troubleshoot page with the report preview built.
-    Report,
+    /// Settings, on the section it was left on.
+    Settings,
+    /// Settings, on Help.
+    Help,
     /// Settings, on the speech engine and key.
     Speech,
     /// Settings, on the dictation key.
@@ -61,7 +63,8 @@ impl WindowRequest {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Troubleshoot => "troubleshoot",
-            Self::Report => "report",
+            Self::Settings => "settings",
+            Self::Help => "help",
             Self::Speech => "speech",
             Self::Shortcut => "shortcut",
             Self::History => "history",
@@ -181,6 +184,9 @@ pub struct Check {
     pub detail: String,
     /// The error code behind a ✗, if any.
     pub code: Option<ErrorCode>,
+    /// What the "Details" disclosure holds: the code, and for the last error
+    /// its time (U12). Never in `detail`.
+    pub details: Option<String>,
     /// The button that fixes it, if one does.
     pub fix: Option<FixAction>,
     /// That button's label.
@@ -333,6 +339,7 @@ fn failing(id: CheckId, label: &str, code: ErrorCode) -> Check {
         ok: false,
         detail: format!("{} {}", info.message, info.next_step),
         code: Some(code),
+        details: Some(code.to_string()),
         fix: Some(info.action),
         fix_label: Some(info.action_label.to_owned()),
         local_model: None,
@@ -346,6 +353,7 @@ fn passing(id: CheckId, label: &str, detail: &str) -> Check {
         ok: true,
         detail: detail.to_owned(),
         code: None,
+        details: None,
         fix: None,
         fix_label: None,
         local_model: None,
@@ -363,16 +371,20 @@ pub fn checks(input: &CheckInput) -> Vec<Check> {
         }
     };
     let mut engine = match input.engine.problem() {
-        None => passing(CheckId::Engine, "Transcription engine", "Ready."),
-        Some(code) => failing(CheckId::Engine, "Transcription engine", code),
+        None => passing(CheckId::Engine, "Speech engine", "Ready."),
+        Some(code) => failing(CheckId::Engine, "Speech engine", code),
     };
     if let EngineState::Local(state) = input.engine {
         engine.local_model = Some(state.readiness().to_owned());
     }
     let hotkey = if input.hotkey_up && input.accessibility == PermissionStatus::Granted {
-        passing(CheckId::Hotkey, "Hotkey", "Registered.")
+        passing(CheckId::Hotkey, "Dictation key", "Registered.")
     } else {
-        failing(CheckId::Hotkey, "Hotkey", ErrorCode::HotkeyUnregistered)
+        failing(
+            CheckId::Hotkey,
+            "Dictation key",
+            ErrorCode::HotkeyUnregistered,
+        )
     };
     let last = match input.last_error {
         None => passing(
@@ -386,13 +398,9 @@ pub fn checks(input: &CheckInput) -> Vec<Check> {
                 id: CheckId::LastError,
                 label: "Last error".to_owned(),
                 ok: false,
-                detail: format!(
-                    "{} at {}. {}",
-                    error.code,
-                    report::utc(error.at),
-                    info.next_step
-                ),
+                detail: format!("{} {}", info.message, info.next_step),
                 code: Some(error.code),
+                details: Some(format!("{} at {}", error.code, report::utc(error.at))),
                 fix: Some(info.action),
                 fix_label: Some(info.action_label.to_owned()),
                 local_model: None,
@@ -796,7 +804,7 @@ pub async fn dictation_progress(
 }
 
 /// What the tray asked the window to show since the window last asked, as
-/// `"troubleshoot"`, `"report"`, `"speech"`, `"shortcut"` or `"history"`; empty if
+/// `"settings"`, `"help"`, `"troubleshoot"`, `"speech"`, `"shortcut"` or `"history"`; empty if
 /// nothing. Asking clears it.
 #[tauri::command]
 #[specta::specta]
@@ -1040,10 +1048,12 @@ mod tests {
         let rows = checks(&data);
         let last = by_id(&rows, CheckId::LastError);
         assert!(!last.ok);
-        assert!(
-            last.detail
-                .starts_with("key_rejected at 2026-11-03T10:11:12Z")
+        assert_eq!(
+            last.details.as_deref(),
+            Some("key_rejected at 2026-11-03T10:11:12Z")
         );
+        // U12 criterion 2: the sentence holds no code; it goes in Details.
+        assert!(!last.detail.contains("key_rejected"), "{}", last.detail);
         assert_eq!(last.fix, Some(FixAction::OpenSettings));
     }
 
@@ -1080,9 +1090,9 @@ mod tests {
         assert_eq!(recent[1].code, ErrorCode::MicDenied);
         assert_eq!(diagnostics.take_request(), None);
         diagnostics.ask_for(WindowRequest::Troubleshoot);
-        diagnostics.ask_for(WindowRequest::Report);
+        diagnostics.ask_for(WindowRequest::Help);
         // The newest ask wins, and asking clears it.
-        assert_eq!(diagnostics.take_request(), Some(WindowRequest::Report));
+        assert_eq!(diagnostics.take_request(), Some(WindowRequest::Help));
         assert_eq!(diagnostics.take_request(), None);
     }
 

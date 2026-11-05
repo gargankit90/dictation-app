@@ -425,6 +425,10 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     app.manage(preferences::UpdateCheck(Arc::new(move || {
         updater::check_from_tray(&handle);
     })));
+    let handle = app.handle().clone();
+    app.manage(preferences::WindowPages(Arc::new(move |page| {
+        window::set_page(&handle, page).map_err(|error| error.to_string())
+    })));
     // Settings' "Test microphone" (U6) records from a microphone of its own.
     app.manage(preferences::AppMicTest(
         dictation_pipeline::mic_test::MicTest::new(Box::new(|| Box::new(SystemMicrophone::new()))),
