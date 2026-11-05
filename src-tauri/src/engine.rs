@@ -396,6 +396,66 @@ impl LiveEngine {
         })
     }
 
+    /// Deletes `provider`'s key from the keychain (U6: Remove key) and
+    /// rebuilds the engine, bounded like [`write_key`](Self::write_key).
+    ///
+    /// # Errors
+    ///
+    /// The keychain's error, or that it didn't answer in time.
+    pub fn delete_key<S: SecretStore + 'static>(
+        &self,
+        config: &Arc<Config<S>>,
+        provider: Provider,
+    ) -> Result<(), ConfigError> {
+        let (config, live) = (Arc::clone(config), self.clone());
+        self.writes.write(self.key_timeout, move || {
+            changed(&config, &live, |config| config.delete_api_key(provider))
+        })
+    }
+
+    /// Loads on-device model `id` before the settings choose it (U6: "Use
+    /// this"), so the engine in use keeps working until the model is ready.
+    /// From a cloud engine nothing current changes; the loaded model waits
+    /// in the cache, and the rebuild after the settings are saved reuses it
+    /// at once. From another on-device model the old one is freed first, as
+    /// a rebuild does (two models at once can need gigabytes); if loading
+    /// fails, the caller rebuilds from the settings to bring it back.
+    /// Seconds: call it from a blocking thread.
+    ///
+    /// # Errors
+    ///
+    /// Why the model couldn't be loaded (not downloaded, damaged, or the
+    /// loader failed).
+    pub fn preload_local(&self, id: &str, language: Option<&str>) -> Result<(), TranscribeError> {
+        let Some(local) = &self.local else {
+            return Err(TranscribeError::Engine(
+                "on-device transcription isn't available in this build".to_owned(),
+            ));
+        };
+        let outcome = |engine: &Engine| match engine {
+            Engine::Local(_) => Ok(()),
+            Engine::Unavailable(error) => Err(error.clone()),
+            Engine::Mock(_) | Engine::Remote(_) => Err(TranscribeError::Engine(
+                "the on-device model didn't load".to_owned(),
+            )),
+        };
+        let on_device_now = self
+            .current_engine()
+            .is_some_and(|engine| matches!(*engine, Engine::Local(_)));
+        match &self.transcribers {
+            Some(transcribers) if on_device_now => {
+                let mut result = Ok(());
+                transcribers.update_staged(|stage| {
+                    let engine = local.engine(id, language, stage);
+                    result = outcome(&engine);
+                    engine
+                });
+                result
+            }
+            _ => outcome(&local.engine(id, language, &|_| {})),
+        }
+    }
+
     /// The keychain writes, so a test can see a save queue.
     #[cfg(test)]
     pub(crate) fn writes(&self) -> &KeyWrites {

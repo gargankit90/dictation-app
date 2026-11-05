@@ -1,5 +1,6 @@
-# L1 [manual] criterion 8, run by the Tester: pick "On this Mac" in Settings,
-# download the default model (the real Hugging Face file), dictate real
+# L1 [manual] criterion 8, run by the Tester: in Settings' Speech section (U6),
+# download the default model, press Use this (no Save: it applies once the
+# model has loaded) (the real Hugging Face file), dictate real
 # speech (a `say` clip, --debug-audio-file) into TextEdit with the real
 # on-device engine, then do it again with the VM's network off if the VM
 # allows it. Records release-to-text latency. In ALL_SCENARIOS since L1
@@ -39,13 +40,14 @@ e2e_local_model() {
   expect "the app starts" wait_for_log 'engine rebuilt' 30
   textedit_fresh
   expect "Settings opens" open_settings
-  expect "choose On this Mac" ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" "On this Mac"
+  expect "open the Speech section" ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Speech
   expect "the models are listed" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Parakeet Unified 0.6B" 15
   expect "press Download (first model)" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Download
-  expect "progress is shown" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Downloading" 30
+  expect "progress is shown" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "↓ " 30
   expect "the model finishes downloading" download_wait
-  expect "press Save" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Save
-  expect "Settings saved." ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 20
+  expect "press Use this (first model)" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Use this"
+  expect "the model loads" wait_for_log 'on-device model loaded' 120
+  expect "the settings choose it" settings_file_has transcription local
   expect "closing hides Settings" close_settings
   vm "ls -l '/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/models'" >&2 || true
 

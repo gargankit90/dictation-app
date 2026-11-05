@@ -1,16 +1,15 @@
-# T2 criteria 1 and 7 (P1-03, P2-01): Settings in the real app. Settings… in
-# the tray opens the window; the language and the hotkey are typed in as a
-# user would (fixtures/ax.js field-set: focus, select all, delete, keys),
-# Save shows "Settings saved."; closing the window hides it, and reopening
-# it from the tray shows the saved values, which are also in the settings
-# file. The new hotkey (Left Option instead of the default Right Option)
-# then starts a dictation right away, with no restart, and Right Option no
-# longer does; after Quit and a relaunch the saved hotkey still works.
+# T2 criteria 1 and 7 (P1-03, P2-01), U6 criterion 8: Settings in the real
+# app, every change applied at once (no Save button). Settings… in the tray
+# opens the window; in the Dictation section the language is picked as a
+# user would and says "Saved", and the shortcut is recorded by pressing Left
+# Option (a real key posted from Terminal, as in e2e_hotkey_recorder);
+# closing the window hides it, and reopening it from the tray shows the
+# saved values, which are also in the settings file. The new hotkey then
+# starts a dictation right away, with no restart, and Right Option no longer
+# does; after Quit and a relaunch the saved hotkey still works.
 #
-# The hotkey is typed in lowercase ("leftalt"): the app stores the canonical
-# form, LeftAlt, and the form shows it after the save. The app logs
-# `hotkey applied … hotkey=LeftAlt` once the new hotkey listens, and its
-# `ready` line names the hotkey it started with.
+# The app logs `hotkey applied … hotkey=LeftAlt` once the new hotkey
+# listens, and its `ready` line names the hotkey it started with.
 #
 # Real keys are posted, so the key cleanup is armed (Right and Left Option
 # up however it ends), and it resets the settings to the defaults (the file
@@ -42,6 +41,27 @@ settings_file_has() {
 # Opens the settings window from the tray and waits for it.
 open_settings() {
   ax_ok tray-click "$APP_NAME" Settings && ax_ok wait-window "$APP_NAME" "$SETTINGS_WINDOW" 10
+}
+
+# open_section <name>: Settings' sidebar section <name> (a tab, which
+# WebKit shows as a radio button), once its heading shows.
+open_section() {
+  ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" "$1" &&
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "$1" 10
+}
+
+# keycap_shows <text>: the shortcut's keycap says <text>.
+keycap_shows() {
+  ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "$1" 10
+}
+
+# record_shortcut <post-key.js key>: Record a different key, then the key,
+# pressed in Settings (the recorder listens to the window's own key events).
+record_shortcut() {
+  ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Record a different key" &&
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Press a key" 5 &&
+    job_says "posted down
+posted up" post_key_hold "$1" 0.4 "$APP_NAME"
 }
 
 # Closes it with its close button; it hides, the app keeps running.
@@ -94,16 +114,19 @@ e2e_settings_save_reopen() {
 
   # Change and save.
   expect "Settings… in the tray opens the window" open_settings
-  expect "it shows the default hotkey" field_shows hotkey RightAlt
+  expect "the Dictation section opens" open_section Dictation
+  expect "there is no Save button" sh -c '! ax press "$1" "$2" Save >/dev/null 2>&1' _ "$APP_NAME" "$SETTINGS_WINDOW"
+  expect "it shows the default shortcut" keycap_shows "Right ⌥"
   expect "and detects the language automatically" field_shows language "Detect automatically"
   expect "pick German in the language popup" \
     ax_ok combo-pick "$APP_NAME" "$SETTINGS_WINDOW" language german "German (Deutsch)"
-  expect "type leftalt as the hotkey" ax_ok field-set "$APP_NAME" "$SETTINGS_WINDOW" hotkey leftalt
-  expect "press Save" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Save
-  expect "the window says Settings saved." \
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Settings saved." 15
+  # "Saved" shows for 2 s, less than a Terminal job can take to look for it
+  # (the unit tests check it), so the stored value is what is checked here.
+  expect "it is saved at once, with no Save button" wait_for_log 'settings saved' 10
+  expect "the settings file has German at once" settings_file_has language de
+  expect "record Left Option as the shortcut" record_shortcut left-option
   expect "the app applied the new hotkey" wait_for_log 'hotkey applied.*hotkey=LeftAlt' 10
-  expect "the form shows it in canonical form" field_shows hotkey LeftAlt
+  expect "the keycap shows it" keycap_shows "Left ⌥"
   expect "the settings file has the language" settings_file_has language de
   expect "and the hotkey" settings_file_has hotkey LeftAlt
 
@@ -111,8 +134,8 @@ e2e_settings_save_reopen() {
   expect "closing the window hides it" close_settings
   expect "the app keeps running" app_count_is 1
   expect "Settings… opens it again" open_settings
+  expect "on the section last opened, Dictation" keycap_shows "Left ⌥"
   expect "it shows the saved language" field_shows language "German (Deutsch)"
-  expect "and the saved hotkey" field_shows hotkey LeftAlt
   expect "closing it again hides it" close_settings
 
   # The new hotkey works at once; the old one doesn't.

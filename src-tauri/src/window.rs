@@ -55,4 +55,23 @@ mod tests {
         assert_eq!(title(View::Settings), "Vocet Settings");
         assert_eq!(title(View::Onboarding), "Set up Vocet");
     }
+
+    /// U6 criterion 1: Settings opens at about 720×520, resizable down to
+    /// 640×460.
+    #[test]
+    fn criterion_u6_1_the_window_opens_at_720_by_520() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let window = &config["app"]["windows"][0];
+        assert_eq!(window["label"], MAIN);
+        assert_eq!(
+            (window["width"].as_u64(), window["height"].as_u64()),
+            (Some(720), Some(520))
+        );
+        assert_eq!(
+            (window["minWidth"].as_u64(), window["minHeight"].as_u64()),
+            (Some(640), Some(460))
+        );
+        assert_eq!(window["resizable"], true);
+    }
 }
