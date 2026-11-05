@@ -27,6 +27,7 @@ use tauri::State;
 use crate::commands::{self, ActiveHotkey, AppConfig, Saved};
 use crate::diagnostics::AppOpener;
 use crate::engine::LiveEngine;
+use crate::onboarding::Onboarding;
 use crate::usage::{self, Usage};
 
 /// What a one-field write did: the usage change (names only) and what
@@ -258,13 +259,20 @@ pub fn status_of(engine: &Engine) -> EngineStatus {
 /// The engine in use: loading, ready, or failed and why. Never blocks.
 #[tauri::command]
 #[specta::specta]
-pub fn get_engine_status(engine: State<'_, LiveEngine>) -> Result<EngineStatus, String> {
+pub fn get_engine_status(
+    engine: State<'_, LiveEngine>,
+    onboarding: State<'_, Arc<Onboarding>>,
+    usage: State<'_, Usage>,
+) -> Result<EngineStatus, String> {
     Ok(engine.current_engine().map_or(
         EngineStatus {
             state: EngineState::Ready,
             message: None,
         },
-        |current| status_of(&current),
+        |current| {
+            usage::engine_status_read(&usage, &onboarding, &current);
+            status_of(&current)
+        },
     ))
 }
 

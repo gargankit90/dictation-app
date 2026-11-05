@@ -5,6 +5,9 @@
 // verdict line. U8 criterion 1: jsdom can't measure layout. U9 adds what also
 // takes a real browser: the selected language button in each state, the failed
 // paste panel and the text box's focus on Try it, and the language search box.
+// The page "ready-strip" is Ready at the usual 740×560 with its real text and the
+// download strip showing: the sharing switch's row must be in view without
+// scrolling (U10).
 
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { createRoot } from "react-dom/client";
@@ -32,6 +35,7 @@ const SETTLE_MS = 1800;
 // Which step: a page per step, since macOS's `open` drops a file URL's query.
 const view = document.body.dataset.step ?? "welcome";
 const isMore = view === "speech-more" || view === "speech-more-plain";
+const usualSize = view === "ready-strip";
 const steps: Record<string, Step> = {
   welcome: "welcome",
   speech: "speech",
@@ -43,8 +47,9 @@ const steps: Record<string, Step> = {
   "try-plain": "try",
   "try-default": "try",
   ready: "ready",
+  "ready-strip": "ready",
 };
-const size = view === "try-default" ? DEFAULT : MIN;
+const size = view === "try-default" || usualSize ? DEFAULT : MIN;
 const isTry = steps[view] === "try";
 const isLanguage = isMore || view === "settings-language";
 
@@ -53,7 +58,8 @@ const plain =
   view === "try-plain" ||
   view === "try-default" ||
   view === "speech-more-plain" ||
-  view === "settings-language";
+  view === "settings-language" ||
+  usualSize;
 
 const model: LocalModelInfo_Serialize = {
   id: "parakeet",
@@ -107,6 +113,7 @@ const status: OnboardingStatus = {
   try_outcome: "not_tried",
   download_paused: false,
   speech_choice: view === "speech-key" ? "own_key" : null,
+  sharing_on_throughout: true,
 };
 
 const quiet: DictationProgressView = {
@@ -265,6 +272,25 @@ function problems(root: HTMLElement): string[] {
     found.push("the end of the content can't be scrolled to");
   }
   content.scrollTop = scrolled;
+
+  // The only place in setup to make this choice (U10): in view as the step
+  // opens at the usual size, and reachable at the minimum.
+  const share = root.querySelector(".ob-share-row #ob-share-ready");
+  if (share !== null) {
+    if (usualSize && root.querySelector(".ob-strip") === null) {
+      found.push("the page has no download strip");
+    }
+    if (!usualSize) share.scrollIntoView({ block: "nearest" });
+    const row = share.getBoundingClientRect();
+    if (row.top < area.top - 1 || row.bottom > area.bottom + 1) {
+      found.push(
+        `the sharing switch is out of view (${String(row.bottom)} > ${String(area.bottom)})`,
+      );
+    }
+    content.scrollTop = scrolled;
+  } else if (view.startsWith("ready")) {
+    found.push("the sharing switch is missing");
+  }
 
   const rail = root.querySelector<HTMLElement>(".ob-rail");
   if (rail === null) found.push("the rail is missing");

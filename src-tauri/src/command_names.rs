@@ -51,6 +51,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "set_window_page",
     "choose_local_model",
     "set_try_outcome",
+    "practice_paste_missed",
     "set_download_paused",
     "practice_words",
     "copy_practice_words",

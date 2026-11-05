@@ -61,9 +61,8 @@ export const commands = {
 	openSetup: () => typedError<null, string>(__TAURI_INVOKE("open_setup")),
 	/**
 	 *  Moves onboarding to `step`, if every step before it is done (the key is
-	 *  read from the keychain only to move past Speech). Moving past Welcome is
-	 *  the user's go-ahead for usage events (U8), if sharing is on. An error says
-	 *  which step comes first; the user stays where they were.
+	 *  read from the keychain only to move past Speech). An error says which step
+	 *  comes first; the user stays where they were.
 	 */
 	setOnboardingStep: (step: Step) => typedError<OnboardingStatus_Serialize, string>(__TAURI_INVOKE("set_onboarding_step", { step })),
 	/**  Ends onboarding: the window goes back to the settings view and hides. */
@@ -213,6 +212,12 @@ export const commands = {
 	chooseLocalModel: (id: string) => typedError<null, string>(__TAURI_INVOKE("choose_local_model", { id })),
 	/**  Keeps how the practice dictation went, for the Ready step and a relaunch. */
 	setTryOutcome: (outcome: TryOutcome) => typedError<null, string>(__TAURI_INVOKE("set_try_outcome", { outcome })),
+	/**
+	 *  Try it: the words of a practice dictation didn't reach the practice box.
+	 *  Only the window can see the box. It says only that this happened: the event
+	 *  is `paste_missed`, chosen here, with nothing from the window in it.
+	 */
+	practicePasteMissed: () => typedError<null, string>(__TAURI_INVOKE("practice_paste_missed")),
 	/**
 	 *  Keeps that the user cancelled (or resumed) the model download, so a
 	 *  relaunch doesn't start a download they stopped.
@@ -747,6 +752,8 @@ export type OnboardingStatus_Deserialize = {
 	download_paused: boolean,
 	/**  The engine selected on the Speech step, if one was. */
 	speech_choice?: SpeechChoice | null,
+	/**  Sharing has been on for the whole of this walk through setup. */
+	sharing_on_throughout: boolean,
 };
 
 /**  What the settings window needs to show onboarding. */
@@ -770,6 +777,8 @@ export type OnboardingStatus_Serialize = {
 	download_paused: boolean,
 	/**  The engine selected on the Speech step, if one was. */
 	speech_choice: SpeechChoice | null,
+	/**  Sharing has been on for the whole of this walk through setup. */
+	sharing_on_throughout: boolean,
 };
 
 /**  A permission's state, for the onboarding steps. */
@@ -885,7 +894,7 @@ export type SpeechChoice =
 
 /**  One onboarding step, in order. */
 export type Step = 
-/**  What the app does, and the usage and error events switch. */
+/**  What the app does. */
 "welcome" | 
 /**  The language, and the on-device model or the user's own key. */
 "speech" | 
@@ -893,7 +902,10 @@ export type Step =
 "permissions" | 
 /**  The dictation key, and a practice dictation in the onboarding window. */
 "try" | 
-/**  A summary of the real states; closes onboarding. */
+/**
+ *  A summary of the real states, and the usage and error events switch;
+ *  closes onboarding.
+ */
 "ready";
 
 /**  Where speech becomes text (L1). */

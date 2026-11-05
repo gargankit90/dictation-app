@@ -1308,14 +1308,6 @@ button.ob-chip[aria-checked="true"]:hover:not(:disabled) {
   gap: var(--vc-space-1) var(--vc-space-3);
 }
 
-.ob-summary-control {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--vc-space-2);
-}
-
 .ob-summary dt {
   color: var(--vc-muted);
 }
@@ -1325,7 +1317,40 @@ button.ob-chip[aria-checked="true"]:hover:not(:disabled) {
   margin: 0;
 }
 
+.ob-summary > .ob-summary-switch {
+  align-items: center;
+}
+
+.ob-summary-switch > dt {
+  color: inherit;
+}
+
+.ob-summary-note {
+  flex-basis: 100%;
+}
+
+.ob-summary-note:empty {
+  display: none;
+}
+
+.ob-summary-note .ob-caption {
+  margin: 0;
+}
+
+.ob-notes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--vc-space-1) var(--vc-space-3);
+  margin-top: var(--vc-space-3);
+}
+
+.ob-notes p {
+  margin-block: 0;
+}
+
 .ob-menubar {
+  margin-left: auto;
   font-weight: 600;
   text-align: right;
 }
