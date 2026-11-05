@@ -191,6 +191,25 @@ describe("LanguagePicker", () => {
     for (const spy of spies) spy.mockRestore();
   });
 
+  it("fits the list to the area it opens in, between three rows and its full height", () => {
+    const fit = (areaHeight: number) => {
+      const spy = vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(areaHeight);
+      const { unmount } = render(
+        <div className="ob-content">
+          <Harness initial="hi" supported={cloudLanguages("groq")} />
+        </div>,
+      );
+      fireEvent.keyDown(box(), { key: "ArrowDown" });
+      const height = screen.getByRole("listbox").style.maxHeight;
+      unmount();
+      spy.mockRestore();
+      return height;
+    };
+    expect(fit(1000)).toBe("220px");
+    expect(fit(200)).toBe("168px");
+    expect(fit(50)).toBe("96px");
+  });
+
   it("reads as a picker: a chevron, hidden from screen readers, that turns when open", () => {
     render(<Harness initial="hi" supported={cloudLanguages("groq")} />);
     const chevron = document.querySelector(".language-chevron");

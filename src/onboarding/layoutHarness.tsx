@@ -464,6 +464,7 @@ async function languageProblems(root: HTMLElement): Promise<string[]> {
   if (box.top < area.top - 1) found.push("the field is scrolled out of its area");
   if (rows.bottom > area.bottom + 1) found.push("the list is cut off by its area");
   if (rows.right > area.right + 1) found.push("the list sticks out sideways");
+  if (rows.height > 221) found.push("the list is taller than its 220 px");
   // The row it opens at: the selected language, which may be far down the list.
   const opened = field.getAttribute("aria-activedescendant");
   const start = opened === null ? first : document.getElementById(opened);

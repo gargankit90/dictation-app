@@ -8,6 +8,8 @@ const SCROLL_AREAS = ".ob-content, .settings-pane";
 const LIST_MARGIN_PX = 32;
 /** Three rows, however short the area is: it scrolls for the rest. */
 const MIN_LIST_PX = 96;
+/** However tall the area is. */
+const MAX_LIST_PX = 220;
 
 interface Option {
   /** The stored value: `""` for automatic, otherwise the ISO code. */
@@ -82,7 +84,7 @@ export function LanguagePicker({
     const area = list.closest(SCROLL_AREAS);
     if (area !== null) {
       const room = area.clientHeight - box.offsetHeight - LIST_MARGIN_PX;
-      list.style.maxHeight = `${String(Math.max(room, MIN_LIST_PX))}px`;
+      list.style.maxHeight = `${String(Math.min(MAX_LIST_PX, Math.max(room, MIN_LIST_PX)))}px`;
     }
     box.scrollIntoView({ block: "nearest" });
     list.scrollIntoView({ block: "nearest" });
