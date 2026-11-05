@@ -1,0 +1,37 @@
+2026-11-05T08:07:11.064159Z  INFO dictation_app_lib: starting version="0.1.0" log_dir=/Users/lume/Library/Logs/com.dictationapp.desktop
+2026-11-05T08:07:11.075271Z  INFO dictation_app_lib: settings file path=/Users/lume/Library/Application Support/com.dictationapp.desktop/settings.json
+2026-11-05T08:07:11.075424Z  INFO dictation_app_lib: test hook: the provider is reached at a local URL url=http://127.0.0.1:18731/v1
+2026-11-05T08:07:11.076332Z  INFO dictation_app_lib: engine transcriber="settings" engine="unavailable"
+2026-11-05T08:07:11.076817Z  INFO dictation_app_lib: test hook: recording a file, not the microphone path=/Users/lume/e2e-fixtures/tone-16k.wav
+2026-11-05T08:07:11.076950Z  INFO dictation_platform::insert::macos::layout: paste key for the keyboard layout key_code=9
+2026-11-05T08:07:11.089535Z  INFO dictation_app_lib::overlay: overlay native window non_activating_panel=true native=class=OverlayPanel is_panel=true can_become_key=false can_become_main=false non_activating=true backs_webview=true
+2026-11-05T08:07:11.091374Z  INFO dictation_app_lib: ready hotkey=RightAlt
+2026-11-05T08:07:11.145174Z  INFO dictation_app_lib::engine: engine settings provider=groq model=whisper-large-v3-turbo language=None has_key=false
+2026-11-05T08:07:11.145280Z  INFO dictation_app_lib::engine: engine rebuilt engine="unavailable"
+2026-11-05T08:07:11.145780Z  INFO dictation_app_lib: onboarding shown at launch step=Welcome readiness=Readiness { welcome_passed: false, speech_chosen: false, microphone: true, accessibility: true } launch=LaunchOnboarding { resumed: false, scripted: false }
+2026-11-05T08:07:11.178970Z  INFO dictation_app_lib::tray_menu: tray menu status=✓ Ready · Hold Right ⌥ icon=Normal items=status,engine,-,copy-last,-,settings,troubleshoot,report,-,check-updates,quit
+2026-11-05T08:07:12.105484Z  INFO dictation_app_lib::tray_menu: tray menu status=! No API key saved. icon=Attention items=status,fix-speech-settings,-,copy-last,-,settings,troubleshoot,report,onboarding,-,check-updates,quit
+2026-11-05T08:07:12.702342Z  INFO dictation_app_lib::overlay: overlay page listening; view sent again state="hidden"
+2026-11-05T08:07:13.080204Z  INFO dictation_platform::launch::macos: login item: SMAppService status elapsed_ms=346 state=Disabled
+2026-11-05T08:07:27.524373Z  INFO dictation_platform::launch::macos: login item: SMAppService status elapsed_ms=283 state=Disabled
+2026-11-05T08:07:30.990640Z  WARN dictation_app_lib::commands: API key test failed provider=groq source="typed" error=the API key is missing or invalid
+2026-11-05T08:07:36.379558Z  INFO dictation_platform::launch::macos: login item: SMAppService status elapsed_ms=285 state=Disabled
+2026-11-05T08:07:39.728485Z  WARN dictation_app_lib::commands: API key test failed provider=groq source="typed" error=the API key is missing or invalid
+2026-11-05T08:09:20.251908Z  INFO dictation_app_lib: test hook event=Pressed from="a second launch" delivered=true
+2026-11-05T08:09:20.252049Z  INFO dictation_app_lib: state changed phase=Recording
+2026-11-05T08:09:20.252354Z  INFO dictation_app_lib::overlay: overlay shown state="recording"
+2026-11-05T08:09:20.267347Z  INFO dictation_app_lib::tray_menu: tray menu status=! No API key saved. icon=Recording items=status,fix-speech-settings,-,copy-last,-,settings,troubleshoot,report,onboarding,-,check-updates,quit
+2026-11-05T08:09:21.442004Z  INFO dictation_app_lib: test hook event=Released from="a second launch" delivered=true
+2026-11-05T08:09:21.442122Z  INFO dictation_app_lib: state changed phase=Transcribing
+2026-11-05T08:09:21.442227Z  INFO dictation_app_lib::overlay: overlay shown state="transcribing"
+2026-11-05T08:09:21.442593Z  INFO dictation_pipeline::pipeline: dictation failed error=Transcription failed: Add your API key in Settings.
+2026-11-05T08:09:21.442701Z  INFO dictation_app_lib: shown to the user error=Transcription failed: Add your API key in Settings.
+2026-11-05T08:09:21.442846Z  INFO dictation_app_lib: state changed phase=Idle
+2026-11-05T08:09:21.442929Z  INFO dictation_app_lib::overlay: overlay shown state="error"
+2026-11-05T08:09:21.447337Z  INFO dictation_app_lib::tray_menu: tray menu status=! No API key saved. icon=Attention items=status,fix-speech-settings,-,copy-last,-,settings,troubleshoot,report,onboarding,-,check-updates,quit
+2026-11-05T08:09:25.454614Z  INFO dictation_app_lib::overlay: overlay hidden
+2026-11-05T08:11:23.750325Z  INFO dictation_platform::launch::macos: login item: SMAppService status elapsed_ms=320 state=Disabled
+2026-11-05T08:11:23.921775Z  INFO dictation_platform::launch::macos: login item: SMAppService status elapsed_ms=374 state=Disabled
+2026-11-05T08:11:29.238183Z  INFO dictation_app_lib::commands: onboarding opened from Settings step=Speech
+2026-11-05T08:11:29.502646Z  INFO dictation_platform::launch::macos: login item: SMAppService status elapsed_ms=241 state=Disabled
+2026-11-05T08:11:29.667338Z  INFO dictation_platform::launch::macos: login item: SMAppService status elapsed_ms=398 state=Disabled
