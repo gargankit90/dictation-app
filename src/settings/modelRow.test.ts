@@ -135,7 +135,7 @@ describe("Design Lead round 1: model titles and captions", () => {
       "Parakeet English · English only · works offline · audio stays on this Mac",
     );
     const multi = model({ name: "Qwen3-ASR 0.6B", language_codes: ["en", "hi", "de", "fr"] });
-    expect(modelTitle(multi)).toBe("All languages");
+    expect(modelTitle(multi)).toBe("4 languages");
     expect(modelDetails(multi)).toBe(
       "Qwen3-ASR 0.6B · 4 languages, including English and Hindi · works offline · audio stays on this Mac",
     );

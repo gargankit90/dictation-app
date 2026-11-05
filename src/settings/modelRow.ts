@@ -127,9 +127,14 @@ export function modelRow(model: LocalModelInfo_Serialize, context: RowContext): 
   return row(null, [], partly);
 }
 
-/** A model's title: the language choice, not the checkpoint (Design Lead, round 1). */
+/**
+ * A model's title: the language choice, not the checkpoint (Design Lead,
+ * round 1). The one place this label lives: a count from the catalogue, since
+ * "All languages" would claim more than it has (U12, the owner is deciding).
+ */
 export function modelTitle(model: LocalModelInfo_Serialize): string {
-  return model.language_codes.join() === "en" ? "English" : "All languages";
+  const codes = model.language_codes;
+  return codes.join() === "en" ? "English" : `${String(codes.length)} languages`;
 }
 
 /** Its languages in words, counted from the codes the language picker uses. */

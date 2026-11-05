@@ -29,7 +29,7 @@ interface Props {
   /** The app's settings after a change (what Settings shows from now). */
   onStored: (settings: Settings_Serialize) => void;
   languages: LanguageChoice;
-  /** Opens the Speech section (to pick the engine for all languages). */
+  /** Opens the Speech section (to pick a model with more languages). */
   onOpenSpeech: () => void;
 }
 
@@ -156,7 +156,7 @@ export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props
               <>
                 The English model understands English only. For Hindi and other languages,{" "}
                 <button type="button" className="link" onClick={onOpenSpeech}>
-                  choose All languages in Speech
+                  choose a model with more languages in Speech
                 </button>
                 .
               </>

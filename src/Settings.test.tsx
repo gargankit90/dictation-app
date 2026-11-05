@@ -518,7 +518,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     backend.models = [ready(ENGLISH), model(MULTI)];
     await open("speech");
     expect(radio(/^English/)).toBeTruthy();
-    expect(radio(/^All languages/)).toBeTruthy();
+    expect(radio(/^3 languages/)).toBeTruthy();
     expect(radio(/^Your own key/)).toBeTruthy();
     expect(
       within(screen.getByRole("radiogroup", { name: "Speech engine" })).getAllByRole("radio"),
@@ -591,7 +591,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     fireEvent.click(radio(/^English/));
     expect(await screen.findByText("Loading…")).toBeTruthy();
     expect(checked().map((row) => row.id)).toEqual([`engine-${ENGLISH}`]);
-    expect(radio(/^All languages/).disabled).toBe(true);
+    expect(radio(/^3 languages/).disabled).toBe(true);
     expect(radio(/^Your own key/).disabled).toBe(true);
     expect(screen.getByTestId("blocked-reason").textContent).toBe("Wait until English has loaded.");
     loading.open();
@@ -624,8 +624,8 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     expect(screen.getByText(/Choose another engine to delete it/)).toBeTruthy();
     expect(screen.getByText(/Parakeet English · English only · works offline/)).toBeTruthy();
     click("More actions for English");
-    click("More actions for All languages");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Delete All languages" }));
+    click("More actions for 3 languages");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete 3 languages" }));
     await waitFor(() => {
       expect(backend.named("delete_local_model")[0]?.args).toEqual({ id: MULTI });
     });

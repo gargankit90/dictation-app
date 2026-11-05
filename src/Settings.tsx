@@ -5,6 +5,7 @@ import type { EngineStatus, LocalModelInfo_Serialize, Settings_Serialize } from 
 import { BROKEN, messageOf } from "./keyTest";
 import { cloudLanguages } from "./languages";
 import { providerInfo } from "./providers";
+import { modelTitle } from "./settings/modelRow";
 import "./settings.css";
 import { Dictation } from "./settings/Dictation";
 import type { LanguageChoice } from "./settings/Dictation";
@@ -141,7 +142,7 @@ function languageChoice(
   const englishOnly = model.language_codes.join() === "en";
   return {
     supported: model.language_codes,
-    engineName: englishOnly ? "the English model" : "the All languages model",
+    engineName: `the ${modelTitle(model)} model`,
     englishOnly,
   };
 }
