@@ -12,7 +12,7 @@ LAYOUT_DIR="/Users/$VM_USER/onboarding-layout"
 LAYOUT_STEPS="welcome speech speech-key permissions try ready"
 
 layout_build() {
-  local out=tests/e2e/out/onboarding-layout
+  local out=target/onboarding-layout
   npx vite build --config vite.layout.config.ts >/dev/null 2>&1 || return 1
   local step
   for step in $LAYOUT_STEPS; do

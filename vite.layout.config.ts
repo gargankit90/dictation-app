@@ -9,7 +9,7 @@ export default defineConfig({
   define: { "process.env.NODE_ENV": JSON.stringify("production") },
   build: {
     target: "safari16",
-    outDir: "tests/e2e/out/onboarding-layout",
+    outDir: "target/onboarding-layout",
     emptyOutDir: true,
     cssCodeSplit: false,
     lib: {
