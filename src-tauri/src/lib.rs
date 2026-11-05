@@ -420,7 +420,7 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
             live
         }
     };
-    app.manage(models::ModelDownloads::default());
+    app.manage(with_model_url(models::ModelDownloads::default(), &launch));
     let handle = app.handle().clone();
     app.manage(preferences::UpdateCheck(Arc::new(move || {
         updater::check_from_tray(&handle);
@@ -673,6 +673,28 @@ fn show_settings(app: &AppHandle) {
     window::show(app, onboarding::View::Settings);
 }
 
+/// Test builds: downloads models from `--debug-model-url` (a local stand-in
+/// server). Release builds have no such flag and this does nothing.
+#[cfg(debug_assertions)]
+fn with_model_url(
+    downloads: models::ModelDownloads,
+    launch: &flags::LaunchFlags,
+) -> models::ModelDownloads {
+    let Some(url) = &launch.model_url else {
+        return downloads;
+    };
+    tracing::info!(%url, "test hook: models download from a local URL");
+    downloads.from_stand_in(url)
+}
+
+#[cfg(not(debug_assertions))]
+fn with_model_url(
+    downloads: models::ModelDownloads,
+    _: &flags::LaunchFlags,
+) -> models::ModelDownloads {
+    downloads
+}
+
 /// Test builds: points the real engine at `--debug-provider-url` (a local
 /// stand-in provider, T4a). Release builds have no such flag (it is never
 /// parsed) and this does nothing: the engine always talks to the provider.
@@ -759,6 +781,9 @@ fn handle_flags(
             from,
             "the API key commands only run as a process of their own; ignored"
         );
+    }
+    for url in &flags.refused_model_urls {
+        tracing::warn!(%url, from, "ignoring --debug-model-url: only a loopback http URL is allowed");
     }
     for url in &flags.refused_provider_urls {
         tracing::warn!(%url, from, "ignoring --debug-provider-url: only a loopback http URL is allowed");

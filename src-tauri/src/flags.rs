@@ -51,6 +51,10 @@
 //!   an update dialog can't take the focus from the window a test pastes
 //!   into. Only the first launch's counts.
 //!
+//! - `--debug-model-url <url>` downloads on-device models from a local stand-in
+//!   server (loopback `http` only) instead of Hugging Face. The file is still
+//!   checked against the catalogue's SHA-256. Only the first launch's counts.
+//!
 //! - `--debug-provider-url <url>` sends the real engine's requests (and
 //!   Settings' Test key) to `url` instead of the provider's own endpoint, so
 //!   the signed test build can talk to a local stand-in provider (T4a). Only
@@ -94,6 +98,10 @@ pub const DEBUG_ONBOARDING_FLAG: &str = "--debug-onboarding";
 /// `--debug-update-check`: check for updates at launch like a person's
 /// launch, even in a scripted test launch (debug builds only, M5.4).
 pub const DEBUG_UPDATE_CHECK_FLAG: &str = "--debug-update-check";
+
+/// `--debug-model-url <url>` (or `=<url>`): where on-device models download
+/// from in a test build.
+pub const DEBUG_MODEL_URL_FLAG: &str = "--debug-model-url";
 
 /// `--debug-provider-url <url>` (or `=<url>`): where the real engine sends
 /// its requests instead of the provider's endpoint (debug builds only;
@@ -180,6 +188,12 @@ pub struct LaunchFlags {
     /// `--debug-provider-url` values refused because they aren't a loopback
     /// `http` URL, for a warning.
     pub refused_provider_urls: Vec<String>,
+    /// Where on-device models download from instead of their own URL (debug
+    /// builds only, loopback only); the last one given wins.
+    pub model_url: Option<String>,
+    /// `--debug-model-url` values refused because they aren't a loopback
+    /// `http` URL, for a warning.
+    pub refused_model_urls: Vec<String>,
     /// The engine `--transcriber` asked for; the last one wins.
     pub transcriber: Option<TranscriberChoice>,
     /// Decide about onboarding at launch like a person's launch (debug builds
@@ -204,6 +218,15 @@ impl LaunchFlags {
             || self.mock_text.is_some()
             || self.mock_text_sequence.is_some()
             || self.provider_url.is_some()
+            || self.model_url.is_some()
+    }
+
+    fn model_url(&mut self, url: &str) {
+        if is_loopback_http(url) {
+            self.model_url = Some(url.to_owned());
+        } else {
+            self.refused_model_urls.push(url.to_owned());
+        }
     }
 
     fn provider_url(&mut self, url: &str) {
@@ -323,6 +346,24 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
                     .and_then(|rest| rest.strip_prefix('='))
                 {
                     flags.provider_url(url);
+                }
+            }
+            DEBUG_MODEL_URL_FLAG if test_flags => match args.next() {
+                Some(url) => flags.model_url(url),
+                None => flags.ignored.push(arg.clone()),
+            },
+            other
+                if test_flags
+                    && other
+                        .strip_prefix(DEBUG_MODEL_URL_FLAG)
+                        .and_then(|rest| rest.strip_prefix('='))
+                        .is_some() =>
+            {
+                if let Some(url) = other
+                    .strip_prefix(DEBUG_MODEL_URL_FLAG)
+                    .and_then(|rest| rest.strip_prefix('='))
+                {
+                    flags.model_url(url);
                 }
             }
             TRANSCRIBER_FLAG => match args.next() {
@@ -761,6 +802,26 @@ mod tests {
             assert_eq!(flags.refused_provider_urls, [url], "{url}");
             assert!(!flags.configure_pipeline(), "{url}");
         }
+    }
+
+    #[test]
+    fn debug_builds_take_only_a_loopback_model_url() {
+        let flags = parse(&argv(&["--debug-model-url", LOCAL]), true);
+        assert_eq!(flags.model_url.as_deref(), Some(LOCAL));
+        assert!(flags.configure_pipeline(), "only the first launch's counts");
+        let flags = parse(&argv(&[&format!("--debug-model-url={LOCAL}")]), true);
+        assert_eq!(flags.model_url.as_deref(), Some(LOCAL));
+        let flags = parse(&argv(&["--debug-model-url", "https://example.com/m"]), true);
+        assert_eq!(flags.model_url, None);
+        assert_eq!(flags.refused_model_urls, ["https://example.com/m"]);
+    }
+
+    #[test]
+    fn release_builds_ignore_the_model_url() {
+        let flags = parse(&argv(&["--debug-model-url", LOCAL]), false);
+        assert_eq!(flags.model_url, None);
+        assert!(flags.refused_model_urls.is_empty());
+        assert!(!flags.configure_pipeline());
     }
 
     /// T4a criterion 1: a release build never honours the override; the flag

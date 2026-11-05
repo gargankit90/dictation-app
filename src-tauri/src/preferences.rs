@@ -29,18 +29,21 @@ use crate::diagnostics::AppOpener;
 use crate::engine::LiveEngine;
 use crate::usage::{self, Usage};
 
-/// What a one-field write did: the usage change (names only) and any
-/// problem besides the write.
+/// What a one-field write did: the usage change (names only) and what
+/// happened to the hotkey on the way.
 type Changed = (Option<usage::SettingsChange>, Saved);
 
-/// Runs `change` on the blocking pool, records which setting changed (never
-/// its value) and turns a problem into the message Settings shows.
+/// Runs `change` on the blocking pool and records which setting changed (never
+/// its value). An error means this setting wasn't saved. None of these writes
+/// asks for another hotkey, so the hotkey's state isn't their failure: a hotkey
+/// waiting for Accessibility must not stop setup from choosing an engine (U9).
+/// Settings shows that from `get_hotkey_notice`.
 async fn write<S: SecretStore + 'static>(
     config: Arc<Config<S>>,
     usage: &Usage,
     change: impl FnOnce(&Arc<Config<S>>) -> Result<Changed, String> + Send + 'static,
 ) -> Result<(), String> {
-    let (change, saved) = tauri::async_runtime::spawn_blocking(move || change(&config))
+    let (change, _hotkey) = tauri::async_runtime::spawn_blocking(move || change(&config))
         .await
         .map_err(|_| "the settings task crashed".to_owned())?
         .map_err(|error| {
@@ -50,7 +53,7 @@ async fn write<S: SecretStore + 'static>(
     if let Some(change) = change {
         usage::settings_saved(usage, change);
     }
-    saved.problem().map_or(Ok(()), Err)
+    Ok(())
 }
 
 /// `language` as stored: trimmed, and `None` (detect it) when empty.
@@ -157,15 +160,24 @@ pub async fn choose_local_model(
 ) -> Result<(), String> {
     let (live, control) = (engine.inner().clone(), hotkey.0.clone());
     write(Arc::clone(&state.0), &usage, move |config| {
-        let model = local_models::find(&id)
-            .ok_or_else(|| format!("There is no on-device model {id:?}."))?;
-        commands::write_change(config, &live, &control, |settings| {
-            settings.transcription = Transcription::Local;
-            model.id.clone_into(&mut settings.local_model);
-        })
-        .map_err(|error| error.to_string())
+        choose_local(config, &live, &control, &id)
     })
     .await
+}
+
+fn choose_local<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    live: &LiveEngine,
+    control: &HotkeyControl,
+    id: &str,
+) -> Result<Changed, String> {
+    let model =
+        local_models::find(id).ok_or_else(|| format!("There is no on-device model {id:?}."))?;
+    commands::write_change(config, live, control, |settings| {
+        settings.transcription = Transcription::Local;
+        model.id.clone_into(&mut settings.local_model);
+    })
+    .map_err(|error| error.to_string())
 }
 
 fn switch_to_local<S: SecretStore + 'static>(

@@ -14,6 +14,7 @@ import type {
 } from "./bindings";
 import { SECTION_KEY, Settings } from "./Settings";
 import type { SectionId } from "./Settings";
+import { HOTKEY_NOTICE_POLL_MS } from "./settings/Dictation";
 import { CONNECTED, KEY_NOT_SAVED, NOTICE_DISMISSED_KEY } from "./settings/Speech";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
@@ -72,6 +73,8 @@ class Backend {
   /** Holds the command named until the promise settles. */
   holds = new Map<string, Promise<void>>();
   calls: Call[] = [];
+
+  hotkeyNotice: string | null = null;
 
   handle = async (command: string, payload: unknown): Promise<unknown> => {
     const args = (payload ?? {}) as Record<string, unknown>;
@@ -153,6 +156,8 @@ class Backend {
         return null;
       case "get_app_info":
         return { version: "0.1.0", last_update_check_ms: null };
+      case "get_hotkey_notice":
+        return this.hotkeyNotice;
       case "check_for_updates":
       case "open_link":
         return null;
@@ -425,6 +430,38 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     });
     expect(backend.settings.hotkey).toBe("F7");
     expect(screen.getByLabelText("Dictation key").textContent).toBe("F7");
+  });
+});
+
+describe("U9 a hotkey waiting for Accessibility", () => {
+  const WAITING = "The hotkey Right ⌥ is saved, but Vocet can't listen to the keyboard yet.";
+
+  it("is said on the Dictation key row, while saving other settings still works", async () => {
+    backend.hotkeyNotice = WAITING;
+    await open("dictation");
+    expect((await screen.findByText(WAITING)).getAttribute("role")).toBe("status");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("goes by itself once the key listens", async () => {
+    backend.hotkeyNotice = WAITING;
+    await open("dictation");
+    await screen.findByText(WAITING);
+    backend.hotkeyNotice = null;
+    await waitFor(
+      () => {
+        expect(screen.queryByText(WAITING)).toBeNull();
+      },
+      { timeout: HOTKEY_NOTICE_POLL_MS + 1_000 },
+    );
+  });
+
+  it("says nothing while the key listens", async () => {
+    await open("dictation");
+    await waitFor(() => {
+      expect(backend.named("get_hotkey_notice").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText(/can't listen/)).toBeNull();
   });
 });
 

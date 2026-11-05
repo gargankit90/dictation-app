@@ -193,51 +193,7 @@ pub const fn download_answers(code: ErrorCode, chosen: bool) -> bool {
             ))
 }
 
-/// The keycap text for a stored hotkey, as Settings' recorder shows it:
-/// `RightAlt` is `Right ⌥`, `Ctrl+Shift+Space` is `⌃⇧Space`. Anything
-/// unrecognised is shown as written. Mirrors `keycapLabel` in
-/// `src/hotkeyKeys.ts`.
-#[must_use]
-pub fn keycap_label(spec: &str) -> String {
-    let labels: Vec<(String, Option<&'static str>)> = spec
-        .split('+')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let lower = part.to_ascii_lowercase();
-            let (side, rest) = if let Some(rest) = lower.strip_prefix("left") {
-                (Some("Left"), rest.to_owned())
-            } else if let Some(rest) = lower.strip_prefix("right") {
-                (Some("Right"), rest.to_owned())
-            } else {
-                (None, lower)
-            };
-            let symbol = match rest.as_str() {
-                "ctrl" | "control" => Some("⌃"),
-                "alt" | "option" | "opt" => Some("⌥"),
-                "shift" => Some("⇧"),
-                "cmd" | "command" | "meta" | "super" | "win" => Some("⌘"),
-                _ => None,
-            };
-            match symbol {
-                Some(symbol) => (symbol.to_owned(), side),
-                None => (part.to_owned(), None),
-            }
-        })
-        .collect();
-    if labels.iter().any(|(_, side)| side.is_some()) {
-        labels
-            .iter()
-            .map(|(text, side)| match side {
-                Some(side) => format!("{side} {text}"),
-                None => text.clone(),
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-    } else {
-        labels.iter().map(|(text, _)| text.as_str()).collect()
-    }
-}
+pub use dictation_core::hotkey_spec::keycap_label;
 
 /// Which template image the tray shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
