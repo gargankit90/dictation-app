@@ -953,7 +953,7 @@ main.ob {
   gap: var(--vc-space-2);
 }
 
-.ob-chip[aria-pressed="true"] {
+.ob-chip[aria-checked="true"] {
   border-color: var(--vc-accent);
   background: var(--vc-accent);
   color: var(--vc-accent-fg);
@@ -1058,6 +1058,7 @@ main.ob {
 .ob-summary > div {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   justify-content: space-between;
   gap: var(--vc-space-1) var(--vc-space-3);
 }

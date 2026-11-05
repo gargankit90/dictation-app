@@ -206,7 +206,7 @@ function SpeechForm({
         blockedBecause,
       }}
     >
-      <div className="ob-languages" role="group" aria-label="Language">
+      <div className="ob-languages" role="radiogroup" aria-label="Language">
         {(
           [
             ["en", "English"],
@@ -217,7 +217,8 @@ function SpeechForm({
             key={code}
             type="button"
             className="ob-chip"
-            aria-pressed={!more && language === code}
+            role="radio"
+            aria-checked={!more && language === code}
             onClick={() => {
               setMore(false);
               void chooseLanguage(code);
@@ -229,8 +230,8 @@ function SpeechForm({
         <button
           type="button"
           className="ob-chip"
-          aria-expanded={more}
-          aria-pressed={more}
+          role="radio"
+          aria-checked={more}
           onClick={() => {
             setMore(true);
           }}
@@ -252,6 +253,7 @@ function SpeechForm({
         <input
           type="radio"
           name="ob-engine"
+          aria-label="Recommended for your language"
           checked={choice === "local"}
           disabled={model === null}
           onChange={() => {

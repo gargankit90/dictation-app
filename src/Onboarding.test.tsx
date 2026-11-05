@@ -399,7 +399,7 @@ describe("Speech", () => {
   it("criterion 3: Hindi recommends the multilingual model, with its real size", async () => {
     show();
     await screen.findByText("Parakeet English · 477 MB");
-    fireEvent.click(screen.getByRole("button", { name: "Hindi" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
     await screen.findByText("Qwen3-ASR Multilingual · 590 MB");
     await waitFor(() => {
       expect(backend.settings.language).toBe("hi");
@@ -410,7 +410,7 @@ describe("Speech", () => {
     show();
     await screen.findByText("Parakeet English · 477 MB");
     expect(screen.queryByRole("combobox")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "More…" }));
+    fireEvent.click(screen.getByRole("radio", { name: "More…" }));
     expect(screen.getByRole("combobox")).toBeTruthy();
   });
 
