@@ -17,14 +17,5 @@ retries = 0
 failure-output = "immediate-final"
 fail-fast = false
 
-# G2: the whole workspace now runs on the hosted macOS runner, where this
-# real-clock test (a feeder thread paced by sleeps) was starved once and read
-# silence. It passes alone and on Linux. Retry it twice there rather than
-# let a scheduling hiccup fail a required check; the flake is tracked in a
-# tech-debt issue.
-[[profile.ci.overrides]]
-filter = 'test(criterion_u4_1_levels_are_published_while_recording_only)'
-retries = 2
-
 [profile.ci.junit]
 path = "junit.xml"
