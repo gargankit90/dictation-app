@@ -43,14 +43,14 @@ export const commands = {
 	 *  The view the settings window shows and, for onboarding (M5.2), the step
 	 *  the user is on and the two permissions. Never blocks: the key isn't read.
 	 */
-	getOnboarding: () => typedError<OnboardingStatus, string>(__TAURI_INVOKE("get_onboarding")),
+	getOnboarding: () => typedError<OnboardingStatus_Serialize, string>(__TAURI_INVOKE("get_onboarding")),
 	/**
 	 *  Asks macOS for `permission`: its prompt while it hasn't been asked,
 	 *  System Settings at the permission's page once refused (Accessibility:
 	 *  both). Returns at once; `get_onboarding` shows the answer once the user
 	 *  gives it.
 	 */
-	requestPermission: (permission: AppPermission) => typedError<OnboardingStatus, string>(__TAURI_INVOKE("request_permission", { permission })),
+	requestPermission: (permission: AppPermission) => typedError<OnboardingStatus_Serialize, string>(__TAURI_INVOKE("request_permission", { permission })),
 	/**
 	 *  Settings, Help, "Run setup again" (U5, U6): opens the first-run steps,
 	 *  from the start if setup was finished (U8), otherwise at the step the user
@@ -63,7 +63,7 @@ export const commands = {
 	 *  the user's go-ahead for usage events (U8), if sharing is on. An error says
 	 *  which step comes first; the user stays where they were.
 	 */
-	setOnboardingStep: (step: Step) => typedError<OnboardingStatus, string>(__TAURI_INVOKE("set_onboarding_step", { step })),
+	setOnboardingStep: (step: Step) => typedError<OnboardingStatus_Serialize, string>(__TAURI_INVOKE("set_onboarding_step", { step })),
 	/**  Ends onboarding: the window goes back to the settings view and hides. */
 	finishOnboarding: () => typedError<null, string>(__TAURI_INVOKE("finish_onboarding")),
 	/**
@@ -218,6 +218,11 @@ export const commands = {
 	 *  when the user asks. Nothing is pasted.
 	 */
 	copyPracticeWords: () => typedError<null, string>(__TAURI_INVOKE("copy_practice_words")),
+	/**
+	 *  Keeps the engine selected on the Speech step, so a quit before Continue
+	 *  comes back to it. Never the key.
+	 */
+	setSpeechChoice: (choice: SpeechChoice) => typedError<null, string>(__TAURI_INVOKE("set_speech_choice", { choice })),
 	/**
 	 *  The newest input level, in dBFS, for the overlay's meter; silence when
 	 *  nothing records. Only the overlay window may call it
@@ -569,6 +574,16 @@ export type LocalModelInfo_Deserialize = {
 	downloaded_bytes: number | null,
 	/**  Where it is. */
 	state: ModelState,
+	/**
+	 *  The running download kept this many bytes of an earlier part: the
+	 *  server accepted the range. `None` otherwise.
+	 */
+	resumed_from_bytes?: number | null,
+	/**
+	 *  The running download threw an earlier part away: the server sent the
+	 *  whole file.
+	 */
+	restarted: boolean,
 	/**  Why the last download failed, in plain words, if it did. */
 	error?: string | null,
 	/**  Whether it is the catalogue's default. */
@@ -591,6 +606,16 @@ export type LocalModelInfo_Serialize = {
 	downloaded_bytes: number | null,
 	/**  Where it is. */
 	state: ModelState,
+	/**
+	 *  The running download kept this many bytes of an earlier part: the
+	 *  server accepted the range. `None` otherwise.
+	 */
+	resumed_from_bytes: number | null,
+	/**
+	 *  The running download threw an earlier part away: the server sent the
+	 *  whole file.
+	 */
+	restarted: boolean,
 	/**  Why the last download failed, in plain words, if it did. */
 	error: string | null,
 	/**  Whether it is the catalogue's default. */
@@ -634,7 +659,10 @@ export type ModelState =
 "ready";
 
 /**  What the settings window needs to show onboarding. */
-export type OnboardingStatus = {
+export type OnboardingStatus = OnboardingStatus_Serialize | OnboardingStatus_Deserialize;
+
+/**  What the settings window needs to show onboarding. */
+export type OnboardingStatus_Deserialize = {
 	/**  Which view to show. */
 	view: View,
 	/**  The step the user is on. */
@@ -652,6 +680,31 @@ export type OnboardingStatus = {
 	try_outcome: TryOutcome,
 	/**  The user cancelled the model download. */
 	download_paused: boolean,
+	/**  The engine selected on the Speech step, if one was. */
+	speech_choice?: SpeechChoice | null,
+};
+
+/**  What the settings window needs to show onboarding. */
+export type OnboardingStatus_Serialize = {
+	/**  Which view to show. */
+	view: View,
+	/**  The step the user is on. */
+	step: Step,
+	/**  The microphone permission. */
+	microphone: PermissionState,
+	/**  The Accessibility permission. */
+	accessibility: PermissionState,
+	/**
+	 *  macOS says Accessibility is allowed but the hotkey can't use it: a
+	 *  relaunch makes it take.
+	 */
+	needs_relaunch: boolean,
+	/**  How the practice dictation went. */
+	try_outcome: TryOutcome,
+	/**  The user cancelled the model download. */
+	download_paused: boolean,
+	/**  The engine selected on the Speech step, if one was. */
+	speech_choice: SpeechChoice | null,
 };
 
 /**  A permission's state, for the onboarding steps. */
@@ -747,6 +800,13 @@ export type Settings_Serialize = {
 	 */
 	share_usage_events: boolean,
 };
+
+/**  The engine the user selected on [`Step::Speech`], before they continue. */
+export type SpeechChoice = 
+/**  The recommended on-device model. */
+"local" | 
+/**  The user's own key. The key itself is never kept here. */
+"own_key";
 
 /**  One onboarding step, in order. */
 export type Step = 

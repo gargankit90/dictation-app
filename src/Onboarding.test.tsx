@@ -14,6 +14,7 @@ import type {
   PermissionState,
   Provider,
   Settings_Serialize,
+  SpeechChoice,
   Step,
   TryOutcome,
   View,
@@ -24,7 +25,7 @@ import { NOT_TESTED } from "./onboarding/ReadyStep";
 import { KEY_REASON, MODEL_COPY } from "./onboarding/SpeechStep";
 import { BOTH_REASON } from "./onboarding/PermissionsStep";
 import { CONTINUE_REASON } from "./onboarding/TryStep";
-import { EVENTS_CAPTION } from "./onboarding/WelcomeStep";
+import { EVENTS_CAPTION, SAVE_FAILED_REASON, SAVING_REASON } from "./onboarding/WelcomeStep";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
 const KEY = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
@@ -41,6 +42,8 @@ const PARAKEET: LocalModelInfo_Serialize = {
   state: "missing",
   error: null,
   default: true,
+  resumed_from_bytes: null,
+  restarted: false,
 };
 
 const QWEN: LocalModelInfo_Serialize = {
@@ -53,6 +56,8 @@ const QWEN: LocalModelInfo_Serialize = {
   state: "missing",
   error: null,
   default: false,
+  resumed_from_bytes: null,
+  restarted: false,
 };
 
 interface Call {
@@ -81,6 +86,9 @@ class Backend {
   needsRelaunch = false;
   tryOutcome: TryOutcome = "not_tried";
   downloadPaused = false;
+  speechChoice: SpeechChoice | null = null;
+  /** The server answers a resume with the whole file. */
+  ignoresRange = false;
   micAnswer: PermissionState = "granted";
   keys: Record<Provider, boolean> = { groq: false, openai: false };
   models: LocalModelInfo_Serialize[] = [{ ...PARAKEET }, { ...QWEN }];
@@ -113,6 +121,7 @@ class Backend {
       needs_relaunch: this.needsRelaunch,
       try_outcome: this.tryOutcome,
       download_paused: this.downloadPaused,
+      speech_choice: this.speechChoice,
     };
   }
 
@@ -213,8 +222,16 @@ class Backend {
           local_model: args.id as string,
         };
         return null;
-      case "download_local_model":
-        this.model(args.id as string).state = "downloading";
+      case "download_local_model": {
+        const model = this.model(args.id as string);
+        const part = model.downloaded_bytes ?? 0;
+        model.state = "downloading";
+        if (part > 0 && this.ignoresRange) model.restarted = true;
+        else if (part > 0) model.resumed_from_bytes = part;
+        return null;
+      }
+      case "set_speech_choice":
+        this.speechChoice = args.choice as SpeechChoice;
         return null;
       case "cancel_local_model_download": {
         const model = this.model(args.id as string);
@@ -222,7 +239,8 @@ class Backend {
         return null;
       }
       case "list_local_models":
-        return this.models;
+        // A new list each time, as the app sends.
+        return this.models.map((model) => ({ ...model }));
       case "get_engine_status":
         return this.engine;
       default:
@@ -381,10 +399,114 @@ describe("Welcome", () => {
   });
 });
 
+describe("Welcome's switch before Continue (finding 1)", () => {
+  /** Holds `set_share_usage_events` until `finish` is called. */
+  function holdTheWrite(fail = false) {
+    const held: { finish: () => void } = { finish: () => undefined };
+    const original = backend.handle;
+    mockIPC((command, payload) => {
+      if (command !== "set_share_usage_events") return original(command, payload);
+      return new Promise((resolve, reject) => {
+        held.finish = () => {
+          if (fail) {
+            // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+            reject("Couldn't write the settings file.");
+            return;
+          }
+          resolve(original(command, payload));
+        };
+      });
+    });
+    return held;
+  }
+
+  it("Continue can't overtake an opt-out still being written", async () => {
+    const held = holdTheWrite();
+    show();
+    fireEvent.click(await screen.findByRole("switch", { name: "Share usage and error events" }));
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(true);
+    });
+    expect(screen.getByText(SAVING_REASON)).toBeTruthy();
+    fireEvent.click(primary("Continue"));
+    expect(backend.named("set_onboarding_step")).toEqual([]);
+
+    act(() => {
+      held.finish();
+    });
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
+    expect(backend.settings.share_usage_events).toBe(false);
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Which language will you mostly speak?");
+  });
+
+  it("stays locked after a failed opt-out, and the switch shows what is saved", async () => {
+    const held = holdTheWrite(true);
+    show();
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    fireEvent.click(share);
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(true);
+    });
+    act(() => {
+      held.finish();
+    });
+    await screen.findByText(SAVE_FAILED_REASON);
+    expect(primary("Continue").disabled).toBe(true);
+    expect(share.checked).toBe(true);
+    fireEvent.click(primary("Continue"));
+    expect(backend.named("set_onboarding_step")).toEqual([]);
+  });
+});
+
 describe("Speech", () => {
   beforeEach(() => {
     backend.step = "speech";
     backend.welcomePassed = true;
+  });
+
+  it("finding 3: the own key choice survives a quit, with no key saved and none kept", async () => {
+    const { unmount } = show();
+    await screen.findByText("Parakeet English · 477 MB");
+    fireEvent.click(screen.getByRole("radio", { name: /Use my own Groq or OpenAI key/ }));
+    await waitFor(() => {
+      expect(backend.speechChoice).toBe("own_key");
+    });
+    fireEvent.change(await screen.findByLabelText("Groq API key"), { target: { value: KEY } });
+    unmount();
+
+    // The relaunch: the app's status has the choice, and the typed key is gone.
+    show();
+    const field = await screen.findByLabelText<HTMLInputElement>("Groq API key");
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
+    expect(field.value).toBe("");
+    expect(JSON.stringify(backend.named("set_speech_choice"))).not.toContain(KEY);
+  });
+
+  it("finding 3: choosing local survives a quit, even with a cloud key saved", async () => {
+    backend.keys.groq = true;
+    const { unmount } = show();
+    await waitFor(() => {
+      expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
+    });
+    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    await waitFor(() => {
+      expect(backend.speechChoice).toBe("local");
+    });
+    unmount();
+    show();
+    await screen.findByText("Parakeet English · 477 MB");
+    await waitFor(() => {
+      expect(backend.named("has_api_key").length).toBeGreaterThan(1);
+    });
+    expect(
+      screen.getByRole<HTMLInputElement>("radio", { name: "Recommended for your language" })
+        .checked,
+    ).toBe(true);
   });
 
   it("criterion 3: English preselects Parakeet English, with its real size", async () => {
@@ -564,22 +686,21 @@ describe("the download strip", () => {
     await screen.findByText("Continued from 212 MB.");
   });
 
-  it("criterion 7: if the bytes went backwards, the strip says it started again", async () => {
+  it("criterion 7: a restart stays a restart, also once it passes the old part's size", async () => {
     downloading();
+    backend.ignoresRange = true;
     const model = backend.model(PARAKEET.id);
     model.state = "partial";
     show();
-    await screen.findByText("Continued from 212 MB.");
-    model.downloaded_bytes = 5_000_000;
+    const said = "The earlier download couldn't continue, so it started again.";
+    await screen.findByText(said);
+    model.downloaded_bytes = 400_000_000;
     refocus();
-    await waitFor(
-      () => {
-        expect(
-          screen.getByText("The earlier download couldn't continue, so it started again."),
-        ).toBeTruthy();
-      },
-      { timeout: 2000 },
-    );
+    await screen.findByText("Downloading Parakeet English · 400 of 477 MB", undefined, {
+      timeout: 2000,
+    });
+    expect(screen.getByText(said)).toBeTruthy();
+    expect(screen.queryByText(/Continued from/)).toBeNull();
   });
 
   it("criterion 7: a download the user cancelled doesn't start again by itself", async () => {

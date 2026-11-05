@@ -35,6 +35,8 @@ function model(id: string, overrides: Partial<LocalModelInfo_Serialize> = {}) {
     size_bytes: id === ENGLISH ? 477_274_496 : 600_000_000,
     downloaded_bytes: 0,
     state: "missing",
+    resumed_from_bytes: null,
+    restarted: false,
     error: null,
     default: id === ENGLISH,
     ...overrides,

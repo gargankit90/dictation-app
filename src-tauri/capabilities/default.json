@@ -47,6 +47,7 @@
     "allow-set-try-outcome",
     "allow-set-download-paused",
     "allow-practice-words",
-    "allow-copy-practice-words"
+    "allow-copy-practice-words",
+    "allow-set-speech-choice"
   ]
 }

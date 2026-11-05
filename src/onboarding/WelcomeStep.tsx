@@ -11,6 +11,11 @@ import type { FrameParts } from "./StepFrame";
 export const EVENTS_CAPTION =
   "Anonymous usage events (with a random install ID) and error reports help us fix what breaks. Never audio, transcripts, typed text, keys or app names.";
 
+/** Leaving Welcome starts sending, so the switch has to be saved first. */
+export const SAVING_REASON = "Saving your choice…";
+export const SAVE_FAILED_REASON =
+  "Continue unlocks once your choice is saved. Try the switch again.";
+
 interface Props {
   parts: FrameParts;
   settings: Settings_Serialize | null;
@@ -47,7 +52,14 @@ export function WelcomeStep({ parts, settings, onStored, onContinue }: Props) {
       primary={{
         label: "Continue",
         onClick: onContinue,
-        blockedBecause: settings === null ? "Loading…" : null,
+        blockedBecause:
+          settings === null
+            ? "Loading…"
+            : sharing.save.state === "saving"
+              ? SAVING_REASON
+              : sharing.save.state === "error"
+                ? SAVE_FAILED_REASON
+                : null,
       }}
     >
       <div className="ob-demo">

@@ -25,7 +25,7 @@
 
 use std::sync::Arc;
 
-use dictation_core::onboarding::{Step, TryOutcome};
+use dictation_core::onboarding::{SpeechChoice, Step, TryOutcome};
 use dictation_core::settings::{Provider, Settings};
 use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, UndoFailed};
@@ -814,8 +814,15 @@ pub async fn set_onboarding_step(
     diagnostics: State<'_, Diagnostics>,
     step: Step,
 ) -> Result<OnboardingStatus, String> {
-    if step > Step::Welcome && onboarding.pass_welcome() {
-        usage.left_welcome();
+    if step > Step::Welcome && !onboarding.welcome_passed() {
+        let (config, onboarding, usage) = (
+            Arc::clone(&state.0),
+            Arc::clone(&onboarding),
+            usage.inner().clone(),
+        );
+        tauri::async_runtime::spawn_blocking(move || leave_welcome(&config, &onboarding, &usage))
+            .await
+            .map_err(|_| "the onboarding task crashed".to_owned())?;
     }
     let welcome_passed = onboarding.welcome_passed();
     let (config, live, os) = (
@@ -835,6 +842,34 @@ pub async fn set_onboarding_step(
         .map_err(|not_yet| not_yet.to_string())?;
     usage::onboarding_step(&usage, step);
     Ok(onboarding.status(&*permissions.0, diagnostics.hotkey_is_down()))
+}
+
+/// The user continued past Welcome (U8). What decides is the saved sharing
+/// choice, read under the lock its writer holds, not what the adapters last
+/// heard: an opt-out still on its way can't be overtaken by this. A choice
+/// that can't be read counts as off. An opt-out that arrives later still stops
+/// everything first (`write_sharing`).
+fn leave_welcome<S: SecretStore>(config: &Config<S>, onboarding: &Onboarding, usage: &Usage) {
+    let _writing = settings_write();
+    let share = config
+        .settings()
+        .is_ok_and(|settings| settings.share_usage_events);
+    usage.set_enabled(share);
+    if onboarding.pass_welcome() {
+        usage.left_welcome();
+    }
+}
+
+/// Keeps the engine selected on the Speech step, so a quit before Continue
+/// comes back to it. Never the key.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_speech_choice(
+    onboarding: State<'_, Arc<Onboarding>>,
+    choice: SpeechChoice,
+) -> Result<(), String> {
+    onboarding.set_speech_choice(choice);
+    Ok(())
 }
 
 /// Keeps how the practice dictation went, for the Ready step and a relaunch.
@@ -984,6 +1019,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         set_download_paused,
         practice_words,
         copy_practice_words,
+        set_speech_choice,
         crate::overlay::get_overlay_level,
     ])
 }
@@ -1107,6 +1143,7 @@ mod tests {
             "setDownloadPaused",
             "practiceWords",
             "copyPracticeWords",
+            "setSpeechChoice",
         ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
@@ -1115,7 +1152,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 44,
+            commands, 45,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1224,6 +1261,8 @@ mod tests {
                 "size_bytes",
                 "downloaded_bytes",
                 "state",
+                "resumed_from_bytes",
+                "restarted",
                 "error",
                 "default"
             ]
@@ -1306,6 +1345,67 @@ mod tests {
 
     /// K1: the dictation key has one writer, `set_hotkey`; the form's save
     /// keeps the stored key, so neither can undo the other.
+    /// U8 finding 1: the saved choice decides, even if the adapters haven't
+    /// heard of an opt-out yet. Fails if Welcome's exit trusts the gate's copy.
+    mod leaving_welcome {
+        use dictation_core::settings::Settings;
+        use dictation_platform::fakes::{FakeTelemetry, MemSecretStore};
+
+        use super::super::*;
+
+        fn config(tag: &str, share: bool) -> (Config<MemSecretStore>, std::path::PathBuf) {
+            let dir =
+                std::env::temp_dir().join(format!("dictation-leave-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let config = Config::new(&dir, MemSecretStore::new());
+            config
+                .save_settings(&Settings {
+                    share_usage_events: share,
+                    ..Settings::default()
+                })
+                .unwrap();
+            (config, dir)
+        }
+
+        #[test]
+        fn a_saved_opt_out_the_adapters_have_not_heard_of_sends_nothing() {
+            let (config, dir) = config("off", false);
+            let fake = FakeTelemetry::new();
+            // The launch read "on"; the opt-out reached only the file so far.
+            let usage = Usage::at_welcome(Arc::new(fake.clone()));
+            let onboarding = Onboarding::new();
+            leave_welcome(&config, &onboarding, &usage);
+            assert!(onboarding.welcome_passed());
+            usage::onboarding_step(&usage, Step::Speech);
+            assert!(fake.events().is_empty());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_saved_opt_in_starts_sending() {
+            let (config, dir) = config("on", true);
+            let fake = FakeTelemetry::new();
+            let usage = Usage::at_welcome(Arc::new(fake.clone()));
+            let onboarding = Onboarding::new();
+            leave_welcome(&config, &onboarding, &usage);
+            usage::onboarding_step(&usage, Step::Speech);
+            assert_eq!(fake.events().len(), 1);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn settings_that_cannot_be_read_count_as_off() {
+            let (config, dir) = config("bad", true);
+            std::fs::write(config.path(), "{ not json").unwrap();
+            let fake = FakeTelemetry::new();
+            let usage = Usage::at_welcome(Arc::new(fake.clone()));
+            leave_welcome(&config, &Onboarding::new(), &usage);
+            usage::onboarding_step(&usage, Step::Speech);
+            assert!(fake.events().is_empty());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
     mod recorded_hotkey {
         use dictation_platform::fakes::MemSecretStore;
 
@@ -2957,7 +3057,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 44);
+        assert_eq!(COMMAND_NAMES.len(), 45);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

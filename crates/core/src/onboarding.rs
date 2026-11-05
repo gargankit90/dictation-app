@@ -153,6 +153,17 @@ pub enum TryOutcome {
     Skipped,
 }
 
+/// The engine the user selected on [`Step::Speech`], before they continue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub enum SpeechChoice {
+    /// The recommended on-device model.
+    Local,
+    /// The user's own key. The key itself is never kept here.
+    OwnKey,
+}
+
 /// What survives a quit: where the user is and what they chose that only the
 /// steps know. Holds no audio, text or key.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,6 +181,8 @@ pub struct SetupProgress {
     /// The user cancelled the model download, so a relaunch doesn't start it
     /// again by itself.
     pub download_paused: bool,
+    /// The engine selected on the Speech step, if the user selected one.
+    pub speech_choice: Option<SpeechChoice>,
 }
 
 impl SetupProgress {
@@ -181,6 +194,7 @@ impl SetupProgress {
         completed: true,
         try_outcome: TryOutcome::NotTried,
         download_paused: false,
+        speech_choice: None,
     };
 
     /// Reads the file's text. `None` if it can't be understood.
@@ -304,6 +318,7 @@ mod tests {
             completed: false,
             try_outcome: TryOutcome::Skipped,
             download_paused: true,
+            speech_choice: Some(SpeechChoice::OwnKey),
         };
         assert_eq!(
             SetupProgress::from_json(&progress.to_json()),

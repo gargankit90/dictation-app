@@ -23,6 +23,8 @@ function model(update: Partial<LocalModelInfo_Serialize> = {}): LocalModelInfo_S
     state: "missing",
     error: null,
     default: true,
+    resumed_from_bytes: null,
+    restarted: false,
     ...update,
   };
 }
@@ -85,33 +87,35 @@ describe("stripView", () => {
   const running = model({ state: "downloading", downloaded_bytes: 212_000_000 });
 
   it("says the spec's sentence while downloading, with Cancel", () => {
-    const strip = stripView([running], running, null);
+    const strip = stripView([running], running);
     expect(strip?.text).toBe("Downloading Parakeet English · 212 of 477 MB");
     expect(strip?.percent).toBe(44);
     expect(strip?.actions).toEqual(["cancel"]);
     expect(strip?.note).toBeNull();
   });
 
-  it("claims a resume only when the bytes back it", () => {
-    expect(stripView([running], running, 200_000_000)?.note).toBe("Continued from 200 MB.");
-    expect(stripView([running], running, 300_000_000)?.note).toBe(
+  it("claims a resume only when the server's answer backs it", () => {
+    const kept = { ...running, resumed_from_bytes: 200_000_000 };
+    expect(stripView([kept], kept)?.note).toBe("Continued from 200 MB.");
+    // A restart that has overtaken the old part is still a restart.
+    const restarted = { ...running, restarted: true };
+    expect(stripView([restarted], restarted)?.note).toBe(
       "The earlier download couldn't continue, so it started again.",
     );
-    // No bytes reported yet: nothing to claim.
-    const starting = model({ state: "downloading", downloaded_bytes: 0 });
-    expect(stripView([starting], starting, 200_000_000)?.note).toBeNull();
+    // Nothing known yet: nothing claimed, whatever the bytes.
+    expect(stripView([running], running)?.note).toBeNull();
   });
 
   it("offers Resume when paused and Retry when failed; nothing when ready", () => {
     const part = model({ state: "partial", downloaded_bytes: 212_000_000 });
-    expect(stripView([part], part, null)?.text).toBe("Download paused · 212 of 477 MB");
-    expect(stripView([part], part, null)?.actions).toEqual(["resume", "use-key"]);
+    expect(stripView([part], part)?.text).toBe("Download paused · 212 of 477 MB");
+    expect(stripView([part], part)?.actions).toEqual(["resume", "use-key"]);
     const failed = model({ state: "partial", error: "The disk is full." });
-    expect(stripView([failed], failed, null)?.actions).toEqual(["retry", "use-key"]);
+    expect(stripView([failed], failed)?.actions).toEqual(["retry", "use-key"]);
     const ready = model({ state: "ready" });
-    expect(stripView([ready], ready, null)).toBeNull();
+    expect(stripView([ready], ready)).toBeNull();
     // Own key chosen, nothing running: no strip.
-    expect(stripView([part], null, null)).toBeNull();
+    expect(stripView([part], null)).toBeNull();
   });
 });
 

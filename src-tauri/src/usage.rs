@@ -46,6 +46,19 @@ impl Usage {
         Self(posthog, SentryReporter::disabled(), Arc::new(gate), None)
     }
 
+    /// Adapters that do nothing, with the gate in front of `telemetry`.
+    #[cfg(test)]
+    #[must_use]
+    pub fn at_welcome(telemetry: Arc<dyn Telemetry>) -> Self {
+        let gate = ConsentGate::new(telemetry, false, true);
+        Self(
+            PostHogTelemetry::disabled(),
+            SentryReporter::disabled(),
+            Arc::new(gate),
+            None,
+        )
+    }
+
     /// The one sharing switch. The adapters stay off while the gate is shut,
     /// so they write no install ID and send no error report either.
     pub fn set_enabled(&self, enabled: bool) {
@@ -387,13 +400,7 @@ mod tests {
     }
 
     fn walking(fake: &dictation_platform::fakes::FakeTelemetry) -> Usage {
-        let gate = ConsentGate::new(Arc::new(fake.clone()), false, true);
-        Usage(
-            PostHogTelemetry::disabled(),
-            SentryReporter::disabled(),
-            Arc::new(gate),
-            None,
-        )
+        Usage::at_welcome(Arc::new(fake.clone()))
     }
 
     /// U8 criterion 2, through what the commands call: the steps' events and

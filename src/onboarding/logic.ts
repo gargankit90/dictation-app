@@ -73,26 +73,23 @@ export interface StripView {
 }
 
 /**
- * The download strip, or `null` for no strip. `resumedFrom`: the bytes on
- * disk when this launch picked up an earlier download by itself. The app
- * resumes with an HTTP range request, and a server that ignores it sends the
- * whole file, so what is said here follows the bytes actually reported.
+ * The download strip, or `null` for no strip. What it says about an earlier
+ * part is what the server's answer established (`resumed_from_bytes`,
+ * `restarted`), never a guess from the bytes so far.
  */
 export function stripView(
   models: readonly LocalModelInfo_Serialize[] | null,
   chosen: LocalModelInfo_Serialize | null,
-  resumedFrom: number | null,
 ): StripView | null {
   const running = models?.find((model) => model.state === "downloading") ?? null;
   if (running !== null) {
     const bytes = done(running);
     const total = size(running);
     let note: string | null = null;
-    if (resumedFrom !== null && resumedFrom > 0 && bytes > 0) {
-      note =
-        bytes < resumedFrom
-          ? "The earlier download couldn't continue, so it started again."
-          : `Continued from ${megabytes(resumedFrom)}.`;
+    if (running.restarted) {
+      note = "The earlier download couldn't continue, so it started again.";
+    } else if (running.resumed_from_bytes !== null) {
+      note = `Continued from ${megabytes(running.resumed_from_bytes)}.`;
     }
     return {
       text: `Downloading ${spokenName(running)} · ${progressText(running)}`,

@@ -54,8 +54,6 @@ export function Onboarding({ onFinished }: Props) {
   const { models, error: modelsError, refresh: refreshModels } = useModels();
   const { engine, refresh: refreshEngine } = useEngineStatus();
   const [downPolls, setDownPolls] = useState(0);
-  // The bytes on disk when this launch picked up an earlier download.
-  const [resumedFrom, setResumedFrom] = useState<number | null>(null);
   const resumeChecked = useRef(false);
 
   const goTo = useCallback(async (step: Step) => {
@@ -156,13 +154,10 @@ export function Onboarding({ onFinished }: Props) {
     if (chosen === null || paused || step === "welcome" || step === "speech") return;
     if (chosen.state !== "partial" && chosen.state !== "missing") return;
     if (chosen.error !== null) return;
-    const timer = window.setTimeout(() => {
-      setResumedFrom(chosen.downloaded_bytes ?? 0);
-      void download(chosen.id);
-    }, 0);
-    return () => {
-      window.clearTimeout(timer);
-    };
+    // After this effect, and not on a timer its cleanup could cancel:
+    // resumeChecked is already set, so nothing would start it again.
+    const id = chosen.id;
+    queueMicrotask(() => void download(id));
   }, [models, settings, step, chosen, paused, download]);
 
   async function stripAction(action: StripAction, id: string) {
@@ -179,7 +174,6 @@ export function Onboarding({ onFinished }: Props) {
     } else if (action === "use-key") {
       await goTo("speech");
     } else {
-      setResumedFrom(null);
       await download(id);
       await refresh();
     }
@@ -219,7 +213,7 @@ export function Onboarding({ onFinished }: Props) {
   const index = STEPS.findIndex((item) => item.id === status.step);
   const previous = STEPS[index - 1];
   const next = STEPS[index + 1];
-  const strip = stripView(models, chosen, resumedFrom);
+  const strip = stripView(models, chosen);
   // A strip only for a running download on the first two steps: until the
   // user has chosen, a stopped one isn't news.
   const stripShown =
@@ -300,6 +294,7 @@ export function Onboarding({ onFinished }: Props) {
       {status.step === "speech" && (
         <SpeechStep
           parts={parts}
+          kept={status.speech_choice ?? null}
           settings={settings}
           onStored={setSettings}
           models={models}

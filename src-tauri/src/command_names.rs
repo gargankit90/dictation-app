@@ -52,6 +52,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "set_download_paused",
     "practice_words",
     "copy_practice_words",
+    "set_speech_choice",
 ];
 
 /// The overlay window's commands (U4 round 2): `build.rs` adds their

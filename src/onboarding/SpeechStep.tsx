@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import { commands } from "../bindings";
-import type { LocalModelInfo_Serialize, Provider, Settings_Serialize } from "../bindings";
+import type {
+  LocalModelInfo_Serialize,
+  Provider,
+  Settings_Serialize,
+  SpeechChoice,
+} from "../bindings";
 import { BROKEN, messageOf, testKey } from "../keyTest";
 import { LanguagePicker } from "../LanguagePicker";
 import { cloudLanguages } from "../languages";
@@ -19,6 +24,8 @@ const CANCEL_WAIT_MS = 200;
 
 interface Props {
   parts: FrameParts;
+  /** The engine selected earlier, kept across a quit. */
+  kept: SpeechChoice | null;
   settings: Settings_Serialize | null;
   onStored: (settings: Settings_Serialize) => void;
   models: LocalModelInfo_Serialize[] | null;
@@ -48,6 +55,7 @@ export function SpeechStep(props: Props) {
 
 function SpeechForm({
   parts,
+  kept,
   settings,
   onStored,
   models,
@@ -62,7 +70,16 @@ function SpeechForm({
   );
   // What the user picked here. Until they do: the recommendation, or the key
   // they already chose (coming back to the step).
-  const [picked, setPicked] = useState<Choice | null>(null);
+  const [picked, setPicked] = useState<Choice | null>(
+    kept === null ? null : kept === "own_key" ? "key" : "local",
+  );
+
+  function pick(choice: Choice) {
+    setPicked(choice);
+    setProblem(null);
+    // The key itself isn't part of this: only which engine is selected.
+    void commands.setSpeechChoice(choice === "key" ? "own_key" : "local").catch(() => undefined);
+  }
   const [problem, setProblem] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
 
@@ -257,8 +274,7 @@ function SpeechForm({
           checked={choice === "local"}
           disabled={model === null}
           onChange={() => {
-            setPicked("local");
-            setProblem(null);
+            pick("local");
           }}
         />
         <span className="ob-option-text">
@@ -291,8 +307,7 @@ function SpeechForm({
           aria-label="Use my own Groq or OpenAI key"
           checked={choice === "key"}
           onChange={() => {
-            setPicked("key");
-            setProblem(null);
+            pick("key");
           }}
         />
         <span className="ob-option-text">

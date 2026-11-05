@@ -24,7 +24,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use dictation_core::onboarding::{Readiness, SetupProgress, Step, TryOutcome};
+use dictation_core::onboarding::{Readiness, SetupProgress, SpeechChoice, Step, TryOutcome};
 use dictation_pipeline::config::{Config, SETTINGS_FILE};
 use dictation_ports::{Permission, PermissionStatus, Permissions, SecretStore};
 use serde::{Deserialize, Serialize};
@@ -108,6 +108,8 @@ pub struct OnboardingStatus {
     pub try_outcome: TryOutcome,
     /// The user cancelled the model download.
     pub download_paused: bool,
+    /// The engine selected on the Speech step, if one was.
+    pub speech_choice: Option<SpeechChoice>,
 }
 
 /// The OS's permissions, for the onboarding commands.
@@ -311,6 +313,15 @@ impl Onboarding {
         self.keep(&progress);
     }
 
+    /// Keeps the engine selected on the Speech step.
+    pub fn set_speech_choice(&self, choice: SpeechChoice) {
+        let mut state = self.lock();
+        state.progress.speech_choice = Some(choice);
+        let progress = state.progress;
+        drop(state);
+        self.keep(&progress);
+    }
+
     /// What the window shows. A step whose permission was turned off since
     /// comes back (the key isn't read here: it only matters for moving on).
     /// `hotkey_down`: the hotkey isn't working right now.
@@ -336,6 +347,7 @@ impl Onboarding {
                 needs_relaunch: accessibility == PermissionStatus::Granted && hotkey_down,
                 try_outcome: state.progress.try_outcome,
                 download_paused: state.progress.download_paused,
+                speech_choice: state.progress.speech_choice,
             },
             state.progress,
         );
@@ -651,6 +663,7 @@ mod tests {
             onboarding.go_to(step, Readiness::READY).unwrap();
             onboarding.set_try_outcome(TryOutcome::Skipped);
             onboarding.set_download_paused(true);
+            onboarding.set_speech_choice(SpeechChoice::OwnKey);
             drop(onboarding);
 
             let relaunched = Onboarding::load(&dir);
@@ -660,6 +673,7 @@ mod tests {
             let status = relaunched.status(&granted(true, true), false);
             assert_eq!(status.try_outcome, TryOutcome::Skipped);
             assert!(status.download_paused);
+            assert_eq!(status.speech_choice, Some(SpeechChoice::OwnKey));
             let _ = std::fs::remove_dir_all(&dir);
         }
     }
