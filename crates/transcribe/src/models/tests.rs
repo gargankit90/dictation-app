@@ -172,6 +172,7 @@ async fn criterion_3_resumes_a_partial_download_with_a_range_request() {
 
     assert_eq!(*ranges.lock().unwrap(), [Some("bytes=1000000-".to_owned())]);
     assert_eq!(first.unwrap().downloaded, 1_000_000);
+    assert_eq!(first.unwrap().resume, Resume::Continued { from: 1_000_000 });
     assert_eq!(std::fs::read(path).unwrap(), bytes);
 }
 
@@ -183,11 +184,36 @@ async fn criterion_3_a_server_that_ignores_the_range_starts_the_part_again() {
     let dir = TempDir::new();
     std::fs::create_dir_all(&dir.0).unwrap();
     std::fs::write(dir.0.join("test-model.gguf.part"), &bytes[..500]).unwrap();
+    let mut seen = Vec::new();
     let path = store(&dir, plenty())
-        .download_from(&model, &url(&server), &DownloadCancel::new(), |_| {})
+        .download_from(&model, &url(&server), &DownloadCancel::new(), |p| {
+            seen.push(p)
+        })
         .await
         .unwrap();
     assert_eq!(std::fs::read(path).unwrap(), bytes);
+    // U8: it stays a restart, also once the new bytes pass the old part's size.
+    assert!(seen.iter().any(|p| p.downloaded > 500));
+    assert!(
+        seen.iter().all(|p| p.resume == Resume::Restarted),
+        "{seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn u8_a_download_with_no_part_is_neither_continued_nor_restarted() {
+    let bytes = content();
+    let model = model_for(&bytes);
+    let (server, _) = serve(bytes, false).await;
+    let dir = TempDir::new();
+    let mut seen = Vec::new();
+    store(&dir, plenty())
+        .download_from(&model, &url(&server), &DownloadCancel::new(), |p| {
+            seen.push(p)
+        })
+        .await
+        .unwrap();
+    assert!(seen.iter().all(|p| p.resume == Resume::None), "{seen:?}");
 }
 
 #[tokio::test]

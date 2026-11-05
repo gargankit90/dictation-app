@@ -20,12 +20,16 @@
 #    the tray's tooltip, and Relaunch offered in the tray menu; no second
 #    prompt; the app never left Idle; nothing pasted, the clipboard
 #    untouched. Settings opens and closes.
+#    U8: setup left at Permissions (seeded before the launch) shows the same
+#    refusal on its Microphone card, with the exact path, and "Relaunch and
+#    resume" comes back at Permissions with the choices kept.
 # 3. The microphone is allowed in System Settings › Privacy & Security ›
 #    Microphone (its switch for the app, pressed through AX). A press in the
 #    running app is only logged: macOS doesn't tell a running app about this
 #    grant (T4b, docs/ENGINEERING.md), which is why the error says to
 #    relaunch it. Relaunch from the tray menu, and a dictation records the
-#    real microphone with no permission error.
+#    real microphone with no permission error. U8: "Resume setup…" then
+#    shows the card allowed, with the live meter.
 #
 # However it ends, the grant is restored (mic_restore, the cleanup hook): if
 # the scenario didn't see the grant work, the permission is reset again and
@@ -209,6 +213,7 @@ e2e_microphone_denied_then_recover() {
   mic_evidence "$(vm "codesign -dv --verbose=2 $(q "$VM_APP") 2>&1" | grep -E '^(Identifier|Authority|TeamIdentifier|CDHash)=')"
 
   expect "the app's microphone permission is reset in this clone" mic_reset
+  expect "setup was left at Permissions by an earlier launch" seed_setup_at_permissions
   textedit_fresh
   set_clipboard "$MIC_SENTINEL"
   launch --mock-text "$MOCK_TEXT"
@@ -265,6 +270,29 @@ e2e_microphone_denied_then_recover() {
   expect "and closes" close_settings
   expect "one app is running" app_count_is 1
 
+  # U8: the same refusal in setup, and a relaunch that comes back to it.
+  expect "Resume setup… opens setup" ax_ok tray-click "$APP_NAME" "Resume setup"
+  expect "at Permissions" ax_ok wait-text "$APP_NAME" "Set up" "Two permissions" 10
+  expect "the Microphone card says it is off" \
+    ax_ok wait-text "$APP_NAME" "Set up" "Turned off" 5
+  expect "with the exact path" \
+    ax_ok wait-text "$APP_NAME" "Set up" "Privacy & Security → Microphone → turn on Vocet" 5
+  expect "and why Continue waits" \
+    ax_ok wait-text "$APP_NAME" "Set up" "Continue unlocks when both are allowed" 5
+  screenshot e2e_microphone_denied_then_recover.setup_denied
+  # The window alone, in both appearances (U8, for the Design Lead).
+  obs_shot 3-permissions-mic-denied-light
+  obs_appearance dark
+  obs_shot 3-permissions-mic-denied-dark
+  obs_appearance light
+  ready=$(log_count 'INFO .*ready')
+  expect "press Relaunch and resume" ax_ok press "$APP_NAME" "Set up" "Relaunch and resume"
+  expect "the app relaunches" wait_for_log_count 'INFO .*ready' $((ready + 1)) 30
+  expect "and comes back at Permissions" \
+    wait_for_log 'onboarding shown at launch step=Permissions' 20
+  expect "its window is on screen" ax_ok wait-text "$APP_NAME" "Set up" "Two permissions" 15
+  expect "closing it hides it" ax_ok close "$APP_NAME" "Set up"
+
   # 3. Allowed in System Settings.
   switch=$(mic_switch) || switch="unreadable"
   log "  the app's switch in System Settings: $switch"
@@ -310,6 +338,13 @@ e2e_microphone_denied_then_recover() {
   fi
   expect "after the relaunch a dictation records the microphone" test "$MIC_GRANTED" = 1
   expect "the clipboard is the user's again" test "$(clipboard)" = "$MIC_SENTINEL"
+  # U8: setup picks up, now allowed.
+  expect "Resume setup… opens setup again" ax_ok tray-click "$APP_NAME" "Resume setup"
+  expect "the Microphone card is allowed" ax_ok wait-text "$APP_NAME" "Set up" "Allowed" 10
+  expect "with the live meter's line" \
+    ax_ok wait-text "$APP_NAME" "Set up" "the bars should move" 10
+  screenshot e2e_microphone_denied_then_recover.setup_recovered
+  expect "closing it hides it" ax_ok close "$APP_NAME" "Set up"
   log "  evidence: $(paste -sd '|' "$MIC_EVIDENCE")"
 
   [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_microphone_denied_then_recover

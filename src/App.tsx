@@ -89,6 +89,11 @@ export function App() {
         onFinished={() => {
           setView("settings");
         }}
+        onOpenHistory={() => {
+          setView("settings");
+          setPage("settings");
+          setOpen((current) => ({ section: "history", id: (current?.id ?? 0) + 1 }));
+        }}
       />
     );
   }

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Onboarding layout</title>
+    <link rel="stylesheet" href="harness.css" />
+    <style>
+      /* What the window gives main.ob as 100vh: only this differs from the app. */
+      main.ob {
+        height: 100%;
+      }
+      #harness {
+        overflow: hidden;
+        outline: 1px solid gray;
+      }
+      #verdict {
+        margin: 8px;
+        font: 12px monospace;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body data-step="STEP">
+    <div id="harness"></div>
+    <p id="verdict">LAYOUT measuring</p>
+    <script src="harness.js"></script>
+  </body>
+</html>

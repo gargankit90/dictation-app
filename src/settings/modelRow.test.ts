@@ -14,6 +14,8 @@ function model(overrides: Partial<LocalModelInfo_Serialize> = {}): LocalModelInf
     size_bytes: SIZE,
     downloaded_bytes: 0,
     state: "missing",
+    resumed_from_bytes: null,
+    restarted: false,
     error: null,
     default: true,
     ...overrides,

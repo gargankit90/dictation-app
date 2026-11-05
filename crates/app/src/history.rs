@@ -13,6 +13,9 @@
 //! - A file that can't be read (damaged, from a newer version, or a read that
 //!   fails) is never written over, as it may hold the user's entries. Nothing
 //!   is saved until it can be read or the user deletes it with Clear or Off.
+//! - The last paste attempt's words are held in memory for onboarding's Try
+//!   it (U8), whatever the limit, so a paste that missed can show them. Never
+//!   a Secure Input paste's: those are forgotten. Clear drops them too.
 //! - Nothing here logs an entry's text or length, or a parser's message
 //!   (which can quote the file). Counts and the limit are fine.
 
@@ -41,6 +44,8 @@ struct State {
     limit: u32,
     /// The last pasted text while history is Off.
     in_memory: Option<String>,
+    /// The words of the last paste attempt. Memory only.
+    attempted: Option<String>,
     /// The newest id used in this run, so an id is never reused.
     last_id: u64,
     /// Whether the file has been read. Until it has, it is never written: it
@@ -101,6 +106,7 @@ impl History {
                 entries: Vec::new(),
                 limit: 0,
                 in_memory: None,
+                attempted: None,
                 last_id: 0,
                 loaded: false,
                 unreadable: false,
@@ -189,6 +195,13 @@ impl History {
             .first()
             .map(|entry| entry.text.clone())
             .or_else(|| state.in_memory.clone())
+    }
+
+    /// The words of the last paste attempt, for Try it (U8), whether it
+    /// worked or not. Never written anywhere.
+    #[must_use]
+    pub fn attempted(&self) -> Option<String> {
+        self.lock().attempted.clone()
     }
 
     /// The entries, newest first.
@@ -306,7 +319,11 @@ impl History {
     /// If the file can't be deleted; the entries then stay.
     pub fn clear(&self) -> Result<(), HistoryStoreError> {
         let _persisting = self.lock_persisting();
-        self.lock().in_memory = None;
+        {
+            let mut state = self.lock();
+            state.in_memory = None;
+            state.attempted = None;
+        }
         self.store.delete()?;
         let mut state = self.lock();
         state.entries.clear();
@@ -394,8 +411,11 @@ impl<I: TextInserter> TextInserter for Recording<I> {
         let result = self.inner.insert(text);
         match &result {
             // A password field has focus: these words are never kept.
-            Err(InsertError::SecureInput) => {}
-            outcome => self.history.record(text, &(self.engine)(), outcome.is_ok()),
+            Err(InsertError::SecureInput) => self.history.lock().attempted = None,
+            outcome => {
+                self.history.lock().attempted = Some(text.trim_start_matches(' ').to_owned());
+                self.history.record(text, &(self.engine)(), outcome.is_ok());
+            }
         }
         result
     }
@@ -424,6 +444,48 @@ mod tests {
 
     fn open(store: &MemHistoryStore, limit: u32) -> History {
         History::with_clock(store.clone(), Some(limit), ticking())
+    }
+
+    /// U8: what Try it shows after a paste that missed, also with history Off.
+    #[test]
+    fn u8_the_last_attempt_is_held_also_when_it_failed_or_history_is_off() {
+        let store = MemHistoryStore::new();
+        let history = Arc::new(open(&store, 0));
+        let fake = FakeInserter::new();
+        let inserter = Recording::new(fake.clone(), Arc::clone(&history), String::new);
+        assert_eq!(history.attempted(), None);
+        fake.fail_next(InsertError::Failed("no focus".into()));
+        assert!(inserter.insert(" my words").is_err());
+        assert_eq!(history.attempted().as_deref(), Some("my words"));
+        assert_eq!(
+            history.last_text(),
+            None,
+            "the menu's copy still means a success"
+        );
+    }
+
+    /// U8, U7: Secure Input's words may be a password: not even in memory.
+    #[test]
+    fn u8_a_secure_input_paste_forgets_the_attempt() {
+        let store = MemHistoryStore::new();
+        let history = Arc::new(open(&store, 25));
+        let fake = FakeInserter::new();
+        let inserter = Recording::new(fake.clone(), Arc::clone(&history), String::new);
+        inserter.insert("before").unwrap();
+        fake.fail_next(InsertError::SecureInput);
+        assert!(inserter.insert("hunter2").is_err());
+        assert_eq!(history.attempted(), None);
+    }
+
+    /// U8: Clear history leaves none of the user's words behind.
+    #[test]
+    fn u8_clear_drops_the_attempt() {
+        let store = MemHistoryStore::new();
+        let history = Arc::new(open(&store, 25));
+        let inserter = Recording::new(FakeInserter::new(), Arc::clone(&history), String::new);
+        inserter.insert("my words").unwrap();
+        history.clear().unwrap();
+        assert_eq!(history.attempted(), None);
     }
 
     fn texts(history: &History) -> Vec<String> {

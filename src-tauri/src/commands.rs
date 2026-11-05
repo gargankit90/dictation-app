@@ -25,7 +25,7 @@
 
 use std::sync::Arc;
 
-use dictation_core::onboarding::Step;
+use dictation_core::onboarding::{SpeechChoice, Step, TryOutcome};
 use dictation_core::settings::{Provider, Settings};
 use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, UndoFailed};
@@ -37,8 +37,10 @@ use dictation_transcribe::openai_compat::{self, Preset};
 use serde::Serialize;
 use tauri::State;
 
+use crate::diagnostics::Diagnostics;
 use crate::engine::{self, LiveEngine};
-use crate::onboarding::{self, AppPermission, Onboarding, OnboardingStatus, OsPermissions};
+use crate::history::AppHistory;
+use crate::onboarding::{self, AppPermission, Onboarding, OnboardingStatus, OsPermissions, View};
 use crate::usage::{self, Usage};
 
 /// Where the bindings go, relative to `src-tauri/`.
@@ -110,6 +112,8 @@ pub trait Shell: Send + Sync {
     fn restart(&self);
     /// Shows the window on its first-run steps.
     fn show_onboarding_window(&self);
+    /// Shows the window on the settings form.
+    fn show_settings_window(&self);
 }
 
 /// The app, for the onboarding commands.
@@ -738,13 +742,14 @@ pub async fn test_api_key(
 pub async fn get_onboarding(
     onboarding: State<'_, Arc<Onboarding>>,
     permissions: State<'_, OsPermissions>,
+    diagnostics: State<'_, Diagnostics>,
 ) -> Result<OnboardingStatus, String> {
-    Ok(onboarding.status(&*permissions.0))
+    Ok(onboarding.status(&*permissions.0, diagnostics.hotkey_is_down()))
 }
 
-/// Settings, Help, "Set up dictation…" (U5): opens the first-run steps at
-/// the step the user was on, now that the tray's "Resume setup…" is hidden
-/// once setup is done. The key is read (bounded) off the async runtime.
+/// Settings, Help, "Run setup again" (U5, U6): opens the first-run steps,
+/// from the start if setup was finished (U8), otherwise at the step the user
+/// was on. The key is read (bounded) off the async runtime.
 #[tauri::command]
 #[specta::specta]
 pub async fn open_setup(
@@ -757,7 +762,10 @@ pub async fn open_setup(
     let (onboarding, os) = (Arc::clone(&onboarding), Arc::clone(&permissions.0));
     let (config, live) = (Arc::clone(&config.0), live.inner().clone());
     tauri::async_runtime::spawn_blocking(move || {
-        let readiness = onboarding::readiness(&*os, true, || onboarding::key_saved(&config, &live));
+        let readiness = onboarding::readiness(&*os, onboarding.welcome_passed(), true, || {
+            onboarding::key_saved(&config, &live)
+        });
+        onboarding.start_over_if_finished();
         let step = onboarding.open(readiness);
         tracing::info!(?step, "onboarding opened from Settings");
     })
@@ -776,6 +784,7 @@ pub async fn open_setup(
 pub async fn request_permission(
     onboarding: State<'_, Arc<Onboarding>>,
     permissions: State<'_, OsPermissions>,
+    diagnostics: State<'_, Diagnostics>,
     permission: AppPermission,
 ) -> Result<OnboardingStatus, String> {
     let os = Arc::clone(&permissions.0);
@@ -788,11 +797,12 @@ pub async fn request_permission(
     })
     .await
     .map_err(|_| "the permission task crashed".to_owned())??;
-    Ok(onboarding.status(&*permissions.0))
+    Ok(onboarding.status(&*permissions.0, diagnostics.hotkey_is_down()))
 }
 
 /// Moves onboarding to `step`, if every step before it is done (the key is
-/// read from the keychain only to move to the last step). An error says
+/// read from the keychain only to move past Speech). Moving past Welcome is
+/// the user's go-ahead for usage events (U8), if sharing is on. An error says
 /// which step comes first; the user stays where they were.
 #[tauri::command]
 #[specta::specta]
@@ -802,15 +812,27 @@ pub async fn set_onboarding_step(
     onboarding: State<'_, Arc<Onboarding>>,
     permissions: State<'_, OsPermissions>,
     usage: State<'_, Usage>,
+    diagnostics: State<'_, Diagnostics>,
     step: Step,
 ) -> Result<OnboardingStatus, String> {
+    if step > Step::Welcome && !onboarding.welcome_passed() {
+        let (config, onboarding, usage) = (
+            Arc::clone(&state.0),
+            Arc::clone(&onboarding),
+            usage.inner().clone(),
+        );
+        tauri::async_runtime::spawn_blocking(move || leave_welcome(&config, &onboarding, &usage))
+            .await
+            .map_err(|_| "the onboarding task crashed".to_owned())?;
+    }
+    let welcome_passed = onboarding.welcome_passed();
     let (config, live, os) = (
         Arc::clone(&state.0),
         engine.inner().clone(),
         Arc::clone(&permissions.0),
     );
     let readiness = tauri::async_runtime::spawn_blocking(move || {
-        onboarding::readiness(&*os, step > Step::Key, || {
+        onboarding::readiness(&*os, welcome_passed, step > Step::Speech, || {
             onboarding::key_saved(&config, &live)
         })
     })
@@ -820,7 +842,105 @@ pub async fn set_onboarding_step(
         .go_to(step, readiness)
         .map_err(|not_yet| not_yet.to_string())?;
     usage::onboarding_step(&usage, step);
-    Ok(onboarding.status(&*permissions.0))
+    Ok(onboarding.status(&*permissions.0, diagnostics.hotkey_is_down()))
+}
+
+/// The user continued past Welcome (U8). What decides is the saved sharing
+/// choice, read under the lock its writer holds, not what the adapters last
+/// heard: an opt-out still on its way can't be overtaken by this. A choice
+/// that can't be read counts as off. An opt-out that arrives later still stops
+/// everything first (`write_sharing`).
+fn leave_welcome<S: SecretStore>(config: &Config<S>, onboarding: &Onboarding, usage: &Usage) {
+    let _writing = settings_write();
+    let share = config
+        .settings()
+        .is_ok_and(|settings| settings.share_usage_events);
+    usage.set_enabled(share);
+    if onboarding.pass_welcome() {
+        usage.left_welcome();
+    }
+}
+
+/// Ready's History "Change": leaves the steps for Settings. Setup stays where
+/// it was, and "Resume setup…" comes back to it.
+#[tauri::command]
+#[specta::specta]
+pub async fn leave_setup_for_settings(
+    shell: State<'_, AppShell>,
+    onboarding: State<'_, Arc<Onboarding>>,
+) -> Result<(), String> {
+    onboarding.close();
+    shell.0.show_settings_window();
+    Ok(())
+}
+
+/// Keeps the engine selected on the Speech step, so a quit before Continue
+/// comes back to it. Never the key.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_speech_choice(
+    onboarding: State<'_, Arc<Onboarding>>,
+    choice: SpeechChoice,
+) -> Result<(), String> {
+    onboarding.set_speech_choice(choice);
+    Ok(())
+}
+
+/// Keeps how the practice dictation went, for the Ready step and a relaunch.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_try_outcome(
+    onboarding: State<'_, Arc<Onboarding>>,
+    outcome: TryOutcome,
+) -> Result<(), String> {
+    onboarding.set_try_outcome(outcome);
+    Ok(())
+}
+
+/// Keeps that the user cancelled (or resumed) the model download, so a
+/// relaunch doesn't start a download they stopped.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_download_paused(
+    onboarding: State<'_, Arc<Onboarding>>,
+    paused: bool,
+) -> Result<(), String> {
+    onboarding.set_download_paused(paused);
+    Ok(())
+}
+
+/// The words of the last dictation the app tried to paste, for Try it only:
+/// `None` unless onboarding is on screen. Held in memory; never logged.
+#[tauri::command]
+#[specta::specta]
+pub async fn practice_words(
+    onboarding: State<'_, Arc<Onboarding>>,
+    history: State<'_, AppHistory>,
+) -> Result<Option<String>, String> {
+    Ok(if onboarding.view() == View::Onboarding {
+        history.0.attempted()
+    } else {
+        None
+    })
+}
+
+/// Try it's Copy: puts [`practice_words`]'s text on the clipboard, and only
+/// when the user asks. Nothing is pasted.
+#[tauri::command]
+#[specta::specta]
+pub async fn copy_practice_words(
+    onboarding: State<'_, Arc<Onboarding>>,
+    history: State<'_, AppHistory>,
+) -> Result<(), String> {
+    if onboarding.view() != View::Onboarding {
+        return Ok(());
+    }
+    let Some(text) = history.0.attempted() else {
+        return Ok(());
+    };
+    tauri::async_runtime::spawn_blocking(move || crate::tray_menu::copy_text(&text))
+        .await
+        .map_err(|_| "the copy task crashed".to_owned())?
 }
 
 /// Ends onboarding: the window goes back to the settings view and hides.
@@ -831,7 +951,7 @@ pub async fn finish_onboarding(
     onboarding: State<'_, Arc<Onboarding>>,
     usage: State<'_, Usage>,
 ) -> Result<(), String> {
-    onboarding.close();
+    onboarding.finish();
     usage::onboarding_completed(&usage);
     tracing::info!("onboarding finished");
     shell.0.hide_window();
@@ -908,6 +1028,13 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::preferences::open_link,
         crate::preferences::get_app_info,
         crate::preferences::check_for_updates,
+        crate::preferences::choose_local_model,
+        set_try_outcome,
+        set_download_paused,
+        practice_words,
+        copy_practice_words,
+        set_speech_choice,
+        leave_setup_for_settings,
         crate::history::list_history,
         crate::history::copy_history_entry,
         crate::history::delete_history_entry,
@@ -966,6 +1093,7 @@ mod tests {
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
         fn show_onboarding_window(&self) {}
+        fn show_settings_window(&self) {}
     }
 
     /// M5.7 criterion 2: the tray's Relaunch restarts the app once, through
@@ -1031,6 +1159,13 @@ mod tests {
             "openLink",
             "getAppInfo",
             "checkForUpdates",
+            "chooseLocalModel",
+            "setTryOutcome",
+            "setDownloadPaused",
+            "practiceWords",
+            "copyPracticeWords",
+            "setSpeechChoice",
+            "leaveSetupForSettings",
             "listHistory",
             "copyHistoryEntry",
             "deleteHistoryEntry",
@@ -1044,7 +1179,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 44,
+            commands, 51,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1154,6 +1289,8 @@ mod tests {
                 "size_bytes",
                 "downloaded_bytes",
                 "state",
+                "resumed_from_bytes",
+                "restarted",
                 "error",
                 "default"
             ]
@@ -1257,6 +1394,85 @@ mod tests {
 
     /// K1: the dictation key has one writer, `set_hotkey`; the form's save
     /// keeps the stored key, so neither can undo the other.
+    /// U8 finding 1: the saved choice decides, even if the adapters haven't
+    /// heard of an opt-out yet. Fails if Welcome's exit trusts the gate's copy.
+    mod leaving_welcome {
+        use dictation_core::settings::Settings;
+        use dictation_platform::fakes::{FakeTelemetry, MemSecretStore};
+
+        use super::super::*;
+
+        fn config(tag: &str, share: bool) -> (Config<MemSecretStore>, std::path::PathBuf) {
+            let dir =
+                std::env::temp_dir().join(format!("dictation-leave-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let config = Config::new(&dir, MemSecretStore::new());
+            config
+                .save_settings(&Settings {
+                    share_usage_events: share,
+                    ..Settings::default()
+                })
+                .unwrap();
+            (config, dir)
+        }
+
+        #[test]
+        fn a_saved_opt_out_the_adapters_have_not_heard_of_sends_nothing() {
+            let (config, dir) = config("off", false);
+            let fake = FakeTelemetry::new();
+            // The launch read "on"; the opt-out reached only the file so far.
+            let usage = Usage::at_welcome(Arc::new(fake.clone()));
+            let onboarding = Onboarding::new();
+            leave_welcome(&config, &onboarding, &usage);
+            assert!(onboarding.welcome_passed());
+            usage::onboarding_step(&usage, Step::Speech);
+            assert!(fake.events().is_empty());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// Round 5: the writes the window's queue sends, in its order, leave
+        /// both the file and the event gate off.
+        #[test]
+        fn on_then_off_leaves_the_file_and_the_gate_off() {
+            let (config, dir) = config("queue", false);
+            let fake = FakeTelemetry::new();
+            let usage = Usage::at_welcome(Arc::new(fake.clone()));
+            let onboarding = Onboarding::new();
+            leave_welcome(&config, &onboarding, &usage);
+            write_sharing(&config, &usage, true).unwrap();
+            write_sharing(&config, &usage, false).unwrap();
+            let before = fake.events().len();
+            usage::onboarding_step(&usage, Step::Speech);
+            assert_eq!(fake.events().len(), before, "the gate is shut");
+            assert!(!config.settings().unwrap().share_usage_events);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_saved_opt_in_starts_sending() {
+            let (config, dir) = config("on", true);
+            let fake = FakeTelemetry::new();
+            let usage = Usage::at_welcome(Arc::new(fake.clone()));
+            let onboarding = Onboarding::new();
+            leave_welcome(&config, &onboarding, &usage);
+            usage::onboarding_step(&usage, Step::Speech);
+            assert_eq!(fake.events().len(), 1);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn settings_that_cannot_be_read_count_as_off() {
+            let (config, dir) = config("bad", true);
+            std::fs::write(config.path(), "{ not json").unwrap();
+            let fake = FakeTelemetry::new();
+            let usage = Usage::at_welcome(Arc::new(fake.clone()));
+            leave_welcome(&config, &Onboarding::new(), &usage);
+            usage::onboarding_step(&usage, Step::Speech);
+            assert!(fake.events().is_empty());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
     mod recorded_hotkey {
         use dictation_platform::fakes::MemSecretStore;
 
@@ -2760,6 +2976,7 @@ mod capability_tests {
         fn hide_window(&self) {}
         fn restart(&self) {}
         fn show_onboarding_window(&self) {}
+        fn show_settings_window(&self) {}
     }
 
     fn invoke(
@@ -2790,7 +3007,7 @@ mod capability_tests {
             "set_api_key" => serde_json::json!({ "provider": "groq", "key": "gsk_not_a_real_key" }),
             "has_api_key" | "test_api_key" => serde_json::json!({ "provider": "groq" }),
             "request_permission" => serde_json::json!({ "permission": "microphone" }),
-            "set_onboarding_step" => serde_json::json!({ "step": "microphone" }),
+            "set_onboarding_step" => serde_json::json!({ "step": "welcome" }),
             "set_share_usage_events" => serde_json::json!({ "share": true }),
             "set_hotkey_recording" => serde_json::json!({ "recording": false }),
             "copy_history_entry" | "delete_history_entry" => serde_json::json!({ "id": "1" }),
@@ -2915,7 +3132,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 44);
+        assert_eq!(COMMAND_NAMES.len(), 51);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

@@ -355,6 +355,9 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         dictation_platform::secrets::KeychainSecretStore::new(),
     ));
     tracing::info!(path = %config.path().display(), "settings file");
+    // Before anything writes a settings file: a settings file with no
+    // progress file means someone set up before the five steps (U8).
+    let setup = Arc::new(onboarding::Onboarding::load(&config_dir));
     // Recent dictations (U7). Settings that can't be read mean the user's
     // choice isn't known: nothing is saved or deleted until it is.
     let history = Arc::new(History::open(
@@ -439,12 +442,14 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         false,
     );
     // Anonymous usage events (A1): on by default, a no-op without a build
-    // key, and silent in scripted test launches.
+    // key, silent in scripted test launches, and held until the user has
+    // left onboarding's first screen (U8).
     let usage = usage::start(
         &data_dir,
         &config.settings().unwrap_or_default(),
         scripted,
         &version,
+        setup.welcome_passed(),
     );
     usage::launched(usage.clone(), &data_dir, &version);
     app.manage(usage.clone());
@@ -493,7 +498,7 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     app.manage(commands::AppShell(Arc::new(TauriShell(
         app.handle().clone(),
     ))));
-    app.manage(Arc::new(onboarding::Onboarding::new()));
+    app.manage(Arc::clone(&setup));
     app.manage(onboarding::OsPermissions(
         Arc::new(SystemPermissions::new()),
     ));
@@ -509,12 +514,14 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     // window exists, so the command always finds it.
     let overlay_level = overlay::OverlayLevel::default();
     app.manage(overlay_level.clone());
+    let heard_levels = levels.clone();
     let overlay = overlay::start(app.handle(), levels, &overlay_level)
         .inspect_err(|error| tracing::error!(%error, "could not create the overlay"))
         .ok();
     let diagnostics = diagnostics::Diagnostics::default();
     diagnostics.attach(app.handle().clone());
     app.manage(diagnostics.clone());
+    tauri::async_runtime::spawn(record_levels(heard_levels, diagnostics.clone()));
     tauri::async_runtime::spawn(show_ui_events(
         app.handle().clone(),
         ui_events,
@@ -571,6 +578,10 @@ impl commands::Shell for TauriShell {
         window::show(&self.0, onboarding::View::Onboarding);
     }
 
+    fn show_settings_window(&self) {
+        window::show(&self.0, onboarding::View::Settings);
+    }
+
     fn restart(&self) {
         // Quits as Quit does (the pipeline stops and the single-instance
         // hold is released in `shut_down`), then Tauri starts the app again
@@ -600,14 +611,18 @@ fn onboarding_at_launch(
     let spawned = std::thread::Builder::new()
         .name("onboarding".into())
         .spawn(move || {
-            let readiness = onboarding::readiness(&SystemPermissions::new(), true, || {
-                onboarding::key_saved(&config, &live)
-            });
-            if !onboarding::show_at_launch(readiness, launch.resumed, launch.scripted) {
+            let onboarding = app.state::<Arc<onboarding::Onboarding>>();
+            let welcome_passed = onboarding.welcome_passed();
+            let readiness =
+                onboarding::readiness(&SystemPermissions::new(), welcome_passed, true, || {
+                    onboarding::key_saved(&config, &live)
+                });
+            let completed = onboarding.completed();
+            if !onboarding::show_at_launch(readiness, completed, launch.resumed, launch.scripted) {
                 tracing::info!(?readiness, ?launch, "onboarding not shown at launch");
                 return;
             }
-            let step = app.state::<Arc<onboarding::Onboarding>>().open(readiness);
+            let step = onboarding.open(readiness);
             // This line's text is what the e2e scenario waits for.
             tracing::info!(?step, ?readiness, ?launch, "onboarding shown at launch");
             window::show(&app, onboarding::View::Onboarding);
@@ -631,10 +646,13 @@ fn show_onboarding(app: &AppHandle) {
     let spawned = std::thread::Builder::new()
         .name("onboarding".into())
         .spawn(move || {
-            let readiness = onboarding::readiness(&SystemPermissions::new(), true, || {
-                onboarding::key_saved(&config, &live)
-            });
-            let step = app.state::<Arc<onboarding::Onboarding>>().open(readiness);
+            let onboarding = app.state::<Arc<onboarding::Onboarding>>();
+            let welcome_passed = onboarding.welcome_passed();
+            let readiness =
+                onboarding::readiness(&SystemPermissions::new(), welcome_passed, true, || {
+                    onboarding::key_saved(&config, &live)
+                });
+            let step = onboarding.open(readiness);
             tracing::info!(?step, "onboarding opened from the tray");
             window::show(&app, onboarding::View::Onboarding);
         });
@@ -770,6 +788,23 @@ fn handle_flags(
     Ok(())
 }
 
+/// Feeds the input levels to the progress Try it reads, so "Heard you" means
+/// sound during the hold (U8).
+async fn record_levels(
+    mut levels: dictation_pipeline::pipeline::LevelReceiver,
+    diagnostics: diagnostics::Diagnostics,
+) {
+    while levels.changed().await.is_ok() {
+        let level = levels
+            .borrow_and_update()
+            .as_ref()
+            .map(|reading| reading.dbfs);
+        if let Some(dbfs) = level {
+            diagnostics.record_level(dbfs);
+        }
+    }
+}
+
 /// Logs each state change (never the transcript), passes each event to the
 /// overlay, and to the tray, whose status line and icon show a dictation
 /// error until the next recording starts, and the hotkey while it doesn't
@@ -785,7 +820,7 @@ async fn show_ui_events(
 ) {
     // Usage events from the same stream; only kinds and buckets leave it.
     let mut tracker =
-        UsageTracker::new(usage.0.clone(), EngineKind::Cloud).with_reporter(usage.1.clone());
+        UsageTracker::new(usage.events(), EngineKind::Cloud).with_reporter(usage.1.clone());
     let started = std::time::Instant::now();
     if microphone_denied {
         tray_menu::on_event(

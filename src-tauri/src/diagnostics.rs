@@ -22,7 +22,7 @@ use dictation_core::report::{self, Access, EngineInfo, ReportInput};
 use dictation_core::settings::{Settings, Transcription};
 use dictation_pipeline::config::Config;
 use dictation_pipeline::pipeline::UiEvent;
-use dictation_pipeline::progress::{DictationProgress, Stage};
+use dictation_pipeline::progress::{DictationProgress, Failure, Stage};
 use dictation_platform::secrets::KeychainSecretStore;
 use dictation_ports::{PermissionStatus, TranscribeError};
 use dictation_transcribe::engine::Engine;
@@ -113,6 +113,17 @@ impl Diagnostics {
     /// Feeds one pipeline event to the progress Try it reads.
     pub fn record_event(&self, event: &UiEvent) {
         lock(&self.0.progress).on_event(event);
+    }
+
+    /// Feeds one input level to the progress Try it reads.
+    pub fn record_level(&self, dbfs: f32) {
+        lock(&self.0.progress).on_level(dbfs);
+    }
+
+    /// Whether the hotkey isn't working right now.
+    #[must_use]
+    pub fn hotkey_is_down(&self) -> bool {
+        self.0.hotkey_down.load(Ordering::Relaxed)
     }
 
     /// The hotkey works again.
@@ -708,12 +719,28 @@ pub enum DictationStage {
     Pasted,
 }
 
+/// What fixes a failed dictation, for Try it's one inline fix (U8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum DictationFailure {
+    /// The microphone: no sound, refused or failing.
+    Microphone,
+    /// The API key.
+    Key,
+    /// The text couldn't be pasted.
+    Paste,
+    /// Anything else; the sentence says what happened.
+    Other,
+}
+
 /// What the last dictation got through (U1). Counts only grow, so a window
-/// compares them with what it saw when it opened. No transcript, no code.
+/// compares them with what it saw when it opened. No transcript.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
 pub struct DictationProgressView {
     /// Dictations started since launch.
     pub started: u32,
+    /// Dictations that are over, however they ended.
+    pub finished: u32,
     /// Dictations that ended pasted with no error.
     pub completed: u32,
     /// Errors shown.
@@ -722,12 +749,17 @@ pub struct DictationProgressView {
     pub stages: Vec<DictationStage>,
     /// The latest error's sentence, until the next recording starts.
     pub error: Option<String>,
+    /// What fixes the latest error, until the next recording starts.
+    pub failure: Option<DictationFailure>,
+    /// The input was louder than silence during the current or last hold.
+    pub heard: bool,
 }
 
 impl From<&dictation_pipeline::progress::ProgressView> for DictationProgressView {
     fn from(view: &dictation_pipeline::progress::ProgressView) -> Self {
         Self {
             started: view.started,
+            finished: view.finished,
             completed: view.completed,
             errors: view.errors,
             stages: view
@@ -740,6 +772,13 @@ impl From<&dictation_pipeline::progress::ProgressView> for DictationProgressView
                 })
                 .collect(),
             error: view.error.clone(),
+            failure: view.failure.map(|failure| match failure {
+                Failure::Microphone => DictationFailure::Microphone,
+                Failure::Key => DictationFailure::Key,
+                Failure::Paste => DictationFailure::Paste,
+                Failure::Other => DictationFailure::Other,
+            }),
+            heard: view.heard,
         }
     }
 }

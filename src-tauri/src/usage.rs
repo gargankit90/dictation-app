@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use dictation_core::onboarding::Step;
 use dictation_core::settings::{Provider, Settings, Transcription};
+use dictation_pipeline::usage::ConsentGate;
 use dictation_ports::{
     Arch, EngineChoice, EngineKind, Event, OnboardingStep, SettingName, Telemetry, Version,
 };
@@ -24,37 +25,100 @@ const BUILD_KEY: Option<&str> = option_env!("DICTATION_POSTHOG_KEY");
 const BUILD_DSN: Option<&str> = option_env!("DICTATION_SENTRY_DSN");
 
 /// The running adapters, as Tauri state: PostHog events (`.0`) and Sentry
-/// error reports (`.1`), both governed by the one sharing switch.
+/// error reports (`.1`), both governed by the one sharing switch and by
+/// [`ConsentGate`] (U8): until the user leaves Welcome both stay off, and
+/// every event goes through the gate. `.3` is the app's version, for the
+/// `app_opened` that waited for Welcome.
 #[derive(Clone)]
-pub struct Usage(pub Arc<PostHogTelemetry>, pub Arc<SentryReporter>);
+pub struct Usage(
+    pub Arc<PostHogTelemetry>,
+    pub Arc<SentryReporter>,
+    Arc<ConsentGate>,
+    Option<Version>,
+);
 
 impl Usage {
     /// Adapters that do nothing (tests).
     #[must_use]
     pub fn disabled() -> Self {
-        Self(PostHogTelemetry::disabled(), SentryReporter::disabled())
+        let posthog = PostHogTelemetry::disabled();
+        let gate = ConsentGate::new(posthog.clone(), true, false);
+        Self(posthog, SentryReporter::disabled(), Arc::new(gate), None)
     }
 
-    /// Turns both on or off: the one sharing switch.
+    /// Adapters that do nothing, with the gate in front of `telemetry`.
+    #[cfg(test)]
+    #[must_use]
+    pub fn at_welcome(telemetry: Arc<dyn Telemetry>) -> Self {
+        let gate = ConsentGate::new(telemetry, false, true);
+        Self(
+            PostHogTelemetry::disabled(),
+            SentryReporter::disabled(),
+            Arc::new(gate),
+            None,
+        )
+    }
+
+    /// The one sharing switch. The adapters stay off while the gate is shut,
+    /// so they write no install ID and send no error report either.
     pub fn set_enabled(&self, enabled: bool) {
-        self.0.set_enabled(enabled);
-        self.1.set_enabled(enabled);
+        self.2.set_share(enabled);
+        self.apply();
     }
 
-    /// Records `event`.
+    fn apply(&self) {
+        let allowed = self.2.allows();
+        self.0.set_enabled(allowed);
+        self.1.set_enabled(allowed);
+    }
+
+    /// Records `event`, unless the gate holds it back.
     pub fn record(&self, event: Event) {
-        self.0.record(event);
+        self.2.record(event);
+    }
+
+    /// What dictation events are recorded through.
+    #[must_use]
+    pub fn events(&self) -> Arc<ConsentGate> {
+        Arc::clone(&self.2)
+    }
+
+    /// The user continued past Welcome: if sharing is on, sending starts,
+    /// with the `app_opened` that waited for this. Reads the macOS version,
+    /// so that part runs on the blocking pool.
+    pub fn left_welcome(&self) {
+        self.2.pass_welcome();
+        self.apply();
+        let Some(version) = self.3.clone() else {
+            return;
+        };
+        let usage = self.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            usage.record(Event::AppOpened {
+                version,
+                macos_major: macos_major(),
+                arch: Arch::current(),
+            });
+        });
     }
 }
 
 /// Starts the adapter for a launch. `scripted` launches (the e2e test
-/// hooks) send nothing, whatever the build key.
-pub fn start(data_dir: &Path, settings: &Settings, scripted: bool, version: &str) -> Usage {
+/// hooks) send nothing, whatever the build key. Until `welcome_passed`
+/// nothing starts sending, whatever the saved choice (U8).
+pub fn start(
+    data_dir: &Path,
+    settings: &Settings,
+    scripted: bool,
+    version: &str,
+    welcome_passed: bool,
+) -> Usage {
     let key = if scripted { None } else { BUILD_KEY };
     let config = Config::new(key, data_dir);
     let handle = tauri::async_runtime::handle();
     let runtime = handle.inner().clone();
-    let posthog = PostHogTelemetry::start(config, settings.share_usage_events, &runtime);
+    let allowed = settings.share_usage_events && welcome_passed;
+    let posthog = PostHogTelemetry::start(config, allowed, &runtime);
     let dsn = if scripted { None } else { BUILD_DSN };
     let errors = match Version::new(version) {
         Some(release) if dsn.is_some() => {
@@ -64,13 +128,14 @@ pub fn start(data_dir: &Path, settings: &Settings, scripted: bool, version: &str
                 "production"
             };
             let config = errors::Config::new(dsn, &release, environment, macos_major(), data_dir);
-            let reporter = SentryReporter::start(config, settings.share_usage_events, &runtime);
+            let reporter = SentryReporter::start(config, allowed, &runtime);
             reporter.install_panic_hook();
             reporter
         }
         _ => SentryReporter::disabled(),
     };
-    Usage(posthog, errors)
+    let gate = ConsentGate::new(posthog.clone(), welcome_passed, settings.share_usage_events);
+    Usage(posthog, errors, Arc::new(gate), Version::new(version))
 }
 
 /// Records `app_opened`, and `update_installed` if the version changed
@@ -218,7 +283,7 @@ pub fn onboarding_step(usage: &Usage, step: Step) {
 /// Records onboarding finished.
 pub fn onboarding_completed(usage: &Usage) {
     usage.record(Event::OnboardingCompleted {
-        step: OnboardingStep::from(Step::Try),
+        step: OnboardingStep::from(Step::Ready),
     });
 }
 
@@ -330,10 +395,41 @@ mod tests {
         if BUILD_KEY.is_none() {
             let usage = Usage::disabled();
             usage.record(Event::OnboardingCompleted {
-                step: OnboardingStep::Try,
+                step: OnboardingStep::Ready,
             });
             assert!(!usage.0.is_enabled());
             assert_eq!(usage.0.queued(), 0);
         }
+    }
+
+    fn walking(fake: &dictation_platform::fakes::FakeTelemetry) -> Usage {
+        Usage::at_welcome(Arc::new(fake.clone()))
+    }
+
+    /// U8 criterion 2, through what the commands call: the steps' events and
+    /// the sharing switch.
+    #[test]
+    fn u8_no_event_before_leaving_welcome_then_they_flow() {
+        let fake = dictation_platform::fakes::FakeTelemetry::new();
+        let usage = walking(&fake);
+        onboarding_step(&usage, Step::Welcome);
+        sharing_turned_on(&usage);
+        assert!(fake.events().is_empty());
+
+        usage.left_welcome();
+        onboarding_step(&usage, Step::Speech);
+        assert_eq!(fake.events().len(), 1);
+    }
+
+    /// U8 criterion 2.
+    #[test]
+    fn u8_switched_off_on_welcome_no_event_ever() {
+        let fake = dictation_platform::fakes::FakeTelemetry::new();
+        let usage = walking(&fake);
+        usage.set_enabled(false);
+        usage.left_welcome();
+        onboarding_step(&usage, Step::Speech);
+        onboarding_completed(&usage);
+        assert!(fake.events().is_empty());
     }
 }

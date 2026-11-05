@@ -556,11 +556,14 @@ function typeInto(appEl, window, field, value, secret = false, pick = null) {
   // Empty it first. Through AX if it takes that (the keys typed next fire
   // the page's input events with the whole value, so a framework holding
   // the old value catches up); else, or when nothing is typed after it,
-  // select all and delete, as a person would.
+  // select all and delete, as a person would. A password field always goes
+  // that way: emptied through AX, its framework still holds the old value, and
+  // a re-render before the first key puts it back, so the key adds to it.
   if (
     value === "" ||
+    secret ||
     setAttr(field, "AXValue", $("")) !== 0 ||
-    (secret ? charCount(field) : text(field, "AXValue").length) !== 0
+    text(field, "AXValue").length !== 0
   ) {
     postKey(KEY_A, COMMAND);
     postKey(KEY_DELETE, 0);
@@ -577,7 +580,12 @@ function typeInto(appEl, window, field, value, secret = false, pick = null) {
     return "picked";
   }
   if (secret) {
-    const count = charCount(field);
+    // On a loaded machine the page takes a while to catch up with the keys.
+    let count = charCount(field);
+    for (let i = 0; i < 25 && count !== value.length; i++) {
+      delay(0.2);
+      count = charCount(field);
+    }
     if (count !== value.length)
       fail("typed " + value.length + " characters but the field holds " + count);
     return "typed";

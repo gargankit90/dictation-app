@@ -4,14 +4,14 @@ import type { Settings_Serialize } from "../bindings";
 import { HotkeyRecorder } from "../HotkeyRecorder";
 import { BROKEN, messageOf } from "../keyTest";
 import { LanguagePicker } from "../LanguagePicker";
-import { SILENT_LEVELS, barHeight, pushLevel } from "../overlay/view";
+import { SILENT_LEVELS, pushLevel } from "../overlay/view";
 import { saveHotkey, setHotkeyRecording } from "../saveHotkey";
+import { MIC_POLL_MS, MicMeter } from "./MicMeter";
 import { Group, Row, SaveStatus, useSave } from "./ui";
 
 /** How long Test microphone listens. */
 export const MIC_TEST_MS = 5_000;
-/** How often the test's level is read: as often as the pill's (U4). */
-export const MIC_POLL_MS = 50;
+export { MIC_POLL_MS } from "./MicMeter";
 /** Louder than this, in dBFS, is sound (`NO_SOUND_THRESHOLD_DBFS` in `dictation-core`). */
 export const SOUND_DBFS = -50;
 
@@ -39,22 +39,6 @@ type MicTest =
   | { state: "listening"; levels: number[]; heard: boolean }
   | { state: "done"; heard: boolean }
   | { state: "error"; message: string };
-
-/** The meter: U4's bars, newest on the right. Decorative; the text says what matters. */
-function MicMeter({ levels }: { levels: readonly number[] }) {
-  return (
-    <span className="mic-meter" aria-hidden="true">
-      {levels.map((dbfs, index) => (
-        <i
-          // A fixed set of bars; the index is the bar.
-          key={index}
-          data-testid="mic-bar"
-          style={{ height: `${String(barHeight(dbfs))}px` }}
-        />
-      ))}
-    </span>
-  );
-}
 
 /**
  * Dictation: the shortcut (K1's recorder, applied at once), the language

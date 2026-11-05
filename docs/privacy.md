@@ -11,6 +11,9 @@ and error reports are built field by field from an allow-list
   more is sent, events and reports still waiting are deleted, requests under
   way are dropped, and the install ID is deleted. Turning it on again makes a
   new ID.
+- **Nothing before you choose.** On a first run the same switch is on the
+  first setup screen. Nothing is sent, and no install ID is made, until you
+  continue past that screen, and nothing at all if you switched it off there.
 - **Where it goes.** PostHog Cloud US (`https://us.i.posthog.com`), sent by
   the app itself, never by the webview.
 - **A build without a PostHog key sends nothing.** Development builds, CI and
@@ -78,8 +81,8 @@ links one install's events together. Turning sharing off deletes it.
 | Event | When | Properties |
 | --- | --- | --- |
 | `app_opened` | The app starts | `version` (for example `0.1.0`), `macos_major` (for example `15`), `arch` (`apple_silicon`, `intel`, `other`) |
-| `onboarding_step_reached` | You get to an onboarding step | `step` (`microphone`, `accessibility`, `key`, `try`) |
-| `onboarding_completed` | You finish onboarding | `step` (`try`) |
+| `onboarding_step_reached` | You get to an onboarding step | `step` (`welcome`, `speech`, `permissions`, `try`, `ready`) |
+| `onboarding_completed` | You finish onboarding | `step` (`ready`) |
 | `engine_selected` | You pick a provider or save its key, or switch between On this Mac and Your own key | `kind` (`cloud`, `local`), `provider` (`groq`, `openai`; cloud only; which local model is never sent) |
 | `dictation_finished` | A dictation was pasted | `engine_kind` (`cloud`, `local`), `duration_bucket` (`under2s`, `from2_to5s`, `from5_to15s`, `from15_to60s`, `over60s`), `latency_bucket` (`under500ms`, `from500_to1000ms`, `from1_to2s`, `from2_to5s`, `over5s`) |
 | `dictation_failed` | A dictation failed | `error_type` (`transcription`, `empty_transcript`, `insert`, `secure_input`, `microphone_permission`, `accessibility_permission`, `hotkey`) |

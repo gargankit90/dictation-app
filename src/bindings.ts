@@ -45,26 +45,27 @@ export const commands = {
 	 *  The view the settings window shows and, for onboarding (M5.2), the step
 	 *  the user is on and the two permissions. Never blocks: the key isn't read.
 	 */
-	getOnboarding: () => typedError<OnboardingStatus, string>(__TAURI_INVOKE("get_onboarding")),
+	getOnboarding: () => typedError<OnboardingStatus_Serialize, string>(__TAURI_INVOKE("get_onboarding")),
 	/**
 	 *  Asks macOS for `permission`: its prompt while it hasn't been asked,
 	 *  System Settings at the permission's page once refused (Accessibility:
 	 *  both). Returns at once; `get_onboarding` shows the answer once the user
 	 *  gives it.
 	 */
-	requestPermission: (permission: AppPermission) => typedError<OnboardingStatus, string>(__TAURI_INVOKE("request_permission", { permission })),
+	requestPermission: (permission: AppPermission) => typedError<OnboardingStatus_Serialize, string>(__TAURI_INVOKE("request_permission", { permission })),
 	/**
-	 *  Settings, Help, "Set up dictation…" (U5): opens the first-run steps at
-	 *  the step the user was on, now that the tray's "Resume setup…" is hidden
-	 *  once setup is done. The key is read (bounded) off the async runtime.
+	 *  Settings, Help, "Run setup again" (U5, U6): opens the first-run steps,
+	 *  from the start if setup was finished (U8), otherwise at the step the user
+	 *  was on. The key is read (bounded) off the async runtime.
 	 */
 	openSetup: () => typedError<null, string>(__TAURI_INVOKE("open_setup")),
 	/**
 	 *  Moves onboarding to `step`, if every step before it is done (the key is
-	 *  read from the keychain only to move to the last step). An error says
+	 *  read from the keychain only to move past Speech). Moving past Welcome is
+	 *  the user's go-ahead for usage events (U8), if sharing is on. An error says
 	 *  which step comes first; the user stays where they were.
 	 */
-	setOnboardingStep: (step: Step) => typedError<OnboardingStatus, string>(__TAURI_INVOKE("set_onboarding_step", { step })),
+	setOnboardingStep: (step: Step) => typedError<OnboardingStatus_Serialize, string>(__TAURI_INVOKE("set_onboarding_step", { step })),
 	/**  Ends onboarding: the window goes back to the settings view and hides. */
 	finishOnboarding: () => typedError<null, string>(__TAURI_INVOKE("finish_onboarding")),
 	/**
@@ -194,6 +195,41 @@ export const commands = {
 	getAppInfo: () => typedError<AppInfo_Serialize, string>(__TAURI_INVOKE("get_app_info")),
 	/**  Checks for updates as the tray's item does: a dialog says what it found. */
 	checkForUpdates: () => typedError<null, string>(__TAURI_INVOKE("check_for_updates")),
+	/**
+	 *  Chooses on-device model `id` before it is on this Mac (U8's "Download and
+	 *  continue"): the settings choose it now, so the choice survives a quit and
+	 *  the model becomes the engine as soon as its download finishes
+	 *  (`download_local_model` rebuilds the engine then). Until then the engine
+	 *  says the model isn't ready.
+	 */
+	chooseLocalModel: (id: string) => typedError<null, string>(__TAURI_INVOKE("choose_local_model", { id })),
+	/**  Keeps how the practice dictation went, for the Ready step and a relaunch. */
+	setTryOutcome: (outcome: TryOutcome) => typedError<null, string>(__TAURI_INVOKE("set_try_outcome", { outcome })),
+	/**
+	 *  Keeps that the user cancelled (or resumed) the model download, so a
+	 *  relaunch doesn't start a download they stopped.
+	 */
+	setDownloadPaused: (paused: boolean) => typedError<null, string>(__TAURI_INVOKE("set_download_paused", { paused })),
+	/**
+	 *  The words of the last dictation the app tried to paste, for Try it only:
+	 *  `None` unless onboarding is on screen. Held in memory; never logged.
+	 */
+	practiceWords: () => typedError<string | null, string>(__TAURI_INVOKE("practice_words")),
+	/**
+	 *  Try it's Copy: puts [`practice_words`]'s text on the clipboard, and only
+	 *  when the user asks. Nothing is pasted.
+	 */
+	copyPracticeWords: () => typedError<null, string>(__TAURI_INVOKE("copy_practice_words")),
+	/**
+	 *  Keeps the engine selected on the Speech step, so a quit before Continue
+	 *  comes back to it. Never the key.
+	 */
+	setSpeechChoice: (choice: SpeechChoice) => typedError<null, string>(__TAURI_INVOKE("set_speech_choice", { choice })),
+	/**
+	 *  Ready's History "Change": leaves the steps for Settings. Setup stays where
+	 *  it was, and "Resume setup…" comes back to it.
+	 */
+	leaveSetupForSettings: () => typedError<null, string>(__TAURI_INVOKE("leave_setup_for_settings")),
 	/**  The recent dictations, newest first. History is in memory, so no blocking. */
 	listHistory: () => typedError<HistoryList, string>(__TAURI_INVOKE("list_history")),
 	/**
@@ -345,19 +381,32 @@ export type ConnectionResult_Serialize = {
 	message: string,
 };
 
+/**  What fixes a failed dictation, for Try it's one inline fix (U8). */
+export type DictationFailure = 
+/**  The microphone: no sound, refused or failing. */
+"microphone" | 
+/**  The API key. */
+"key" | 
+/**  The text couldn't be pasted. */
+"paste" | 
+/**  Anything else; the sentence says what happened. */
+"other";
+
 /**
  *  What the last dictation got through (U1). Counts only grow, so a window
- *  compares them with what it saw when it opened. No transcript, no code.
+ *  compares them with what it saw when it opened. No transcript.
  */
 export type DictationProgressView = DictationProgressView_Serialize | DictationProgressView_Deserialize;
 
 /**
  *  What the last dictation got through (U1). Counts only grow, so a window
- *  compares them with what it saw when it opened. No transcript, no code.
+ *  compares them with what it saw when it opened. No transcript.
  */
 export type DictationProgressView_Deserialize = {
 	/**  Dictations started since launch. */
 	started: number,
+	/**  Dictations that are over, however they ended. */
+	finished: number,
 	/**  Dictations that ended pasted with no error. */
 	completed: number,
 	/**  Errors shown. */
@@ -366,15 +415,21 @@ export type DictationProgressView_Deserialize = {
 	stages: DictationStage[],
 	/**  The latest error's sentence, until the next recording starts. */
 	error?: string | null,
+	/**  What fixes the latest error, until the next recording starts. */
+	failure?: DictationFailure | null,
+	/**  The input was louder than silence during the current or last hold. */
+	heard: boolean,
 };
 
 /**
  *  What the last dictation got through (U1). Counts only grow, so a window
- *  compares them with what it saw when it opened. No transcript, no code.
+ *  compares them with what it saw when it opened. No transcript.
  */
 export type DictationProgressView_Serialize = {
 	/**  Dictations started since launch. */
 	started: number,
+	/**  Dictations that are over, however they ended. */
+	finished: number,
 	/**  Dictations that ended pasted with no error. */
 	completed: number,
 	/**  Errors shown. */
@@ -383,6 +438,10 @@ export type DictationProgressView_Serialize = {
 	stages: DictationStage[],
 	/**  The latest error's sentence, until the next recording starts. */
 	error: string | null,
+	/**  What fixes the latest error, until the next recording starts. */
+	failure: DictationFailure | null,
+	/**  The input was louder than silence during the current or last hold. */
+	heard: boolean,
 };
 
 /**  A stage of a dictation, as onboarding's Try it names them. */
@@ -562,6 +621,16 @@ export type LocalModelInfo_Deserialize = {
 	downloaded_bytes: number | null,
 	/**  Where it is. */
 	state: ModelState,
+	/**
+	 *  The running download kept this many bytes of an earlier part: the
+	 *  server accepted the range. `None` otherwise.
+	 */
+	resumed_from_bytes?: number | null,
+	/**
+	 *  The running download threw an earlier part away: the server sent the
+	 *  whole file.
+	 */
+	restarted: boolean,
 	/**  Why the last download failed, in plain words, if it did. */
 	error?: string | null,
 	/**  Whether it is the catalogue's default. */
@@ -584,6 +653,16 @@ export type LocalModelInfo_Serialize = {
 	downloaded_bytes: number | null,
 	/**  Where it is. */
 	state: ModelState,
+	/**
+	 *  The running download kept this many bytes of an earlier part: the
+	 *  server accepted the range. `None` otherwise.
+	 */
+	resumed_from_bytes: number | null,
+	/**
+	 *  The running download threw an earlier part away: the server sent the
+	 *  whole file.
+	 */
+	restarted: boolean,
 	/**  Why the last download failed, in plain words, if it did. */
 	error: string | null,
 	/**  Whether it is the catalogue's default. */
@@ -627,7 +706,10 @@ export type ModelState =
 "ready";
 
 /**  What the settings window needs to show onboarding. */
-export type OnboardingStatus = {
+export type OnboardingStatus = OnboardingStatus_Serialize | OnboardingStatus_Deserialize;
+
+/**  What the settings window needs to show onboarding. */
+export type OnboardingStatus_Deserialize = {
 	/**  Which view to show. */
 	view: View,
 	/**  The step the user is on. */
@@ -636,6 +718,40 @@ export type OnboardingStatus = {
 	microphone: PermissionState,
 	/**  The Accessibility permission. */
 	accessibility: PermissionState,
+	/**
+	 *  macOS says Accessibility is allowed but the hotkey can't use it: a
+	 *  relaunch makes it take.
+	 */
+	needs_relaunch: boolean,
+	/**  How the practice dictation went. */
+	try_outcome: TryOutcome,
+	/**  The user cancelled the model download. */
+	download_paused: boolean,
+	/**  The engine selected on the Speech step, if one was. */
+	speech_choice?: SpeechChoice | null,
+};
+
+/**  What the settings window needs to show onboarding. */
+export type OnboardingStatus_Serialize = {
+	/**  Which view to show. */
+	view: View,
+	/**  The step the user is on. */
+	step: Step,
+	/**  The microphone permission. */
+	microphone: PermissionState,
+	/**  The Accessibility permission. */
+	accessibility: PermissionState,
+	/**
+	 *  macOS says Accessibility is allowed but the hotkey can't use it: a
+	 *  relaunch makes it take.
+	 */
+	needs_relaunch: boolean,
+	/**  How the practice dictation went. */
+	try_outcome: TryOutcome,
+	/**  The user cancelled the model download. */
+	download_paused: boolean,
+	/**  The engine selected on the Speech step, if one was. */
+	speech_choice: SpeechChoice | null,
 };
 
 /**  A permission's state, for the onboarding steps. */
@@ -742,16 +858,25 @@ export type Settings_Serialize = {
 	history_limit: number,
 };
 
+/**  The engine the user selected on [`Step::Speech`], before they continue. */
+export type SpeechChoice = 
+/**  The recommended on-device model. */
+"local" | 
+/**  The user's own key. The key itself is never kept here. */
+"own_key";
+
 /**  One onboarding step, in order. */
 export type Step = 
-/**  Allow the microphone. */
-"microphone" | 
-/**  Allow Accessibility (the hotkey and the paste need it). */
-"accessibility" | 
-/**  Pick the provider and add a working API key. */
-"key" | 
-/**  Try a dictation into a text field in the onboarding window. */
-"try";
+/**  What the app does, and the usage and error events switch. */
+"welcome" | 
+/**  The language, and the on-device model or the user's own key. */
+"speech" | 
+/**  Allow the microphone and Accessibility. */
+"permissions" | 
+/**  The dictation key, and a practice dictation in the onboarding window. */
+"try" | 
+/**  A summary of the real states; closes onboarding. */
+"ready";
 
 /**  Where speech becomes text (L1). */
 export type Transcription = 
@@ -759,6 +884,15 @@ export type Transcription =
 "cloud" | 
 /**  A downloaded model on this Mac ([`Settings::local_model`]); no key. */
 "local";
+
+/**  How the practice dictation in [`Step::Try`] went. */
+export type TryOutcome = 
+/**  Not tried yet. */
+"not_tried" | 
+/**  A dictation landed in the practice box. */
+"passed" | 
+/**  The user pressed "Skip for now". */
+"skipped";
 
 /**  What the settings window shows. */
 export type View = 

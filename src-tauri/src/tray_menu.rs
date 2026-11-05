@@ -290,7 +290,10 @@ fn read_ambient(app: &AppHandle) -> Ambient {
         problem,
         setup_incomplete: mic != PermissionStatus::Granted
             || accessibility != PermissionStatus::Granted
-            || engine_problem == Some(ErrorCode::KeyMissing),
+            || engine_problem == Some(ErrorCode::KeyMissing)
+            || app
+                .try_state::<std::sync::Arc<onboarding::Onboarding>>()
+                .is_some_and(|onboarding| onboarding.in_progress()),
     }
 }
 
@@ -473,13 +476,28 @@ fn copy_last(app: &AppHandle) {
             let Some(text) = history.last_text() else {
                 return;
             };
-            match dictation_platform::insert::SystemClipboard::new().copy(&text) {
-                Ok(()) => tracing::info!("copied the last dictation"),
-                Err(error) => tracing::warn!(%error, "could not copy the last dictation"),
-            }
+            let _ = copy_text(&text);
         });
     if let Err(error) = spawned {
         tracing::warn!(%error, "could not start the copy");
+    }
+}
+
+/// Puts `text` on the clipboard; blocks. The text is not logged.
+///
+/// # Errors
+///
+/// The clipboard refused; the message is for the user.
+pub fn copy_text(text: &str) -> Result<(), String> {
+    match dictation_platform::insert::SystemClipboard::new().copy(text) {
+        Ok(()) => {
+            tracing::info!("copied the last dictation");
+            Ok(())
+        }
+        Err(error) => {
+            tracing::warn!(%error, "could not copy the last dictation");
+            Err("Couldn't copy the words. Select them and press ⌘C.".to_owned())
+        }
     }
 }
 

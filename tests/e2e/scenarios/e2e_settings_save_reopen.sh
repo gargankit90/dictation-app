@@ -19,8 +19,12 @@ SETTINGS_FILE_VM="/Users/$VM_USER/Library/Application Support/com.dictationapp.d
 # Text in the settings window's title ("Vocet Settings").
 SETTINGS_WINDOW=Settings
 
+# The setup progress goes too (U8): it belongs with the settings it describes,
+# and a scenario must not inherit another's unfinished setup.
+SETUP_PROGRESS_VM="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/onboarding-progress.json"
+
 settings_reset() {
-  vm "rm -f $(q "$SETTINGS_FILE_VM")"
+  vm "rm -f $(q "$SETTINGS_FILE_VM" "$SETUP_PROGRESS_VM")"
 }
 
 # settings_file_has <key> <string value>: the saved settings file has

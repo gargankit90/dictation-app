@@ -14,7 +14,10 @@ describe("App", () => {
       if (command === "get_onboarding") {
         return {
           view: "settings",
-          step: "microphone",
+          step: "welcome",
+          needs_relaunch: false,
+          try_outcome: "not_tried",
+          download_paused: false,
           microphone: "granted",
           accessibility: "granted",
         };
@@ -46,7 +49,10 @@ describe("App", () => {
       if (command === "get_onboarding") {
         return {
           view: "settings",
-          step: "microphone",
+          step: "welcome",
+          needs_relaunch: false,
+          try_outcome: "not_tried",
+          download_paused: false,
           microphone: "granted",
           accessibility: "granted",
         };
@@ -96,7 +102,10 @@ describe("App", () => {
         case "get_onboarding":
           return {
             view: "settings",
-            step: "microphone",
+            step: "welcome",
+            needs_relaunch: false,
+            try_outcome: "not_tried",
+            download_paused: false,
             microphone: "granted",
             accessibility: "granted",
           };
@@ -192,7 +201,10 @@ describe("App", () => {
         case "get_onboarding":
           return {
             view,
-            step: "microphone",
+            step: "welcome",
+            needs_relaunch: false,
+            try_outcome: "not_tried",
+            download_paused: false,
             microphone: "granted",
             accessibility: "granted",
           };

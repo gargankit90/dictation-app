@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use dictation_core::local_models::{self, LocalModel};
 use dictation_pipeline::config::Config;
 use dictation_ports::SecretStore;
-use dictation_transcribe::models::{DownloadCancel, DownloadError, ModelStatus, Progress};
+use dictation_transcribe::models::{DownloadCancel, DownloadError, ModelStatus, Progress, Resume};
 use serde::Serialize;
 use tauri::State;
 
@@ -56,6 +56,12 @@ pub struct LocalModelInfo {
     pub downloaded_bytes: f64,
     /// Where it is.
     pub state: ModelState,
+    /// The running download kept this many bytes of an earlier part: the
+    /// server accepted the range. `None` otherwise.
+    pub resumed_from_bytes: Option<f64>,
+    /// The running download threw an earlier part away: the server sent the
+    /// whole file.
+    pub restarted: bool,
     /// Why the last download failed, in plain words, if it did.
     pub error: Option<String>,
     /// Whether it is the catalogue's default.
@@ -114,6 +120,10 @@ impl ModelDownloads {
                         Some(ModelStatus::Missing) | None => (ModelState::Missing, 0),
                     },
                 };
+                let resume = downloads
+                    .running
+                    .get(model.id)
+                    .map_or(Resume::None, |running| running.progress.resume);
                 #[allow(
                     clippy::cast_precision_loss,
                     reason = "model sizes are far below 2^53 bytes"
@@ -126,6 +136,11 @@ impl ModelDownloads {
                     size_bytes: model.size_bytes as f64,
                     downloaded_bytes: downloaded as f64,
                     state,
+                    resumed_from_bytes: match resume {
+                        Resume::Continued { from } => Some(from as f64),
+                        Resume::None | Resume::Restarted => None,
+                    },
+                    restarted: resume == Resume::Restarted,
                     error: downloads.failed.get(model.id).cloned(),
                     default: model.id == local_models::DEFAULT_MODEL,
                 }
@@ -170,6 +185,7 @@ impl ModelDownloads {
                     progress: Progress {
                         downloaded: 0,
                         total: model.size_bytes,
+                        resume: Resume::None,
                     },
                 },
             );

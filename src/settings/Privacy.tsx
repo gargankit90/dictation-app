@@ -1,8 +1,103 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { commands } from "../bindings";
 import type { Settings_Serialize } from "../bindings";
-import { messageOf } from "../keyTest";
+import { sharingState, subscribeSharing, writeSharing } from "./sharingQueue";
 import { Group, Row, SaveStatus, Switch, useSave } from "./ui";
+import type { SaveState } from "./ui";
+
+/** What sharing sends, in words, with a link to the full notice. */
+export function WhatsSent() {
+  return (
+    <details className="row-details">
+      <summary>What&apos;s sent</summary>
+      <ul className="hint">
+        <li>That the app was opened, with its version, your macOS version and chip.</li>
+        <li>Which onboarding steps you reached, and that you finished.</li>
+        <li>Which speech engine you chose (for example Groq or OpenAI).</li>
+        <li>That a dictation worked, with its length and speed in rough ranges (not the words).</li>
+        <li>That a dictation failed, and the kind of failure (not the message).</li>
+        <li>
+          Error reports, sent to Sentry (US): when the app crashes (a panic) or a dictation fails,
+          the error code (for example mic_denied), the app version, your macOS major version and
+          chip, and for a crash the code locations and function names where it happened. Never the
+          error message, your words, file paths, your user name or computer name.
+        </li>
+        <li>Which setting you changed (not the new value).</li>
+        <li>That the app updated, from which version to which.</li>
+      </ul>
+      <p className="hint">
+        Each event carries a random ID made on this Mac, not tied to you or your computer. Turning
+        sharing off deletes it.
+      </p>
+      <button
+        type="button"
+        className="link"
+        onClick={() => {
+          void commands.openLink("privacy").catch(() => undefined);
+        }}
+      >
+        Read the full privacy notice
+      </button>
+    </details>
+  );
+}
+
+/**
+ * The sharing switch, for any view that shows it. The writes go through the
+ * one queue in `sharingQueue`, which outlives the view. `save` stays "saving"
+ * while any view's write is waiting, and holds the last failure until a later
+ * write succeeds, whichever view made them.
+ */
+export function useSharingSwitch(
+  stored: boolean,
+  onStored: (settings: Settings_Serialize) => void,
+) {
+  const sharing = useSave();
+  const queue = useSyncExternalStore(subscribeSharing, sharingState);
+
+  // Settings read back after a write reach every view, once each: an older
+  // copy must not overwrite what the view has learned since.
+  const latestOnStored = useRef(onStored);
+  const seen = useRef(queue.settings);
+  useLayoutEffect(() => {
+    latestOnStored.current = onStored;
+  });
+  useLayoutEffect(() => {
+    if (queue.settings !== null && queue.settings !== seen.current) {
+      seen.current = queue.settings;
+      latestOnStored.current(queue.settings);
+    }
+  }, [queue.settings]);
+
+  async function setSharing(share: boolean) {
+    await sharing.track(() => writeSharing(share));
+  }
+
+  const save: SaveState = queue.pending
+    ? { state: "saving" }
+    : queue.problem !== null
+      ? { state: "error", message: queue.problem }
+      : sharing.save.state === "saved"
+        ? sharing.save
+        : { state: "idle" };
+
+  return {
+    save,
+    checked: queue.pending && queue.latest !== null ? queue.latest : stored,
+    setSharing,
+  };
+}
+
+export type SharingSwitch = ReturnType<typeof useSharingSwitch>;
+
+/**
+ * What a step's way forward must say while the switch isn't settled: leaving
+ * can send events, so it waits for the user's choice to be saved.
+ */
+export function sharingBlock(save: SaveState, failed: string): string | null {
+  if (save.state === "saving") return "Saving your choice…";
+  return save.state === "error" ? failed : null;
+}
 
 /**
  * Privacy: "Share usage and error events" (A1's own command: off stops
@@ -16,22 +111,7 @@ export function Privacy({
   settings: Settings_Serialize;
   onStored: (settings: Settings_Serialize) => void;
 }) {
-  const sharing = useSave();
-  // Shown at once; the stored value comes back after the write.
-  const [shown, setShown] = useState<boolean | null>(null);
-  const checked = shown ?? settings.share_usage_events;
-
-  async function setSharing(share: boolean) {
-    setShown(share);
-    await sharing.track(async () => {
-      const result = await commands.setShareUsageEvents(share);
-      // What the app stores now, not a copy of what this pane was given.
-      const reread = await commands.getSettings();
-      if (reread.status === "ok") onStored(reread.data);
-      return result.status === "error" ? messageOf(result.error) : null;
-    });
-    setShown(null);
-  }
+  const { save, checked, setSharing } = useSharingSwitch(settings.share_usage_events, onStored);
 
   return (
     <Group>
@@ -42,42 +122,8 @@ export function Privacy({
         captionId="share-usage-events-hint"
         below={
           <>
-            <SaveStatus save={sharing.save} />
-            <details className="row-details">
-              <summary>What&apos;s sent</summary>
-              <ul className="hint">
-                <li>That the app was opened, with its version, your macOS version and chip.</li>
-                <li>Which onboarding steps you reached, and that you finished.</li>
-                <li>Which speech engine you chose (for example Groq or OpenAI).</li>
-                <li>
-                  That a dictation worked, with its length and speed in rough ranges (not the
-                  words).
-                </li>
-                <li>That a dictation failed, and the kind of failure (not the message).</li>
-                <li>
-                  Error reports, sent to Sentry (US): when the app crashes (a panic) or a dictation
-                  fails, the error code (for example mic_denied), the app version, your macOS major
-                  version and chip, and for a crash the code locations and function names where it
-                  happened. Never the error message, your words, file paths, your user name or
-                  computer name.
-                </li>
-                <li>Which setting you changed (not the new value).</li>
-                <li>That the app updated, from which version to which.</li>
-              </ul>
-              <p className="hint">
-                Each event carries a random ID made on this Mac, not tied to you or your computer.
-                Turning sharing off deletes it.
-              </p>
-              <button
-                type="button"
-                className="link"
-                onClick={() => {
-                  void commands.openLink("privacy").catch(() => undefined);
-                }}
-              >
-                Read the full privacy notice
-              </button>
-            </details>
+            <SaveStatus save={save} />
+            <WhatsSent />
           </>
         }
       >

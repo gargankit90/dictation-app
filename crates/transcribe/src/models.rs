@@ -70,6 +70,22 @@ pub enum ModelStatus {
     Ready,
 }
 
+/// What became of a part left by an earlier download, from the server's
+/// answer, not from the bytes on disk.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Resume {
+    /// There was no part, or the server hasn't answered yet.
+    #[default]
+    None,
+    /// The server accepted the range (HTTP 206): the part was kept.
+    Continued {
+        /// The bytes that were kept.
+        from: u64,
+    },
+    /// The server sent the whole file (HTTP 200): the part was thrown away.
+    Restarted,
+}
+
 /// How far a download is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Progress {
@@ -77,6 +93,8 @@ pub struct Progress {
     pub downloaded: u64,
     /// The model's full size.
     pub total: u64,
+    /// What became of an earlier part.
+    pub resume: Resume,
 }
 
 /// Why a download failed.
@@ -393,8 +411,9 @@ impl ModelStore {
         }
         self.check_space(total - have)?;
 
+        let mut resume = Resume::None;
         if have < total {
-            have = tokio::select! {
+            (have, resume) = tokio::select! {
                 () = cancel.cancelled() => return Err(DownloadError::Cancelled),
                 fetched = self.fetch(url, &part, have, total, &mut on_progress) => fetched?,
             };
@@ -407,6 +426,7 @@ impl ModelStore {
         on_progress(Progress {
             downloaded: total,
             total,
+            resume,
         });
         verify(&part, model.sha256).await?;
         let path = self.final_path(model);
@@ -429,7 +449,8 @@ impl ModelStore {
         Ok(())
     }
 
-    /// Fetches from byte `have` into `part`; returns the bytes on disk.
+    /// Fetches from byte `have` into `part`; returns the bytes on disk and
+    /// what became of the part.
     async fn fetch(
         &self,
         url: &str,
@@ -437,7 +458,7 @@ impl ModelStore {
         mut have: u64,
         total: u64,
         on_progress: &mut (impl FnMut(Progress) + Send),
-    ) -> Result<u64, DownloadError> {
+    ) -> Result<(u64, Resume), DownloadError> {
         let mut request = self.client.get(url);
         if have > 0 {
             request = request.header(header::RANGE, format!("bytes={have}-"));
@@ -462,6 +483,13 @@ impl ModelStore {
                 )));
             }
         };
+        let resume = if append {
+            Resume::Continued { from: have }
+        } else if have > 0 {
+            Resume::Restarted
+        } else {
+            Resume::None
+        };
         if !append {
             have = 0;
         }
@@ -473,10 +501,13 @@ impl ModelStore {
             .open(part)
             .await
             .map_err(|e| disk(&e))?;
+        // This line's text is what the e2e scenario waits for.
+        tracing::info!(?resume, "model download answered");
         let mut reported = have;
         on_progress(Progress {
             downloaded: have,
             total,
+            resume,
         });
         while let Some(chunk) = response.chunk().await.map_err(|e| network(&e))? {
             have += chunk.len() as u64;
@@ -491,12 +522,13 @@ impl ModelStore {
                 on_progress(Progress {
                     downloaded: have,
                     total,
+                    resume,
                 });
             }
         }
         file.flush().await.map_err(|e| disk(&e))?;
         file.sync_all().await.map_err(|e| disk(&e))?;
-        Ok(have)
+        Ok((have, resume))
     }
 }
 
