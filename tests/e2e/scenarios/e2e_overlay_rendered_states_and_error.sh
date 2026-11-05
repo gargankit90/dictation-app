@@ -11,11 +11,11 @@
 #    the dictation is pasted.
 # 2. A second dictation the same way.
 # 3. The provider rejects the key (a 401): the overlay renders the error
-#    text, it stays up for its time (ERROR_VISIBLE_FOR, 4 s, from the log's
+#    text, it stays up for its time (ERROR_VISIBLE_FOR, 6 s, from the log's
 #    timestamps) with nothing else in between, then hides and leaves the
 #    screen.
 # 4. Another failed dictation, and a press right after its error shows: the
-#    recording replaces the error and stays up past the error's 4 s (its
+#    recording replaces the error and stays up past the error's 6 s (its
 #    timer must not hide the recording); with the right key back, that
 #    dictation pastes and the overlay hides.
 #
@@ -28,7 +28,7 @@
 OVERLAY_BAD_KEY="shown: Your API key was rejected. Open Settings → Speech to fix it."
 # The error's time on screen (crates/app/src/overlay.rs ERROR_VISIBLE_FOR),
 # and how far the log's show-to-hide gap may stray from it.
-OVERLAY_ERROR_MS=4000
+OVERLAY_ERROR_MS=6000
 OVERLAY_ERROR_SLACK_MS=600
 
 # The overlay's lines in the log after the first <n>, space-separated:
@@ -183,13 +183,13 @@ e2e_overlay_rendered_states_and_error() {
   mark=$(overlay_log_mark)
   launch --press
   expect "the overlay renders Recording" overlay_shows "$OVERLAY_RECORDING"
-  overlay_watch_start 12
+  overlay_watch_start 16
   launch --release
   expect "the dictation fails and is back in Idle" wait_for_idle_count 3 15
   expect "the provider rejected the key" provider_request_has 1 auth=bad
   expect "the overlay renders the error's text" overlay_shows "$OVERLAY_BAD_KEY"
   expect "the panel is on screen with the error" overlay_on_screen
-  # After the check: the error shows for only 4 s.
+  # After the check: the error shows for only 6 s.
   screenshot e2e_overlay_rendered_states_and_error.error
   overlay_watch_end
   watch=$OVERLAY_WATCHED
@@ -209,11 +209,11 @@ e2e_overlay_rendered_states_and_error() {
 
   # 4. A new recording while the error shows replaces it, and the error's
   # timer doesn't hide it: watched from the failing dictation's recording
-  # until 8 s or more after its error showed.
+  # until 12 s or more after its error showed.
   mark=$(overlay_log_mark)
   launch --press
   expect "the overlay renders Recording" overlay_shows "$OVERLAY_RECORDING"
-  overlay_watch_start 14
+  overlay_watch_start 18
   launch --release
   expect "another failed dictation" wait_for_idle_count 4 15
   expect "its error shows" wait_for_log_count 'overlay shown state="?error' 2 10
@@ -223,7 +223,7 @@ e2e_overlay_rendered_states_and_error() {
   watch=$OVERLAY_WATCHED
   expect "the watch saw Recording, the error, then Recording until its end" \
     overlay_watch_went "$watch" "$OVERLAY_RECORDING" "$OVERLAY_BAD_KEY" "$OVERLAY_RECORDING"
-  lifetime=$(overlay_watch_lasted "$watch" "$OVERLAY_BAD_KEY" "$OVERLAY_RECORDING" 14000) || lifetime=""
+  lifetime=$(overlay_watch_lasted "$watch" "$OVERLAY_BAD_KEY" "$OVERLAY_RECORDING" 18000) || lifetime=""
   log "  the new recording was up for ${lifetime:-?} ms of the watch"
   expect "Recording stayed up past the error's time" \
     test "${lifetime:-0}" -gt $((OVERLAY_ERROR_MS + OVERLAY_ERROR_SLACK_MS))
@@ -235,7 +235,7 @@ e2e_overlay_rendered_states_and_error() {
   expect "that dictation ends Idle" wait_for_idle_count 5 15
   expect "the overlay is hidden" overlay_shows "$OVERLAY_HIDDEN"
   expect "the panel is off screen" overlay_off_screen
-  # U4: a paste that was sent shows Paste sent (800 ms) before hiding.
+  # U4: a paste that was sent shows Done (800 ms) before hiding.
   expect "the overlay went recording, transcribing, error, recording, transcribing, paste_sent, hidden" \
     test "$(overlay_log_since "$mark")" = "recording transcribing error recording transcribing paste_sent hidden"
   expect "it pasted" textedit_is "$(esc_b64 "$PROVIDER_TEXT")"
