@@ -287,6 +287,9 @@ pub fn onboarding_completed(usage: &Usage) {
 /// screen shows up (U10).
 pub fn setup_opened(usage: &Usage, onboarding: &Onboarding, readiness: Readiness) -> Step {
     let step = onboarding.open(readiness);
+    if !usage.2.allows() {
+        onboarding.note_sharing_off();
+    }
     onboarding_step(usage, step);
     step
 }
@@ -611,6 +614,22 @@ mod tests {
             setup_left(&usage, &onboarding, &FakePermissions::new());
             onboarding_completed(&usage);
             assert_eq!(fake.events(), []);
+        }
+
+        /// Round 2: Ready's caption reads this. Stored off, it can't say sharing
+        /// has been on since setup began, even once it is turned on.
+        #[test]
+        fn u10_a_stored_off_is_noted_when_setup_opens() {
+            let permissions = FakePermissions::new();
+            let (usage, _, onboarding) = walking(false);
+            setup_opened(&usage, &onboarding, Readiness::default());
+            assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
+            usage.set_enabled(true);
+            assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
+
+            let (usage, _, onboarding) = walking(true);
+            setup_opened(&usage, &onboarding, Readiness::default());
+            assert!(onboarding.status(&permissions, false).sharing_on_throughout);
         }
 
         /// U10 criterion 4: a problem in Settings isn't a setup problem.

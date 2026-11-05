@@ -2,7 +2,9 @@
 // onboarding at its minimum content size (680×520 less the title bar) with
 // every text made pseudo-long, on a fake backend, measured in real WebKit. Built by
 // vite.layout.config.ts and opened by e2e_onboarding_layout, which reads the
-// verdict line. U8 criterion 1: jsdom can't measure layout.
+// verdict line. U8 criterion 1: jsdom can't measure layout. The page
+// "ready-strip" is Ready at the usual 740×560 with its real text and the download
+// strip showing: the sharing switch's row must be in view without scrolling (U10).
 
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { createRoot } from "react-dom/client";
@@ -16,15 +18,16 @@ import type {
 } from "../bindings";
 import { Onboarding } from "../Onboarding";
 
-const WIDTH = 680;
-/** The window's minimum height less its title bar. */
-const HEIGHT = 492;
 /** Devanagari with no break, then a third again of ordinary words. */
 const PSEUDO = "हिन्दीकेलंबेशब्दोंकीजाँचहिन्दीकेलंबे";
 const SETTLE_MS = 1800;
 
 // Which step: a page per step, since macOS's `open` drops a file URL's query.
 const view = document.body.dataset.step ?? "welcome";
+const usualSize = view === "ready-strip";
+const WIDTH = usualSize ? 740 : 680;
+/** The window's height (usual or minimum) less its title bar. */
+const HEIGHT = usualSize ? 532 : 492;
 const steps: Record<string, Step> = {
   welcome: "welcome",
   speech: "speech",
@@ -32,6 +35,7 @@ const steps: Record<string, Step> = {
   permissions: "permissions",
   try: "try",
   ready: "ready",
+  "ready-strip": "ready",
 };
 
 const model: LocalModelInfo_Serialize = {
@@ -70,6 +74,7 @@ const status: OnboardingStatus = {
   try_outcome: "not_tried",
   download_paused: false,
   speech_choice: view === "speech-key" ? "own_key" : null,
+  sharing_on_throughout: true,
 };
 
 const quiet: DictationProgressView = {
@@ -219,6 +224,25 @@ function problems(root: HTMLElement): string[] {
   }
   content.scrollTop = 0;
 
+  // The only place in setup to make this choice (U10): in view as the step
+  // opens at the usual size, and reachable at the minimum.
+  const share = root.querySelector(".ob-share-row #ob-share-ready");
+  if (share !== null) {
+    if (usualSize && root.querySelector(".ob-strip") === null) {
+      found.push("the page has no download strip");
+    }
+    if (!usualSize) share.scrollIntoView({ block: "nearest" });
+    const row = share.getBoundingClientRect();
+    if (row.top < area.top - 1 || row.bottom > area.bottom + 1) {
+      found.push(
+        `the sharing switch is out of view (${String(row.bottom)} > ${String(area.bottom)})`,
+      );
+    }
+    content.scrollTop = 0;
+  } else if (view.startsWith("ready")) {
+    found.push("the sharing switch is missing");
+  }
+
   const rail = root.querySelector<HTMLElement>(".ob-rail");
   if (rail === null) found.push("the rail is missing");
   else if (rail.scrollWidth > rail.clientWidth + 1) found.push("the rail overflows sideways");
@@ -251,7 +275,7 @@ page.style.width = `${String(WIDTH)}px`;
 page.style.height = `${String(HEIGHT)}px`;
 
 createRoot(page).render(<Onboarding onFinished={() => undefined} />);
-makePseudoLong(page);
+if (!usualSize) makePseudoLong(page);
 
 /** Measures once the step is on screen and the text has settled. */
 function measureWhenReady() {

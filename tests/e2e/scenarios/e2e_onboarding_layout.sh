@@ -6,10 +6,14 @@
 # on a fake backend, since the app's strings can't be swapped in the app, and
 # prints its verdict, which is read through Accessibility.
 #
+# The page ready-strip is Ready at the usual size with its real text and the
+# download strip showing: the sharing switch's row is in view without scrolling
+# (U10).
+#
 # Pictures of each step, light and dark, go to the run's output.
 
 LAYOUT_DIR="/Users/$VM_USER/onboarding-layout"
-LAYOUT_STEPS="welcome speech speech-key permissions try ready"
+LAYOUT_STEPS="welcome speech speech-key permissions try ready ready-strip"
 
 layout_build() {
   local out=target/onboarding-layout

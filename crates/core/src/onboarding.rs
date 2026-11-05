@@ -167,6 +167,10 @@ pub enum SpeechChoice {
 
 /// What survives a quit: where the user is and what they chose that only the
 /// steps know. Holds no audio, text or key.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent facts kept in a file, each with its own meaning"
+)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SetupProgress {
@@ -183,6 +187,9 @@ pub struct SetupProgress {
     pub download_paused: bool,
     /// The engine selected on the Speech step, if the user selected one.
     pub speech_choice: Option<SpeechChoice>,
+    /// Sharing was off at some point of this walk through setup, so Ready
+    /// can't say it has been on since setup began (U10).
+    pub sharing_was_off: bool,
 }
 
 impl SetupProgress {
@@ -195,6 +202,7 @@ impl SetupProgress {
         try_outcome: TryOutcome::NotTried,
         download_paused: false,
         speech_choice: None,
+        sharing_was_off: false,
     };
 
     /// Reads the file's text. `None` if it can't be understood.
@@ -319,6 +327,7 @@ mod tests {
             try_outcome: TryOutcome::Skipped,
             download_paused: true,
             speech_choice: Some(SpeechChoice::OwnKey),
+            sharing_was_off: true,
         };
         assert_eq!(
             SetupProgress::from_json(&progress.to_json()),

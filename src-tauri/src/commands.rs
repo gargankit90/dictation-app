@@ -459,10 +459,18 @@ pub fn set_hotkey_recording(
 pub async fn set_share_usage_events(
     state: State<'_, AppConfig>,
     usage: State<'_, Usage>,
+    onboarding: State<'_, Arc<Onboarding>>,
     share: bool,
 ) -> Result<(), String> {
     let usage = usage.inner().clone();
-    on_config(&state, move |config| write_sharing(config, &usage, share)).await
+    let onboarding = Arc::clone(&onboarding);
+    on_config(&state, move |config| {
+        if !share {
+            onboarding.note_sharing_off();
+        }
+        write_sharing(config, &usage, share)
+    })
+    .await
 }
 
 fn write_sharing<S: SecretStore>(
@@ -3197,6 +3205,34 @@ mod capability_tests {
                     },
                 ]
             );
+        }
+
+        /// Round 2: Off through the real command, on Ready or in Settings.
+        #[test]
+        fn u10_turning_it_off_is_noted_for_readys_caption() {
+            let fixture = app_with_usage(&[MAIN], Usage::disabled());
+            let main = &fixture.windows[0];
+            let onboarding = fixture._app.state::<Arc<Onboarding>>();
+            onboarding.open(Readiness::READY);
+            let on_throughout = || {
+                let permissions = dictation_platform::fakes::FakePermissions::new();
+                onboarding.status(&permissions, false).sharing_on_throughout
+            };
+            assert!(on_throughout());
+            invoke(
+                main,
+                "set_share_usage_events",
+                serde_json::json!({ "share": true }),
+            )
+            .unwrap();
+            assert!(on_throughout(), "on doesn't count");
+            invoke(
+                main,
+                "set_share_usage_events",
+                serde_json::json!({ "share": false }),
+            )
+            .unwrap();
+            assert!(!on_throughout());
         }
 
         #[test]

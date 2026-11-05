@@ -23,6 +23,7 @@ import { Onboarding, RELAUNCH_AFTER_POLLS, STEPS } from "./Onboarding";
 import css from "./settings.css?raw";
 import {
   EVENTS_CAPTION,
+  EVENTS_FROM_NOW_CAPTION,
   EVENTS_OFF_CAPTION,
   FINISH_REASON,
   NOT_TESTED,
@@ -90,6 +91,7 @@ class Backend {
   accessibility: PermissionState = "not_determined";
   needsRelaunch = false;
   tryOutcome: TryOutcome = "not_tried";
+  sharingOnThroughout = true;
   downloadPaused = false;
   speechChoice: SpeechChoice | null = null;
   /** The server answers a resume with the whole file. */
@@ -126,6 +128,7 @@ class Backend {
       accessibility: this.accessibility,
       needs_relaunch: this.needsRelaunch,
       try_outcome: this.tryOutcome,
+      sharing_on_throughout: this.sharingOnThroughout,
       download_paused: this.downloadPaused,
       speech_choice: this.speechChoice,
     };
@@ -431,7 +434,6 @@ describe("the sharing switch across setup (U10)", () => {
     expect(share.checked).toBe(true);
     expect(screen.getByText(EVENTS_CAPTION)).toBeTruthy();
     expect(screen.getByText("What's sent")).toBeTruthy();
-    expect(screen.getByText("Change any time in Settings → Privacy.")).toBeTruthy();
   });
 
   it("criterion 3: a stored off shows off on Ready, and setup writes nothing", async () => {
@@ -463,9 +465,101 @@ describe("the sharing switch across setup (U10)", () => {
     expect(words).toContain("deletes what is waiting");
     expect(words).toContain("can't recall what was already sent");
     expect(words).toContain("where you stopped");
-    expect(EVENTS_CAPTION).toContain("have been on since setup began");
-    expect(EVENTS_CAPTION).toContain("Off stops them from now on");
+    expect(EVENTS_CAPTION).toContain("On since setup began");
+    expect(EVENTS_CAPTION).toContain("Off stops them and deletes what's waiting");
+    expect(EVENTS_OFF_CAPTION).toContain("Settings → Privacy");
     expect(EVENTS_CAPTION).not.toMatch(/nothing is sent|until you/i);
+  });
+
+  it("round 2: stored off, then on at Ready, doesn't claim it was on since setup began", async () => {
+    backend.settings = { ...backend.settings, share_usage_events: false };
+    backend.sharingOnThroughout = false;
+    backend.allSet("ready");
+    show();
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    await screen.findByText(EVENTS_OFF_CAPTION);
+    fireEvent.click(share);
+    await waitFor(() => {
+      expect(backend.settings.share_usage_events).toBe(true);
+    });
+    await screen.findByText(EVENTS_FROM_NOW_CAPTION);
+    expect(screen.queryByText(EVENTS_CAPTION)).toBeNull();
+    expect(EVENTS_FROM_NOW_CAPTION).not.toMatch(/since/i);
+  });
+
+  it("round 2: stored off, turned on earlier and relaunched, still doesn't claim it", async () => {
+    backend.sharingOnThroughout = false;
+    backend.allSet("ready");
+    show();
+    await screen.findByText(EVENTS_FROM_NOW_CAPTION);
+    expect(screen.queryByText(EVENTS_CAPTION)).toBeNull();
+  });
+
+  it("round 2: off and on again at Ready says from now, before the app's next report", async () => {
+    backend.allSet("ready");
+    show();
+    await screen.findByText(EVENTS_CAPTION);
+    const share = screen.getByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    fireEvent.click(share);
+    await screen.findByText(EVENTS_OFF_CAPTION);
+    fireEvent.click(share);
+    await screen.findByText(EVENTS_FROM_NOW_CAPTION);
+    expect(backend.sharingOnThroughout).toBe(true);
+    expect(screen.queryByText(EVENTS_CAPTION)).toBeNull();
+  });
+
+  it("round 2: no caption claims anything before the stored choice is read", async () => {
+    backend.allSet("ready");
+    const held: { finish: () => void } = { finish: () => undefined };
+    const original = backend.handle;
+    mockIPC((command, payload) => {
+      if (command !== "get_settings") return original(command, payload);
+      return new Promise((resolve) => {
+        held.finish = () => {
+          resolve(original(command, payload));
+        };
+      });
+    });
+    show();
+    await screen.findByText("You're set");
+    expect(screen.queryByText(EVENTS_CAPTION)).toBeNull();
+    expect(screen.queryByText(EVENTS_FROM_NOW_CAPTION)).toBeNull();
+    act(() => {
+      held.finish();
+    });
+    await screen.findByText(EVENTS_CAPTION);
+  });
+
+  it("item 1: a click on What's sent opens it on Ready, and it stays open", async () => {
+    backend.allSet("ready");
+    show();
+    const summary = await screen.findByText("What's sent");
+    const details = summary.closest("details");
+    if (details === null) throw new Error("no disclosure");
+    expect(details.open).toBe(false);
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
+    // And stays open through the shell's polling, which re-renders the step.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    });
+    expect(details.open).toBe(true);
+    fireEvent.click(summary);
+    expect(details.open).toBe(false);
+  });
+
+  it("item 1: What's sent opens on Settings → Privacy too", () => {
+    render(<Privacy settings={backend.settings} onStored={() => undefined} />);
+    const summary = screen.getByText("What's sent");
+    const details = summary.closest("details");
+    if (details === null) throw new Error("no disclosure");
+    expect(details.open).toBe(false);
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
   });
 
   it("a failed write made elsewhere doesn't trap a step with no switch", async () => {

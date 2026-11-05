@@ -110,6 +110,8 @@ pub struct OnboardingStatus {
     pub download_paused: bool,
     /// The engine selected on the Speech step, if one was.
     pub speech_choice: Option<SpeechChoice>,
+    /// Sharing has been on for the whole of this walk through setup.
+    pub sharing_on_throughout: bool,
 }
 
 /// The OS's permissions, for the onboarding commands.
@@ -243,6 +245,8 @@ impl Onboarding {
             return;
         }
         state.progress.step = Step::Welcome;
+        // A new walk: whether sharing is off now is noted when it opens.
+        state.progress.sharing_was_off = false;
         let progress = state.progress;
         drop(state);
         self.keep(&progress);
@@ -314,6 +318,21 @@ impl Onboarding {
         true
     }
 
+    /// Sharing is off, or was just turned off: Ready can't say it has been on
+    /// since setup began. Kept across a quit, since a relaunch reads the switch
+    /// afresh. Nothing to keep for someone who has never opened setup: opening
+    /// it notes the choice then.
+    pub fn note_sharing_off(&self) {
+        let mut state = self.lock();
+        if !state.opened || state.progress.sharing_was_off {
+            return;
+        }
+        state.progress.sharing_was_off = true;
+        let progress = state.progress;
+        drop(state);
+        self.keep(&progress);
+    }
+
     /// The user asked for Accessibility.
     pub fn note_accessibility_asked(&self) {
         self.lock().accessibility_asked = true;
@@ -383,6 +402,7 @@ impl Onboarding {
                 try_outcome: state.progress.try_outcome,
                 download_paused: state.progress.download_paused,
                 speech_choice: state.progress.speech_choice,
+                sharing_on_throughout: !state.progress.sharing_was_off,
             },
             state.progress,
         );
@@ -563,6 +583,37 @@ mod tests {
         microphone: false,
         accessibility: false,
     };
+
+    #[test]
+    fn u10_a_note_that_sharing_was_off_survives_a_quit_and_ends_with_the_walk() {
+        let dir = temp("sharing-off");
+        let onboarding = Onboarding::load(&dir);
+        onboarding.note_sharing_off();
+        assert!(
+            !dir.join(PROGRESS_FILE).exists(),
+            "setup never opened: nothing to keep"
+        );
+        onboarding.open(Readiness::READY);
+        let permissions = granted(true, true);
+        assert!(onboarding.status(&permissions, false).sharing_on_throughout);
+
+        onboarding.note_sharing_off();
+        assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
+        let relaunched = Onboarding::load(&dir);
+        relaunched.open(Readiness::READY);
+        assert!(
+            !relaunched.status(&permissions, false).sharing_on_throughout,
+            "a relaunch mustn't forget it"
+        );
+
+        relaunched.finish();
+        relaunched.start_over_if_finished();
+        assert!(
+            relaunched.status(&permissions, false).sharing_on_throughout,
+            "Run setup again is a new walk"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_window_starts_on_settings_and_a_new_user_opens_at_welcome() {

@@ -734,6 +734,8 @@ export type OnboardingStatus_Deserialize = {
 	download_paused: boolean,
 	/**  The engine selected on the Speech step, if one was. */
 	speech_choice?: SpeechChoice | null,
+	/**  Sharing has been on for the whole of this walk through setup. */
+	sharing_on_throughout: boolean,
 };
 
 /**  What the settings window needs to show onboarding. */
@@ -757,6 +759,8 @@ export type OnboardingStatus_Serialize = {
 	download_paused: boolean,
 	/**  The engine selected on the Speech step, if one was. */
 	speech_choice: SpeechChoice | null,
+	/**  Sharing has been on for the whole of this walk through setup. */
+	sharing_on_throughout: boolean,
 };
 
 /**  A permission's state, for the onboarding steps. */
