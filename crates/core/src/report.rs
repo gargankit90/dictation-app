@@ -139,7 +139,7 @@ pub fn render(input: &ReportInput<'_>) -> String {
     let _ = writeln!(out, "arch: {}", field(input.arch));
     let _ = writeln!(out, "microphone: {}", input.microphone.as_str());
     let _ = writeln!(out, "accessibility: {}", input.accessibility.as_str());
-    let _ = writeln!(out, "hotkey: {}", field(input.hotkey));
+    let _ = writeln!(out, "dictation_key: {}", field(input.hotkey));
     let _ = match input.engine {
         EngineInfo::Cloud(provider) => writeln!(out, "engine: cloud ({provider})"),
         EngineInfo::Local(model) => writeln!(out, "engine: local ({})", field(model)),
@@ -232,7 +232,7 @@ mod tests {
                 "arch",
                 "microphone",
                 "accessibility",
-                "hotkey",
+                "dictation_key",
                 "engine",
                 "engine_ready",
                 "analytics",

@@ -126,7 +126,7 @@ You install from the DMG once. After that, Vocet updates itself:
 - **When it starts**, it quietly asks the release page whether there is a
   newer build. If there is, it shows **Update available** with what is new;
   if not, or if you are offline, it shows nothing.
-- **Any time**, click the menu-bar icon > **Check for updates…**. It says
+- **Any time**, click the menu-bar icon > **Settings…** > General > **Check now**. It says
   _"You're up to date"_, offers the update, or says plainly that it couldn't
   check (_"Couldn't check for updates"_, for example when you are offline).
 - Nothing is downloaded or installed until you click **Install and
@@ -163,7 +163,7 @@ Vocet writes a log that you can send us. It holds what the app did
 keys are removed from the log before it is written, and the words you dictate
 are not written at all.
 
-- **See it:** menu-bar icon > **Reveal log** opens the folder in Finder.
+- **See it:** menu-bar icon > **Help…** > Log file > **Show in Finder** opens the folder.
   It is `~/Library/Logs/com.dictationapp.desktop/`.
 - **Send it:** in that folder, select all the files, right-click > **Compress**,
   and attach the zip to a bug report (see "Report a bug" below; the files are
@@ -179,7 +179,7 @@ Open an issue: <https://github.com/gargankit90/dictation-app/issues/new/choose>
 and pick **Bug report**. The form asks for:
 
 - your macOS version (Apple menu > **About This Mac**) and Mac model,
-- the Vocet version: menu-bar icon > **Check for updates…** says
+- the Vocet version: menu-bar icon > **Settings…** > About says
   "Vocet _x.y.z_ is the newest version" (or what you have, if there is
   an update),
 - what you did, what you expected and what happened,

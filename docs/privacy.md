@@ -131,9 +131,8 @@ recent dictations": Off, 10, 25, 50 or 100. The default is the last 25.
 
 ## Troubleshoot and "Report a problem" (separate from analytics)
 
-Tray menu → Troubleshoot… (also Settings → Help → Troubleshoot…) checks, on
-this Mac, the microphone and Accessibility permissions, whether the hotkey
-works, whether the engine is ready (a saved key can be read, or the chosen
+Settings → Help → Troubleshoot checks, on this Mac, the microphone and
+Accessibility permissions, whether the dictation key works, whether the engine is ready (a saved key can be read, or the chosen
 model is downloaded and the engine has loaded it, or says it is still loading
 or couldn't load), and the last error. These checks record no
 audio and contact nobody. "Test connection" is the one button that does: it
@@ -145,7 +144,7 @@ when you press it.
 
 - the app version, macOS version and chip
 - whether the microphone and Accessibility permissions are granted
-- your hotkey, as the setting writes it
+- your dictation key, as the setting writes it
 - the engine: cloud with the provider's name, or on this Mac with the model id
 - whether the engine is ready
 - whether anonymous usage events are on

@@ -1185,7 +1185,7 @@ mod tests {
                 "arch: ",
                 "microphone: ",
                 "accessibility: ",
-                "hotkey: ",
+                "dictation_key: ",
                 "engine: ",
                 "engine_ready: ",
                 "analytics: ",
