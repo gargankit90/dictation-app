@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Onboarding C — single setup page</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#22663F}a:hover{color:#174A2D}
+</style>
+</helmet>
+<div style="width: 3520px; height: 820px; box-sizing: border-box; padding: 48px; background: #E3E6DE; font-family: 'IBM Plex Sans', -apple-system, system-ui, sans-serif; color: #17201A; display: flex; gap: 48px; align-items: flex-start">
+
+<sc-for list="{{screens}}" as="sc" hint-placeholder-count="5">
+<div style="width: 640px; display: flex; flex-direction: column; gap: 14px">
+<p style="margin: 0; font-size: 15px; font-weight: 600; color: #3F4A43">{{sc.caption}}</p>
+<div style="width: 640px; height: 640px; background: #FFFFFF; border-radius: 14px; box-shadow: 0 20px 50px rgba(23,32,26,0.14); overflow: hidden; display: flex; flex-direction: column">
+<div style="height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid #E6E8E1; flex-shrink: 0">
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #FF5F57" aria-hidden="true"></span><span style="width: 12px; height: 12px; border-radius: 50%; background: #FEBC2E" aria-hidden="true"></span><span style="width: 12px; height: 12px; border-radius: 50%; background: #DADDD3" aria-hidden="true"></span>
+<span style="flex: 1; text-align: center; font-size: 13px; font-weight: 600; color: #56605A; margin-right: 52px">Set up utter_</span>
+</div>
+<div style="padding: 20px 24px 8px; display: flex; justify-content: space-between; align-items: baseline">
+<h1 style="margin: 0; font-size: 21px">Setup checklist</h1>
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #56605A">{{sc.count}}</span>
+</div>
+<div style="flex: 1; padding: 6px 24px 16px; display: flex; flex-direction: column; gap: 8px; min-height: 0">
+<sc-for list="{{sc.rows}}" as="r" hint-placeholder-count="5">
+<div style="border: {{r.border}}; border-radius: 10px; background: {{r.bg}}; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="width: 22px; height: 22px; border-radius: 6px; background: {{r.dot}}; color: #fff; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1.5px solid {{r.ring}}">{{r.mark}}</span>
+<strong style="font-size: 15px; color: {{r.color}}">{{r.label}}</strong>
+<span style="flex: 1"></span>
+<span style="font-size: 13px; color: #56605A">{{r.summary}}</span>
+</div>
+
+<sc-if value="{{r.openEngine}}" hint-placeholder-val="{{ false }}">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<div style="border: 2px solid {{accent}}; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px"><strong style="font-size: 14px">On this Mac</strong><span style="font-size: 13px; color: #3F4A43; line-height: 1.45">[MODEL NAME] · [SIZE]. Offline once downloaded.</span></div>
+<div style="border: 1px solid #C9CEC3; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px"><strong style="font-size: 14px">Your key</strong><span style="font-size: 13px; color: #3F4A43; line-height: 1.45">Groq or OpenAI. Audio goes to them.</span></div>
+</div>
+<button type="button" style="align-self: flex-start; background: {{accent}}; color: #fff; border: 0; border-radius: 8px; padding: 0 14px; height: 44px; font: inherit; font-weight: 600">Download [SIZE]</button>
+</sc-if>
+
+<sc-if value="{{r.openPerms}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 8px; font-size: 14px">
+<div style="display: flex; justify-content: space-between; gap: 10px"><span>Microphone — records while you hold the key</span><span style="color: #1E7A44; font-weight: 600">✓</span></div>
+<div style="display: flex; justify-content: space-between; gap: 10px; align-items: center"><span>Accessibility — notices the key, pastes text</span><a href="#" style="font-weight: 600; min-height: 44px; display: inline-flex; align-items: center">Open Settings</a></div>
+</div>
+</sc-if>
+
+<sc-if value="{{r.openKey}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; align-items: center; gap: 14px">
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 18px; background: #F3F4EF; border: 1px solid #B9BFB3; border-bottom-width: 4px; border-radius: 8px; padding: 8px 16px">Right ⌥</span>
+<span style="font-size: 14px; color: #3F4A43">Hold to speak · release to paste</span>
+</div>
+<a href="#" style="font-size: 14px; min-height: 44px; display: inline-flex; align-items: center">Record a different key</a>
+</sc-if>
+
+<sc-if value="{{r.openTry}}" hint-placeholder-val="{{ false }}">
+<label for="tryC" style="font-size: 13px; color: #56605A">Hold Right ⌥ and speak into this box</label>
+<textarea id="tryC" style="height: 70px; border: 2px solid {{accent}}; border-radius: 8px; padding: 10px; font: inherit; font-size: 15px; resize: none">Testing one two three.</textarea>
+<span style="font-size: 13px; color: #1E5C37; font-weight: 600">✓ Recorded · transcribed · pasted</span>
+</sc-if>
+
+<sc-if value="{{r.openFinish}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px"><label for="anC" style="font-size: 14px; font-weight: 600">Anonymous usage events (on)</label><input id="anC" type="checkbox" checked="checked" style="width: 22px; height: 22px; accent-color: {{accent}}"></div>
+<span style="font-size: 13px; color: #3F4A43; line-height: 1.45">Never audio, text, keys or app names. <a href="#">What’s sent</a></span>
+<button type="button" style="align-self: flex-end; background: {{accent}}; color: #fff; border: 0; border-radius: 8px; padding: 0 18px; height: 44px; font: inherit; font-weight: 600">Done</button>
+</sc-if>
+
+</div>
+</sc-for>
+</div>
+<div style="height: 44px; flex-shrink: 0; border-top: 1px solid #E6E8E1; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; font-size: 13px; color: #56605A">
+<span>{{sc.footer}}</span><a href="#" style="font-size: 13px">Report a problem</a>
+</div>
+</div>
+</div>
+</sc-for>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#22663F","options":["#22663F","#1F4FC9","#8A3B12","#17201A"]},"$preview":{"width":3520,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#22663F';
+    const labels = ['Engine', 'Permissions', 'Dictation key', 'Test dictation', 'Finish'];
+    const summaries = ['On this Mac', 'Both allowed', 'Right ⌥', 'Worked', ''];
+    const captions = ['1 · Everything on one page; current task expanded', '2 · Done rows collapse to a summary; download continues in the footer', '3 · Any row can be reopened to change it', '4 · Test proves the full loop', '5 · Finish with the analytics disclosure'];
+    const footers = ['Nothing downloading yet', 'Downloading [MODEL NAME] · [x] of [SIZE]', 'Downloading [MODEL NAME] · [x] of [SIZE]', 'Model ready', 'Model ready'];
+    const screens = captions.map((caption, i) => ({
+      caption,
+      count: i + ' of 5 done',
+      footer: footers[i],
+      rows: labels.map((label, j) => {
+        const done = j < i, now = j === i;
+        return {
+          label,
+          mark: done ? '✓' : String(j + 1),
+          summary: done ? summaries[j] : '',
+          dot: done ? '#1E7A44' : (now ? accent : '#FFFFFF'),
+          ring: done ? '#1E7A44' : (now ? accent : '#B9BFB3'),
+          color: (done || now) ? '#17201A' : '#8A938C',
+          bg: now ? '#FFFFFF' : (done ? '#F6F7F3' : '#FFFFFF'),
+          border: now ? '1px solid #9FB3A4' : '1px solid #E6E8E1',
+          openEngine: now && j === 0,
+          openPerms: now && j === 1,
+          openKey: now && j === 2,
+          openTry: now && j === 3,
+          openFinish: now && j === 4
+        };
+      })
+    }));
+    return { accent, screens };
+  }
+}
+</script>
+</body>
+</html>

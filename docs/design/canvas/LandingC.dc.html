@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Utter — open-source dictation for Mac</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F3F4EF}
+a{color:#22663F}a:hover{color:#174A2D}
+</style>
+</helmet>
+<div style="font-family: 'IBM Plex Sans', system-ui, sans-serif; color: #17201A; background: #F3F4EF; width: 100%">
+
+<header style="max-width: 1200px; margin: 0 auto; padding: 20px 24px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; border-bottom: 1px solid #DADDD3">
+<div style="display: flex; align-items: baseline; gap: 10px">
+<span style="font-family: 'IBM Plex Mono', monospace; font-weight: 500; font-size: 22px">utter<span style="color: {{accent}}">_</span></span>
+<span style="font-size: 14px; color: #56605A">dictation for Mac</span>
+</div>
+<nav aria-label="Main" style="display: flex; flex-wrap: wrap; gap: 18px; align-items: center; font-size: 15px">
+<a href="#flow" style="color: #2B352E; text-decoration: none">Where audio goes</a>
+<a href="#help" style="color: #2B352E; text-decoration: none">Help</a>
+<a href="https://github.com/gargankit90/dictation-app" style="color: #17201A; text-decoration: none; border: 1px solid #B9BFB3; border-radius: 8px; padding: 9px 14px; min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 8px; font-weight: 600">GitHub · MIT</a>
+</nav>
+</header>
+
+<section style="max-width: 1200px; margin: 0 auto; padding: 64px 24px 56px; display: flex; flex-wrap: wrap; gap: 48px; align-items: center">
+<div style="flex: 1 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+<h1 style="margin: 0; font-size: 54px; line-height: 1.06; font-weight: 700; letter-spacing: -0.02em">Your voice, typed at the cursor. Open source, on your terms.</h1>
+<p style="margin: 0; font-size: 19px; line-height: 1.55; color: #3F4A43">Hold <kbd style="font-family: 'IBM Plex Mono', monospace; font-size: 15px; background: #fff; border: 1px solid #B9BFB3; border-bottom-width: 3px; border-radius: 6px; padding: 2px 8px">Right ⌥</kbd>, speak, release. Utter turns speech into text with a model on your Mac or your own API key, and pastes it into whatever app you’re in.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 12px">
+<a href="#" style="background: #17201A; color: #fff; text-decoration: none; padding: 14px 22px; border-radius: 10px; font-weight: 600; font-size: 17px; min-height: 48px; box-sizing: border-box; display: inline-flex; align-items: center">Download for Mac</a>
+<a href="https://github.com/gargankit90/dictation-app" style="color: #17201A; text-decoration: none; padding: 14px 18px; border-radius: 10px; border: 1px solid #B9BFB3; font-weight: 600; min-height: 48px; box-sizing: border-box; display: inline-flex; align-items: center">Read the code</a>
+</div>
+<p style="margin: 0; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #56605A">[VERSION] · arm64 · macOS ≥ 13 · no account</p>
+</div>
+<div style="flex: 1 1 460px; min-width: 0; border: 1px solid #DADDD3; border-radius: 14px; background: #fff; padding: 12px">
+<img src="/_blob/d7a424be9aee95c50552ad7a6ca3fe10" alt="Demo: dictating into a text field" style="display: block; width: 100%; height: auto; border-radius: 8px">
+</div>
+</section>
+
+<section id="flow" style="background: #fff; border-top: 1px solid #DADDD3; border-bottom: 1px solid #DADDD3">
+<div style="max-width: 1200px; margin: 0 auto; padding: 72px 24px; display: flex; flex-direction: column; gap: 28px">
+<h2 style="margin: 0; font-size: 34px; font-weight: 700">Exactly where your audio goes</h2>
+<div style="display: flex; flex-direction: column; gap: 18px">
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center">
+<div style="border: 1px solid #B9BFB3; border-radius: 10px; padding: 14px 18px; background: #F3F4EF; font-weight: 600">Microphone</div>
+<span style="font-family: 'IBM Plex Mono', monospace; color: #56605A" aria-hidden="true">──▶</span>
+<div style="border: 2px solid {{accent}}; border-radius: 10px; padding: 14px 18px; display: flex; flex-direction: column; gap: 2px"><strong>Model on this Mac</strong><span style="font-size: 14px; color: #3F4A43">offline after a one-time download</span></div>
+<span style="font-family: 'IBM Plex Mono', monospace; color: #56605A" aria-hidden="true">──▶</span>
+<div style="border: 1px solid #B9BFB3; border-radius: 10px; padding: 14px 18px; background: #F3F4EF; font-weight: 600">Text at your cursor</div>
+</div>
+<p style="margin: 0; font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #56605A">or</p>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center">
+<div style="border: 1px solid #B9BFB3; border-radius: 10px; padding: 14px 18px; background: #F3F4EF; font-weight: 600">Microphone</div>
+<span style="font-family: 'IBM Plex Mono', monospace; color: #56605A" aria-hidden="true">──▶</span>
+<div style="border: 2px solid #8A6A1F; border-radius: 10px; padding: 14px 18px; display: flex; flex-direction: column; gap: 2px"><strong>Groq or OpenAI, with your key</strong><span style="font-size: 14px; color: #3F4A43">direct from your Mac · billed by them</span></div>
+<span style="font-family: 'IBM Plex Mono', monospace; color: #56605A" aria-hidden="true">──▶</span>
+<div style="border: 1px solid #B9BFB3; border-radius: 10px; padding: 14px 18px; background: #F3F4EF; font-weight: 600">Text at your cursor</div>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 8px">
+<div style="background: #F3F4EF; border-radius: 12px; padding: 18px"><strong>Keys</strong><p style="margin: 6px 0 0; color: #3F4A43; line-height: 1.55">Kept in your macOS Keychain. Never logged, never sent to us.</p></div>
+<div style="background: #F3F4EF; border-radius: 12px; padding: 18px"><strong>Usage events</strong><p style="margin: 6px 0 0; color: #3F4A43; line-height: 1.55">Anonymous, on by default, off in Settings. Never audio, text, keys or app names. <a href="#">See the full list</a></p></div>
+<div style="background: #F3F4EF; border-radius: 12px; padding: 18px"><strong>No server of ours</strong><p style="margin: 6px 0 0; color: #3F4A43; line-height: 1.55">Speech never passes through Utter’s infrastructure. Check it in the source.</p></div>
+</div>
+</div>
+</section>
+
+<section id="help" style="max-width: 1200px; margin: 0 auto; padding: 72px 24px; display: flex; flex-wrap: wrap; gap: 40px">
+<div style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 34px; font-weight: 700">When something goes wrong</h2>
+<p style="margin: 0; color: #3F4A43; line-height: 1.6">Each error tells you the next step. Troubleshoot runs the checks for you; Report a problem builds a bug report you can read before you send it.</p>
+</div>
+<div style="flex: 1 1 460px; min-width: 0; background: #fff; border: 1px solid #DADDD3; border-radius: 14px; padding: 22px; display: flex; flex-direction: column; gap: 12px; font-size: 16px">
+<strong style="font-size: 17px">Troubleshoot</strong>
+<div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap"><span>✓ Microphone allowed</span></div>
+<div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap"><span>✓ Accessibility allowed</span></div>
+<div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap"><span>✓ Hotkey Right ⌥ registered</span></div>
+<div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center"><span style="color: #8A3B12; font-weight: 600">✗ Groq rejected the key</span><a href="#" style="font-weight: 600; min-height: 44px; display: inline-flex; align-items: center">Re-enter key</a></div>
+<a href="#" style="align-self: flex-start; color: #17201A; border: 1px solid #B9BFB3; border-radius: 8px; padding: 10px 14px; text-decoration: none; font-weight: 600; min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center">Report a problem…</a>
+</div>
+</section>
+
+<section style="background: #E8EAE3">
+<div style="max-width: 1200px; margin: 0 auto; padding: 56px 24px; display: flex; flex-direction: column; gap: 18px">
+<h2 style="margin: 0; font-size: 26px; font-weight: 700">First time opening it</h2>
+<p style="margin: 0; color: #3F4A43; line-height: 1.6; max-width: 760px">Utter lives in the menu bar. Setup asks for Microphone and Accessibility, lets you pick on-Mac or your key, and ends with a real test dictation. [Add first-open guidance here if the release is not yet notarized.]</p>
+</div>
+</section>
+
+<footer style="max-width: 1200px; margin: 0 auto; padding: 36px 24px 48px; display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; color: #56605A; font-size: 15px">
+<span><strong style="color: #17201A">utter_</strong> is a family of voice tools. Next: Notes, Read aloud — in development.</span>
+<span>MIT · <a href="https://github.com/gargankit90/dictation-app">Source</a> · <a href="#">Privacy</a></span>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#22663F","options":["#22663F","#1F4FC9","#8A3B12","#17201A"]},"$preview":{"width":1440,"height":3600}}'>
+class Component extends DCLogic {
+renderVals() {
+return { accent: this.props.accent ?? '#22663F' };
+}
+}
+</script>
+</body>
+</html>

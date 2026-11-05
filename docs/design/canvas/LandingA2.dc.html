@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vocet — round 2 landing</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Inter+Tight:wght@600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#FBFAF7}
+a{color:#1F4FC9}a:hover{color:#163C9A}
+</style>
+</helmet>
+<div style="font-family: Inter, system-ui, sans-serif; color: #1C1B19; background: #FBFAF7; width: 100%">
+
+<header style="max-width: 1200px; margin: 0 auto; padding: 18px 24px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between">
+<div style="display: flex; align-items: center; gap: 10px">
+<svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect x="1" y="1" width="26" height="26" rx="8" fill="{{accent}}"></rect><path d="M9 11v6M14 8v12M19 11v6" stroke="#fff" stroke-width="2.2" stroke-linecap="round"></path></svg>
+<span style="font-family: 'Inter Tight', sans-serif; font-weight: 800; font-size: 20px">Vocet</span>
+<span style="font-size: 13px; font-weight: 600; color: #3B3A36; background: #EFECE4; border-radius: 999px; padding: 4px 10px">Dictation</span>
+</div>
+<nav aria-label="Main" style="display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: center; font-size: 15px">
+<a href="#uses" style="color: #3B3A36; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center">Uses</a>
+<a href="#setup" style="color: #3B3A36; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center">Setup</a>
+<a href="#data" style="color: #3B3A36; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center">Your data</a>
+<a href="https://github.com/gargankit90/dictation-app" style="color: #3B3A36; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center">GitHub</a>
+<a href="#download" style="background: #1C1B19; color: #fff; text-decoration: none; padding: 0 16px; border-radius: 10px; font-weight: 600; min-height: 44px; display: inline-flex; align-items: center">Download</a>
+</nav>
+</header>
+
+<section style="max-width: 1200px; margin: 0 auto; padding: 40px 24px 64px; display: flex; flex-wrap: wrap; gap: 48px; align-items: center">
+<div style="flex: 1 1 400px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+<h1 style="margin: 0; font-family: 'Inter Tight', sans-serif; font-size: clamp(38px, 5.2vw, 62px); line-height: 1.02; letter-spacing: -0.03em">Talk instead of type in every app you use.</h1>
+<p style="margin: 0; font-size: 19px; line-height: 1.55; color: #4A4843">Hold one key, say what you mean, let go — the words are typed where your cursor is. Free, open source, no account.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center">
+<a id="download" href="#" style="background: {{accent}}; color: #fff; text-decoration: none; padding: 0 22px; border-radius: 12px; font-weight: 600; font-size: 17px; min-height: 52px; display: inline-flex; align-items: center">Download for Mac</a>
+<a href="#setup" style="color: #1C1B19; text-decoration: none; padding: 0 18px; border-radius: 12px; border: 1px solid #D6D2C8; font-weight: 600; min-height: 52px; display: inline-flex; align-items: center">See how setup works</a>
+</div>
+<p style="margin: 0; font-size: 14px; color: #5C5A55">Alpha [VERSION] · Apple Silicon · macOS 13 or later · <a href="#">Release notes</a></p>
+<p style="margin: 0; font-size: 14px; color: #5C5A55">Speech is processed on your Mac, or by Groq or OpenAI with your own key. <a href="#data">Where your data goes</a></p>
+</div>
+
+<div style="flex: 1 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+<div style="background: #fff; border: 1px solid #E4E1D9; border-radius: 18px; box-shadow: 0 24px 60px rgba(28,27,25,0.10); overflow: hidden">
+<div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #EEEBE4; font-size: 14px; font-weight: 600; color: #3B3A36"># design-review</div>
+<div style="padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; font-size: 15px">
+<div style="display: flex; gap: 10px"><span style="width: 32px; height: 32px; border-radius: 8px; background: #E7E2D7; flex-shrink: 0" aria-hidden="true"></span><div><strong>Priya</strong><p style="margin: 2px 0 0; color: #3B3A36">Can you look at the onboarding copy before Friday?</p></div></div>
+<div style="border: 2px solid {{accent}}; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px">
+<p style="margin: 0; font-size: 16px; line-height: 1.5">{{heroText}}<span style="display: inline-block; width: 2px; height: 18px; background: {{accent}}; vertical-align: -3px; margin-left: 1px"></span></p>
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+<span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #fff; background: #1C1B19; border-radius: 999px; padding: 6px 12px">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: {{pillDot}}" aria-hidden="true"></span>{{pillText}}</span>
+<span style="font-size: 12px; color: #8A877F">Message #design-review</span>
+</div>
+</div>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px" role="group" aria-label="Demo steps">
+<sc-for list="{{heroSteps}}" as="s" hint-placeholder-count="3">
+<button type="button" onClick="{{s.pick}}" style="flex: 1 1 140px; min-height: 48px; border-radius: 10px; border: 1px solid {{s.border}}; background: {{s.bg}}; color: {{s.color}}; font: inherit; font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer">{{s.label}}</button>
+</sc-for>
+</div>
+<p style="margin: 0; font-size: 13px; color: #8A877F">Illustration. <a href="#real-demo">Watch the real recording</a></p>
+</div>
+</section>
+
+<section id="uses" style="background: #fff; border-top: 1px solid #ECE9E2; border-bottom: 1px solid #ECE9E2">
+<div style="max-width: 1200px; margin: 0 auto; padding: 72px 24px; display: flex; flex-direction: column; gap: 24px">
+<h2 style="margin: 0; font-family: 'Inter Tight', sans-serif; font-size: clamp(28px, 3.4vw, 40px); letter-spacing: -0.02em">Wherever you’d type</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 8px" role="tablist" aria-label="Use cases">
+<sc-for list="{{uses}}" as="u" hint-placeholder-count="4">
+<button type="button" role="tab" aria-selected="{{u.selected}}" onClick="{{u.pick}}" style="min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid {{u.border}}; background: {{u.bg}}; color: {{u.fg}}; font: inherit; font-weight: 600; cursor: pointer">{{u.label}}</button>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 32px; align-items: center">
+<div style="flex: 1 1 520px; min-width: 0; background: #FBFAF7; border: 1px solid #E4E1D9; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 13px; color: #8A877F; font-weight: 600">{{use.app}}</span>
+<p style="margin: 0; font-size: 18px; line-height: 1.55; white-space: pre-line">{{use.text}}</p>
+</div>
+<div style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 22px; font-weight: 700">{{use.caption}}</p>
+<p style="margin: 0; color: #4A4843; line-height: 1.55">{{use.detail}}</p>
+</div>
+</div>
+<div id="real-demo" style="max-width: 720px; border: 1px solid #E4E1D9; border-radius: 14px; overflow: hidden; margin-top: 12px">
+<img src="/_blob/d7a424be9aee95c50552ad7a6ca3fe10" alt="Real screen recording: holding the key, speaking, and the words appearing in a text field" style="display: block; width: 100%; height: auto">
+</div>
+</div>
+</section>
+
+<section id="setup" style="max-width: 1200px; margin: 0 auto; padding: 72px 24px; display: flex; flex-direction: column; gap: 24px">
+<h2 style="margin: 0; font-family: 'Inter Tight', sans-serif; font-size: clamp(28px, 3.4vw, 40px); letter-spacing: -0.02em">Setup ends with your first real dictation</h2>
+<ol style="margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px">
+<li style="background: #fff; border: 1px solid #E4E1D9; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 6px"><span style="font-weight: 700; color: {{accent}}">1</span><strong>Choose how speech becomes text</strong><span style="color: #4A4843; line-height: 1.5">On this Mac (a one-time model download) or your own Groq or OpenAI key.</span></li>
+<li style="background: #fff; border: 1px solid #E4E1D9; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 6px"><span style="font-weight: 700; color: {{accent}}">2</span><strong>Allow two permissions</strong><span style="color: #4A4843; line-height: 1.5">Microphone, and Accessibility to paste at your cursor. The model downloads meanwhile.</span></li>
+<li style="background: #fff; border: 1px solid #E4E1D9; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 6px"><span style="font-weight: 700; color: {{accent}}">3</span><strong>Confirm your key</strong><span style="color: #4A4843; line-height: 1.5">Right Option by default, or record another.</span></li>
+<li style="background: #fff; border: 1px solid #E4E1D9; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 6px"><span style="font-weight: 700; color: {{accent}}">4</span><strong>Say a sentence</strong><span style="color: #4A4843; line-height: 1.5">It’s recorded, transcribed and pasted — so you know it all works.</span></li>
+</ol>
+</section>
+
+<section style="background: #F3F1EB">
+<div style="max-width: 1200px; margin: 0 auto; padding: 64px 24px; display: flex; flex-wrap: wrap; gap: 24px; align-items: stretch">
+<div style="flex: 1 1 360px; min-width: 0; background: #fff; border-radius: 16px; padding: 26px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-family: 'Inter Tight', sans-serif; font-size: 28px">Free. No account.</h2>
+<ul style="margin: 0; padding-left: 20px; line-height: 1.9; color: #3B3A36">
+<li>Unlimited dictation with a model on your Mac</li>
+<li>Or your own Groq or OpenAI key — they bill your account directly</li>
+<li>Open source under the MIT licence</li>
+<li>No paid plan, no sign-up</li>
+</ul>
+</div>
+<div style="flex: 1 1 360px; min-width: 0; background: #fff; border-radius: 16px; padding: 26px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-family: 'Inter Tight', sans-serif; font-size: 28px">Which engine?</h2>
+<div style="display: flex; flex-direction: column; gap: 10px; font-size: 15px; line-height: 1.5">
+<div><strong>English</strong> — Parakeet, about 477 MB, fast on Apple Silicon.</div>
+<div><strong>Hindi and 29 more languages</strong> — Qwen3-ASR, [SIZE].</div>
+<div><strong>Your key</strong> — Groq or OpenAI Whisper; needs internet.</div>
+</div>
+</div>
+</div>
+</section>
+
+<section id="data" style="max-width: 1200px; margin: 0 auto; padding: 72px 24px; display: flex; flex-direction: column; gap: 22px">
+<h2 style="margin: 0; font-family: 'Inter Tight', sans-serif; font-size: clamp(28px, 3.4vw, 40px); letter-spacing: -0.02em">Where your data goes</h2>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px">
+<div style="border: 1px solid #E4E1D9; border-radius: 14px; padding: 20px; background: #fff; display: flex; flex-direction: column; gap: 8px"><strong>Your speech</strong><span style="color: #4A4843; line-height: 1.55">On this Mac: stays on your Mac. With your key: sent from your Mac straight to Groq or OpenAI. Never through a server of ours.</span></div>
+<div style="border: 1px solid #E4E1D9; border-radius: 14px; padding: 20px; background: #fff; display: flex; flex-direction: column; gap: 8px"><strong>Your key</strong><span style="color: #4A4843; line-height: 1.55">Stored in your macOS Keychain. Never logged or sent to us.</span></div>
+<div style="border: 1px solid #E4E1D9; border-radius: 14px; padding: 20px; background: #fff; display: flex; flex-direction: column; gap: 8px"><strong>Usage and error events</strong><span style="color: #4A4843; line-height: 1.55">On by default: anonymous events to PostHog and error reports to Sentry, so we can fix what breaks. Never audio, transcripts, typed text, keys or app names. Turn off in setup or Settings. <a href="#">Full list</a></span></div>
+</div>
+</section>
+
+<section style="border-top: 1px solid #ECE9E2">
+<div style="max-width: 860px; margin: 0 auto; padding: 64px 24px; display: flex; flex-direction: column; gap: 6px">
+<h2 style="margin: 0 0 10px; font-family: 'Inter Tight', sans-serif; font-size: 32px">Questions</h2>
+<details style="border-bottom: 1px solid #E4E1D9; padding: 12px 0"><summary style="font-weight: 600; cursor: pointer; min-height: 32px">Why does it need Accessibility?</summary><p style="color: #4A4843; line-height: 1.6">To notice your dictation key in any app and paste at your cursor. It doesn’t read your screen.</p></details>
+<details style="border-bottom: 1px solid #E4E1D9; padding: 12px 0"><summary style="font-weight: 600; cursor: pointer; min-height: 32px">How is this different from macOS dictation?</summary><p style="color: #4A4843; line-height: 1.6">[Answer after measuring: model choice, your own key, one-key hold-to-talk in every app.]</p></details>
+<details style="border-bottom: 1px solid #E4E1D9; padding: 12px 0"><summary style="font-weight: 600; cursor: pointer; min-height: 32px">Something isn’t working</summary><p style="color: #4A4843; line-height: 1.6">Menu bar icon → Troubleshoot checks permissions, your key, the model and the hotkey, and says what to fix. Report a problem shows you the report before you share it.</p></details>
+<details style="border-bottom: 1px solid #E4E1D9; padding: 12px 0"><summary style="font-weight: 600; cursor: pointer; min-height: 32px">Is this the official download?</summary><p style="color: #4A4843; line-height: 1.6">Download only from this site or the project’s GitHub releases.</p></details>
+</div>
+</section>
+
+<footer style="background: #1C1B19; color: #D9D6CE">
+<div style="max-width: 1200px; margin: 0 auto; padding: 36px 24px; display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: baseline; font-size: 15px">
+<span><strong style="color: #fff">Vocet</strong> — Dictation today. Notes and Read aloud are in development.</span>
+<span>MIT · <a href="https://github.com/gargankit90/dictation-app" style="color: #fff">GitHub</a> · <a href="#" style="color: #fff">Privacy</a></span>
+</div>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#1F4FC9","options":["#1F4FC9","#0F6E66","#B4531F","#1C1B19"]},"$preview":{"width":1440,"height":4300}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { step: 2, use: 0 }; }
+  renderVals() {
+    const accent = this.props.accent ?? '#1F4FC9';
+    const step = this.state.step;
+    const stepDefs = [
+      { label: 'Hold Right ⌥', text: '', pill: 'Listening…', dot: '#E5484D' },
+      { label: 'Speak', text: '', pill: 'Transcribing…', dot: '#F2B544' },
+      { label: 'Release — pasted', text: 'Yes, I’ll review the onboarding copy tomorrow morning and send notes by noon.', pill: 'Pasted', dot: '#3DBE6B' }
+    ];
+    const cur = stepDefs[step];
+    const heroSteps = stepDefs.map((s, i) => ({
+      label: s.label,
+      bg: i === step ? '#1C1B19' : '#FFFFFF',
+      border: i === step ? '#1C1B19' : '#D6D2C8',
+      pick: () => this.setState({ step: i })
+    })).map((s, i) => ({ ...s, label: s.label }));
+    const useDefs = [
+      { label: 'Message', app: 'Slack · reply', text: 'Sounds good — let’s move the review to Thursday at 3 and I’ll bring the new screenshots.', caption: 'Replies without breaking flow', detail: 'Hold the key in the message box, talk, let go. The text is pasted, ready to send.' },
+      { label: 'Email', app: 'Mail · new message', text: 'Hi Sam,\nThanks for the quick turnaround. I’ve attached the notes from today; the two open questions are at the top.', caption: 'Paragraphs, not just phrases', detail: 'Dictate a whole paragraph in one hold.' },
+      { label: 'AI prompt', app: 'Claude · new chat', text: 'Write a short test plan for the onboarding flow: one happy path, then what happens when the microphone is denied.', caption: 'Explain the task out loud', detail: 'Spoken prompts tend to carry more context than typed ones.' },
+      { label: 'Notes', app: 'Notes', text: 'Ideas for the landing page: show the real demo first, then setup, then where data goes.', caption: 'Capture a thought before it’s gone', detail: 'Works in any app with a text field.' }
+    ];
+    const u = this.state.use;
+    const uses = useDefs.map((d, i) => ({
+      label: d.label,
+      selected: i === u ? 'true' : 'false',
+      bg: i === u ? '#1C1B19' : '#FFFFFF',
+      fg: i === u ? '#FFFFFF' : '#1C1B19',
+      border: i === u ? '#1C1B19' : '#D6D2C8',
+      pick: () => this.setState({ use: i })
+    }));
+    return {
+      accent,
+      heroText: cur.text,
+      pillText: cur.pill,
+      pillDot: cur.dot,
+      heroSteps: heroSteps.map((s, i) => ({ ...s, label: s.label, color: i === step ? '#fff' : '#1C1B19' })).map((s) => s),
+      uses,
+      use: useDefs[u]
+    };
+  }
+}
+</script>
+</body>
+</html>

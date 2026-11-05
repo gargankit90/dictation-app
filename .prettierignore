@@ -14,3 +14,5 @@ src/bindings.ts
 *.md
 # A template: whitespace is output.
 about.hbs
+# Design source: generated and exploratory HTML.
+docs/design/

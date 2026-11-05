@@ -1,0 +1,27 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-11-03T14:50:07Z"},
+  "title": "Dictation: landing page and onboarding",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 3600, "title": "Landing A · Murmur — quiet Mac utility", "expand": "fill"},
+    "LandingB.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 3600, "title": "Landing B · Parlance — product family shell", "expand": "fill"},
+    "LandingC.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 3600, "title": "Landing C · Utter — open-source, show the data flow", "expand": "fill"},
+    "OnboardingA.dc.html": {"x": 0, "y": 4020, "w": 3520, "h": 820, "title": "Onboarding A · Sidebar checklist (5 stages)"},
+    "OnboardingB.dc.html": {"x": 0, "y": 4960, "w": 3520, "h": 820, "title": "Onboarding B · One card at a time"},
+    "OnboardingC.dc.html": {"x": 0, "y": 5900, "w": 3520, "h": 820, "title": "Onboarding C · Single setup page"},
+    "LandingA2.dc.html": {"x": 5000, "y": 0, "w": 1440, "h": 4300, "title": "Round 2 · Landing A2 — click the demo steps and use-case tabs", "expand": "fill", "is_interactive": true},
+    "OnboardingA2.dc.html": {"x": 5000, "y": 4720, "w": 4176, "h": 840, "title": "Round 2 · Onboarding A2 — main path (6 steps)"},
+    "OnboardingA2States.dc.html": {"x": 5000, "y": 5680, "w": 4176, "h": 840, "title": "Round 2 · Onboarding A2 — branches and repair states"}
+  },
+  "order": ["Main.dc.html", "LandingB.dc.html", "LandingC.dc.html", "OnboardingA.dc.html", "OnboardingB.dc.html", "OnboardingC.dc.html", "LandingA2.dc.html", "OnboardingA2.dc.html", "OnboardingA2States.dc.html"],
+  "notes": {
+    "landingTitle": {"x": 0, "y": -320, "text": "Round 1 — three landing directions", "kind": "title1", "maxW": 4480},
+    "onboardingTitle": {"x": 0, "y": 3720, "text": "Round 1 — three onboarding flows", "kind": "title1", "maxW": 3520},
+    "round2Title": {"x": 5000, "y": -320, "text": "Round 2 — recommended: A, revised", "kind": "title1", "maxW": 4176},
+    "round2Onboarding": {"x": 5000, "y": 4420, "text": "Round 2 — onboarding A2", "kind": "title1", "maxW": 4176},
+    "round2Why": {"x": 6560, "y": 0, "w": 520, "size": "m", "fill": "orange", "text": "What changed in round 2 (from 9 commercial apps + Codex):\n• Hero shows text landing in a real-looking app, with clickable Hold / Speak / Release steps\n• Use-case tabs with a plain result caption each\n• Setup preview before the data section; ‘Free. No account.’ card\n• Engine card names the real models (Parakeet EN 477 MB; Qwen3-ASR for Hindi)\n• Usage + error events: ON, disclosed on the very first setup screen with the switch, repeated at Finish\n• Every step has Back/Continue; download runs in the background\n• New board of failure states: download paused, permission needs relaunch, paste failed (words kept), Report a problem preview\n• Dropped: ‘any length’, ‘about three minutes’, unverified claims"}
+  },
+  "designSystems": []
+}
