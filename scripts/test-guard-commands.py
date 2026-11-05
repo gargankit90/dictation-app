@@ -80,6 +80,20 @@ allowed += [
     "git commit -m 'text # with hash and gh pr merge'",
     "grep '>' scripts/pre-push", "echo 'x > scripts/pre-push'", "cp scripts/pre-push /tmp/copy 2>/dev/null",
 ]
+# Final R1: arbitrary combined repo variables, without rewriting owner variables.
+for repo in ("$REPO", "${REPO}", "$REPOSITORY", "${REPOSITORY}", "$GH_REPO", "$OWNER/$REPO", "$OWNER/r", "$USER/r"):
+    blocked.append(f"gh api -X PUT repos/{repo}/pulls/12/merge")
+blocked += [
+    "gh api -X DELETE repos/$REPO/rulesets/1",
+    "gh api -X DELETE repos/$REPOSITORY/git/refs/heads/x",
+    "gh api -X PUT repos/${REPO}/branches/main/protection",
+]
+allowed += [
+    "gh api repos/$REPO/issues -f title=test",
+    "gh api repos/$REPO/labels -f name=test",
+    "gh api repos/${REPO}/issues -f title=test",
+    "gh api repos/$REPOSITORY/issues -f title=test",
+]
 start = time.monotonic()
 def check(case):
     expected, command = case

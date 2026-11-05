@@ -59,7 +59,7 @@ for args in segments:
             if option in ("-f", "-F", "--field", "--raw-field") and value.startswith("query="): queries.append(value[6:])
         elif not token.startswith("-") and not endpoint: endpoint = token
     if (method or ("POST" if data else "GET")) == "GET": continue
-    endpoint = re.sub(r"(repos/)\$(?:GITHUB_REPOSITORY|\{GITHUB_REPOSITORY\})(?=/|$)", r"\1owner/repo", endpoint)
+    endpoint = re.sub(r"(repos/)\$\{?(?!OWNER|USER)\w+\}?(?=/[^/${:]|$)", r"\1owner/repo", endpoint)
     if re.search(r"(?:^|/)repos/[^/\s]+/[^/\s?]+(?:/?(?:[?#]|$)|/(?:rules|rulesets|branches|tags|git/refs|settings|interaction-limits|merges|pulls/\d+/merge)(?:[/?#]|$))", endpoint): block()
     if "graphql" in endpoint and any(re.search(r"\bmutation\b", q) and re.search(r"\b(?:mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|mergeBranch|createCommitOnBranch|(?:create|update|delete)(?:Refs?|Repository|RepositoryRuleset|BranchProtectionRule))\s*\(", q) for q in queries): block()
 PY
