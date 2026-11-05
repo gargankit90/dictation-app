@@ -52,12 +52,12 @@ fn failed_view() -> OverlayView {
 }
 
 #[test]
-fn the_error_stays_up_for_four_seconds() {
-    assert_eq!(ERROR_VISIBLE_FOR, Duration::from_secs(4));
+fn the_error_stays_up_for_six_seconds() {
+    assert_eq!(ERROR_VISIBLE_FOR, Duration::from_secs(6));
 }
 
 // U4 criterion 5 changed the end of a successful dictation: Inserting then
-// Idle shows "Paste sent" (which hides by itself), not Hidden.
+// Idle shows "Done" (which hides by itself), not Hidden.
 #[test]
 fn rapid_dictations_each_show_recording_then_paste_sent() {
     let mut model = OverlayModel::default();
@@ -135,9 +135,9 @@ async fn run_error_then_success_never_hides_the_new_dictation_late() {
     tx.send(failed()).unwrap();
     tx.send(phase(Phase::Idle)).unwrap();
     tokio::time::sleep(Duration::from_secs(2)).await;
-    // Second dictation, still inside the error's 4 s, runs past its deadline.
+    // Second dictation, still inside the error's 6 s, runs past its deadline.
     tx.send(phase(Phase::Recording)).unwrap();
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
     tx.send(phase(Phase::Transcribing)).unwrap();
     tx.send(phase(Phase::Idle)).unwrap();
     tokio::time::sleep(Duration::from_secs(10)).await;
@@ -156,14 +156,14 @@ async fn run_error_then_success_never_hides_the_new_dictation_late() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn run_two_errors_in_a_row_hide_once_four_seconds_after_the_last() {
+async fn run_two_errors_in_a_row_hide_once_six_seconds_after_the_last() {
     let (tx, rx) = mpsc::unbounded_channel();
     let recorder = Recorder::default();
     let task = tokio::spawn(run(rx, recorder.clone(), ERROR_VISIBLE_FOR));
     tx.send(failed()).unwrap();
     tokio::time::sleep(Duration::from_secs(3)).await;
     tx.send(failed()).unwrap();
-    tokio::time::sleep(Duration::from_millis(3999)).await;
+    tokio::time::sleep(Duration::from_millis(5999)).await;
     assert_eq!(recorder.views().last(), Some(&failed_view()));
     tokio::time::sleep(Duration::from_millis(2)).await;
     drop(tx);

@@ -16,11 +16,17 @@
   drives `dictation-vm-2` (Testers). Use them only for tests, never the
   owner's screen.
 
-- GitHub rulesets `main-public` and `immutable-tags` enforce default-branch
-  and tag protection server-side for every account, with no bypass. Never
-  push to the default branch, force push or skip hooks.
-- The unchanged pre-push guard adds defence in depth and runs the gate.
-  Claude's command hook keeps only role, hook bypass, guard edit and
-  destructive settings checks; it does not inspect push commands or git
-  aliases. Static push deny rules in settings.json remain for the owner to
-  decide separately. Only the owner changes guards.
+- GitHub rulesets `main-public`, `immutable-tags` and
+  `all-branches-no-force-no-delete` enforce push protection for every account,
+  with no bypass. Never push to the default branch, force push or skip hooks.
+- The unchanged pre-push guard runs the gate; no hook reinstall is needed
+  for G1. Claude's command hook matches plain merge, destructive settings
+  and guard-write commands, fails open on unreadable/unparsable input and
+  heredocs, and does not read command files. Static push deny rules and
+  hook-bypass checks are removed; Edit/Write deny rules remain.
+- A deliberately disguised command can pass the hook. This accepted
+  trade-off keeps ordinary scripts usable. The daily read-only ruleset
+  workflow detects visible policy changes afterwards, but GitHub hides
+  bypass actors from read-only callers. The Lead checks those locally with
+  `python3 scripts/check-rulesets.py --require-bypass` and the admin token.
+  Only the owner changes guards.
