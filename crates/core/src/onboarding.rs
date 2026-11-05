@@ -2,10 +2,10 @@
 //! on, and what is kept across launches.
 //!
 //! The steps come in a fixed order: [`Welcome`](Step::Welcome) (what the app
-//! does, and the events switch), [`Speech`](Step::Speech) (language and
+//! does), [`Speech`](Step::Speech) (language and
 //! engine), [`Permissions`](Step::Permissions) (microphone and
 //! Accessibility), [`Try`](Step::Try) (a practice dictation) and
-//! [`Ready`](Step::Ready) (a summary). A step is done when its condition
+//! [`Ready`](Step::Ready) (a summary, and the events switch). A step is done when its condition
 //! holds ([`Readiness::is_met`]); the user may go to a step only when every
 //! step before it is done ([`Readiness::allows`]), and may always go back.
 //!
@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum Step {
-    /// What the app does, and the usage and error events switch.
+    /// What the app does.
     #[default]
     Welcome,
     /// The language, and the on-device model or the user's own key.
@@ -31,7 +31,8 @@ pub enum Step {
     Permissions,
     /// The dictation key, and a practice dictation in the onboarding window.
     Try,
-    /// A summary of the real states; closes onboarding.
+    /// A summary of the real states, and the usage and error events switch;
+    /// closes onboarding.
     Ready,
 }
 
@@ -171,8 +172,7 @@ pub enum SpeechChoice {
 pub struct SetupProgress {
     /// The step the user was on.
     pub step: Step,
-    /// The user has continued past Welcome. Usage and error events wait for
-    /// this.
+    /// The user has continued past Welcome.
     pub welcome_passed: bool,
     /// "Start dictating" was pressed.
     pub completed: bool,

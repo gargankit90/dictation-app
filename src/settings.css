@@ -1077,14 +1077,6 @@ main.ob {
   gap: var(--vc-space-1) var(--vc-space-3);
 }
 
-.ob-summary-control {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--vc-space-2);
-}
-
 .ob-summary dt {
   color: var(--vc-muted);
 }

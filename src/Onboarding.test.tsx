@@ -21,11 +21,10 @@ import type {
 } from "./bindings";
 import { Onboarding, RELAUNCH_AFTER_POLLS, STEPS } from "./Onboarding";
 import css from "./settings.css?raw";
-import { FINISH_REASON, NOT_TESTED } from "./onboarding/ReadyStep";
+import { EVENTS_CAPTION, FINISH_REASON, NOT_TESTED } from "./onboarding/ReadyStep";
 import { KEY_REASON, MODEL_COPY } from "./onboarding/SpeechStep";
 import { BOTH_REASON } from "./onboarding/PermissionsStep";
 import { CONTINUE_REASON } from "./onboarding/TryStep";
-import { EVENTS_CAPTION, SAVE_FAILED_REASON } from "./onboarding/WelcomeStep";
 import { Privacy } from "./settings/Privacy";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
@@ -174,6 +173,8 @@ class Backend {
         return null;
       case "dictation_progress":
         return this.progress;
+      case "practice_paste_missed":
+        return null;
       case "practice_words":
         return this.words;
       case "copy_practice_words":
@@ -376,33 +377,108 @@ describe("the frame", () => {
 });
 
 describe("Welcome", () => {
-  it("criterion 2: the switch is on, with its caption and What's sent", async () => {
+  // Replaces U8's three tests here, which required the switch on this screen
+  // and no event before leaving it (U10 reverses both).
+  it("U10 criterion 1: has no sharing switch, caption or What's sent", async () => {
     show();
-    const share = await screen.findByRole("switch", { name: "Share usage and error events" });
-    expect((share as HTMLInputElement).checked).toBe(true);
+    await screen.findByText("Talk instead of type");
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByText(/usage|error events|anonymous/i)).toBeNull();
+    expect(screen.queryByText("What's sent")).toBeNull();
+  });
+
+  it("Continue moves on", async () => {
+    show();
+    await screen.findByText("Talk instead of type");
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Which language will you mostly speak?");
+    expect(backend.step).toBe("speech");
+  });
+});
+
+describe("the sharing switch across setup (U10)", () => {
+  it.each(["speech", "permissions", "try"] as const)(
+    "criterion 1: %s has no sharing switch",
+    async (step) => {
+      backend.allSet(step);
+      show();
+      await screen.findByRole("navigation", { name: "Setup steps" });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(screen.queryByRole("switch", { name: /usage and error events/i })).toBeNull();
+      expect(screen.queryByText("What's sent")).toBeNull();
+    },
+  );
+
+  it("criterion 1: Ready has the switch, on by default, with What's sent", async () => {
+    backend.allSet("ready");
+    show();
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    expect(share.checked).toBe(true);
     expect(screen.getByText(EVENTS_CAPTION)).toBeTruthy();
     expect(screen.getByText("What's sent")).toBeTruthy();
     expect(screen.getByText("Change any time in Settings → Privacy.")).toBeTruthy();
   });
 
-  it("criterion 2: the screen itself asks the app to record nothing", async () => {
+  it("criterion 3: a stored off shows off on Ready, and setup writes nothing", async () => {
+    backend.settings = { ...backend.settings, share_usage_events: false };
+    backend.allSet("ready");
     show();
-    await screen.findByRole("switch", { name: "Share usage and error events" });
-    // Moving past Welcome is what opens the gate (ConsentGate, in Rust).
-    expect(backend.named("set_onboarding_step")).toEqual([]);
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    await waitFor(() => {
+      expect(share.checked).toBe(false);
+    });
+    fireEvent.click(primary("Start dictating"));
+    await waitFor(() => {
+      expect(backend.named("finish_onboarding")).toHaveLength(1);
+    });
+    expect(backend.named("set_share_usage_events")).toEqual([]);
+    expect(backend.settings.share_usage_events).toBe(false);
   });
 
-  it("criterion 2: switching it off goes through A1's command, then Continue moves on", async () => {
+  it("criterion 7: What's sent says what really happens", async () => {
+    backend.allSet("ready");
     show();
-    const share = await screen.findByRole("switch", { name: "Share usage and error events" });
-    fireEvent.click(share);
-    await waitFor(() => {
-      expect(backend.settings.share_usage_events).toBe(false);
+    await screen.findByText("What's sent");
+    const words = screen.getByText("What's sent").closest("details")?.textContent ?? "";
+    expect(words).toContain("from the first setup screen");
+    expect(words).toContain("deletes what is waiting");
+    expect(words).toContain("can't recall what was already sent");
+    expect(words).toContain("where you stopped");
+    expect(EVENTS_CAPTION).toContain("from the first setup screen");
+    expect(EVENTS_CAPTION).not.toMatch(/nothing is sent|until you/i);
+  });
+
+  it("a failed write made elsewhere doesn't trap a step with no switch", async () => {
+    const original = backend.handle;
+    mockIPC((command, payload) => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      if (command === "set_share_usage_events") throw "Couldn't write the settings file.";
+      return original(command, payload);
     });
-    expect(backend.named("set_share_usage_events")[0]?.args).toEqual({ share: false });
+    const settings = render(<Privacy settings={backend.settings} onStored={() => undefined} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Share usage and error events" }));
+    await screen.findByRole("alert");
+    settings.unmount();
+
+    show();
+    await screen.findByText("Talk instead of type");
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
     fireEvent.click(primary("Continue"));
     await screen.findByText("Which language will you mostly speak?");
-    expect(backend.step).toBe("speech");
   });
 });
 
@@ -433,6 +509,7 @@ describe("one queue for the whole window (round 5)", () => {
 
   it("an old write from onboarding can't land after a newer off in Settings", async () => {
     backend.settings = { ...backend.settings, share_usage_events: false };
+    backend.allSet("ready");
     const pending = holdWrites();
     const setup = show();
     const share = await screen.findByRole<HTMLInputElement>("switch", {
@@ -477,7 +554,7 @@ describe("one queue for the whole window (round 5)", () => {
     settings.unmount();
 
     show();
-    await screen.findByRole("switch", { name: "Share usage and error events" });
+    await screen.findByText("Talk instead of type");
     await waitFor(() => {
       expect(primary("Continue").disabled).toBe(true);
     });
@@ -508,7 +585,14 @@ describe("one queue for the whole window (round 5)", () => {
   });
 });
 
-describe("Welcome's switch before Continue (finding 1)", () => {
+// U8 finding 1 and round 2, moved from Welcome with the switch (U10 criterion 5):
+// Off on Ready, right before Start dictating, can't be overtaken.
+describe("Ready's switch before Start dictating", () => {
+  beforeEach(() => {
+    backend.allSet("ready");
+    backend.tryOutcome = "passed";
+  });
+
   /** Holds `set_share_usage_events` until `finish` is called. */
   function holdTheWrite(fail = false) {
     const held: { finish: () => void } = { finish: () => undefined };
@@ -529,26 +613,28 @@ describe("Welcome's switch before Continue (finding 1)", () => {
     return held;
   }
 
-  it("Continue can't overtake an opt-out still being written", async () => {
+  it("Start dictating can't overtake an opt-out still being written", async () => {
     const held = holdTheWrite();
     show();
     fireEvent.click(await screen.findByRole("switch", { name: "Share usage and error events" }));
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(true);
+      expect(primary("Start dictating").disabled).toBe(true);
     });
     expect(screen.getByText(SAVING_REASON)).toBeTruthy();
-    fireEvent.click(primary("Continue"));
-    expect(backend.named("set_onboarding_step")).toEqual([]);
+    fireEvent.click(primary("Start dictating"));
+    expect(backend.named("finish_onboarding")).toEqual([]);
 
     act(() => {
       held.finish();
     });
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(false);
+      expect(primary("Start dictating").disabled).toBe(false);
     });
     expect(backend.settings.share_usage_events).toBe(false);
-    fireEvent.click(primary("Continue"));
-    await screen.findByText("Which language will you mostly speak?");
+    fireEvent.click(primary("Start dictating"));
+    await waitFor(() => {
+      expect(backend.named("finish_onboarding")).toHaveLength(1);
+    });
   });
 
   /**
@@ -593,18 +679,18 @@ describe("Welcome's switch before Continue (finding 1)", () => {
     fireEvent.click(share); // off, the user's last word
     expect(share.checked).toBe(false);
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(true);
+      expect(primary("Start dictating").disabled).toBe(true);
     });
     // With overlapping writes, this applies off and then on.
     await releaseNewestFirst(pending);
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(false);
+      expect(primary("Start dictating").disabled).toBe(false);
     });
     expect(backend.settings.share_usage_events).toBe(false);
     expect(share.checked).toBe(false);
   });
 
-  it("round 2: on, off, on ends on, and Continue waits for all of it", async () => {
+  it("round 2: on, off, on ends on, and Start dictating waits for all of it", async () => {
     const pending = holdEveryWrite();
     show();
     const share = await screen.findByRole<HTMLInputElement>("switch", {
@@ -615,17 +701,17 @@ describe("Welcome's switch before Continue (finding 1)", () => {
     fireEvent.click(share); // off
     fireEvent.click(share); // on
     expect(pending).toHaveLength(1);
-    expect(primary("Continue").disabled).toBe(true);
+    expect(primary("Start dictating").disabled).toBe(true);
     await act(async () => {
       pending.pop()?.();
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
-    // The first write done: only the last choice is sent next, and Continue waits for it.
+    // The first write done: only the last choice is sent next, and Start dictating waits for it.
     expect(pending).toHaveLength(1);
-    expect(primary("Continue").disabled).toBe(true);
+    expect(primary("Start dictating").disabled).toBe(true);
     await releaseNewestFirst(pending);
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(false);
+      expect(primary("Start dictating").disabled).toBe(false);
     });
     expect(backend.settings.share_usage_events).toBe(true);
     expect(backend.named("set_share_usage_events").map((call) => call.args.share)).toEqual([
@@ -642,16 +728,16 @@ describe("Welcome's switch before Continue (finding 1)", () => {
     });
     fireEvent.click(share);
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(true);
+      expect(primary("Start dictating").disabled).toBe(true);
     });
     act(() => {
       held.finish();
     });
-    await screen.findByText(SAVE_FAILED_REASON);
-    expect(primary("Continue").disabled).toBe(true);
+    await screen.findByText(FINISH_REASON);
+    expect(primary("Start dictating").disabled).toBe(true);
     expect(share.checked).toBe(true);
-    fireEvent.click(primary("Continue"));
-    expect(backend.named("set_onboarding_step")).toEqual([]);
+    fireEvent.click(primary("Start dictating"));
+    expect(backend.named("finish_onboarding")).toEqual([]);
   });
 });
 
@@ -1142,6 +1228,40 @@ describe("Try it", () => {
     expect(backend.named("copy_practice_words")).toHaveLength(1);
   });
 
+  it("U10 criterion 4: a missed paste tells the app once, with nothing from the box", async () => {
+    await stepOpen();
+    backend.words = WORDS;
+    report({
+      started: 1,
+      finished: 1,
+      completed: 1,
+      heard: true,
+      stages: ["recorded", "transcribed", "pasted"],
+    });
+    await screen.findByText(WORDS, undefined, { timeout: 2500 });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 900));
+    });
+    expect(backend.named("practice_paste_missed")).toEqual([
+      { command: "practice_paste_missed", args: {} },
+    ]);
+  });
+
+  it("U10 criterion 4: a paste that landed isn't a missed one", async () => {
+    await stepOpen();
+    backend.words = WORDS;
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: WORDS } });
+    report({
+      started: 1,
+      finished: 1,
+      completed: 1,
+      heard: true,
+      stages: ["recorded", "transcribed", "pasted"],
+    });
+    await screen.findByText(/It works/, undefined, { timeout: 2500 });
+    expect(backend.named("practice_paste_missed")).toEqual([]);
+  });
+
   it("Design Lead: the title is Try it, with the key as a small label", async () => {
     await stepOpen();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Try it");
@@ -1282,12 +1402,11 @@ describe("Ready", () => {
     backend.settings = { ...backend.settings, share_usage_events: false };
     show();
     const share = await screen.findByRole<HTMLInputElement>("switch", {
-      name: "Usage and error events",
+      name: "Share usage and error events",
     });
     await waitFor(() => {
       expect(share.checked).toBe(false);
     });
-    expect(screen.getByText("Off")).toBeTruthy();
     fireEvent.click(share);
     await waitFor(() => {
       expect(backend.settings.share_usage_events).toBe(true);
@@ -1296,7 +1415,7 @@ describe("Ready", () => {
       { command: "set_share_usage_events", args: { share: true } },
     ]);
     expect(backend.step).toBe("ready");
-    expect(screen.getByText("On")).toBeTruthy();
+    expect(share.checked).toBe(true);
     expect(screen.queryByRole("button", { name: "Change" })?.closest("div")?.textContent).toContain(
       "History",
     );
@@ -1315,7 +1434,7 @@ describe("Ready", () => {
     });
     show();
     const share = await screen.findByRole<HTMLInputElement>("switch", {
-      name: "Usage and error events",
+      name: "Share usage and error events",
     });
     fireEvent.click(share); // off
     fireEvent.click(share); // on
@@ -1363,7 +1482,7 @@ describe("Ready", () => {
     });
     show();
     const share = await screen.findByRole<HTMLInputElement>("switch", {
-      name: "Usage and error events",
+      name: "Share usage and error events",
     });
     await screen.findByRole("button", { name: "Use my own key" });
     const pressExit = () => {
@@ -1426,7 +1545,7 @@ describe("Ready", () => {
       return original(name, payload);
     });
     show();
-    fireEvent.click(await screen.findByRole("switch", { name: "Usage and error events" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Share usage and error events" }));
     await screen.findByText(FINISH_REASON);
     for (const name of ["Start dictating", "Back", "Change", "Use my own key"]) {
       fireEvent.click(screen.getByRole("button", { name }));
@@ -1451,7 +1570,7 @@ describe("Ready", () => {
       return original(command, payload);
     });
     show();
-    fireEvent.click(await screen.findByRole("switch", { name: "Usage and error events" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Share usage and error events" }));
     await screen.findByText(FINISH_REASON);
     expect(primary("Start dictating").disabled).toBe(true);
     fireEvent.click(primary("Start dictating"));

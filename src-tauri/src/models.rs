@@ -24,6 +24,8 @@ use tauri::State;
 
 use crate::commands::AppConfig;
 use crate::engine::LiveEngine;
+use crate::onboarding::Onboarding;
+use crate::usage::{self, Usage};
 
 /// Where a model is, as Settings shows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
@@ -276,12 +278,18 @@ pub async fn download_local_model(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
     downloads: State<'_, ModelDownloads>,
+    onboarding: State<'_, Arc<Onboarding>>,
+    usage: State<'_, Usage>,
     id: String,
 ) -> Result<(), String> {
     let (config, live) = (Arc::clone(&state.0), engine.inner().clone());
-    downloads.start(engine.inner(), &id, None, move |result| {
-        if result.is_ok() {
-            rebuild_later(config, live);
+    let (onboarding, usage) = (Arc::clone(&onboarding), usage.inner().clone());
+    downloads.start(engine.inner(), &id, None, move |result| match result {
+        Ok(()) => rebuild_later(config, live),
+        Err(error) => {
+            if let Some(problem) = usage::download_problem(&error) {
+                usage::setup_problem(&usage, &onboarding, problem);
+            }
         }
     })
 }

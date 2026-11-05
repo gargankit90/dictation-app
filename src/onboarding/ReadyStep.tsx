@@ -9,6 +9,7 @@ import type {
 import { keycapLabel } from "../hotkeyKeys";
 import { BROKEN, messageOf } from "../keyTest";
 import { providerInfo } from "../providers";
+import { WhatsSent } from "../settings/Privacy";
 import type { SharingSwitch } from "../settings/Privacy";
 import { SaveStatus, Switch, useSave } from "../settings/ui";
 import { chosenModel, modelWait, spokenName } from "./logic";
@@ -17,6 +18,8 @@ import type { FrameParts } from "./StepFrame";
 
 export const FINISH_REASON =
   "Start dictating unlocks once your choice is saved. Try the switch again.";
+export const EVENTS_CAPTION =
+  "While this is on, anonymous usage events (with a random install ID) and error reports are sent, from the first setup screen on, so we can see where setup goes wrong and fix what breaks. Never audio, transcripts, typed text, keys or app names. Off stops them and deletes what's waiting and the install ID; it can't recall what was already sent.";
 export const NOT_TESTED = "Not tested yet: try it from the menu bar any time";
 
 interface Props {
@@ -79,7 +82,10 @@ function useEngineLine(
   return `On this Mac · ${name} · ${wait ?? "✓ Ready"}`;
 }
 
-/** Ready: the real states, the menu-bar hint, launch at login, and the way out. */
+/**
+ * Ready: the real states, the menu-bar hint, launch at login, the sharing
+ * switch (the only one in setup), and the way out.
+ */
 export function ReadyStep({
   parts,
   status,
@@ -130,20 +136,6 @@ export function ReadyStep({
           <dt>Speech</dt>
           <dd>{engineLine}</dd>
         </div>
-        <div>
-          <dt id="ob-share-ready-label">Usage and error events</dt>
-          <dd className="ob-summary-control">
-            <span>{sharing.checked ? "On" : "Off"}</span>
-            <Switch
-              id="ob-share-ready"
-              checked={sharing.checked}
-              disabled={settings === null}
-              labelledBy="ob-share-ready-label"
-              onChange={(share) => void sharing.setSharing(share)}
-            />
-            <SaveStatus save={sharing.save} />
-          </dd>
-        </div>
         {settings !== null && (
           <div>
             <dt>History</dt>
@@ -178,6 +170,27 @@ export function ReadyStep({
           />
         </div>
         <SaveStatus save={login.save} />
+      </div>
+      <div className="ob-card">
+        <div className="ob-card-head">
+          <span className="ob-card-title" id="ob-share-ready-label">
+            Share usage and error events
+          </span>
+          <Switch
+            id="ob-share-ready"
+            checked={sharing.checked}
+            disabled={settings === null}
+            labelledBy="ob-share-ready-label"
+            describedBy="ob-share-ready-caption"
+            onChange={(share) => void sharing.setSharing(share)}
+          />
+        </div>
+        <p className="ob-caption" id="ob-share-ready-caption">
+          {EVENTS_CAPTION}
+        </p>
+        <SaveStatus save={sharing.save} />
+        <WhatsSent />
+        <p className="ob-caption">Change any time in Settings → Privacy.</p>
       </div>
     </StepFrame>
   );

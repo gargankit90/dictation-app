@@ -49,6 +49,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "check_for_updates",
     "choose_local_model",
     "set_try_outcome",
+    "practice_paste_missed",
     "set_download_paused",
     "practice_words",
     "copy_practice_words",

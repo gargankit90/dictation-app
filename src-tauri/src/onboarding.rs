@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use dictation_core::onboarding::{Readiness, SetupProgress, SpeechChoice, Step, TryOutcome};
 use dictation_pipeline::config::{Config, SETTINGS_FILE};
-use dictation_ports::{Permission, PermissionStatus, Permissions, SecretStore};
+use dictation_ports::{Permission, PermissionStatus, Permissions, SecretStore, SetupProblem};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::LiveEngine;
@@ -131,6 +131,12 @@ struct State {
     /// Onboarding was opened at some point, here or in an earlier launch. A
     /// scripted test launch that never opens it isn't setting anything up.
     opened: bool,
+    /// Problems already recorded this launch, for those read over and over.
+    told: Vec<SetupProblem>,
+    /// Accessibility was asked for this launch.
+    accessibility_asked: bool,
+    /// Leaving was recorded, and setup hasn't been opened again since.
+    left_told: bool,
 }
 
 impl Default for Onboarding {
@@ -168,6 +174,9 @@ impl Onboarding {
                 view: View::Settings,
                 progress,
                 opened,
+                told: Vec::new(),
+                accessibility_asked: false,
+                left_told: false,
             }),
             file,
         }
@@ -181,8 +190,7 @@ impl Onboarding {
         let file = config_dir.join(PROGRESS_FILE);
         let kept = std::fs::read_to_string(&file).ok();
         let (progress, opened) = match kept {
-            // A file that can't be understood starts over: the safe way
-            // round, since events then wait for Welcome again.
+            // A file that can't be understood starts over.
             Some(text) => (SetupProgress::from_json(&text).unwrap_or_default(), true),
             None if config_dir.join(SETTINGS_FILE).exists() => {
                 (SetupProgress::ALREADY_SET_UP, false)
@@ -219,6 +227,7 @@ impl Onboarding {
         state.progress.step = readiness.resume_at(state.progress.step);
         state.view = View::Onboarding;
         state.opened = true;
+        state.left_told = false;
         let (step, progress) = (state.progress.step, state.progress);
         drop(state);
         self.keep(&progress);
@@ -227,7 +236,7 @@ impl Onboarding {
 
     /// "Run setup again": setup that was finished goes through the steps from
     /// Welcome. It stays finished, so the tray doesn't start offering "Resume
-    /// setup…", and Welcome stays passed, so sending doesn't stop.
+    /// setup…", and Welcome stays passed.
     pub fn start_over_if_finished(&self) {
         let mut state = self.lock();
         if !state.progress.completed {
@@ -293,6 +302,32 @@ impl Onboarding {
         drop(state);
         self.keep(&progress);
         true
+    }
+
+    /// Whether `problem` hasn't been recorded yet this launch; it now has.
+    pub fn first_time(&self, problem: SetupProblem) -> bool {
+        let mut state = self.lock();
+        if state.told.contains(&problem) {
+            return false;
+        }
+        state.told.push(problem);
+        true
+    }
+
+    /// The user asked for Accessibility.
+    pub fn note_accessibility_asked(&self) {
+        self.lock().accessibility_asked = true;
+    }
+
+    /// If setup is on the window and leaving it wasn't recorded yet: the step
+    /// the user stopped on, and whether they had asked for Accessibility.
+    pub fn take_left(&self) -> Option<(Step, bool)> {
+        let mut state = self.lock();
+        if state.view != View::Onboarding || state.left_told {
+            return None;
+        }
+        state.left_told = true;
+        Some((state.progress.step, state.accessibility_asked))
     }
 
     /// Keeps how the practice dictation went.
