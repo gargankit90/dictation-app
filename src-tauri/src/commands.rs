@@ -465,12 +465,29 @@ pub async fn set_share_usage_events(
     let usage = usage.inner().clone();
     let onboarding = Arc::clone(&onboarding);
     on_config(&state, move |config| {
-        if !share {
-            onboarding.note_sharing_off();
-        }
-        write_sharing(config, &usage, share)
+        choose_sharing(config, &usage, &onboarding, share)
     })
     .await
+}
+
+/// The user's choice. Off reaches both adapters before any file is touched, so
+/// neither the settings lock nor a stalled disk can keep sending going. Whether
+/// the note about setup's caption is written doesn't change what is sent, so
+/// it comes last, and a failed save still counts as off for it.
+fn choose_sharing<S: SecretStore>(
+    config: &Config<S>,
+    usage: &Usage,
+    onboarding: &Onboarding,
+    share: bool,
+) -> Result<(), ConfigError> {
+    if !share {
+        usage.set_enabled(false);
+    }
+    let saved = write_sharing(config, usage, share);
+    if !share {
+        onboarding.note_sharing_off();
+    }
+    saved
 }
 
 fn write_sharing<S: SecretStore>(
@@ -1597,6 +1614,101 @@ mod tests {
                 .await
                 .expect("dropped, not waited for")
                 .unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// Round 3: Off is in force while the settings lock is held and while
+        /// the progress file's write is stalled (the temporary file is a FIFO
+        /// with no reader, so the real write blocks until the test reads it).
+        #[tokio::test(flavor = "multi_thread")]
+        async fn u10_off_takes_effect_while_the_files_are_stalled() {
+            let dir = temp("stalled");
+            let server = server().await;
+            let settings = Arc::new(config(&dir, true));
+            let usage = live(&dir, &server, true);
+            let onboarding = Arc::new(Onboarding::load(&dir));
+            onboarding.open(dictation_core::onboarding::Readiness::READY);
+            let temporary = dir
+                .join(crate::onboarding::PROGRESS_FILE)
+                .with_extension("json.tmp");
+            let made = std::process::Command::new("mkfifo")
+                .arg(&temporary)
+                .status()
+                .unwrap();
+            assert!(made.success());
+            usage.record(step());
+            assert_eq!(usage.0.queued(), 1);
+
+            // The settings write can't start yet.
+            let held = settings_write();
+            let choosing = {
+                let (settings, usage, onboarding) = (
+                    Arc::clone(&settings),
+                    usage.clone(),
+                    Arc::clone(&onboarding),
+                );
+                std::thread::spawn(move || {
+                    choose_sharing(&settings, &usage, &onboarding, false).unwrap();
+                })
+            };
+            for _ in 0..200 {
+                if !usage.1.is_enabled() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            let in_force = |why: &str| {
+                assert!(!usage.0.is_enabled(), "{why}: events");
+                assert!(!usage.1.is_enabled(), "{why}: reports");
+                assert_eq!(usage.0.queued(), 0, "{why}: what was waiting");
+                assert!(!id_exists(&dir), "{why}: the install ID");
+                usage.record(step());
+                assert_eq!(usage.0.queued(), 0, "{why}: a new event");
+            };
+            in_force("the settings lock held");
+            assert!(
+                settings.settings().unwrap().share_usage_events,
+                "not saved yet"
+            );
+            drop(held);
+
+            // Now the settings file is saved, and the note stalls on the FIFO.
+            for _ in 0..200 {
+                if !settings.settings().unwrap().share_usage_events {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(!settings.settings().unwrap().share_usage_events);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            assert!(!choosing.is_finished(), "the progress write is stalled");
+            in_force("the progress write stalled");
+
+            // A reader lets the write finish, and the note is kept.
+            let written = std::fs::read(&temporary).unwrap();
+            assert!(!written.is_empty());
+            choosing.join().unwrap();
+            let permissions = dictation_platform::fakes::FakePermissions::new();
+            assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// A save that fails still counts as off for the caption: sending
+        /// stopped.
+        #[test]
+        fn u10_a_failed_off_is_still_noted() {
+            let dir = temp("failed-off");
+            let settings = config(&dir, true);
+            std::fs::write(settings.path(), "{ not json").unwrap();
+            let onboarding = Onboarding::new();
+            onboarding.open(dictation_core::onboarding::Readiness::READY);
+            let fake = FakeTelemetry::new();
+            let usage = Usage::recording(Arc::new(fake.clone()), true);
+            assert!(choose_sharing(&settings, &usage, &onboarding, false).is_err());
+            usage.record(step());
+            assert_eq!(fake.events(), []);
+            let permissions = dictation_platform::fakes::FakePermissions::new();
+            assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
             let _ = std::fs::remove_dir_all(&dir);
         }
 

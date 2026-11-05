@@ -192,8 +192,15 @@ impl Onboarding {
         let file = config_dir.join(PROGRESS_FILE);
         let kept = std::fs::read_to_string(&file).ok();
         let (progress, opened) = match kept {
-            // A file that can't be understood starts over.
-            Some(text) => (SetupProgress::from_json(&text).unwrap_or_default(), true),
+            // A file that can't be understood starts over, and what it said
+            // about sharing is unknown.
+            Some(text) => (
+                SetupProgress::from_json(&text).unwrap_or(SetupProgress {
+                    sharing_was_off: true,
+                    ..SetupProgress::default()
+                }),
+                true,
+            ),
             None if config_dir.join(SETTINGS_FILE).exists() => {
                 (SetupProgress::ALREADY_SET_UP, false)
             }
@@ -583,6 +590,51 @@ mod tests {
         microphone: false,
         accessibility: false,
     };
+
+    #[test]
+    fn u10_unknown_sharing_history_never_claims_on_since_setup_began() {
+        let permissions = granted(true, true);
+        let throughout = |dir: &Path| {
+            let onboarding = Onboarding::load(dir);
+            onboarding.open(Readiness::READY);
+            onboarding.status(&permissions, false).sharing_on_throughout
+        };
+
+        let dir = temp("history-legacy");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(PROGRESS_FILE),
+            r#"{"step":"ready","welcome_passed":true}"#,
+        )
+        .unwrap();
+        assert!(!throughout(&dir), "a file from before the field");
+        assert!(!throughout(&dir), "and it stays so across another launch");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let dir = temp("history-unreadable");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(PROGRESS_FILE), "{ not json").unwrap();
+        assert!(!throughout(&dir), "a file that can't be read");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let dir = temp("history-fresh");
+        assert!(throughout(&dir), "a fresh install has no unknown history");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Run setup again is a new walk, whatever an old file said.
+        let dir = temp("history-again");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(PROGRESS_FILE),
+            r#"{"step":"ready","welcome_passed":true,"completed":true}"#,
+        )
+        .unwrap();
+        let onboarding = Onboarding::load(&dir);
+        onboarding.start_over_if_finished();
+        onboarding.open(Readiness::READY);
+        assert!(onboarding.status(&permissions, false).sharing_on_throughout);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn u10_a_note_that_sharing_was_off_survives_a_quit_and_ends_with_the_walk() {

@@ -489,7 +489,9 @@ describe("the sharing switch across setup (U10)", () => {
     expect(EVENTS_FROM_NOW_CAPTION).not.toMatch(/since/i);
   });
 
-  it("round 2: stored off, turned on earlier and relaunched, still doesn't claim it", async () => {
+  // What the app reports for this, an old progress file and one it can't read too:
+  // u10_unknown_sharing_history_never_claims_on_since_setup_began, in Rust.
+  it("round 3: history that says off or is unknown doesn't claim it", async () => {
     backend.sharingOnThroughout = false;
     backend.allSet("ready");
     show();

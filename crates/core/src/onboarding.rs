@@ -188,8 +188,16 @@ pub struct SetupProgress {
     /// The engine selected on the Speech step, if the user selected one.
     pub speech_choice: Option<SpeechChoice>,
     /// Sharing was off at some point of this walk through setup, so Ready
-    /// can't say it has been on since setup began (U10).
+    /// can't say it has been on since setup began (U10). A file written before
+    /// this field existed doesn't say, and unknown counts as off.
+    #[serde(default = "unknown_sharing_history")]
     pub sharing_was_off: bool,
+}
+
+/// What [`SetupProgress::sharing_was_off`] is when nothing says: the claim
+/// "on since setup began" needs proof.
+fn unknown_sharing_history() -> bool {
+    true
 }
 
 impl SetupProgress {
@@ -319,6 +327,25 @@ mod tests {
     }
 
     #[test]
+    fn u10_a_file_from_before_the_sharing_history_counts_as_unknown() {
+        let old = SetupProgress::from_json(r#"{"step":"permissions","welcome_passed":true}"#);
+        let old = old.expect("an old file still reads");
+        assert_eq!(old.step, Step::Permissions);
+        assert!(old.sharing_was_off);
+        // A file written now says, either way.
+        for said in [false, true] {
+            let progress = SetupProgress {
+                sharing_was_off: said,
+                ..SetupProgress::default()
+            };
+            let read = SetupProgress::from_json(&progress.to_json()).expect("reads");
+            assert_eq!(read.sharing_was_off, said);
+        }
+        // A new walk with no file has nothing unknown.
+        assert!(!SetupProgress::default().sharing_was_off);
+    }
+
+    #[test]
     fn the_progress_round_trips_and_a_bad_file_is_refused() {
         let progress = SetupProgress {
             step: Step::Permissions,
@@ -342,6 +369,8 @@ mod tests {
             SetupProgress::from_json(r#"{"step":"try"}"#),
             Some(SetupProgress {
                 step: Step::Try,
+                // The one field that says nothing is known, not "no".
+                sharing_was_off: true,
                 ..SetupProgress::default()
             })
         );
