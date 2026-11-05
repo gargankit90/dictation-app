@@ -39,6 +39,9 @@ interface Props {
   refreshEngine: () => Promise<void>;
   /** The first launch after the rename says something about the Keychain (U1). */
   launchNotice?: string | null;
+  /** The sheet already opened by itself since Settings opened. */
+  sheetOffered?: boolean;
+  onSheetOffered?: () => void;
 }
 
 /** What a model action's button says. */
@@ -135,6 +138,8 @@ export function Speech({
   engine,
   refreshEngine,
   launchNotice = null,
+  sheetOffered = false,
+  onSheetOffered,
 }: Props) {
   const onDevice = settings.transcription === "local";
   const [switching, setSwitching] = useState<string | null>(null);
@@ -231,13 +236,17 @@ export function Speech({
   const cloudActive = !onDevice;
   const stored = provider === settings.provider ? keyStatus.state : "checking";
 
-  // The own key is the engine and needs a key: the sheet opens once by itself
-  // (Design Lead item 6). State from props, during render.
-  const [offeredSheet, setOfferedSheet] = useState(false);
+  // The own key is the engine and needs a key: the sheet opens by itself, once
+  // and not again on every return to Speech (Design Lead item 6). State from
+  // props, during render.
+  const [offeredSheet, setOfferedSheet] = useState(sheetOffered);
   if (!offeredSheet && cloudActive && stored === "none") {
     setOfferedSheet(true);
     setSheetOpen(true);
   }
+  useEffect(() => {
+    if (offeredSheet) onSheetOffered?.();
+  }, [offeredSheet, onSheetOffered]);
 
   function openSheet() {
     sheetOpener.current =

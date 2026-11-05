@@ -719,6 +719,16 @@ describe("u12_criterion_4 the key sheet", () => {
     expect(screen.getByText("! Needs a key")).toBeTruthy();
   });
 
+  it("opens by itself once, not on every return to Speech", async () => {
+    await open("speech");
+    click("Done");
+    fireEvent.click(screen.getByRole("tab", { name: "General" }));
+    await screen.findByRole("heading", { level: 1, name: "General" });
+    fireEvent.click(screen.getByRole("tab", { name: "Speech" }));
+    await screen.findByText("! Needs a key");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("shows one status line: saved, or connected after a test", async () => {
     backend.keys.groq = true;
     await open("speech");

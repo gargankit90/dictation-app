@@ -189,6 +189,10 @@ export function Settings({ open = null, onOpened, ...help }: Props) {
       window.clearTimeout(timer);
     };
   }, []);
+  const [sheetOffered, setSheetOffered] = useState(false);
+  const offerSheet = useCallback(() => {
+    setSheetOffered(true);
+  }, []);
   const launch = useLaunchAtLogin(settings?.launch_at_login ?? false);
   const tabs = useRef<Partial<Record<SectionId, HTMLButtonElement | null>>>({});
 
@@ -300,6 +304,8 @@ export function Settings({ open = null, onOpened, ...help }: Props) {
             engine={engine}
             refreshEngine={refreshEngine}
             launchNotice={launchNotice}
+            sheetOffered={sheetOffered}
+            onSheetOffered={offerSheet}
           />
         );
         break;
