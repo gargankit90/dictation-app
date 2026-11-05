@@ -340,7 +340,6 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
           onStored={setSettings}
           models={models}
           engine={engine}
-          onChangeSharing={() => void goTo("welcome")}
           onChangeHistory={() => {
             void (async () => {
               try {

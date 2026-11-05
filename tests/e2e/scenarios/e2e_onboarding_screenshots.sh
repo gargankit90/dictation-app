@@ -114,6 +114,14 @@ obs_mode() {
   dictate_once 2
   expect "$mode: the missed paste" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "didn't reach the box" 10
   obs_shot "4-try-paste-missed-$mode"
+  # The panel scrolls into view when it appears: at the smallest window too.
+  obs_size 680 520
+  ax_ok field-set "$APP_NAME" "$OBS_WINDOW" try-field ""
+  textedit_fresh
+  dictate_once 2
+  sleep 2
+  obs_shot "4-try-paste-missed-680x520-$mode"
+  obs_size 740 560
   ax_ok field-set "$APP_NAME" "$OBS_WINDOW" try-field ""
   dictate_once 2
   expect "$mode: it works" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "It works." 10

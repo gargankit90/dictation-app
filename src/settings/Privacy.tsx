@@ -3,6 +3,7 @@ import { commands } from "../bindings";
 import type { Settings_Serialize } from "../bindings";
 import { messageOf } from "../keyTest";
 import { Group, Row, SaveStatus, Switch, useSave } from "./ui";
+import type { SaveState } from "./ui";
 
 /** What sharing sends, in words, with a link to the full notice. */
 export function WhatsSent() {
@@ -85,6 +86,15 @@ export function useSharingSwitch(
   }
 
   return { save: sharing.save, checked: shown ?? stored, setSharing };
+}
+
+/**
+ * What a step's way forward must say while the switch isn't settled: leaving
+ * can send events, so it waits for the user's choice to be saved.
+ */
+export function sharingBlock(save: SaveState, failed: string): string | null {
+  if (save.state === "saving") return "Saving your choice…";
+  return save.state === "error" ? failed : null;
 }
 
 /**

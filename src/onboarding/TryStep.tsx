@@ -57,6 +57,7 @@ export function TryStep({
 }: Props) {
   const [box, setBox] = useState("");
   const field = useRef<HTMLTextAreaElement>(null);
+  const fixArea = useRef<HTMLDivElement>(null);
   const [progress, setProgress] = useState<DictationProgressView | null>(null);
   const [baseline, setBaseline] = useState<DictationProgressView | null>(null);
   // The paste check, and which dictation it belongs to.
@@ -149,6 +150,12 @@ export function TryStep({
 
   const view = tryView(progress, baseline, check);
 
+  // role="alert" announces it but doesn't scroll: the panel lands below the
+  // fold in a short window. Again when the words arrive and it grows.
+  useEffect(() => {
+    if (view.fix.kind !== "none") fixArea.current?.scrollIntoView({ block: "nearest" });
+  }, [view.fix.kind, words, copied]);
+
   async function copy() {
     try {
       const result = await commands.copyPracticeWords();
@@ -161,7 +168,7 @@ export function TryStep({
   return (
     <StepFrame
       parts={parts}
-      title="Your dictation key"
+      title="Try it"
       primary={{
         label: "Continue",
         onClick: onContinue,
@@ -169,6 +176,7 @@ export function TryStep({
       }}
       secondary={succeeded ? undefined : { label: "Skip for now", onClick: onSkip }}
     >
+      <span className="ob-label">Your dictation key</span>
       <HotkeyRecorder
         value={settings?.hotkey ?? "RightAlt"}
         disabled={settings === null}
@@ -213,45 +221,50 @@ export function TryStep({
           It works. The same key works in any app.
         </p>
       )}
-      {view.fix.kind === "microphone" && (
-        <div role="alert" className="ob-fix">
-          <p>{view.fix.message}</p>
-          <p className="ob-caption">
-            Check the input in System Settings → Sound, and that it isn&apos;t muted.
-          </p>
-        </div>
-      )}
-      {view.fix.kind === "key" && (
-        <div role="alert" className="ob-fix">
-          <p>{view.fix.message}</p>
-          <div className="row">
-            <button type="button" onClick={onBackToSpeech}>
-              Back to Speech
-            </button>
-          </div>
-        </div>
-      )}
-      {view.fix.kind === "other" && (
-        <p role="alert" className="ob-fix">
-          {view.fix.message}
-        </p>
-      )}
-      {view.fix.kind === "paste" && (
-        <div role="alert" className="ob-fix">
-          <p>Vocet heard you, but the words didn&apos;t reach the box:</p>
-          {words !== null && <p className="ob-words">{words}</p>}
-          <div className="row">
-            <button type="button" disabled={words === null} onClick={() => void copy()}>
-              Copy
-            </button>
-          </div>
-          <p className="ob-caption">
-            Click the box and press ⌘V. Vocet never pastes again by itself, so nothing lands twice.
-          </p>
-          {copied !== null && (
-            <p role="status" className="ob-caption">
-              {copied}
+      {view.fix.kind !== "none" && (
+        <div className="ob-fix-area" ref={fixArea}>
+          {view.fix.kind === "microphone" && (
+            <div role="alert" className="ob-fix">
+              <p>{view.fix.message}</p>
+              <p className="ob-caption">
+                Check the input in System Settings → Sound, and that it isn&apos;t muted.
+              </p>
+            </div>
+          )}
+          {view.fix.kind === "key" && (
+            <div role="alert" className="ob-fix">
+              <p>{view.fix.message}</p>
+              <div className="row">
+                <button type="button" onClick={onBackToSpeech}>
+                  Back to Speech
+                </button>
+              </div>
+            </div>
+          )}
+          {view.fix.kind === "other" && (
+            <p role="alert" className="ob-fix">
+              {view.fix.message}
             </p>
+          )}
+          {view.fix.kind === "paste" && (
+            <div role="alert" className="ob-fix">
+              <p>Vocet heard you, but the words didn&apos;t reach the box:</p>
+              {words !== null && <p className="ob-words">{words}</p>}
+              <div className="row">
+                <button type="button" disabled={words === null} onClick={() => void copy()}>
+                  Copy
+                </button>
+              </div>
+              <p className="ob-caption">
+                Click the box and press ⌘V. Vocet never pastes again by itself, so nothing lands
+                twice.
+              </p>
+              {copied !== null && (
+                <p role="status" className="ob-caption">
+                  {copied}
+                </p>
+              )}
+            </div>
           )}
         </div>
       )}

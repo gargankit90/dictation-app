@@ -203,6 +203,15 @@ function problems(root: HTMLElement): string[] {
   const area = content.getBoundingClientRect();
   if (area.height < 120) found.push(`the content is only ${String(area.height)} px tall`);
   if (content.scrollWidth > content.clientWidth + 1) found.push("the content overflows sideways");
+  // The fix panel scrolls itself into view; taller than the area, it fills it.
+  const fix = root.querySelector(".ob-fix-area")?.getBoundingClientRect();
+  if (
+    fix !== undefined &&
+    (fix.bottom > area.bottom + 1 || fix.top < area.top - 1) &&
+    !(fix.top <= area.top + 1 && fix.bottom >= area.bottom - 1)
+  ) {
+    found.push("the fix panel isn't scrolled into view");
+  }
   content.scrollTop = content.scrollHeight;
   const last = content.lastElementChild?.getBoundingClientRect();
   if (last !== undefined && last.bottom > area.bottom + 1) {

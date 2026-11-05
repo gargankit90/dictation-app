@@ -1035,6 +1035,12 @@ main.ob {
   clip-path: inset(50%);
 }
 
+.ob-fix-area {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vc-space-3);
+}
+
 .ob-fix {
   display: flex;
   flex-direction: column;
@@ -1069,6 +1075,14 @@ main.ob {
   align-items: baseline;
   justify-content: space-between;
   gap: var(--vc-space-1) var(--vc-space-3);
+}
+
+.ob-summary-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--vc-space-2);
 }
 
 .ob-summary dt {

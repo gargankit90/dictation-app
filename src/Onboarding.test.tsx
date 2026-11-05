@@ -4,7 +4,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type {
   DictationProgressView,
@@ -21,11 +21,11 @@ import type {
 } from "./bindings";
 import { Onboarding, RELAUNCH_AFTER_POLLS, STEPS } from "./Onboarding";
 import css from "./settings.css?raw";
-import { NOT_TESTED } from "./onboarding/ReadyStep";
+import { FINISH_REASON, NOT_TESTED } from "./onboarding/ReadyStep";
 import { KEY_REASON, MODEL_COPY } from "./onboarding/SpeechStep";
 import { BOTH_REASON } from "./onboarding/PermissionsStep";
 import { CONTINUE_REASON } from "./onboarding/TryStep";
-import { EVENTS_CAPTION, SAVE_FAILED_REASON, SAVING_REASON } from "./onboarding/WelcomeStep";
+import { EVENTS_CAPTION, SAVE_FAILED_REASON } from "./onboarding/WelcomeStep";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
 const KEY = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
@@ -296,6 +296,8 @@ function primary(name: string | RegExp): HTMLButtonElement {
 }
 
 const LONG = "ह".repeat(300);
+
+const SAVING_REASON = "Saving your choice…";
 
 describe("the frame", () => {
   it("criterion 1: exactly these five steps, in order, on the rail", async () => {
@@ -1037,6 +1039,42 @@ describe("Try it", () => {
     expect(backend.named("copy_practice_words")).toHaveLength(1);
   });
 
+  it("Design Lead: the title is Try it, with the key as a small label", async () => {
+    await stepOpen();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Try it");
+    expect(screen.getByText("Your dictation key").tagName).toBe("SPAN");
+  });
+
+  it("Design Lead: the panel of a missed paste is scrolled into view, also once the words arrive", async () => {
+    const scrolled = vi
+      .spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    try {
+      await stepOpen();
+      expect(document.querySelector(".ob-fix-area")).toBeNull();
+      backend.words = WORDS;
+      report({
+        started: 1,
+        finished: 1,
+        errors: 1,
+        heard: true,
+        stages: ["recorded", "transcribed"],
+        failure: "paste",
+        error: "Vocet couldn't paste.",
+      });
+      await screen.findByText(WORDS, undefined, { timeout: 2500 });
+      const area = document.querySelector(".ob-fix-area");
+      expect(area).not.toBeNull();
+      await waitFor(() => {
+        expect(scrolled.mock.contexts).toContain(area);
+      });
+      // Its last line, the instruction, is inside what was scrolled to.
+      expect(area?.textContent).toContain("Click the box and press ⌘V");
+    } finally {
+      scrolled.mockRestore();
+    }
+  });
+
   it("criterion 5: a failed paste shows the words at once", async () => {
     await stepOpen();
     backend.words = WORDS;
@@ -1117,7 +1155,9 @@ describe("Ready", () => {
     await screen.findByText("On this Mac · Parakeet English · ✓ Ready");
     expect(screen.getByText("Find Vocet in the menu bar", { exact: false })).toBeTruthy();
     expect(screen.queryByText(NOT_TESTED)).toBeNull();
-    expect(screen.getByRole<HTMLInputElement>("switch").checked).toBe(false);
+    expect(
+      screen.getByRole<HTMLInputElement>("switch", { name: "Open Vocet when I log in" }).checked,
+    ).toBe(false);
   });
 
   it("criterion 6: while the model isn't ready it doesn't say Ready", async () => {
@@ -1135,13 +1175,79 @@ describe("Ready", () => {
     await screen.findByText("Groq · ✓ Connected");
   });
 
-  it("criterion 6: the events line follows the switch, and Change goes to it", async () => {
+  it("the events row is a switch that shows the real state and applies at once", async () => {
     backend.settings = { ...backend.settings, share_usage_events: false };
     show();
-    const row = (await screen.findByText("Usage and error events")).closest("div");
-    await within(row as HTMLElement).findByText(/^Off/);
-    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "Change" }));
-    await screen.findByRole("switch", { name: "Share usage and error events" });
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Usage and error events",
+    });
+    await waitFor(() => {
+      expect(share.checked).toBe(false);
+    });
+    expect(screen.getByText("Off")).toBeTruthy();
+    fireEvent.click(share);
+    await waitFor(() => {
+      expect(backend.settings.share_usage_events).toBe(true);
+    });
+    expect(backend.named("set_share_usage_events")).toEqual([
+      { command: "set_share_usage_events", args: { share: true } },
+    ]);
+    expect(backend.step).toBe("ready");
+    expect(screen.getByText("On")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Change" })?.closest("div")?.textContent).toContain(
+      "History",
+    );
+  });
+
+  it("nothing leaves Ready while the switch is saving, and the last choice wins", async () => {
+    const pending: (() => void)[] = [];
+    const original = backend.handle;
+    mockIPC((command, payload) => {
+      if (command !== "set_share_usage_events") return original(command, payload);
+      return new Promise((resolve) => {
+        pending.push(() => {
+          resolve(original(command, payload));
+        });
+      });
+    });
+    show();
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Usage and error events",
+    });
+    fireEvent.click(share); // off
+    fireEvent.click(share); // on
+    fireEvent.click(share); // off
+    expect(pending).toHaveLength(1);
+    await waitFor(() => {
+      expect(primary("Start dictating").disabled).toBe(true);
+    });
+    expect(primary("Back").disabled).toBe(true);
+    for (let round = 0; round < 4; round += 1) {
+      await act(async () => {
+        pending.pop()?.();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+    }
+    await waitFor(() => {
+      expect(primary("Start dictating").disabled).toBe(false);
+    });
+    expect(backend.settings.share_usage_events).toBe(false);
+    expect(share.checked).toBe(false);
+  });
+
+  it("stays on Ready after a failed opt-out, and says why", async () => {
+    const original = backend.handle;
+    mockIPC((command, payload) => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      if (command === "set_share_usage_events") throw "Couldn't write the settings file.";
+      return original(command, payload);
+    });
+    show();
+    fireEvent.click(await screen.findByRole("switch", { name: "Usage and error events" }));
+    await screen.findByText(FINISH_REASON);
+    expect(primary("Start dictating").disabled).toBe(true);
+    fireEvent.click(primary("Start dictating"));
+    expect(backend.named("finish_onboarding")).toEqual([]);
   });
 
   it("criterion 6: shows the real history limit, and Change opens Settings → History", async () => {

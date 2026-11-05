@@ -9,11 +9,14 @@ import type {
 import { keycapLabel } from "../hotkeyKeys";
 import { BROKEN, messageOf } from "../keyTest";
 import { providerInfo } from "../providers";
+import { sharingBlock, useSharingSwitch } from "../settings/Privacy";
 import { SaveStatus, Switch, useSave } from "../settings/ui";
 import { chosenModel, modelWait, spokenName } from "./logic";
 import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";
 
+export const FINISH_REASON =
+  "Start dictating unlocks once your choice is saved. Try the switch again.";
 export const NOT_TESTED = "Not tested yet: try it from the menu bar any time";
 
 interface Props {
@@ -23,7 +26,6 @@ interface Props {
   onStored: (settings: Settings_Serialize) => void;
   models: LocalModelInfo_Serialize[] | null;
   engine: EngineStatus | null;
-  onChangeSharing: () => void;
   onChangeHistory: () => void;
   onFinish: () => void;
 }
@@ -84,11 +86,12 @@ export function ReadyStep({
   onStored,
   models,
   engine,
-  onChangeSharing,
   onChangeHistory,
   onFinish,
 }: Props) {
   const login = useSave();
+  const sharing = useSharingSwitch(settings?.share_usage_events ?? true, onStored);
+  const saving = sharing.save.state === "saving";
   const [shownLogin, setShownLogin] = useState<boolean | null>(null);
   const engineLine = useEngineLine(settings, models, engine);
   const atLogin = shownLogin ?? settings?.launch_at_login ?? false;
@@ -110,9 +113,14 @@ export function ReadyStep({
 
   return (
     <StepFrame
-      parts={parts}
+      // Leaving can send events, so nothing leaves while the switch is saving.
+      parts={{ ...parts, busy: parts.busy || saving }}
       title="You're set"
-      primary={{ label: "Start dictating", onClick: onFinish, blockedBecause: null }}
+      primary={{
+        label: "Start dictating",
+        onClick: onFinish,
+        blockedBecause: sharingBlock(sharing.save, FINISH_REASON),
+      }}
     >
       <dl className="ob-summary">
         <div>
@@ -124,12 +132,17 @@ export function ReadyStep({
           <dd>{engineLine}</dd>
         </div>
         <div>
-          <dt>Usage and error events</dt>
-          <dd>
-            {settings?.share_usage_events === false ? "Off" : "On"} ·{" "}
-            <button type="button" className="link" onClick={onChangeSharing}>
-              Change
-            </button>
+          <dt id="ob-share-ready-label">Usage and error events</dt>
+          <dd className="ob-summary-control">
+            <span>{sharing.checked ? "On" : "Off"}</span>
+            <Switch
+              id="ob-share-ready"
+              checked={sharing.checked}
+              disabled={settings === null}
+              labelledBy="ob-share-ready-label"
+              onChange={(share) => void sharing.setSharing(share)}
+            />
+            <SaveStatus save={sharing.save} />
           </dd>
         </div>
         {settings !== null && (
@@ -137,7 +150,7 @@ export function ReadyStep({
             <dt>History</dt>
             <dd>
               {historyLine(settings.history_limit)} ·{" "}
-              <button type="button" className="link" onClick={onChangeHistory}>
+              <button type="button" className="link" disabled={saving} onClick={onChangeHistory}>
                 Change
               </button>
             </dd>

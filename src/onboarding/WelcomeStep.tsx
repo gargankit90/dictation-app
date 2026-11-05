@@ -1,6 +1,6 @@
 import type { Settings_Serialize } from "../bindings";
 import { keycapLabel } from "../hotkeyKeys";
-import { useSharingSwitch, WhatsSent } from "../settings/Privacy";
+import { sharingBlock, useSharingSwitch, WhatsSent } from "../settings/Privacy";
 import { SaveStatus, Switch } from "../settings/ui";
 import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";
@@ -9,7 +9,6 @@ export const EVENTS_CAPTION =
   "Anonymous usage events (with a random install ID) and error reports help us fix what breaks. Never audio, transcripts, typed text, keys or app names.";
 
 /** Leaving Welcome starts sending, so the switch has to be saved first. */
-export const SAVING_REASON = "Saving your choice…";
 export const SAVE_FAILED_REASON =
   "Continue unlocks once your choice is saved. Try the switch again.";
 
@@ -39,14 +38,7 @@ export function WelcomeStep({ parts, settings, onStored, onContinue }: Props) {
       primary={{
         label: "Continue",
         onClick: onContinue,
-        blockedBecause:
-          settings === null
-            ? "Loading…"
-            : save.state === "saving"
-              ? SAVING_REASON
-              : save.state === "error"
-                ? SAVE_FAILED_REASON
-                : null,
+        blockedBecause: settings === null ? "Loading…" : sharingBlock(save, SAVE_FAILED_REASON),
       }}
     >
       <div className="ob-demo">

@@ -280,6 +280,11 @@ e2e_microphone_denied_then_recover() {
   expect "and why Continue waits" \
     ax_ok wait-text "$APP_NAME" "Set up" "Continue unlocks when both are allowed" 5
   screenshot e2e_microphone_denied_then_recover.setup_denied
+  # The window alone, in both appearances (U8, for the Design Lead).
+  obs_shot 3-permissions-mic-denied-light
+  obs_appearance dark
+  obs_shot 3-permissions-mic-denied-dark
+  obs_appearance light
   ready=$(log_count 'INFO .*ready')
   expect "press Relaunch and resume" ax_ok press "$APP_NAME" "Set up" "Relaunch and resume"
   expect "the app relaunches" wait_for_log_count 'INFO .*ready' $((ready + 1)) 30
