@@ -195,7 +195,7 @@ export const commands = {
 	/**  Checks for updates as the tray's item does: a dialog says what it found. */
 	checkForUpdates: () => typedError<null, string>(__TAURI_INVOKE("check_for_updates")),
 	/**  The recent dictations, newest first. History is in memory, so no blocking. */
-	listHistory: () => typedError<HistoryRow[], string>(__TAURI_INVOKE("list_history")),
+	listHistory: () => typedError<HistoryList, string>(__TAURI_INVOKE("list_history")),
 	/**
 	 *  Puts an entry's full text on the clipboard, with the same privacy markers
 	 *  as the menu's "Copy last dictation", so clipboard managers skip it.
@@ -478,6 +478,17 @@ export type FixAction =
 "open_troubleshoot" | 
 /**  Nothing to click: the next dictation is the retry. */
 "try_again";
+
+/**  What Settings → History shows. */
+export type HistoryList = {
+	/**  The entries, newest first. */
+	rows: HistoryRow[],
+	/**
+	 *  A history file exists that can't be read, so nothing is being saved
+	 *  until it can be, or Clear or Off deletes it.
+	 */
+	unreadable: boolean,
+};
 
 /**  One row of Settings → History. Deliberately no `Debug`: it holds the text. */
 export type HistoryRow = {

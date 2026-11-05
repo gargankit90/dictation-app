@@ -118,6 +118,10 @@ recent dictations": Off, 10, 25, 50 or 100. The default is the last 25.
 - **Deleting.** Delete removes one entry and "Clear history…" removes them all.
   Lowering the number deletes the oldest at once, after asking. Off deletes all
   of them and saves nothing more.
+- **A file that can't be read** (damaged, or from a newer version of the app) is
+  left as it is, because it may still hold your dictations. Settings → History
+  says so; new dictations are then kept only until you quit. "Clear history…"
+  or Off deletes the file.
 - **"Copy last dictation"** in the menu copies the newest entry. With history
   Off it copies the last pasted text, which is kept in memory only and is gone
   when you quit.

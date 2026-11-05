@@ -17,6 +17,7 @@ function row(id: number, text: string, pasted = true, agoMinutes = id): HistoryR
 class Backend {
   limit = 25;
   entries: HistoryRow[] = [];
+  unreadable = false;
   calls: { command: string; args: Record<string, unknown> }[] = [];
   failing = new Map<string, string>();
 
@@ -29,15 +30,17 @@ class Backend {
     if (failure !== undefined) throw failure;
     switch (command) {
       case "list_history":
-        return this.entries;
+        return { rows: this.entries, unreadable: this.unreadable };
       case "get_settings":
         return settingsWith(this.limit);
       case "set_history_limit":
         this.limit = args.limit as number;
+        if (this.limit === 0) this.unreadable = false;
         this.entries = this.entries.slice(0, this.limit);
         return null;
       case "clear_history":
         this.entries = [];
+        this.unreadable = false;
         return null;
       case "delete_history_entry":
         this.entries = this.entries.filter((entry) => entry.id !== args.id);
@@ -383,6 +386,48 @@ describe("Settings → History", () => {
     fireEvent.change(select, { target: { value: "50" } });
     expect((await screen.findByRole("alert")).textContent).toContain("disk full");
     expect(select.value).toBe("25");
+  });
+
+  it("a saved file that can't be read: says so, keeps it, and Clear can delete it", async () => {
+    backend.unreadable = true;
+    await show();
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Your saved history can't be read",
+    );
+    // Not "no dictations yet": there may well be some, in that file.
+    expect(screen.queryByText(/No dictations yet/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear history…" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("Delete the saved history that can't be read?");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await screen.findByText(/No dictations yet/);
+    expect(backend.called("clear_history")).toHaveLength(1);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("this run's dictations show beside the notice, and Clear counts them", async () => {
+    backend.unreadable = true;
+    backend.entries = [row(1, "one")];
+    await show();
+    await screen.findByText("one");
+    fireEvent.click(screen.getByRole("button", { name: "Clear history…" }));
+    expect((await screen.findByRole("alertdialog")).textContent).toContain(
+      "Delete 1 dictation and the saved history that can't be read?",
+    );
+  });
+
+  it("Off asks before deleting a saved file that can't be read, even with no rows", async () => {
+    backend.unreadable = true;
+    await show();
+    await screen.findByRole("alert");
+    fireEvent.change(screen.getByLabelText("Keep recent dictations"), { target: { value: "0" } });
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("delete the saved history that can't be read?");
+    expect(backend.called("set_history_limit")).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => {
+      expect(backend.called("set_history_limit")[0]?.args).toEqual({ limit: 0 });
+    });
   });
 
   it("a list the app can't read says so", async () => {

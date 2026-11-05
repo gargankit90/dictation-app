@@ -123,7 +123,7 @@ describe("App", () => {
             history_limit: 25,
           };
         case "list_history":
-          return [];
+          return { rows: [], unreadable: false };
         case "list_local_models":
           return [];
         case "get_engine_status":

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, RefObject } from "react";
 import { commands } from "../bindings";
-import type { HistoryRow, Settings_Serialize } from "../bindings";
+import type { HistoryList, Settings_Serialize } from "../bindings";
 import { keycapLabel } from "../hotkeyKeys";
 import { BROKEN, messageOf } from "../keyTest";
 import { Chip, Group, Row, SAVED_FOR_MS, SaveStatus, useSave } from "./ui";
@@ -51,24 +51,36 @@ function dictations(count: number): string {
 }
 
 /** What lowering the limit to `limit` asks, or `null` if it deletes nothing. */
-export function limitQuestion(limit: number, count: number): string | null {
+export function limitQuestion(limit: number, count: number, unreadable = false): string | null {
   if (limit === 0) {
-    return count === 0
-      ? null
-      : `Turn off history and delete ${count === 1 ? "1 dictation" : `all ${dictations(count)}`}? This can't be undone.`;
+    if (count === 0) {
+      return unreadable
+        ? "Turn off history and delete the saved history that can't be read? This can't be undone."
+        : null;
+    }
+    return `Turn off history and delete ${count === 1 ? "1 dictation" : `all ${dictations(count)}`}? This can't be undone.`;
   }
   const deleted = count - limit;
   if (deleted <= 0) return null;
   return `Keep the last ${String(limit)} and delete the ${deleted === 1 ? "oldest dictation" : `${String(deleted)} oldest dictations`}? This can't be undone.`;
 }
 
+/** What Clear history asks. */
+export function clearQuestion(count: number, unreadable: boolean): string {
+  if (count === 0) return "Delete the saved history that can't be read? This can't be undone.";
+  const what = count === 1 ? "1 dictation" : `all ${dictations(count)}`;
+  return unreadable
+    ? `Delete ${what} and the saved history that can't be read? This can't be undone.`
+    : `Delete ${what}? This can't be undone.`;
+}
+
 /** The recent dictations, read while the section shows. */
 function useHistoryList() {
-  const [entries, setEntries] = useState<HistoryRow[] | null>(null);
+  const [list, setList] = useState<HistoryList | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Only the newest reply counts.
   const read = useRef(0);
-  const refresh = useCallback(async (): Promise<HistoryRow[] | null> => {
+  const refresh = useCallback(async (): Promise<HistoryList | null> => {
     read.current += 1;
     const run = read.current;
     try {
@@ -79,7 +91,7 @@ function useHistoryList() {
         return null;
       }
       setError(null);
-      setEntries(result.data);
+      setList(result.data);
       return result.data;
     } catch {
       if (run === read.current) setError(BROKEN);
@@ -97,7 +109,7 @@ function useHistoryList() {
       window.clearInterval(timer);
     };
   }, [refresh]);
-  return { entries, error, refresh };
+  return { list, error, refresh };
 }
 
 interface Asking {
@@ -169,7 +181,9 @@ export function History({
   settings: Settings_Serialize;
   onStored: (settings: Settings_Serialize) => void;
 }) {
-  const { entries, error: listError, refresh } = useHistoryList();
+  const { list, error: listError, refresh } = useHistoryList();
+  const entries = list?.rows ?? null;
+  const unreadable = list?.unreadable ?? false;
   const limit = useSave();
   const [asking, setAsking] = useState<Asking | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -225,8 +239,8 @@ export function History({
 
   async function chooseLimit(next: number) {
     // Counted now: a dictation may have arrived since the list was read.
-    const current = (await refresh()) ?? entries ?? [];
-    const question = limitQuestion(next, current.length);
+    const current = (await refresh()) ?? list;
+    const question = limitQuestion(next, current?.rows.length ?? 0, current?.unreadable ?? false);
     if (question === null) {
       await applyLimit(next);
       return;
@@ -246,7 +260,7 @@ export function History({
   function askToClear() {
     const count = entries?.length ?? 0;
     setAsking({
-      question: `Delete ${count === 1 ? "1 dictation" : `all ${dictations(count)}`}? This can't be undone.`,
+      question: clearQuestion(count, unreadable),
       confirm: "Delete",
       returnTo: clearButton,
       run: () => {
@@ -332,12 +346,20 @@ export function History({
             {problem}
           </p>
         ) : null}
-        {entries === null ? null : count === 0 ? (
-          <p className="history-empty">
-            {off
-              ? "History is off. New dictations aren't saved."
-              : `No dictations yet. Hold ${key} and speak.`}
+        {unreadable ? (
+          <p role="alert" className="notice error">
+            Your saved history can&apos;t be read, so it was left as it is. New dictations are kept
+            only until you quit. Clear history deletes the saved file.
           </p>
+        ) : null}
+        {entries === null ? null : count === 0 ? (
+          unreadable ? null : (
+            <p className="history-empty">
+              {off
+                ? "History is off. New dictations aren't saved."
+                : `No dictations yet. Hold ${key} and speak.`}
+            </p>
+          )
         ) : (
           <ul className="history-list" aria-label="Recent dictations">
             {entries.map((row) => {
@@ -378,7 +400,7 @@ export function History({
         <p role="status" className="visually-hidden">
           {copied === null ? "" : "Copied"}
         </p>
-        {count === 0 ? null : (
+        {count === 0 && !unreadable ? null : (
           <Group>
             <Row label="Clear history">
               <button ref={clearButton} type="button" className="destructive" onClick={askToClear}>

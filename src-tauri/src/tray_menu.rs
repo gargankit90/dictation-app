@@ -465,17 +465,19 @@ fn copy_last(app: &AppHandle) {
     let Some(hub) = app.try_state::<TrayHub>() else {
         return;
     };
-    let Some(text) = hub.history.last_text() else {
-        return;
-    };
+    // Off the main thread, where this click arrives, from the lookup on.
+    let history = Arc::clone(&hub.history);
     let spawned = std::thread::Builder::new()
         .name("copy-last".into())
-        .spawn(
-            move || match dictation_platform::insert::SystemClipboard::new().copy(&text) {
+        .spawn(move || {
+            let Some(text) = history.last_text() else {
+                return;
+            };
+            match dictation_platform::insert::SystemClipboard::new().copy(&text) {
                 Ok(()) => tracing::info!("copied the last dictation"),
                 Err(error) => tracing::warn!(%error, "could not copy the last dictation"),
-            },
-        );
+            }
+        });
     if let Err(error) = spawned {
         tracing::warn!(%error, "could not start the copy");
     }

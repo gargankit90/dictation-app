@@ -31,6 +31,16 @@ pub struct HistoryRow {
     pub pasted: bool,
 }
 
+/// What Settings → History shows.
+#[derive(Serialize, specta::Type)]
+pub struct HistoryList {
+    /// The entries, newest first.
+    pub rows: Vec<HistoryRow>,
+    /// A history file exists that can't be read, so nothing is being saved
+    /// until it can be, or Clear or Off deletes it.
+    pub unreadable: bool,
+}
+
 impl From<Entry> for HistoryRow {
     #[allow(
         clippy::cast_precision_loss,
@@ -63,8 +73,11 @@ async fn blocking<T: Send + 'static>(
 /// The recent dictations, newest first. History is in memory, so no blocking.
 #[tauri::command]
 #[specta::specta]
-pub async fn list_history(history: State<'_, AppHistory>) -> Result<Vec<HistoryRow>, String> {
-    Ok(history.0.entries().into_iter().map(Into::into).collect())
+pub async fn list_history(history: State<'_, AppHistory>) -> Result<HistoryList, String> {
+    Ok(HistoryList {
+        rows: history.0.entries().into_iter().map(Into::into).collect(),
+        unreadable: history.0.is_unreadable(),
+    })
 }
 
 /// Puts an entry's full text on the clipboard, with the same privacy markers

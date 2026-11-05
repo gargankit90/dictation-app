@@ -10,6 +10,9 @@
 //!   failed paste is kept with `pasted: false`.
 //! - With history Off nothing is written. The last pasted text stays in
 //!   memory for "Copy last dictation", as U5 had it, and is gone at quit.
+//! - A file that can't be read (damaged, from a newer version, or a read that
+//!   fails) is never written over, as it may hold the user's entries. Nothing
+//!   is saved until it can be read or the user deletes it with Clear or Off.
 //! - Nothing here logs an entry's text or length, or a parser's message
 //!   (which can quote the file). Counts and the limit are fine.
 
@@ -40,15 +43,23 @@ struct State {
     in_memory: Option<String>,
     /// The newest id used in this run, so an id is never reused.
     last_id: u64,
-    /// Whether the file has been read. It isn't when the settings couldn't
-    /// be read at launch: see [`History::open`].
+    /// Whether the file has been read. Until it has, it is never written: it
+    /// may hold entries this run can't see. See [`History::is_unreadable`].
     loaded: bool,
+    /// Whether the last attempt to read the file failed.
+    unreadable: bool,
 }
 
 /// The recent dictations and the file behind them. Shared with an `Arc`.
+///
+/// Two locks, always taken in this order: `persisting` is held across file
+/// I/O and by everything that changes the history, so changes stay in order;
+/// `state` is held only for moments and never across I/O. So reading the
+/// history (the tray does, on the main thread) never waits for the disk.
 pub struct History {
     store: Box<dyn HistoryStore>,
     now: WallClock,
+    persisting: Mutex<()>,
     state: Mutex<State>,
 }
 
@@ -85,12 +96,14 @@ impl History {
         let history = Self {
             store: Box::new(store),
             now,
+            persisting: Mutex::new(()),
             state: Mutex::new(State {
                 entries: Vec::new(),
                 limit: 0,
                 in_memory: None,
                 last_id: 0,
                 loaded: false,
+                unreadable: false,
             }),
         };
         if let Some(limit) = limit
@@ -110,20 +123,47 @@ impl History {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn load(&self, state: &mut State) {
-        state.loaded = true;
-        state.entries = match self.store.read() {
-            Ok(None) => Vec::new(),
-            Ok(Some(json)) => history::from_json(&json).unwrap_or_else(|| {
+    fn lock_persisting(&self) -> MutexGuard<'_, ()> {
+        self.persisting
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Reads the file and adds what it holds to what is in memory; `false` if
+    /// it can't be read. A file that is damaged, from a newer version or
+    /// failing to read may still hold the user's entries, so it is then left
+    /// exactly as it is and not written: entries stay in memory, and the next
+    /// dictation or limit change tries again. Only Clear or Off remove it.
+    /// Call with `persisting` held.
+    fn load(&self) -> bool {
+        let read = match self.store.read() {
+            Ok(None) => Some(Vec::new()),
+            Ok(Some(json)) => history::from_json(&json).or_else(|| {
                 // No parser message: it could quote the file.
-                tracing::warn!("the history file can't be read; starting empty");
-                Vec::new()
+                tracing::warn!("the history file can't be read; not saving over it");
+                None
             }),
             Err(error) => {
-                tracing::warn!(%error, "could not read the history; starting empty");
-                Vec::new()
+                tracing::warn!(%error, "could not read the history; not saving over it");
+                None
             }
         };
+        let mut state = self.lock();
+        let Some(stored) = read else {
+            state.unreadable = true;
+            return false;
+        };
+        // What waited in memory is newer than the file. New ids put it on top
+        // and can't collide with the file's, whatever the clock did.
+        let waiting = std::mem::replace(&mut state.entries, stored);
+        for mut entry in waiting.into_iter().rev() {
+            entry.id = history::next_id(&state.entries, state.last_id, entry.id);
+            state.last_id = entry.id;
+            state.entries.insert(0, entry);
+        }
+        state.loaded = true;
+        state.unreadable = false;
+        true
     }
 
     fn save(&self, entries: &[Entry]) -> Result<(), HistoryStoreError> {
@@ -167,6 +207,14 @@ impl History {
             .map(|entry| entry.text.clone())
     }
 
+    /// Whether a history file exists that can't be read, so nothing is being
+    /// saved: new dictations stay in memory until it can be, or until Clear
+    /// or Off deletes it.
+    #[must_use]
+    pub fn is_unreadable(&self) -> bool {
+        self.lock().unreadable
+    }
+
     /// Keeps a finished dictation. The smart leading space is dropped: it
     /// belongs to where the text was pasted. A write that fails is logged and
     /// the entry stays in memory, so the next write carries it.
@@ -175,104 +223,147 @@ impl History {
         if text.trim().is_empty() {
             return;
         }
-        let mut state = self.lock();
-        if state.limit == 0 {
-            // As U5: a failed paste keeps the one before.
-            if pasted {
-                state.in_memory = Some(text.to_owned());
+        let _persisting = self.lock_persisting();
+        let loaded = {
+            let mut state = self.lock();
+            if state.limit == 0 {
+                // As U5: a failed paste keeps the one before.
+                if pasted {
+                    state.in_memory = Some(text.to_owned());
+                }
+                return;
             }
+            state.in_memory = None;
+            let now = (self.now)();
+            let id = history::next_id(&state.entries, state.last_id, now);
+            state.last_id = id;
+            let limit = keep(state.limit);
+            history::push(
+                &mut state.entries,
+                Entry {
+                    id,
+                    text: text.to_owned(),
+                    created_at: now,
+                    engine: engine.to_owned(),
+                    pasted,
+                },
+                limit,
+            );
+            state.loaded
+        };
+        if !loaded && !self.load() {
             return;
         }
-        state.in_memory = None;
-        let now = (self.now)();
-        let id = history::next_id(&state.entries, state.last_id, now);
-        state.last_id = id;
-        let limit = usize::try_from(state.limit).unwrap_or(usize::MAX);
-        history::push(
-            &mut state.entries,
-            Entry {
-                id,
-                text: text.to_owned(),
-                created_at: now,
-                engine: engine.to_owned(),
-                pasted,
-            },
-            limit,
-        );
-        if let Err(error) = self.save(&state.entries) {
+        let entries = {
+            let mut state = self.lock();
+            let limit = keep(state.limit);
+            state.entries.truncate(limit);
+            state.entries.clone()
+        };
+        if let Err(error) = self.save(&entries) {
             tracing::warn!(%error, "could not save the history");
         }
     }
 
     /// Deletes one entry; the list changes only if the file did. An entry
-    /// already gone is not an error.
+    /// already gone is not an error. Until the file can be read the entries
+    /// are only in memory, and the file isn't touched.
     ///
     /// # Errors
     ///
     /// If the file can't be changed.
     pub fn delete(&self, id: u64) -> Result<(), HistoryStoreError> {
-        let mut state = self.lock();
-        if !state.entries.iter().any(|entry| entry.id == id) {
-            return Ok(());
+        let _persisting = self.lock_persisting();
+        let (kept, loaded) = {
+            let state = self.lock();
+            if !state.entries.iter().any(|entry| entry.id == id) {
+                return Ok(());
+            }
+            let kept: Vec<Entry> = state
+                .entries
+                .iter()
+                .filter(|entry| entry.id != id)
+                .cloned()
+                .collect();
+            (kept, state.loaded)
+        };
+        if loaded {
+            if kept.is_empty() {
+                self.store.delete()?;
+            } else {
+                self.save(&kept)?;
+            }
         }
-        let kept: Vec<Entry> = state
-            .entries
-            .iter()
-            .filter(|entry| entry.id != id)
-            .cloned()
-            .collect();
-        if kept.is_empty() {
-            self.store.delete()?;
-        } else {
-            self.save(&kept)?;
-        }
-        state.entries = kept;
+        self.lock().entries = kept;
         Ok(())
     }
 
-    /// Deletes every entry and the file, and forgets any text in memory, so
-    /// "Copy last dictation" has nothing left.
+    /// Deletes every entry and the file, even one that can't be read, and
+    /// forgets any text in memory, so "Copy last dictation" has nothing left.
     ///
     /// # Errors
     ///
     /// If the file can't be deleted; the entries then stay.
     pub fn clear(&self) -> Result<(), HistoryStoreError> {
-        let mut state = self.lock();
-        state.in_memory = None;
+        let _persisting = self.lock_persisting();
+        self.lock().in_memory = None;
         self.store.delete()?;
+        let mut state = self.lock();
         state.entries.clear();
+        state.loaded = true;
+        state.unreadable = false;
         Ok(())
     }
 
     /// Keeps at most `limit` entries from now on, trimming the oldest at
-    /// once. Off (0) deletes them all and the file, and saves nothing more.
+    /// once. Off (0) deletes them all and the file, even one that can't be
+    /// read, and saves nothing more.
     ///
     /// # Errors
     ///
     /// If the file can't be changed. The new limit holds anyway, and the file
     /// is put right by the next write or at the next launch.
     pub fn set_limit(&self, limit: u32) -> Result<(), HistoryStoreError> {
-        let mut state = self.lock();
-        if !state.loaded {
+        let _persisting = self.lock_persisting();
+        let was_loaded = {
+            let mut state = self.lock();
+            state.limit = limit;
             if limit == 0 {
-                state.loaded = true;
-            } else {
-                self.load(&mut state);
+                state.entries.clear();
+                state.in_memory = None;
             }
-        }
-        state.limit = limit;
+            state.loaded
+        };
         if limit == 0 {
-            state.entries.clear();
-            state.in_memory = None;
-            return self.store.delete();
+            self.store.delete()?;
+            let mut state = self.lock();
+            state.loaded = true;
+            state.unreadable = false;
+            return Ok(());
         }
-        let keep = usize::try_from(limit).unwrap_or(usize::MAX);
-        if state.entries.len() > keep {
-            state.entries.truncate(keep);
-            return self.save(&state.entries);
+        // Entries kept in memory while the file couldn't be read go in it now.
+        let waiting = !was_loaded && !self.lock().entries.is_empty();
+        if !was_loaded && !self.load() {
+            let mut state = self.lock();
+            state.entries.truncate(keep(limit));
+            return Ok(());
+        }
+        let trimmed = {
+            let mut state = self.lock();
+            let over = state.entries.len() > keep(limit);
+            state.entries.truncate(keep(limit));
+            over
+        };
+        if trimmed || waiting {
+            return self.save(&self.entries());
         }
         Ok(())
     }
+}
+
+/// The limit as a length.
+fn keep(limit: u32) -> usize {
+    usize::try_from(limit).unwrap_or(usize::MAX)
 }
 
 /// A [`TextInserter`] that keeps what it was given in the history.
@@ -634,13 +725,183 @@ mod tests {
         assert_eq!(stored_texts(&store).len(), 3);
     }
 
+    /// Round 1 #1: a file this build can't read may hold the user's entries,
+    /// so a later dictation must not replace it.
     #[test]
-    fn a_damaged_file_starts_empty_and_is_replaced() {
+    fn a_file_that_cannot_be_read_is_never_saved_over() {
+        for original in [
+            "not json",
+            r#"{"version":99,"entries":[{"from":"the future"}]}"#,
+        ] {
+            let store = MemHistoryStore::with_contents(original);
+            let history = open(&store, 25);
+            assert!(history.is_unreadable(), "{original}");
+            history.record("next", "Groq", true);
+            history.record("and next", "Groq", false);
+            assert_eq!(store.contents().as_deref(), Some(original));
+            assert_eq!(store.deletes(), 0);
+            // The new ones work for this run, Copy last dictation included.
+            assert_eq!(texts(&history), ["and next", "next"]);
+            assert_eq!(history.last_text().as_deref(), Some("and next"));
+            // Nor do Delete, or a limit change, touch the file.
+            history.delete(history.entries()[0].id).unwrap();
+            history.set_limit(10).unwrap();
+            assert_eq!(store.contents().as_deref(), Some(original));
+            assert!(history.is_unreadable());
+        }
+    }
+
+    #[test]
+    fn a_failed_read_is_retried_and_nothing_is_lost() {
+        let store = MemHistoryStore::new();
+        fill(&open(&store, 25), 2);
+        let original = store.contents();
+        store.set_failing(true);
+        let history = open(&store, 25);
+        assert!(history.is_unreadable());
+        assert!(history.entries().is_empty());
+        history.record("while failing", "Groq", true);
+        assert_eq!(store.contents(), original);
+        // It reads again: the file's entries and the new ones together.
+        store.set_failing(false);
+        history.record("after", "Groq", true);
+        assert!(!history.is_unreadable());
+        let want = ["after", "while failing", "dictation 1", "dictation 0"];
+        assert_eq!(texts(&history), want);
+        assert_eq!(stored_texts(&store), want);
+    }
+
+    /// The test clocks of the two runs start alike, so ids collide here, as
+    /// they could after a clock change; neither entry may be lost.
+    #[test]
+    fn entries_with_the_same_id_as_the_file_are_all_kept() {
+        let store = MemHistoryStore::new();
+        fill(&open(&store, 25), 1);
+        store.set_failing(true);
+        let history = open(&store, 25);
+        history.record("same id", "Groq", true);
+        store.set_failing(false);
+        history.record("after", "Groq", true);
+        assert_eq!(texts(&history), ["after", "same id", "dictation 0"]);
+        let ids: std::collections::BTreeSet<u64> =
+            history.entries().iter().map(|entry| entry.id).collect();
+        assert_eq!(ids.len(), 3);
+    }
+
+    /// A limit change retries too, and saves what was waiting.
+    #[test]
+    fn a_limit_change_retries_the_read_and_saves_within_the_limit() {
+        let store = MemHistoryStore::new();
+        fill(&open(&store, 25), 11);
+        store.set_failing(true);
+        let history = open(&store, 25);
+        history.record("while failing", "Groq", true);
+        store.set_failing(false);
+        history.set_limit(10).unwrap();
+        assert!(!history.is_unreadable());
+        assert_eq!(history.entries().len(), 10);
+        assert_eq!(texts(&history)[0], "while failing");
+        assert_eq!(stored_texts(&store), texts(&history));
+    }
+
+    #[test]
+    fn clear_and_off_still_delete_a_file_that_cannot_be_read() {
         let store = MemHistoryStore::with_contents("not json");
         let history = open(&store, 25);
-        assert!(history.entries().is_empty());
         history.record("next", "Groq", true);
-        assert_eq!(stored_texts(&store), ["next"]);
+        history.clear().unwrap();
+        assert_eq!(store.contents(), None);
+        assert!(!history.is_unreadable());
+        // And saving works again.
+        history.record("saved", "Groq", true);
+        assert_eq!(stored_texts(&store), ["saved"]);
+
+        let store = MemHistoryStore::with_contents("not json");
+        let history = open(&store, 25);
+        history.set_limit(0).unwrap();
+        assert_eq!(store.contents(), None);
+        assert!(!history.is_unreadable());
+        assert!(!history.has_last());
+
+        // A launch with Off deletes it as well: the user chose that.
+        let store = MemHistoryStore::with_contents("not json");
+        let _ = open(&store, 0);
+        assert_eq!(store.contents(), None);
+    }
+
+    #[test]
+    fn a_failed_clear_of_an_unreadable_file_still_says_it_is_unreadable() {
+        let store = MemHistoryStore::with_contents("not json");
+        let history = open(&store, 25);
+        store.set_failing(true);
+        assert!(history.clear().is_err());
+        assert!(history.is_unreadable());
+        store.set_failing(false);
+        assert_eq!(store.contents().as_deref(), Some("not json"));
+    }
+
+    /// A store whose first write stays in progress until the test lets it go.
+    struct PausedWrite {
+        started: Mutex<std::sync::mpsc::Sender<()>>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl HistoryStore for PausedWrite {
+        fn read(&self) -> Result<Option<String>, HistoryStoreError> {
+            Ok(None)
+        }
+
+        fn write(&self, _contents: &str) -> Result<(), HistoryStoreError> {
+            let _ = self.started.lock().unwrap().send(());
+            let _ = self.release.lock().unwrap().recv();
+            Ok(())
+        }
+
+        fn delete(&self) -> Result<(), HistoryStoreError> {
+            Ok(())
+        }
+    }
+
+    /// Round 1 #2: the tray reads the history on the main thread, so a read
+    /// must finish while a write is stuck on the disk.
+    #[test]
+    fn reading_the_history_never_waits_for_a_write() {
+        let (started_send, started) = std::sync::mpsc::channel();
+        let (release, release_receive) = std::sync::mpsc::channel();
+        let history = Arc::new(History::open(
+            PausedWrite {
+                started: Mutex::new(started_send),
+                release: Mutex::new(release_receive),
+            },
+            Some(25),
+        ));
+        let writer = {
+            let history = Arc::clone(&history);
+            std::thread::spawn(move || history.record("words", "Groq", true))
+        };
+        let wait = std::time::Duration::from_secs(10);
+        started.recv_timeout(wait).unwrap();
+        // On threads of their own, so a regression fails instead of hanging.
+        let (done, finished) = std::sync::mpsc::channel();
+        let reader = {
+            let history = Arc::clone(&history);
+            std::thread::spawn(move || {
+                let id = history.entries()[0].id;
+                let seen = (
+                    history.has_last(),
+                    history.last_text(),
+                    history.text_of(id),
+                    history.is_unreadable(),
+                );
+                let _ = done.send(seen);
+            })
+        };
+        let seen = finished.recv_timeout(wait);
+        release.send(()).unwrap();
+        writer.join().unwrap();
+        reader.join().unwrap();
+        let word = Some("words".to_owned());
+        assert_eq!(seen.unwrap(), (true, word.clone(), word, false));
     }
 
     #[test]

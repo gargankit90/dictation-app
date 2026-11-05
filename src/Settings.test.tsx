@@ -86,7 +86,7 @@ class Backend {
       case "launch_notice":
         return this.launchNotice;
       case "list_history":
-        return [];
+        return { rows: [], unreadable: false };
       case "set_hotkey":
         this.settings = { ...this.settings, hotkey: args.spec as string };
         return null;
