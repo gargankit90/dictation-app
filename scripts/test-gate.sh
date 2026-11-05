@@ -9,12 +9,18 @@ set -euo pipefail
 unset CI GITHUB_ACTIONS GATE_RECEIPT_TTL
 # Git's pre-push hook runs the gate with GIT_DIR and friends set. Left in, they
 # point every fixture command at the real repository (this once moved the
-# checkout's branch). Only the config isolation below stays.
-while IFS= read -r v; do unset "$v"; done < <(env | sed -n 's/^\(GIT_[A-Z_]*\)=.*/\1/p' | grep -v -e '^GIT_EXEC_PATH$' -e '^GIT_TEMPLATE_DIR$' || true)
+# checkout's branch). Drop all of them; GIT_EXEC_PATH (git's own libexec) stays.
+# GIT_TEMPLATE_DIR goes too: a caller's template would copy its hooks into every
+# fixture repo. Fixtures get an empty template and, as a second lock, hooks
+# switched off through the environment (which beats any repo config).
+while IFS= read -r v; do unset "$v"; done < <(env | sed -n 's/^\(GIT_[A-Z_]*\)=.*/\1/p' | grep -v -e '^GIT_EXEC_PATH$' || true)
 
 root=$(git rev-parse --show-toplevel)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+mkdir "$tmp/empty-template"
+export GIT_TEMPLATE_DIR=$tmp/empty-template
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null
 fails=0
 ok() { printf 'ok   %s\n' "$1"; }
 bad() { printf 'FAIL %s\n' "$1" >&2; fails=$((fails + 1)); }
@@ -41,6 +47,9 @@ make_repo() { # name
   cp "$root/scripts/gate.sh" "$root/scripts/gate-lib.sh" "$r/scripts/"
   printf 'node_modules/\ngatefile.txt\n' >"$r/.gitignore"
   echo '{}' >"$r/node_modules/.package-lock.json"
+  mkdir -p "$r/node_modules/.bin" "$r/node_modules/prettier"
+  for t in prettier eslint tsc vitest; do printf '#!/bin/sh\n' >"$r/node_modules/.bin/$t"; chmod +x "$r/node_modules/.bin/$t"; done
+  echo '{}' >"$r/node_modules/prettier/package.json"
   echo one >"$r/gatefile.txt"
   echo '# r' >"$r/README.md"
   echo code >"$r/code.rs"
@@ -82,6 +91,30 @@ commit_file() { # repo path content
   git -C "$1" add -A
   git -C "$1" commit -q -m "change $2"
 }
+
+# Isolation probe: build one fixture repo and commit in it. Used by the hostile-
+# environment test below, which runs this script again in a poisoned caller env.
+if [ "${1:-}" = --probe ]; then
+  r=$(make_repo probe)
+  commit_file "$r" a.txt a
+  exit 0
+fi
+
+# The caller's environment is hostile: a template dir whose hooks write a
+# sentinel, and GIT_DIR pointing at a decoy repo. Neither may have any effect.
+hostile=$tmp/hostile
+mkdir -p "$hostile/template/hooks" "$hostile/decoy"
+for hook in pre-commit post-commit post-checkout pre-push reference-transaction; do
+  printf '#!/bin/sh\ntouch "%s/sentinel-%s"\n' "$hostile" "$hook" >"$hostile/template/hooks/$hook"
+  chmod +x "$hostile/template/hooks/$hook"
+done
+(cd "$hostile/decoy" && git init -q -b main . && git -c core.hooksPath=/dev/null commit -q --allow-empty -m decoy)
+decoy_before=$(git -C "$hostile/decoy" for-each-ref; git -C "$hostile/decoy" status --short)
+GIT_TEMPLATE_DIR=$hostile/template GIT_DIR=$hostile/decoy/.git GIT_WORK_TREE=$hostile/decoy \
+  GIT_CONFIG_COUNT=0 bash "$root/scripts/test-gate.sh" --probe >/dev/null 2>&1 || true
+expect "a caller's template-dir hooks never run in fixtures" test -z "$(ls "$hostile" | grep sentinel || true)"
+expect "a caller's GIT_DIR is never touched by fixtures" test "$decoy_before" = "$(git -C "$hostile/decoy" for-each-ref; git -C "$hostile/decoy" status --short)"
+git config --global core.hooksPath >/dev/null 2>&1 || true
 
 # ---- receipts ----
 r=$(make_repo rcpt)
@@ -135,6 +168,23 @@ expect "a different tool version invalidates" ran_full
 run_gate "$r" --full
 run_gate_with "$r" 'export CARGO_BUILD_JOBS=3'
 expect "a changed env flag or profile invalidates" ran_full
+run_gate "$r" --full
+run_gate_with "$r" 'export COVERAGE_MIN_CORE=1'
+expect "a coverage threshold override invalidates" ran_full
+run_gate "$r" --full
+run_gate_with "$r" 'export LICENCES_GEN=/nonexistent'
+expect "a licence-check override invalidates" ran_full
+run_gate "$r" --full
+rm "$r/node_modules/.bin/prettier"
+run_gate "$r"
+expect "a deleted npm tool: no reuse" ran_full
+expect "...saying the tool is missing" out_has "npm tool is missing"
+printf '#!/bin/sh\n' >"$r/node_modules/.bin/prettier"; chmod +x "$r/node_modules/.bin/prettier"
+run_gate "$r" --full
+rm -rf "$r/node_modules/prettier"
+run_gate_with "$r" 'true'
+expect "a deleted installed package changes the key" ran_full
+mkdir "$r/node_modules/prettier"; echo '{}' >"$r/node_modules/prettier/package.json"
 run_gate "$r" --full
 run_gate_with "$r" 'GATE_RECEIPT_TTL=0'
 expect "an expired receipt (TTL) is not used" ran_full

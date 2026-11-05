@@ -162,7 +162,9 @@ gate_main() {
     use_receipt=1
     key=$(gate_key)
     if [ "$force_full" = 0 ]; then
-      if gate_receipt_valid "$key"; then
+      if ! gate_tools_installed; then
+        GATE_RECEIPT_WHY="an npm tool is missing from node_modules"
+      elif gate_receipt_valid "$key"; then
         printf 'gate: skipped. This exact input (tree, gate scripts, tools, env, packages) passed a full run %s min ago (receipt: %s). Run scripts/gate.sh --full to run it anyway.\n' \
           "$((($(date +%s) - GATE_RECEIPT_AT) / 60))" "$(gate_receipt_file)"
         return 0

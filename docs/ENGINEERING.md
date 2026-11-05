@@ -260,8 +260,10 @@ The rule stays: run the gate before you push. `scripts/gate.sh` (helpers in
   skipped. The key covers the tree (a dirty tree, untracked non-ignored files
   included, never reuses or writes a receipt), the gate scripts, OS and
   architecture, Rust, Node and check-tool versions, env flags and profiles
-  (`NEXTEST_*`, `CARGO_*`, `RUST*`, `DICTATION_*`, `LLVM_*`), and the installed
-  npm packages. It expires after 4 hours (`GATE_RECEIPT_TTL`, seconds) so
+  (`NEXTEST_*`, `CARGO_*`, `RUST*`, `DICTATION_*`, `LLVM_*`, and the checks' own
+  controls `COVERAGE_*` and `LICENCES_*`), and the installed npm packages (the
+  lockfile copy, `.bin` and every package.json, so a deleted tool changes it; a
+  missing npm tool also refuses reuse). It expires after 4 hours (`GATE_RECEIPT_TTL`, seconds) so
   advisory and dependency checks don't go stale.
 - **Prose shortcut.** When every file changed against the merge base of
   `origin/main` is on a short allowlist of plain Markdown, only prettier, typos

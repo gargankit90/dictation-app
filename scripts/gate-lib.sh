@@ -45,12 +45,34 @@ gate_tool_versions() {
 
 # Variables that change what the checks do (flags, profiles, toolchain).
 gate_env_flags() {
-  env | grep -E '^(NEXTEST_|CARGO_|RUST|DICTATION_|LLVM_|CI=|GITHUB_ACTIONS=)' | LC_ALL=C sort || true
+  # Includes the controls the checks themselves read: COVERAGE_* (thresholds,
+  # roots), LICENCES_* (files, generator), TEST_GUARDS_*, STUB_*/FAKE_* and
+  # E2E_* (self-test switches), TAURI_* (signing), TYPOS_*, NODE_*.
+  env | grep -E '^(NEXTEST_|CARGO_|RUST|DICTATION_|LLVM_|COVERAGE_|LICENCES_|TEST_GUARDS_|STUB_|FAKE_|E2E_|TAURI_|TYPOS_|NODE_|CI=|GITHUB_ACTIONS=)' | LC_ALL=C sort || true
 }
 
-# What npm ci installed (the lockfile is in the tree; this is the installed copy).
+# The tools the gate runs from node_modules.
+GATE_NPM_TOOLS="prettier eslint tsc vitest"
+
+# True when every npm tool the gate runs is installed and executable. A receipt
+# is not reused otherwise: a deleted tool must fail the real gate.
+gate_tools_installed() {
+  local t
+  for t in $GATE_NPM_TOOLS; do
+    [ -x "node_modules/.bin/$t" ] || return 1
+  done
+}
+
+# What npm ci installed: the installed lockfile copy, the .bin entries (with
+# their link targets) and every installed package.json, so a deleted tool or
+# package changes the key.
 gate_install_state() {
-  if [ -f node_modules/.package-lock.json ]; then gate_sha256 <node_modules/.package-lock.json; else echo none; fi
+  [ -d node_modules ] || { echo none; return 0; }
+  {
+    if [ -f node_modules/.package-lock.json ]; then gate_sha256 <node_modules/.package-lock.json; else echo no-lock; fi
+    if [ -d node_modules/.bin ]; then (cd node_modules/.bin && LC_ALL=C ls -l | sed 1d | awk '{print $9, $10, $11}'); fi
+    find node_modules -maxdepth 3 -name package.json -not -path '*/node_modules/*/node_modules/*/node_modules/*' 2>/dev/null | LC_ALL=C sort
+  } | gate_sha256
 }
 
 # The files whose content is part of the key (the gate's own scripts).
