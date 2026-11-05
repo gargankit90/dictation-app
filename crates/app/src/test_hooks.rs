@@ -36,6 +36,8 @@ pub const RELEASE_FLAG: &str = "--release";
 pub const DEBUG_AUDIO_FILE_FLAG: &str = "--debug-audio-file";
 /// `--debug-save-audio`: save every recording as a WAV (debug mode).
 pub const DEBUG_SAVE_AUDIO_FLAG: &str = "--debug-save-audio";
+/// `--debug-fail-paste`: every paste fails, for U7's "Not pasted" entries.
+pub const DEBUG_FAIL_PASTE_FLAG: &str = "--debug-fail-paste";
 
 /// `--debug-set-api-key-stdin`: store the Groq API key read from stdin (never
 /// an argument, which any local process can read) and exit.
@@ -560,6 +562,19 @@ mod outage_tests {
         assert!(source.start(sink).is_err());
         assert_eq!(outage.begin(), 0);
         assert!(events.try_recv().is_err());
+    }
+}
+
+/// The inserter of `--debug-fail-paste`: every paste fails, as when the focused
+/// app won't take it. Nothing is pasted and the clipboard isn't touched.
+#[derive(Debug, Default)]
+pub struct FailingPaste;
+
+impl dictation_ports::TextInserter for FailingPaste {
+    fn insert(&self, _text: &str) -> Result<(), dictation_ports::InsertError> {
+        Err(dictation_ports::InsertError::Failed(
+            "--debug-fail-paste".to_owned(),
+        ))
     }
 }
 

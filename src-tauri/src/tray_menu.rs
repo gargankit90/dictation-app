@@ -7,18 +7,18 @@
 //! downloads, permissions), so a changed key, engine or error shows within a
 //! second. The tray never has a text title.
 //!
-//! The last dictation's text is in [`LastDictation`] (memory only). Nothing
-//! here logs it; the log line for a refresh holds the status text, which is
+//! The last dictation's text is in [`History`]. Nothing here logs it or shows
+//! it in the menu; the log line for a refresh holds the status text, which is
 //! made of fixed sentences.
 
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use dictation_core::diagnostics::ErrorCode;
 use dictation_core::local_models;
-use dictation_core::settings::{Provider, Transcription};
-use dictation_pipeline::last_dictation::LastDictation;
+use dictation_core::settings::{Provider, Settings, Transcription};
+use dictation_pipeline::history::History;
 use dictation_pipeline::tray::{
     Ambient, Download, Entry, Fix, MenuModel, TrayIcon, TrayStatus, id,
 };
@@ -61,7 +61,7 @@ pub struct TrayHub {
     /// The applier's end and the model the tray was built with, until
     /// [`start`] takes them.
     pending: Mutex<Option<(Receiver<MenuModel>, MenuModel)>>,
-    last: LastDictation,
+    history: Arc<History>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -69,9 +69,9 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl TrayHub {
-    /// A hub whose "Copy last dictation" follows `last`.
+    /// A hub whose "Copy last dictation" follows `history`.
     #[must_use]
-    pub fn new(last: LastDictation) -> Self {
+    pub fn new(history: Arc<History>) -> Self {
         let (send, receive) = std::sync::mpsc::channel();
         let status = TrayStatus::default();
         let initial = status.menu();
@@ -79,7 +79,7 @@ impl TrayHub {
             status: Mutex::new(status),
             send,
             pending: Mutex::new(Some((receive, initial))),
-            last,
+            history,
         }
     }
 
@@ -99,6 +99,7 @@ pub enum Action {
     ResumeSetup,
     CheckForUpdates,
     CopyLast,
+    History,
     Fix(Fix),
 }
 
@@ -113,6 +114,7 @@ pub fn action_for(item: &str) -> Option<Action> {
         id::RESUME_SETUP => Action::ResumeSetup,
         id::CHECK_UPDATES => Action::CheckForUpdates,
         id::COPY_LAST => Action::CopyLast,
+        id::HISTORY => Action::History,
         other => Action::Fix(Fix::from_id(other)?),
     })
 }
@@ -146,8 +148,8 @@ pub const fn effect_of(fix: Fix) -> Effect {
 /// # Errors
 ///
 /// If the tray icon or its menu can't be created.
-pub fn build(app: &App, last: LastDictation) -> tauri::Result<()> {
-    let hub = TrayHub::new(last);
+pub fn build(app: &App, history: Arc<History>) -> tauri::Result<()> {
+    let hub = TrayHub::new(history);
     let model = lock(&hub.status).menu();
     let menu = native_menu(app.handle(), &model)?;
     let tray = TrayIconBuilder::with_id(TRAY_ID)
@@ -208,13 +210,10 @@ fn native_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Menu<Wry>> {
     Ok(menu)
 }
 
-/// Reads what the menu depends on besides the pipeline's events.
-fn read_ambient(app: &AppHandle) -> Ambient {
-    let settings = app
-        .try_state::<commands::AppConfig>()
-        .and_then(|config| config.0.settings().ok())
-        .unwrap_or_default();
-    let engine_name = match settings.transcription {
+/// The engine's display name, for the menu and the history.
+#[must_use]
+pub fn engine_name(settings: &Settings) -> String {
+    match settings.transcription {
         Transcription::Cloud => match settings.provider {
             Provider::Groq => "Groq".to_owned(),
             Provider::OpenAi => "OpenAI".to_owned(),
@@ -223,7 +222,16 @@ fn read_ambient(app: &AppHandle) -> Ambient {
             || "On this Mac".to_owned(),
             |model| format!("On this Mac ({})", model.name),
         ),
-    };
+    }
+}
+
+/// Reads what the menu depends on besides the pipeline's events.
+fn read_ambient(app: &AppHandle) -> Ambient {
+    let settings = app
+        .try_state::<commands::AppConfig>()
+        .and_then(|config| config.0.settings().ok())
+        .unwrap_or_default();
+    let engine_name = engine_name(&settings);
     let live = app.try_state::<engine::LiveEngine>();
     let download = app
         .try_state::<ModelDownloads>()
@@ -312,7 +320,7 @@ pub fn refresh(app: &AppHandle) {
     let model = {
         let mut status = lock(&hub.status);
         status.set_ambient(ambient);
-        status.set_has_last(hub.last.is_held());
+        status.set_has_last(hub.history.has_last());
         status.menu()
     };
     // A closed channel means the app is shutting down.
@@ -415,6 +423,7 @@ fn click(app: &AppHandle, item: &str) {
         Action::ResumeSetup => crate::show_onboarding(app),
         Action::CheckForUpdates => updater::check_from_tray(app),
         Action::CopyLast => copy_last(app),
+        Action::History => ask_window(app, WindowRequest::History),
         Action::Fix(fix) => run_fix(app, fix),
     }
 }
@@ -456,17 +465,19 @@ fn copy_last(app: &AppHandle) {
     let Some(hub) = app.try_state::<TrayHub>() else {
         return;
     };
-    let Some(text) = hub.last.text() else {
-        return;
-    };
+    // Off the main thread, where this click arrives, from the lookup on.
+    let history = Arc::clone(&hub.history);
     let spawned = std::thread::Builder::new()
         .name("copy-last".into())
-        .spawn(
-            move || match dictation_platform::insert::SystemClipboard::new().copy(&text) {
+        .spawn(move || {
+            let Some(text) = history.last_text() else {
+                return;
+            };
+            match dictation_platform::insert::SystemClipboard::new().copy(&text) {
                 Ok(()) => tracing::info!("copied the last dictation"),
                 Err(error) => tracing::warn!(%error, "could not copy the last dictation"),
-            },
-        );
+            }
+        });
     if let Err(error) = spawned {
         tracing::warn!(%error, "could not start the copy");
     }
@@ -479,12 +490,6 @@ pub fn on_event(app: &AppHandle, event: &dictation_pipeline::pipeline::UiEvent) 
         hub.update(|status| status.on_event(event));
     }
     refresh(app);
-}
-
-/// The hub's last-dictation holder, for the event loop's success path.
-#[must_use]
-pub fn last_of(app: &AppHandle) -> Option<LastDictation> {
-    app.try_state::<TrayHub>().map(|hub| hub.last.clone())
 }
 
 #[cfg(test)]
@@ -556,6 +561,13 @@ mod tests {
         }
         assert_eq!(action_for("reveal-log"), None);
         assert_eq!(action_for("relaunch"), None);
+    }
+
+    /// U7 criterion 6: "History…" opens Settings on the History section.
+    #[test]
+    fn u7_criterion_6_the_history_item_opens_settings_at_history() {
+        assert_eq!(action_for(id::HISTORY), Some(Action::History));
+        assert_eq!(WindowRequest::History.as_str(), "history");
     }
 
     #[test]

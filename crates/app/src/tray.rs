@@ -3,7 +3,7 @@
 //!
 //! The menu, top to bottom: a status line (ready and which key and engine,
 //! a download's progress, or the one problem), one fix row while there is a
-//! problem, "Copy last dictation", Settings, Troubleshoot, Report a problem
+//! problem, "Copy last dictation", History, Settings, Troubleshoot, Report a problem
 //! (and Resume setup while onboarding is incomplete), then updates and Quit.
 //! The tray never has a text title: the problem state is a second icon.
 //!
@@ -42,6 +42,8 @@ pub mod id {
     pub const FIX_TROUBLESHOOT: &str = "fix-troubleshoot";
     /// "Copy last dictation".
     pub const COPY_LAST: &str = "copy-last";
+    /// "History…" (U7).
+    pub const HISTORY: &str = "history";
     /// "Settings…".
     pub const SETTINGS: &str = "settings";
     /// "Troubleshoot…".
@@ -352,7 +354,7 @@ pub struct TrayStatus {
     /// asks for a relaunch. Cleared when the hotkey is restored or a
     /// recording starts.
     lacked_accessibility: bool,
-    /// Whether a dictation succeeded in this run.
+    /// Whether there is a dictation to copy.
     has_last: bool,
     ambient: Ambient,
 }
@@ -432,7 +434,8 @@ impl TrayStatus {
         true
     }
 
-    /// Whether a dictation succeeded, which enables "Copy last dictation".
+    /// Whether there is a dictation to copy, which enables "Copy last
+    /// dictation".
     pub fn set_has_last(&mut self, has_last: bool) -> bool {
         let changed = self.has_last != has_last;
         self.has_last = has_last;
@@ -550,6 +553,7 @@ impl TrayStatus {
             enabled: self.has_last,
             accelerator: None,
         });
+        entries.push(Entry::item(id::HISTORY, "History…"));
         entries.push(Entry::Separator);
         entries.push(Entry::Item {
             id: id::SETTINGS,
@@ -648,6 +652,7 @@ mod tests {
                 ("engine", "On this Mac (Parakeet English)"),
                 ("-", ""),
                 ("copy-last", "Copy last dictation"),
+                ("history", "History…"),
                 ("-", ""),
                 ("settings", "Settings…"),
                 ("troubleshoot", "Troubleshoot…"),
@@ -1163,6 +1168,24 @@ mod tests {
         assert!(tray.set_has_last(true));
         assert!(!tray.set_has_last(true));
         assert_eq!(enabled(&tray.menu(), id::COPY_LAST), Some(true));
+    }
+
+    /// U7 criterion 6: "History…" sits right below "Copy last dictation" in
+    /// every state, and no item shows dictation text: their labels are fixed.
+    #[test]
+    fn u7_criterion_6_history_is_below_copy_last_in_every_state() {
+        let mut problem = ready("RightAlt", "Groq");
+        problem.on_event(&transcription_failed("Add your API key in Settings."));
+        for tray in [ready("RightAlt", "Groq"), problem, TrayStatus::new(true)] {
+            let listed = ids(&tray.menu());
+            let copy = listed.iter().position(|id| id == id::COPY_LAST).unwrap();
+            assert_eq!(listed[copy + 1], id::HISTORY);
+            assert_eq!(enabled(&tray.menu(), id::HISTORY), Some(true));
+            assert_eq!(
+                label_of(&tray.menu(), id::HISTORY).as_deref(),
+                Some("History…")
+            );
+        }
     }
 
     #[test]

@@ -18,6 +18,7 @@ pub mod audio;
 pub mod clock;
 pub mod cursor;
 pub mod disk;
+pub mod history_file;
 pub mod hotkey;
 pub mod insert;
 pub mod launch;

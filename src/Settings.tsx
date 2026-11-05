@@ -10,16 +10,18 @@ import { Dictation } from "./settings/Dictation";
 import type { LanguageChoice } from "./settings/Dictation";
 import { General, useLaunchAtLogin } from "./settings/General";
 import { About, Help } from "./settings/HelpAbout";
+import { History } from "./settings/History";
 import type { HelpActions } from "./settings/HelpAbout";
 import { Privacy } from "./settings/Privacy";
 import { Speech } from "./settings/Speech";
 
-/** The sidebar's sections, in order. History comes with U7. */
+/** The sidebar's sections, in order. */
 export const SECTIONS = [
   { id: "general", name: "General" },
   { id: "dictation", name: "Dictation" },
   { id: "speech", name: "Speech" },
   { id: "privacy", name: "Privacy" },
+  { id: "history", name: "History" },
   { id: "help", name: "Help" },
   { id: "about", name: "About" },
 ] as const;
@@ -292,6 +294,9 @@ export function Settings({ open = null, ...help }: Props) {
         break;
       case "privacy":
         pane = <Privacy settings={settings} onStored={setSettings} />;
+        break;
+      case "history":
+        pane = <History settings={settings} onStored={setSettings} />;
         break;
       case "help":
         pane = <Help {...help} />;

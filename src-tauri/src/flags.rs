@@ -10,7 +10,8 @@
 //! - `--debug-audio-file <wav>` records that file instead of the
 //!   microphone, and `--debug-save-audio` saves every recording as a WAV
 //!   (debug mode). Both choose how the pipeline is built, so only the first
-//!   launch's count; a second launch's are logged and ignored.
+//!   launch's count; a second launch's are logged and ignored. So does
+//!   `--debug-fail-paste`, which makes every paste fail (U7's "Not pasted").
 //!
 //! - `--debug-set-api-key-stdin` and `--debug-delete-api-key` store (the key
 //!   comes from stdin, never an argument) and remove the Groq API key through
@@ -72,8 +73,8 @@
 use std::path::PathBuf;
 
 use dictation_pipeline::test_hooks::{
-    DEBUG_AUDIO_FILE_FLAG, DEBUG_SAVE_AUDIO_FLAG, KeyCommand, LaunchCommand, OutageCommand,
-    PRESS_FLAG, RELEASE_FLAG,
+    DEBUG_AUDIO_FILE_FLAG, DEBUG_FAIL_PASTE_FLAG, DEBUG_SAVE_AUDIO_FLAG, KeyCommand, LaunchCommand,
+    OutageCommand, PRESS_FLAG, RELEASE_FLAG,
 };
 use dictation_ports::HotkeyEvent;
 
@@ -159,6 +160,8 @@ pub struct LaunchFlags {
     pub audio_file: Option<PathBuf>,
     /// Save every recording as a WAV (debug builds only).
     pub save_audio: bool,
+    /// Make every paste fail (debug builds only).
+    pub fail_paste: bool,
     /// The API key commands, in order (debug builds only): done instead of
     /// starting the app.
     pub key_commands: Vec<KeyCommand>,
@@ -197,6 +200,7 @@ impl LaunchFlags {
     pub fn configure_pipeline(&self) -> bool {
         self.audio_file.is_some()
             || self.save_audio
+            || self.fail_paste
             || self.mock_text.is_some()
             || self.mock_text_sequence.is_some()
             || self.provider_url.is_some()
@@ -244,6 +248,7 @@ pub fn parse(argv: &[String], test_flags: bool) -> LaunchFlags {
             PRESS_FLAG if test_flags => flags.events.push(HotkeyEvent::Pressed),
             RELEASE_FLAG if test_flags => flags.events.push(HotkeyEvent::Released),
             DEBUG_SAVE_AUDIO_FLAG if test_flags => flags.save_audio = true,
+            DEBUG_FAIL_PASTE_FLAG if test_flags => flags.fail_paste = true,
             DEBUG_ONBOARDING_FLAG if test_flags => flags.show_onboarding = true,
             DEBUG_UPDATE_CHECK_FLAG if test_flags => flags.check_updates = true,
             key_flag if test_flags && KeyCommand::from_flag(key_flag).is_some() => {
@@ -536,6 +541,16 @@ mod tests {
     #[test]
     fn test_flags_follow_the_build() {
         assert_eq!(TEST_FLAGS, cfg!(debug_assertions));
+    }
+
+    /// U7: the failing paste is a debug hook; a release build ignores it.
+    #[test]
+    fn only_debug_builds_take_the_failing_paste() {
+        let argv = |flag: &str| vec!["app".to_owned(), flag.to_owned()];
+        assert!(parse(&argv("--debug-fail-paste"), true).fail_paste);
+        let release = parse(&argv("--debug-fail-paste"), false);
+        assert!(!release.fail_paste);
+        assert_eq!(release.ignored, ["--debug-fail-paste"]);
     }
 
     #[test]

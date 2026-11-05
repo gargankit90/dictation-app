@@ -265,7 +265,7 @@ fn save_with<S: SecretStore + 'static>(
 /// read and their write.
 static SETTINGS_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn settings_write() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn settings_write() -> std::sync::MutexGuard<'static, ()> {
     SETTINGS_WRITE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -279,8 +279,10 @@ fn settings_write() -> std::sync::MutexGuard<'static, ()> {
 /// [`set_share_usage_events`] changes it, so a Save can never undo a newer
 /// opt-out (A1 review, round 1). The same goes for the hotkey, which only
 /// [`set_hotkey`] changes (K1 review, round 1): a form loaded before the key
-/// was recorded can't switch it back, and for `launch_at_login`, which only
-/// [`set_launch_at_login`] changes (S1).
+/// was recorded can't switch it back, for `launch_at_login`, which only
+/// [`set_launch_at_login`] changes (S1), and for `history_limit`, which only
+/// [`crate::history::set_history_limit`] changes (U7), since lowering it
+/// deletes entries only after the user confirms.
 #[tauri::command]
 #[specta::specta]
 pub async fn save_settings(
@@ -317,6 +319,7 @@ fn save_keeping_sharing<S: SecretStore + 'static>(
         settings.share_usage_events = before.share_usage_events;
         settings.launch_at_login = before.launch_at_login;
         settings.hotkey.clone_from(&before.hotkey);
+        settings.history_limit = before.history_limit;
     }
     save_locked(config, live, hotkey, settings, before)
 }
@@ -905,6 +908,11 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::preferences::open_link,
         crate::preferences::get_app_info,
         crate::preferences::check_for_updates,
+        crate::history::list_history,
+        crate::history::copy_history_entry,
+        crate::history::delete_history_entry,
+        crate::history::clear_history,
+        crate::history::set_history_limit,
         crate::overlay::get_overlay_level,
     ])
 }
@@ -1023,6 +1031,11 @@ mod tests {
             "openLink",
             "getAppInfo",
             "checkForUpdates",
+            "listHistory",
+            "copyHistoryEntry",
+            "deleteHistoryEntry",
+            "clearHistory",
+            "setHistoryLimit",
         ] {
             assert!(
                 bindings.contains(&format!("\t{command}: (")),
@@ -1031,7 +1044,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 39,
+            commands, 44,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1121,7 +1134,8 @@ mod tests {
                 "launch_at_login",
                 "transcription",
                 "local_model",
-                "share_usage_events"
+                "share_usage_events",
+                "history_limit"
             ]
         );
         // L1: the model list carries no key either.
@@ -1203,6 +1217,27 @@ mod tests {
             assert!(!saved.share_usage_events, "the opt-out was undone");
             assert_eq!(saved.language.as_deref(), Some("fr"), "the rest saved");
             assert_eq!(change.unwrap().sharing, None, "no re-enabling");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// U7: only `set_history_limit` changes the limit, since lowering it
+        /// deletes entries, so a stale form can't bring back or lower it.
+        #[test]
+        fn a_save_keeps_the_stored_history_limit() {
+            let (config, dir) = config("history");
+            let (hotkey, _keys) = listening();
+            let mut stored = config.settings().unwrap();
+            stored.history_limit = 0;
+            config.save_settings(&stored).unwrap();
+            let stale = Settings {
+                history_limit: 100,
+                language: Some("fr".into()),
+                ..Settings::default()
+            };
+            save_keeping_sharing(&config, &LiveEngine::fixed(), &hotkey, stale).unwrap();
+            let saved = config.settings().unwrap();
+            assert_eq!(saved.history_limit, 0, "Off was undone");
+            assert_eq!(saved.language.as_deref(), Some("fr"), "the rest saved");
             let _ = std::fs::remove_dir_all(dir);
         }
 
@@ -2652,6 +2687,12 @@ mod capability_tests {
         app.manage(crate::LogDir(dir.join("logs")));
         app.manage(super::LaunchNotice(None));
         app.manage(crate::overlay::OverlayLevel::default());
+        app.manage(crate::history::AppHistory(std::sync::Arc::new(
+            dictation_pipeline::history::History::open(
+                dictation_platform::fakes::MemHistoryStore::new(),
+                Some(25),
+            ),
+        )));
         // U6: a microphone that never opens, and no update check.
         app.manage(crate::preferences::AppMicTest(
             dictation_pipeline::mic_test::MicTest::new(Box::new(|| {
@@ -2752,6 +2793,8 @@ mod capability_tests {
             "set_onboarding_step" => serde_json::json!({ "step": "microphone" }),
             "set_share_usage_events" => serde_json::json!({ "share": true }),
             "set_hotkey_recording" => serde_json::json!({ "recording": false }),
+            "copy_history_entry" | "delete_history_entry" => serde_json::json!({ "id": "1" }),
+            "set_history_limit" => serde_json::json!({ "limit": 25 }),
             _ => serde_json::json!({}),
         }
     }
@@ -2872,7 +2915,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 39);
+        assert_eq!(COMMAND_NAMES.len(), 44);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

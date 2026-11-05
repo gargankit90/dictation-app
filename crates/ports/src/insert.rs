@@ -48,3 +48,13 @@ pub trait TextInserter: Send + Sync {
     /// from a blocking task.
     fn finish(&self) {}
 }
+
+impl TextInserter for Box<dyn TextInserter> {
+    fn insert(&self, text: &str) -> Result<(), InsertError> {
+        (**self).insert(text)
+    }
+
+    fn finish(&self) {
+        (**self).finish();
+    }
+}

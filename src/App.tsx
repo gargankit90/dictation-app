@@ -20,7 +20,8 @@ export function App() {
   // The tray's "Report a problem…": Troubleshoot with the report built.
   const [autoReport, setAutoReport] = useState(false);
   // The tray's fix rows: Settings open at the section that fixes it
-  // (Speech, or Dictation for the shortcut). `id` makes a repeated ask count.
+  // (Speech, or Dictation for the shortcut), and its "History…" (U7). `id`
+  // makes a repeated ask count.
   const [open, setOpen] = useState<{ section: SectionId; id: number } | null>(null);
 
   // ⌘, opens Settings (U6), as in every Mac app, from Troubleshoot too.
@@ -61,9 +62,10 @@ export function App() {
       if (request === "troubleshoot" || request === "report") {
         setAutoReport(request === "report");
         setPage("troubleshoot");
-      } else if (request === "speech" || request === "shortcut") {
+      } else if (request === "speech" || request === "shortcut" || request === "history") {
         setPage("settings");
-        const section: SectionId = request === "speech" ? "speech" : "dictation";
+        const section: SectionId =
+          request === "speech" ? "speech" : request === "history" ? "history" : "dictation";
         setOpen((current) => ({ section, id: (current?.id ?? 0) + 1 }));
       }
     };

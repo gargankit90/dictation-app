@@ -46,6 +46,7 @@ class Backend {
     transcription: "cloud",
     local_model: "parakeet-unified-en-0.6b-q4_k_m",
     share_usage_events: true,
+    history_limit: 25,
   };
   /** What the app says the last dictation got through (U1). */
   progress: DictationProgressView = {

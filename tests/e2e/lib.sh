@@ -21,6 +21,8 @@ OLD_APP_NAME=dictation-app
 # Where the app lives in the VM, and where it logs (Tauri's app_log_dir).
 VM_APP="/Users/$VM_USER/Applications/$APP_NAME.app"
 VM_LOG_DIR="/Users/$VM_USER/Library/Logs/com.dictationapp.desktop"
+# The recent dictations (U7); every scenario starts without any.
+VM_HISTORY_FILE="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/history.json"
 # Test audio (tests/e2e/fixtures/) in the VM. The scenarios record this file
 # instead of the microphone (--debug-audio-file, debug builds only), so they
 # need no microphone permission or input device.
@@ -168,7 +170,7 @@ install_fixtures() {
 fresh_app_state() {
   local name i
   name=$(q "$PROC_NAME")
-  vm "pkill -x $name; pkill -x $OLD_PROC_NAME; sleep 1; pkill -9 -x $name; pkill -9 -x $OLD_PROC_NAME; rm -rf $(q "$VM_LOG_DIR")" || true
+  vm "pkill -x $name; pkill -x $OLD_PROC_NAME; sleep 1; pkill -9 -x $name; pkill -9 -x $OLD_PROC_NAME; rm -rf $(q "$VM_LOG_DIR"); rm -f $(q "$VM_HISTORY_FILE") $(q "$VM_HISTORY_FILE.tmp")" || true
   for i in 1 2 3 4 5; do
     [ "$(app_count)" = 0 ] && return 0
     sleep 1
