@@ -10,6 +10,9 @@ import { SpeechStep } from "./onboarding/SpeechStep";
 import { TryStep } from "./onboarding/TryStep";
 import { WelcomeStep } from "./onboarding/WelcomeStep";
 import type { FrameParts } from "./onboarding/StepFrame";
+import { FINISH_REASON } from "./onboarding/ReadyStep";
+import { SAVE_FAILED_REASON } from "./onboarding/WelcomeStep";
+import { sharingBlock, useSharingSwitch } from "./settings/Privacy";
 import { useEngineStatus, useModels } from "./Settings";
 import "./settings.css";
 
@@ -58,7 +61,25 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
   const [downPolls, setDownPolls] = useState(0);
   const resumeChecked = useRef(false);
 
-  const goTo = useCallback(async (step: Step) => {
+  // Here, not in a step: the writes outlive any one step, and every way out
+  // of a step waits for them, since leaving can send an event.
+  const sharing = useSharingSwitch(settings?.share_usage_events ?? true, setSettings);
+  const exitBlock = sharingBlock(
+    sharing.save,
+    status?.step === "ready" ? FINISH_REASON : SAVE_FAILED_REASON,
+  );
+  /**
+   * The one way out of a step: moving, finishing, or leaving for Settings all
+   * go through here, so a new exit can't overtake the user's sharing choice.
+   */
+  const leave = useCallback(
+    async (exit: () => Promise<void>) => {
+      if (exitBlock === null) await exit();
+    },
+    [exitBlock],
+  );
+
+  const moveTo = useCallback(async (step: Step) => {
     setBusy(true);
     try {
       const result = await commands.setOnboardingStep(step);
@@ -74,6 +95,8 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
       setBusy(false);
     }
   }, []);
+
+  const goTo = useCallback((step: Step) => leave(() => moveTo(step)), [leave, moveTo]);
 
   const refresh = useCallback(async () => {
     try {
@@ -181,7 +204,7 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
     }
   }
 
-  async function finish() {
+  async function finishNow() {
     setBusy(true);
     try {
       const result = await commands.finishOnboarding();
@@ -231,6 +254,7 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
             void goTo(previous.id);
           },
     busy,
+    exitBlock,
     error,
     strip: stripShown ? (
       <div className="ob-strip" role="status" aria-label="Model download">
@@ -244,6 +268,7 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
               key={action}
               type="button"
               className="link"
+              disabled={action === "use-key" && exitBlock !== null}
               onClick={() => void stripAction(action, strip.model.id)}
             >
               {ACTION_LABELS[action]}
@@ -286,12 +311,7 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
       </nav>
 
       {status.step === "welcome" && (
-        <WelcomeStep
-          parts={parts}
-          settings={settings}
-          onStored={setSettings}
-          onContinue={forward}
-        />
+        <WelcomeStep parts={parts} settings={settings} onContinue={forward} sharing={sharing} />
       )}
       {status.step === "speech" && (
         <SpeechStep
@@ -341,7 +361,7 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
           models={models}
           engine={engine}
           onChangeHistory={() => {
-            void (async () => {
+            void leave(async () => {
               try {
                 const left = await commands.leaveSetupForSettings();
                 if (left.status === "error") setError(messageOf(left.error));
@@ -349,9 +369,10 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
               } catch {
                 setError(BROKEN);
               }
-            })();
+            });
           }}
-          onFinish={() => void finish()}
+          sharing={sharing}
+          onFinish={() => void leave(finishNow)}
         />
       )}
     </main>

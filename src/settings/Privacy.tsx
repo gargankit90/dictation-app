@@ -88,6 +88,8 @@ export function useSharingSwitch(
   return { save: sharing.save, checked: shown ?? stored, setSharing };
 }
 
+export type SharingSwitch = ReturnType<typeof useSharingSwitch>;
+
 /**
  * What a step's way forward must say while the switch isn't settled: leaving
  * can send events, so it waits for the user's choice to be saved.

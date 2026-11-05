@@ -1235,6 +1235,111 @@ describe("Ready", () => {
     expect(share.checked).toBe(false);
   });
 
+  // Round 4: every way out, tried while the writes are pending, between them,
+  // and after them. Each of these commands is what can send an event.
+  it.each([
+    { exit: "Start dictating", command: "finish_onboarding" },
+    { exit: "Back", command: "set_onboarding_step" },
+    { exit: "History's Change", command: "leave_setup_for_settings" },
+    { exit: "the strip's Use my own key", command: "set_onboarding_step" },
+  ])("$exit waits for the sharing writes", async ({ exit, command }) => {
+    // A paused model, so the strip offers its way out too.
+    const model = backend.model(PARAKEET.id);
+    model.state = "partial";
+    model.downloaded_bytes = 212_000_000;
+    backend.downloadPaused = true;
+    const pending: (() => void)[] = [];
+    const original = backend.handle;
+    mockIPC((name, payload) => {
+      if (name !== "set_share_usage_events") return original(name, payload);
+      return new Promise((resolve) => {
+        pending.push(() => {
+          resolve(original(name, payload));
+        });
+      });
+    });
+    show();
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Usage and error events",
+    });
+    await screen.findByRole("button", { name: "Use my own key" });
+    const pressExit = () => {
+      const name =
+        exit === "History's Change"
+          ? "Change"
+          : exit === "the strip's Use my own key"
+            ? "Use my own key"
+            : exit;
+      fireEvent.click(screen.getByRole("button", { name }));
+    };
+    const exitCalls = () => backend.named(command);
+
+    fireEvent.click(share); // off
+    fireEvent.click(share); // on
+    fireEvent.click(share); // off, the user's last word
+    pressExit();
+    expect(exitCalls()).toEqual([]);
+
+    // Between the writes: the first is done, the last still pending.
+    await act(async () => {
+      pending.pop()?.();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(pending).toHaveLength(1);
+    pressExit();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(exitCalls()).toEqual([]);
+    expect(backend.step).toBe("ready");
+
+    await act(async () => {
+      pending.pop()?.();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await waitFor(() => {
+      expect(primary("Start dictating").disabled).toBe(false);
+    });
+    expect(backend.settings.share_usage_events).toBe(false);
+    expect(exitCalls()).toEqual([]);
+
+    // Now it works, and only after the final choice is stored.
+    pressExit();
+    await waitFor(() => {
+      expect(exitCalls()).toHaveLength(1);
+    });
+    const last = backend.calls.map((call) => call.command);
+    expect(last.lastIndexOf("set_share_usage_events")).toBeLessThan(last.lastIndexOf(command));
+  });
+
+  it("a failed save holds every way out", async () => {
+    const model = backend.model(PARAKEET.id);
+    model.state = "partial";
+    backend.downloadPaused = true;
+    const original = backend.handle;
+    mockIPC((name, payload) => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      if (name === "set_share_usage_events") throw "Couldn't write the settings file.";
+      return original(name, payload);
+    });
+    show();
+    fireEvent.click(await screen.findByRole("switch", { name: "Usage and error events" }));
+    await screen.findByText(FINISH_REASON);
+    for (const name of ["Start dictating", "Back", "Change", "Use my own key"]) {
+      fireEvent.click(screen.getByRole("button", { name }));
+    }
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    for (const command of [
+      "finish_onboarding",
+      "set_onboarding_step",
+      "leave_setup_for_settings",
+    ]) {
+      expect(backend.named(command)).toEqual([]);
+    }
+  });
+
   it("stays on Ready after a failed opt-out, and says why", async () => {
     const original = backend.handle;
     mockIPC((command, payload) => {

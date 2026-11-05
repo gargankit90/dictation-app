@@ -1,6 +1,7 @@
 import type { Settings_Serialize } from "../bindings";
 import { keycapLabel } from "../hotkeyKeys";
-import { sharingBlock, useSharingSwitch, WhatsSent } from "../settings/Privacy";
+import { WhatsSent } from "../settings/Privacy";
+import type { SharingSwitch } from "../settings/Privacy";
 import { SaveStatus, Switch } from "../settings/ui";
 import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";
@@ -15,7 +16,7 @@ export const SAVE_FAILED_REASON =
 interface Props {
   parts: FrameParts;
   settings: Settings_Serialize | null;
-  onStored: (settings: Settings_Serialize) => void;
+  sharing: SharingSwitch;
   onContinue: () => void;
 }
 
@@ -24,11 +25,8 @@ interface Props {
  * sends nothing until the user continues past this screen, and nothing at
  * all if they switch it off here (`ConsentGate`).
  */
-export function WelcomeStep({ parts, settings, onStored, onContinue }: Props) {
-  const { save, checked, setSharing } = useSharingSwitch(
-    settings?.share_usage_events ?? true,
-    onStored,
-  );
+export function WelcomeStep({ parts, settings, sharing, onContinue }: Props) {
+  const { save, checked, setSharing } = sharing;
   const key = keycapLabel(settings?.hotkey ?? "RightAlt");
 
   return (
@@ -38,7 +36,7 @@ export function WelcomeStep({ parts, settings, onStored, onContinue }: Props) {
       primary={{
         label: "Continue",
         onClick: onContinue,
-        blockedBecause: settings === null ? "Loading…" : sharingBlock(save, SAVE_FAILED_REASON),
+        blockedBecause: settings === null ? "Loading…" : null,
       }}
     >
       <div className="ob-demo">

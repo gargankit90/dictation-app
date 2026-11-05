@@ -9,7 +9,7 @@ import type {
 import { keycapLabel } from "../hotkeyKeys";
 import { BROKEN, messageOf } from "../keyTest";
 import { providerInfo } from "../providers";
-import { sharingBlock, useSharingSwitch } from "../settings/Privacy";
+import type { SharingSwitch } from "../settings/Privacy";
 import { SaveStatus, Switch, useSave } from "../settings/ui";
 import { chosenModel, modelWait, spokenName } from "./logic";
 import { StepFrame } from "./StepFrame";
@@ -24,6 +24,7 @@ interface Props {
   status: OnboardingStatus;
   settings: Settings_Serialize | null;
   onStored: (settings: Settings_Serialize) => void;
+  sharing: SharingSwitch;
   models: LocalModelInfo_Serialize[] | null;
   engine: EngineStatus | null;
   onChangeHistory: () => void;
@@ -84,14 +85,13 @@ export function ReadyStep({
   status,
   settings,
   onStored,
+  sharing,
   models,
   engine,
   onChangeHistory,
   onFinish,
 }: Props) {
   const login = useSave();
-  const sharing = useSharingSwitch(settings?.share_usage_events ?? true, onStored);
-  const saving = sharing.save.state === "saving";
   const [shownLogin, setShownLogin] = useState<boolean | null>(null);
   const engineLine = useEngineLine(settings, models, engine);
   const atLogin = shownLogin ?? settings?.launch_at_login ?? false;
@@ -113,13 +113,12 @@ export function ReadyStep({
 
   return (
     <StepFrame
-      // Leaving can send events, so nothing leaves while the switch is saving.
-      parts={{ ...parts, busy: parts.busy || saving }}
+      parts={parts}
       title="You're set"
       primary={{
         label: "Start dictating",
         onClick: onFinish,
-        blockedBecause: sharingBlock(sharing.save, FINISH_REASON),
+        blockedBecause: null,
       }}
     >
       <dl className="ob-summary">
@@ -150,7 +149,12 @@ export function ReadyStep({
             <dt>History</dt>
             <dd>
               {historyLine(settings.history_limit)} ·{" "}
-              <button type="button" className="link" disabled={saving} onClick={onChangeHistory}>
+              <button
+                type="button"
+                className="link"
+                disabled={parts.exitBlock !== null}
+                onClick={onChangeHistory}
+              >
                 Change
               </button>
             </dd>
