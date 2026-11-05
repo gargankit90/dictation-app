@@ -292,9 +292,13 @@ async fn a_folder_removed_before_the_rename_is_said_plainly() {
     let models = store(&dir, plenty());
     let url = format!("{}/model.gguf", server.uri());
     let removed = dir.0.clone();
+    // Once: the total is reported twice if the last chunk crosses a progress
+    // step, from the fetch and again after it.
+    let mut gone = false;
     let error = models
         .download_from(&model, &url, &DownloadCancel::new(), move |progress| {
-            if progress.downloaded == total {
+            if !gone && progress.downloaded == total {
+                gone = true;
                 std::fs::remove_dir_all(&removed).unwrap();
             }
         })
