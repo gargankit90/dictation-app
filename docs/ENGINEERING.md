@@ -331,3 +331,9 @@ with the existing admin `gh` token to check bypass actors as well; it fails
 if that field is hidden. The owner must enable GitHub workflow-failure email
 notifications to receive scheduled failure alerts. The audit cannot repair
 a changed policy or protect itself from an admin disabling the workflow.
+
+GitHub disables scheduled workflows in public repositories after 60 days
+without repository activity; this daily audit then stops until the workflow
+is re-enabled. The Lead should check the schedule remains enabled and, after
+merging G1-simple-guard, run `gh workflow run rulesets.yml` once and verify
+the first hosted read-only-token run is green.

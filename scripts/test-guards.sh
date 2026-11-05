@@ -40,8 +40,7 @@ g() { git -C "$tmp" -c user.name=test -c user.email=test@example.invalid "$@"; }
 g init -q -b work
 # Refuse to go on unless git really is working in the scratch repo.
 if [ "$(g rev-parse --absolute-git-dir)" != "$tmp/.git" ]; then
-  python3 "$root/scripts/test-check-rulesets.py"
-echo "test-guards: scratch repo resolves to $(g rev-parse --absolute-git-dir), not $tmp/.git; stopping before it touches a real repo" >&2
+  echo "test-guards: scratch repo resolves to $(g rev-parse --absolute-git-dir), not $tmp/.git; stopping before it touches a real repo" >&2
   exit 1
 fi
 g commit -q --allow-empty -m a
@@ -83,6 +82,25 @@ pre_push_refuses() { # name refs-line
 }
 pre_push_refuses "push to main is refused" "refs/heads/x $zero refs/heads/main $zero"
 pre_push_refuses "deleting a branch is refused" "(delete) $zero refs/heads/m1-x $zero"
+
+# The nested isolation probe needs only the scratch push checks above.
+[ "${TEST_GUARDS_ISOLATION_ONLY:-0}" != 1 ] || exit "$failed"
+bait="$tmp/inherited"
+git init -q -b bait "$bait"
+git -C "$bait" -c user.name=test -c user.email=test@example.invalid commit -q --allow-empty -m bait
+snapshot() {
+  git -C "$bait" symbolic-ref HEAD
+  git -C "$bait" for-each-ref --format='%(refname) %(objectname)'
+  git -C "$bait" config --local --list
+  git -C "$bait" count-objects
+}
+before=$(snapshot)
+code=0
+TEST_GUARDS_ISOLATION_ONLY=1 GIT_DIR="$bait/.git" GIT_WORK_TREE="$bait" GIT_INDEX_FILE="$bait/.git/index" \
+  "$root/scripts/test-guards.sh" >/dev/null 2>&1 || code=$?
+check "isolation: inherited GIT_DIR run passes" 0 "$code"
+if [ "$(snapshot)" = "$before" ]; then same=0; else same=1; fi
+check "isolation: inherited repository is untouched" 0 "$same"
 
 ROOT=$root
 TMP_ROOT=$tmp
