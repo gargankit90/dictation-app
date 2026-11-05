@@ -5,12 +5,16 @@
 # network. Part of the quality gate.
 set -euo pipefail
 
+# A fresh environment for every gate_main: no CI variables from the caller.
+unset CI GITHUB_ACTIONS GATE_RECEIPT_TTL
+# Git's pre-push hook runs the gate with GIT_DIR and friends set. Left in, they
+# point every fixture command at the real repository (this once moved the
+# checkout's branch). Only the config isolation below stays.
+while IFS= read -r v; do unset "$v"; done < <(env | sed -n 's/^\(GIT_[A-Z_]*\)=.*/\1/p' | grep -v -e '^GIT_EXEC_PATH$' -e '^GIT_TEMPLATE_DIR$' || true)
+
 root=$(git rev-parse --show-toplevel)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-# A fresh environment for every gate_main: no CI variables from the caller.
-unset CI GITHUB_ACTIONS GATE_RECEIPT_TTL
-
 fails=0
 ok() { printf 'ok   %s\n' "$1"; }
 bad() { printf 'FAIL %s\n' "$1" >&2; fails=$((fails + 1)); }
@@ -28,6 +32,11 @@ make_repo() { # name
   local r=$tmp/$1
   git init -q --bare -b main "$r.git"
   git init -q -b main "$r"
+  # Refuse to touch anything but the fixture, whatever the environment says.
+  [ "$(git -C "$r" rev-parse --show-toplevel)" = "$(cd "$r" && pwd -P)" ] || {
+    echo "test-gate: fixture escaped to $(git -C "$r" rev-parse --show-toplevel)" >&2
+    exit 1
+  }
   mkdir -p "$r/scripts" "$r/docs/history" "$r/node_modules" "$r/.github"
   cp "$root/scripts/gate.sh" "$root/scripts/gate-lib.sh" "$r/scripts/"
   printf 'node_modules/\ngatefile.txt\n' >"$r/.gitignore"

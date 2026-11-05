@@ -168,8 +168,11 @@ gate_main() {
         return 0
       fi
       printf 'gate: no reusable receipt (%s)\n' "$GATE_RECEIPT_WHY"
+    else
+      # Same key, so a failure here must not leave the old receipt standing.
+      # (A receipt for other input is kept: it still describes that input.)
+      gate_receipt_clear
     fi
-    gate_receipt_clear # a failed or interrupted run leaves none
   fi
 
   if gate_is_ci || [ "$force_full" = 1 ]; then
