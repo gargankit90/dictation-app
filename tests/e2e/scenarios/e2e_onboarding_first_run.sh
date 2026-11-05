@@ -95,6 +95,8 @@ e2e_onboarding_first_run() {
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "(hold)" 10
   expect "and that Groq is connected" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Groq · ✓ Connected" 10
+  expect "and the history limit" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Keeps your last 25 dictations on this Mac" 10
   expect "launch at login is off" \
     job_says unchecked ax check-get "$APP_NAME" "$ONBOARDING_WINDOW" ob-login
   expect "the tray offers Resume setup until it is finished" tray_has_resume_setup
