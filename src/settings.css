@@ -133,6 +133,10 @@ p.error:empty {
   color: var(--vc-ready);
 }
 
+.notice.attention {
+  color: var(--vc-attention);
+}
+
 .row {
   display: flex;
   align-items: center;
@@ -348,13 +352,50 @@ pre.report {
   position: relative;
 }
 
+.language-picker input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--vc-control-h);
+  padding: var(--vc-space-1) calc(var(--vc-space-2) * 2 + 12px) var(--vc-space-1) var(--vc-space-2);
+  border: 1px solid var(--vc-line-strong);
+  border-radius: var(--vc-radius-sm);
+  background: var(--vc-bg);
+  color: var(--vc-ink);
+  font: inherit;
+  text-overflow: ellipsis;
+}
+
+.language-picker input[aria-expanded="false"]:not(:disabled) {
+  cursor: pointer;
+}
+
+.language-picker input[aria-invalid="true"] {
+  border-color: var(--vc-danger);
+}
+
+/* Part of the field's look: a click on it reaches the field. */
+.language-chevron {
+  position: absolute;
+  top: 50%;
+  right: var(--vc-space-2);
+  color: var(--vc-muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.language-chevron.open {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+/* Clear of the field's focus ring (3 px, 2 px out), or it covers the first row.
+   The picker shortens it further to fit the area it opens in. */
 .language-list {
   position: absolute;
   z-index: 10;
   left: 0;
   right: 0;
   max-height: 220px;
-  margin: 2px 0 0;
+  margin: var(--vc-space-2) 0 0;
   padding: var(--vc-space-1);
   overflow: auto;
   list-style: none;
@@ -667,22 +708,6 @@ button.menu-button {
   width: 240px;
 }
 
-.row-control .language-picker input {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: var(--vc-control-h);
-  padding: var(--vc-space-1) var(--vc-space-2);
-  border: 1px solid var(--vc-line-strong);
-  border-radius: var(--vc-radius-sm);
-  background: var(--vc-bg);
-  color: var(--vc-ink);
-  font: inherit;
-}
-
-.row-control .language-picker input[aria-invalid="true"] {
-  border-color: var(--vc-danger);
-}
-
 .row-control .hotkey-recorder .row {
   margin-top: var(--vc-space-1);
 }
@@ -961,10 +986,24 @@ main.ob {
   gap: var(--vc-space-2);
 }
 
-.ob-chip[aria-checked="true"] {
+/* `button:hover:not(:disabled)` weighs more than one class and one attribute:
+   it took the fill away under the pointer and left the light label on it. The
+   selected look has to win in every state a button has. */
+button.ob-chip[aria-checked="true"],
+button.ob-chip[aria-checked="true"]:active:not(:disabled) {
   border-color: var(--vc-accent);
   background: var(--vc-accent);
   color: var(--vc-accent-fg);
+}
+
+button.ob-chip[aria-checked="true"]:hover:not(:disabled) {
+  border-color: var(--vc-accent-hover);
+  background: var(--vc-accent-hover);
+  color: var(--vc-accent-fg);
+}
+
+.ob-content > .language-picker {
+  width: min(320px, 100%);
 }
 
 .ob-allowed {
@@ -1050,7 +1089,10 @@ main.ob {
   background: var(--vc-attention-soft);
 }
 
+/* Long words scroll here, so the panel and its Copy button still fit the step. */
 .ob-words {
+  max-height: 5.5em;
+  overflow-y: auto;
   padding: var(--vc-space-2) var(--vc-space-3);
   border: 1px solid var(--vc-line);
   border-radius: var(--vc-radius-sm);

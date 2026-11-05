@@ -2,7 +2,9 @@
 // onboarding at its minimum content size (680×520 less the title bar) with
 // every text made pseudo-long, on a fake backend, measured in real WebKit. Built by
 // vite.layout.config.ts and opened by e2e_onboarding_layout, which reads the
-// verdict line. U8 criterion 1: jsdom can't measure layout.
+// verdict line. U8 criterion 1: jsdom can't measure layout. U9 adds what also
+// takes a real browser: the selected language button in each state, the failed
+// paste panel and the text box's focus on Try it, and the language search box.
 
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { createRoot } from "react-dom/client";
@@ -15,10 +17,14 @@ import type {
   Step,
 } from "../bindings";
 import { Onboarding } from "../Onboarding";
+import { Settings } from "../Settings";
+import settingsCss from "../settings.css?inline";
+import tokensCss from "../styles/tokens.css?inline";
 
-const WIDTH = 680;
-/** The window's minimum height less its title bar. */
-const HEIGHT = 492;
+/** The window's minimum size, less its title bar. */
+const MIN = { width: 680, height: 492 };
+/** The window's default size, less its title bar. */
+const DEFAULT = { width: 740, height: 532 };
 /** Devanagari with no break, then a third again of ordinary words. */
 const PSEUDO = "हिन्दीकेलंबेशब्दोंकीजाँचहिन्दीकेलंबे";
 const SETTLE_MS = 1800;
@@ -30,9 +36,18 @@ const steps: Record<string, Step> = {
   speech: "speech",
   "speech-key": "speech",
   permissions: "permissions",
+  "speech-more": "speech",
   try: "try",
+  "try-plain": "try",
+  "try-default": "try",
   ready: "ready",
 };
+const size = view === "try-default" ? DEFAULT : MIN;
+const isTry = steps[view] === "try";
+const isLanguage = view === "speech-more" || view === "settings-language";
+
+/** The owner's Try it, as it is, not pseudo-long. */
+const plain = view === "try-plain" || view === "try-default" || view === "settings-language";
 
 const model: LocalModelInfo_Serialize = {
   id: "parakeet",
@@ -40,9 +55,10 @@ const model: LocalModelInfo_Serialize = {
   languages: "English only",
   language_codes: ["en"],
   size_bytes: 477_000_000,
-  downloaded_bytes: 212_000_000,
-  state: "downloading",
-  resumed_from_bytes: 100_000_000,
+  downloaded_bytes: plain ? 477_000_000 : 212_000_000,
+  // The owner's Try it has its model: practice is open and the box can be focused.
+  state: plain ? "ready" : "downloading",
+  resumed_from_bytes: plain ? null : 100_000_000,
   restarted: false,
   error: null,
   default: true,
@@ -52,8 +68,9 @@ const settings: Settings_Serialize = {
   version: 2,
   provider: "groq",
   model: "whisper-large-v3-turbo",
-  language: "hi",
-  hotkey: "RightAlt",
+  language: view === "speech-more" ? "fr" : "hi",
+  // The owner's state on Try it: a recorded two-key shortcut.
+  hotkey: isTry ? "RightAlt+RightCmd" : "RightAlt",
   launch_at_login: false,
   transcription: view === "speech-key" ? "cloud" : "local",
   local_model: "parakeet",
@@ -102,6 +119,10 @@ mockIPC((command) => {
       return status;
     case "get_settings":
       return settings;
+    case "get_launch_at_login":
+      return false;
+    case "get_app_info":
+      return { version: "0.1.0", last_update_check_ms: null };
     case "list_local_models":
       return [{ ...model }];
     case "get_engine_status":
@@ -244,31 +265,267 @@ function problems(root: HTMLElement): string[] {
   return found;
 }
 
+function settle(ms = 250): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** What a CSS colour value computes to here, such as `var(--vc-accent)`. */
+function colour(value: string): string {
+  const probe = document.createElement("span");
+  probe.style.color = value;
+  document.body.append(probe);
+  const computed = getComputedStyle(probe).color;
+  probe.remove();
+  return computed;
+}
+
+function luminance(rgb: string): number {
+  const [r = 0, g = 0, b = 0] = (rgb.match(/[\d.]+/g) ?? []).map(Number).map((channel) => {
+    const c = channel / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrast(a: string, b: string): number {
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (light + 0.05) / (dark + 0.05);
+}
+
+/** Whether the middle of `element` can be seen and clicked. */
+function reachable(element: Element): boolean {
+  const rect = element.getBoundingClientRect();
+  const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  return hit !== null && (element === hit || element.contains(hit));
+}
+
+/**
+ * The cascade decides how a state looks and only a browser runs it, but a script
+ * can't hover, and `:focus` needs the window to be the active one. So `read` runs
+ * with the app's own CSS with each state as a class: a class weighs what the
+ * pseudo-class does, so what wins is what would win.
+ */
+async function withStatesAsClasses<T>(read: () => T): Promise<T> {
+  const forced = `${tokensCss}\n${settingsCss}`
+    .replace(/:hover/g, ".is-hover")
+    .replace(/:active/g, ".is-active")
+    .replace(/:focus-visible/g, ".is-focus-visible")
+    .replace(/:focus/g, ".is-focus");
+  const style = document.createElement("style");
+  style.textContent = `${forced}\n* { transition: none !important; }`;
+  const link = document.querySelector<HTMLLinkElement>('link[rel="stylesheet"]');
+  if (link !== null) link.disabled = true;
+  document.head.append(style);
+  await settle();
+  const result = read();
+  style.remove();
+  if (link !== null) link.disabled = false;
+  await settle();
+  return result;
+}
+
+/**
+ * U9 criterion 4. "After a click" is hovered and focused; a window losing focus
+ * changes no style, as the CSS has no rule for it.
+ */
+async function chipProblems(root: HTMLElement): Promise<string[]> {
+  const chip = root.querySelector('.ob-chip[aria-checked="true"]');
+  if (chip === null) return ["no language button is selected"];
+  return withStatesAsClasses(() => {
+    const filled = [colour("var(--vc-accent)"), colour("var(--vc-accent-hover)")];
+    const found: string[] = [];
+    const states: string[][] = [
+      [],
+      ["is-hover"],
+      ["is-hover", "is-active"],
+      ["is-focus", "is-focus-visible"],
+      ["is-hover", "is-focus", "is-focus-visible"],
+      ["is-hover", "is-active", "is-focus", "is-focus-visible"],
+    ];
+    for (const state of states) {
+      chip.classList.add(...state);
+      const computed = getComputedStyle(chip);
+      const name = state.join("+") || "resting";
+      if (!filled.includes(computed.backgroundColor)) {
+        found.push(`the selected chip loses its fill when ${name}`);
+      }
+      if (contrast(computed.color, computed.backgroundColor) < 4.5) {
+        found.push(`the selected chip's label is unreadable when ${name}`);
+      }
+      chip.classList.remove(...state);
+    }
+    return found;
+  });
+}
+
+/** U9 criteria 5 and 6: the panel, and the box's focus, in the owner's state. */
+async function tryProblems(root: HTMLElement): Promise<string[]> {
+  const found: string[] = [];
+  const content = root.querySelector<HTMLElement>(".ob-content");
+  const box = root.querySelector<HTMLTextAreaElement>("#try-field");
+  if (content === null || box === null) return ["Try it isn't on screen"];
+  const panelInView = (when: string) => {
+    const area = content.getBoundingClientRect();
+    const panel = root.querySelector(".ob-fix-area");
+    const copy = panel === null ? null : panel.querySelector("button");
+    if (panel === null || copy === null) {
+      found.push(`the failed-paste panel is missing ${when}`);
+      return;
+    }
+    const rect = panel.getBoundingClientRect();
+    // Pseudo-long text can make it taller than the area: then only its button
+    // has to be there.
+    const fits = rect.height <= area.height;
+    if (fits && (rect.top < area.top - 1 || rect.bottom > area.bottom + 1)) {
+      found.push(`the failed-paste panel isn't all in view ${when}`);
+    }
+    if (!reachable(copy)) found.push(`the panel's button can't be clicked ${when}`);
+  };
+  panelInView("at first");
+  // Only `try` has the model still on its way, which makes practice wait.
+  if (box.disabled) return found;
+  if (document.activeElement !== box) found.push("the box has no focus on arriving");
+
+  const record = root.querySelector<HTMLElement>(".hotkey-recorder button");
+  record?.click();
+  await settle();
+  // A real click on the button takes the focus from the box; a script's doesn't.
+  box.blur();
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  if (document.activeElement === box) found.push("the box takes focus during a recording");
+  root.querySelector<HTMLElement>(".hotkey-recorder button")?.click();
+  await settle();
+  if (document.activeElement !== box) found.push("the box has no focus after a cancel");
+  if (box.value !== "") found.push("the box isn't empty after a recording");
+  panelInView("after a cancel");
+
+  box.blur();
+  content.scrollTop = 0;
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  if (document.activeElement !== box) found.push("the box has no focus when the window returns");
+  panelInView("when the window returns");
+  return found;
+}
+
+/** U9 criterion 7: the search box, in setup and in Settings, at the minimum. */
+async function languageProblems(root: HTMLElement): Promise<string[]> {
+  const found: string[] = [];
+  const field = root.querySelector<HTMLInputElement>('.language-picker input[role="combobox"]');
+  const scroller = field === null ? null : field.closest(".ob-content, .settings-pane");
+  if (field === null || scroller === null) return ["the language search box isn't on screen"];
+  const style = getComputedStyle(field);
+  const chevron = root.querySelector(".language-picker .language-chevron");
+  if (chevron === null || chevron.getBoundingClientRect().width === 0) {
+    found.push("the closed search box has no chevron");
+  }
+  if (parseFloat(style.borderTopLeftRadius) < 1) found.push("the search box isn't rounded");
+  if (style.borderTopColor !== colour("var(--vc-line-strong)")) {
+    found.push("the search box's border isn't the design's");
+  }
+  const ring = await withStatesAsClasses(() => {
+    field.classList.add("is-focus", "is-focus-visible");
+    const computed = getComputedStyle(field);
+    const said = [
+      computed.outlineStyle,
+      computed.outlineWidth,
+      computed.outlineOffset,
+      computed.outlineColor,
+    ].join(" ");
+    field.classList.remove("is-focus", "is-focus-visible");
+    return said;
+  });
+  if (ring !== `solid 3px 2px ${colour("var(--vc-accent)")}`) {
+    found.push(`the search box hasn't the standard focus ring: ${ring}`);
+  }
+  field.focus();
+  await settle(400);
+  const list = root.querySelector(".language-list");
+  const first = list === null ? null : list.querySelector('[role="option"]');
+  if (list === null || first === null) return [...found, "focusing the search box opens no list"];
+  const area = scroller.getBoundingClientRect();
+  const box = field.getBoundingClientRect();
+  const rows = list.getBoundingClientRect();
+  // The ring is 5 px out: a row under it is cut off.
+  if (rows.top < box.bottom + 5) found.push("the list's top sits under the field's ring");
+  if (box.top < area.top - 1) found.push("the field is scrolled out of its area");
+  if (rows.bottom > area.bottom + 1) found.push("the list is cut off by its area");
+  if (rows.right > area.right + 1) found.push("the list sticks out sideways");
+  if (!reachable(first)) found.push("the list's first row can't be clicked");
+
+  const key = (name: string) =>
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
+  const before = field.getAttribute("aria-activedescendant");
+  key("ArrowDown");
+  await settle();
+  const after = field.getAttribute("aria-activedescendant");
+  if (after === before && (list.children.length > 1 || after === null)) {
+    found.push("the arrow keys don't move in the list");
+  }
+  const active = after === null ? null : document.getElementById(after);
+  if (active !== null) {
+    const row = active.getBoundingClientRect();
+    if (row.top < rows.top - 1 || row.bottom > rows.bottom + 1) {
+      found.push("the active row isn't in view");
+    }
+  }
+  key("Escape");
+  await settle();
+  if (field.getAttribute("aria-expanded") !== "false") found.push("Esc doesn't close the list");
+  return found;
+}
+
+/** Everything U9 measures for this page, on top of the frame's own checks. */
+async function viewProblems(root: HTMLElement): Promise<string[]> {
+  const found: string[] = [];
+  if (view === "speech" || view === "speech-more") found.push(...(await chipProblems(root)));
+  if (isTry) found.push(...(await tryProblems(root)));
+  if (isLanguage) found.push(...(await languageProblems(root)));
+  return found;
+}
+
 const page = document.getElementById("harness");
 const verdict = document.getElementById("verdict");
 if (page === null || verdict === null) throw new Error("the harness page is incomplete");
-page.style.width = `${String(WIDTH)}px`;
-page.style.height = `${String(HEIGHT)}px`;
+page.style.width = `${String(size.width)}px`;
+page.style.height = `${String(size.height)}px`;
 
-createRoot(page).render(<Onboarding onFinished={() => undefined} />);
-makePseudoLong(page);
+createRoot(page).render(
+  view === "settings-language" ? <Settings /> : <Onboarding onFinished={() => undefined} />,
+);
+if (!plain) makePseudoLong(page);
+
+/** Settings, at the section with the search box. */
+function openDictation(root: HTMLElement): boolean {
+  if (root.querySelector("#language") !== null) return true;
+  root.querySelector<HTMLElement>("#tab-dictation")?.click();
+  return false;
+}
+
+async function measure(root: HTMLElement, out: HTMLElement) {
+  const own = await viewProblems(root);
+  const found = [...new Set([...own, ...(view === "settings-language" ? [] : problems(root))])];
+  out.textContent = found.length === 0 ? `LAYOUT ${view} OK` : `LAYOUT ${view} FAILED`;
+  // A line each: the accessibility dump cuts long values.
+  for (const problem of found) {
+    const line = document.createElement("p");
+    line.textContent = `LAYOUT ${view} FAIL: ${problem}`;
+    out.after(line);
+  }
+}
 
 /** Measures once the step is on screen and the text has settled. */
 function measureWhenReady() {
   if (page === null || verdict === null) return;
-  if (page.querySelector(".ob-footer") === null) {
+  const ready =
+    view === "settings-language" ? openDictation(page) : page.querySelector(".ob-footer") !== null;
+  if (!ready) {
     window.setTimeout(measureWhenReady, 200);
     return;
   }
   window.setTimeout(() => {
-    const found = [...new Set(problems(page))];
-    verdict.textContent = found.length === 0 ? `LAYOUT ${view} OK` : `LAYOUT ${view} FAILED`;
-    // A line each: the accessibility dump cuts long values.
-    for (const problem of found) {
-      const line = document.createElement("p");
-      line.textContent = `LAYOUT ${view} FAIL: ${problem}`;
-      verdict.after(line);
-    }
+    void measure(page, verdict);
   }, SETTLE_MS);
 }
 

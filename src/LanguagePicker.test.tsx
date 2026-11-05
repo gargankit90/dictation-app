@@ -149,29 +149,62 @@ describe("LanguagePicker", () => {
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["French (Français)"]);
   });
 
-  it("scrolls the keyboard-active option into view on open, arrows, End and typing", () => {
+  it("keeps the keyboard-active option in view by moving only the list", () => {
     const scroll = vi.fn();
     Element.prototype.scrollIntoView = scroll;
+    // jsdom has no layout: rows of 20 px, in a list that shows 5 of them.
+    const rowAt = (element: HTMLElement) =>
+      Array.from(element.parentElement?.children ?? []).indexOf(element) * 20;
+    const spies = [
+      vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        return rowAt(this);
+      }),
+      vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(20),
+      vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(100),
+    ];
     render(<Harness initial="hi" supported={cloudLanguages("groq")} />);
     fireEvent.keyDown(box(), { key: "ArrowDown" });
-    expect(scroll).toHaveBeenCalled();
-    const opened = document.getElementById(box().getAttribute("aria-activedescendant") ?? "");
-    expect(opened?.textContent).toBe("Hindi (हिन्दी)");
-    expect(scroll.mock.instances.at(-1)).toBe(opened);
+    const list = screen.getByRole("listbox");
+    const inView = () => {
+      const active = document.getElementById(box().getAttribute("aria-activedescendant") ?? "");
+      if (active === null) throw new Error("no active row");
+      const top = rowAt(active);
+      expect(top).toBeGreaterThanOrEqual(list.scrollTop);
+      expect(top + 20).toBeLessThanOrEqual(list.scrollTop + 100);
+    };
+    inView();
+    // Only the field and the list are revealed: a row's scrollIntoView also
+    // scrolls the page, which hid the field at the smallest window.
+    expect(scroll.mock.instances).toEqual([box(), list]);
 
-    scroll.mockClear();
-    fireEvent.keyDown(box(), { key: "ArrowDown" });
-    const next = document.getElementById(box().getAttribute("aria-activedescendant") ?? "");
-    expect(next).not.toBe(opened);
-    expect(scroll.mock.instances.at(-1)).toBe(next);
-
-    scroll.mockClear();
     fireEvent.keyDown(box(), { key: "End" });
-    const last = document.getElementById(box().getAttribute("aria-activedescendant") ?? "");
-    expect(scroll.mock.instances.at(-1)).toBe(last);
-
-    scroll.mockClear();
+    inView();
+    expect(list.scrollTop).toBeGreaterThan(0);
+    fireEvent.keyDown(box(), { key: "Home" });
+    inView();
+    expect(list.scrollTop).toBe(0);
     fireEvent.change(box(), { target: { value: "ta" } });
-    expect(scroll).toHaveBeenCalled();
+    inView();
+    expect(scroll.mock.instances).toEqual([box(), list]);
+    for (const spy of spies) spy.mockRestore();
+  });
+
+  it("reads as a picker: a chevron, hidden from screen readers, that turns when open", () => {
+    render(<Harness initial="hi" supported={cloudLanguages("groq")} />);
+    const chevron = document.querySelector(".language-chevron");
+    expect(chevron?.getAttribute("aria-hidden")).toBe("true");
+    expect(chevron?.classList.contains("open")).toBe(false);
+    fireEvent.keyDown(box(), { key: "ArrowDown" });
+    expect(document.querySelector(".language-chevron")?.classList.contains("open")).toBe(true);
+  });
+
+  it("typing into the closed field searches for what was typed, not the name plus it", () => {
+    render(<Harness initial="hi" supported={cloudLanguages("groq")} />);
+    expect(box().value).toBe("Hindi (हिन्दी)");
+    fireEvent.change(box(), { target: { value: "Hindi (हिन्दी)fr" } });
+    expect(box().value).toBe("fr");
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toContain("French (Français)");
   });
 });
