@@ -541,7 +541,7 @@ mod tests {
         model.on_event(&UiEvent::StateChanged(Phase::Recording));
         model.on_level(-90.0, None, ms(0));
         assert_eq!(
-            model.on_level(-90.0, None, ms(2_000)),
+            model.on_level(-90.0, None, ms(3_000)),
             shown(OverlayView::NoSound { device: None })
         );
         // Released while "No sound": Transcribing as usual.
@@ -562,7 +562,7 @@ mod tests {
 
         model.on_event(&UiEvent::StateChanged(Phase::Recording));
         model.on_level(-90.0, None, ms(6_000));
-        assert!(model.on_level(-90.0, None, ms(7_500)).is_some());
+        assert!(model.on_level(-90.0, None, ms(8_500)).is_some());
         model.on_event(&UiEvent::StateChanged(Phase::Idle));
         model.on_event(&UiEvent::StateChanged(Phase::Recording));
         // A new recording: the old quiet run doesn't carry over.
