@@ -23,6 +23,11 @@ five_box_is_empty() {
   [ -z "$(ax field-get "$APP_NAME" "$FIVE_WINDOW" try-field)" ]
 }
 
+# A Terminal job gets 30 s unless told otherwise; the download takes minutes.
+five_model_ready() {
+  VM_TERMINAL_TIMEOUT=1510 ax_ok wait-no-text "$APP_NAME" "$FIVE_WINDOW" "Getting the model ready" 1500
+}
+
 # The download picked up: either claim is the one the bytes back.
 five_download_picked_up() {
   ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Continued from" 30 ||
@@ -68,8 +73,7 @@ e2e_onboarding_five_steps() {
   expect "Try it waits for the model" \
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Getting the model ready" 15
   expect "the strip is still there" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading Parakeet English" 5
-  expect "the model finishes and practice opens" \
-    ax_ok wait-no-text "$APP_NAME" "$FIVE_WINDOW" "Getting the model ready" 1500
+  expect "the model finishes and practice opens" five_model_ready
   expect "the model loaded" wait_for_log 'on-device model loaded' 120
 
   # A paste that lands elsewhere: the words, Copy, no second paste.
