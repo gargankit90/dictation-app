@@ -133,7 +133,7 @@ run_gate "$r" --full
 run_gate_with "$r" 'gate_tool_versions() { echo "rustc: 9.9"; }'
 expect "a different tool version invalidates" ran_full
 run_gate "$r" --full
-run_gate_with "$r" 'export NEXTEST_PROFILE=ci'
+run_gate_with "$r" 'export CARGO_BUILD_JOBS=3'
 expect "a changed env flag or profile invalidates" ran_full
 run_gate "$r" --full
 run_gate_with "$r" 'GATE_RECEIPT_TTL=0'
