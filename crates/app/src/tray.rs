@@ -251,11 +251,10 @@ pub enum TrayIcon {
     Recording,
 }
 
-/// A model downloading.
+/// A model downloading. The menu calls it "speech model": it doesn't bring
+/// back the names Settings leaves to the "…" menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Download {
-    /// The model's display name.
-    pub name: String,
     /// Percent done, 0 to 100.
     pub percent: u8,
     /// Whether the settings already choose this model as the engine.
@@ -547,9 +546,9 @@ impl TrayStatus {
             entries.push(Entry::item(Fix::Relaunch.id(), Fix::Relaunch.label()));
             format!("{APP_NAME}: {RELAUNCH_SENTENCE}")
         } else if let Some(download) = download {
-            let text = format!("↓ Downloading {}, {}%", download.name, download.percent);
+            let text = format!("↓ Downloading speech model, {}%", download.percent);
             entries.push(Entry::disabled(id::STATUS, text));
-            format!("{APP_NAME}: downloading {}", download.name)
+            format!("{APP_NAME}: downloading speech model")
         } else {
             let key = keycap_label(&self.ambient.hotkey);
             entries.push(Entry::disabled(id::STATUS, format!("✓ Ready · Hold {key}")));
@@ -709,7 +708,6 @@ mod tests {
         let local = "On this Mac (Parakeet English)";
         let downloading = |chosen| Ambient {
             download: Some(Download {
-                name: "Parakeet English".to_owned(),
                 percent: 42,
                 chosen,
             }),
@@ -728,7 +726,7 @@ mod tests {
             let menu = tray.menu();
             assert_eq!(
                 label_of(&menu, id::STATUS).as_deref(),
-                Some("↓ Downloading Parakeet English, 42%"),
+                Some("↓ Downloading speech model, 42%"),
                 "chosen: {chosen}"
             );
             assert!(label_of(&menu, id::FIX_SPEECH).is_none());
@@ -742,7 +740,6 @@ mod tests {
     fn u12_criterion_7_a_download_doesnt_hide_other_problems() {
         let downloading = |chosen| Ambient {
             download: Some(Download {
-                name: "Parakeet English".to_owned(),
                 percent: 42,
                 chosen,
             }),
@@ -779,7 +776,6 @@ mod tests {
         let mut tray = ready("RightAlt", "On this Mac (Parakeet English)");
         tray.set_ambient(Ambient {
             download: Some(Download {
-                name: "Parakeet English".to_owned(),
                 percent: 42,
                 chosen: true,
             }),
@@ -791,7 +787,7 @@ mod tests {
             menu.outline().first().cloned(),
             Some((
                 "status".to_owned(),
-                "↓ Downloading Parakeet English, 42%".to_owned()
+                "↓ Downloading speech model, 42%".to_owned()
             ))
         );
         assert_eq!(&ids(&menu)[1], "-");
@@ -1109,7 +1105,6 @@ mod tests {
         tray.set_ambient(Ambient {
             engine_generation: 1,
             download: Some(Download {
-                name: "Parakeet English".to_owned(),
                 percent: 10,
                 chosen: true,
             }),

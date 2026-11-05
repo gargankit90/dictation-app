@@ -109,6 +109,16 @@ describe("u12_criterion_2 Report a problem", () => {
     expect((await screen.findByLabelText("Report")).textContent).toBe(REPORT);
   });
 
+  // Design Lead: a privacy claim, and the report does hold the dictation key.
+  it("says no API keys, and keeps Back outside what scrolls", async () => {
+    view();
+    expect(screen.getByText(/No audio, text, API keys, app names/)).toBeTruthy();
+    const back = await screen.findByRole("button", { name: "Back to Settings" });
+    expect(back.closest(".page-footer")).toBeTruthy();
+    expect(back.closest(".page-body")).toBeNull();
+    expect(screen.getByLabelText("Report").closest(".page-body")).toBeTruthy();
+  });
+
   it("says Dictation key, not hotkey, and goes back", async () => {
     const onBack = vi.fn();
     view(onBack);

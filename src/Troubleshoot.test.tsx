@@ -296,6 +296,15 @@ describe("u12_criterion_2 Troubleshoot is checks and fixes only", () => {
     expect(calls).not.toContain("build_report");
   });
 
+  // Design Lead: in exactly the state where someone is stuck.
+  it("keeps Back outside what scrolls", async () => {
+    view();
+    const back = await screen.findByRole("button", { name: "Back to Settings" });
+    expect(back.closest(".page-footer")).toBeTruthy();
+    expect(back.closest(".page-body")).toBeNull();
+    expect(screen.getByRole("list", { name: "Checks" }).closest(".page-body")).toBeTruthy();
+  });
+
   it("keeps the code behind a closed Details", async () => {
     checks = MIC_DENIED;
     view();

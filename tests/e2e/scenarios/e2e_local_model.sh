@@ -24,7 +24,7 @@ download_wait() {
       ! ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "aused" 1; then
       return 0
     fi
-    if ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Download paused" 2; then
+    if ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Paused · " 2; then
       log "  the download stopped part way; pressing Resume"
       ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Resume" || true
     elif ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Paused: no connection" 2; then

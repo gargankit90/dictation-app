@@ -301,6 +301,29 @@ fieldset.choice {
   margin: 2px 0 0;
 }
 
+/* The way back stays in view, whatever the window's size (U12). */
+.settings.troubleshoot {
+  display: flex;
+  box-sizing: border-box;
+  height: 100vh;
+  flex-direction: column;
+  padding: 0;
+}
+
+.page-body {
+  min-height: 0;
+  flex: 1;
+  padding: var(--vc-space-5) var(--vc-space-6);
+  overflow-y: auto;
+}
+
+.row.page-footer {
+  flex: none;
+  margin: 0;
+  padding: var(--vc-space-3) var(--vc-space-6);
+  border-top: 1px solid var(--vc-line);
+}
+
 .troubleshoot h2 {
   margin: var(--vc-space-5) 0 var(--vc-space-2);
   font-size: var(--vc-text-xl);
@@ -776,7 +799,7 @@ button.menu-button {
 }
 
 .row-control .language-picker {
-  width: 240px;
+  width: 220px;
 }
 
 .row-control .language-picker input {
@@ -816,6 +839,23 @@ button.menu-button {
 
 .recorder-line .keycap {
   margin-bottom: 0;
+}
+
+/* Recording needs the width below the default window size: the controls take
+   a line of their own under the label. */
+@media (max-width: 719px) {
+  .row-main:has(.keycap.recording) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .row-main:has(.keycap.recording) .hotkey-recorder.compact {
+    align-items: flex-start;
+  }
+
+  .row-main:has(.keycap.recording) .hotkey-recorder.compact p {
+    text-align: left;
+  }
 }
 
 /* As wide as the line above, not the sentence. */

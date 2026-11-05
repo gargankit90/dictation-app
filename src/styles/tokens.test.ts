@@ -124,6 +124,15 @@ describe("design tokens", () => {
       );
     });
 
+    // Design Lead: Settings' popup is capped, and recording gets its own line.
+    it("keeps the Dictation rows' controls in their room", () => {
+      const sheet = sources["/src/settings.css"] ?? "";
+      expect(sheet).toMatch(/\.row-control \.language-picker \{[^}]*width: 220px/);
+      expect(sheet).toMatch(
+        /@media \(max-width: 719px\) \{\s*\.row-main:has\(\.keycap\.recording\) \{[^}]*flex-direction: column/,
+      );
+    });
+
     // U12 criterion 9.
     it("draws the sidebar's focus ring inside the row", () => {
       const sheet = sources["/src/settings.css"] ?? "";

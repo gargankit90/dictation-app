@@ -63,7 +63,7 @@ describe("criterion_u6_4 the model state machine", () => {
 
   it("paused by Cancel: where it stopped, and Retry", () => {
     const row = modelRow(model({ state: "partial", downloaded_bytes: 212_000_000 }), IDLE);
-    expect(row.chip?.text).toBe("Download paused, 212 of 477 MB");
+    expect(row.chip?.text).toBe("Paused · 212 of 477 MB");
     expect(row.actions).toEqual(["resume"]);
     expect(row.blockedBecause).not.toBeNull();
   });

@@ -75,69 +75,73 @@ export function Report({ backLabel, onBack }: Props) {
 
   return (
     <main className="settings troubleshoot">
-      <h1>Report a problem</h1>
-      <p className="hint">
-        A short report from a fixed list of facts: versions, permissions, your dictation key and
-        speech engine, and the codes and times of recent errors. No audio, text, keys, app names,
-        file paths or logs. Nothing is sent: you read it first, then save it, copy it or open a
-        GitHub issue that you submit yourself.
-      </p>
-      {report === null ? (
-        building ? (
-          <p>Building…</p>
-        ) : (
-          <div className="row">
-            <button
-              type="button"
-              onClick={() => {
-                void build();
-              }}
-            >
-              Try again
-            </button>
-          </div>
-        )
-      ) : (
-        <>
-          <pre className="report" aria-label="Report" tabIndex={0}>
-            {report}
-          </pre>
-          <div className="row">
-            <button
-              type="button"
-              onClick={() => {
-                void save();
-              }}
-            >
-              Save report…
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void copy();
-              }}
-            >
-              Copy
-            </button>
-            <button
-              type="button"
-              className="primary"
-              onClick={() => {
-                void openIssue();
-              }}
-            >
-              Open a GitHub issue
-            </button>
-          </div>
-        </>
-      )}
-      {notice !== null ? (
-        <p role={notice.kind === "error" ? "alert" : "status"} className={`notice ${notice.kind}`}>
-          {notice.text}
+      <div className="page-body">
+        <h1>Report a problem</h1>
+        <p className="hint">
+          A short report from a fixed list of facts: versions, permissions, your dictation key and
+          speech engine, and the codes and times of recent errors. No audio, text, API keys, app
+          names, file paths or logs. Nothing is sent: you read it first, then save it, copy it or
+          open a GitHub issue that you submit yourself.
         </p>
-      ) : null}
-
-      <div className="row actions">
+        {report === null ? (
+          building ? (
+            <p>Building…</p>
+          ) : (
+            <div className="row">
+              <button
+                type="button"
+                onClick={() => {
+                  void build();
+                }}
+              >
+                Try again
+              </button>
+            </div>
+          )
+        ) : (
+          <>
+            <pre className="report" aria-label="Report" tabIndex={0}>
+              {report}
+            </pre>
+            <div className="row">
+              <button
+                type="button"
+                onClick={() => {
+                  void save();
+                }}
+              >
+                Save report…
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void copy();
+                }}
+              >
+                Copy
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  void openIssue();
+                }}
+              >
+                Open a GitHub issue
+              </button>
+            </div>
+          </>
+        )}
+        {notice !== null ? (
+          <p
+            role={notice.kind === "error" ? "alert" : "status"}
+            className={`notice ${notice.kind}`}
+          >
+            {notice.text}
+          </p>
+        ) : null}
+      </div>
+      <div className="row actions page-footer">
         <button type="button" onClick={onBack}>
           {backLabel}
         </button>

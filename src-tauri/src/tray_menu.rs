@@ -241,7 +241,6 @@ fn read_ambient(app: &AppHandle) -> Ambient {
                     percent: percent(model.downloaded_bytes, model.size_bytes),
                     chosen: settings.transcription == Transcription::Local
                         && settings.local_model == model.id,
-                    name: model.name,
                 })
         });
     let (mic, accessibility) = app.try_state::<onboarding::OsPermissions>().map_or(

@@ -290,7 +290,7 @@ describe("criterion_u6_1 sections, keyboard and names", () => {
 
   it("gives every control in every section an accessible name", async () => {
     await open("speech");
-    expect(screen.getByRole("button", { name: "Change key…" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add key…" })).toBeTruthy();
     click("Done");
     for (const name of Object.values(SECTION_NAMES)) {
       fireEvent.click(screen.getByRole("tab", { name }));
@@ -567,7 +567,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
   it("a paused download says so, can't be selected, and Resume continues it", async () => {
     backend.models = [model(ENGLISH, { state: "partial", downloaded_bytes: 212_000_000 })];
     await open("speech");
-    expect(await screen.findByText("Download paused, 212 of 477 MB")).toBeTruthy();
+    expect(await screen.findByText("Paused · 212 of 477 MB")).toBeTruthy();
     expect(radio(/^English/).disabled).toBe(true);
     expect(screen.getByTestId("blocked-reason").textContent).toBe(
       "Finish the download to choose it.",
@@ -614,7 +614,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     expect(checked().map((row) => row.id)).toEqual(["engine-own-key"]);
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     click("More actions for English");
-    expect(screen.getByRole("menuitem", { name: "Delete English" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Delete model" })).toBeTruthy();
   });
 
   it("Delete is in the … menu; the row in use has the menu but can't be deleted", async () => {
@@ -627,7 +627,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     expect(screen.getByText(/Parakeet English · English only · works offline/)).toBeTruthy();
     click("More actions for English");
     click("More actions for 3 languages");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Delete 3 languages" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete model" }));
     await waitFor(() => {
       expect(backend.named("delete_local_model")[0]?.args).toEqual({ id: MULTI });
     });
@@ -698,7 +698,7 @@ describe("u12_criterion_4 the key sheet", () => {
     click("Done");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(radio(/^English/).checked).toBe(true);
-    click("Change key…");
+    click("Add key…");
     fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
     click("Test & Save");
     expect(await screen.findByText(CONNECTED)).toBeTruthy();
@@ -798,15 +798,169 @@ describe("u12_criterion_4 the key sheet", () => {
     expect(backend.named("set_api_key")).toHaveLength(0);
   });
 
-  it("while the own key is the engine, changing the provider applies at once", async () => {
+  // Review round 1, finding 1: the popup is a draft while Groq works.
+  describe("changing the provider while the own key is the engine", () => {
+    const pickOpenAi = async () => {
+      backend.keys.groq = true;
+      await open("speech");
+      click("Change key…");
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+      await screen.findByText("No key saved yet.");
+    };
+    const switches = () => backend.named("use_cloud_engine");
+
+    it("doesn't switch to a provider with no key", async () => {
+      await pickOpenAi();
+      expect(switches()).toHaveLength(0);
+      expect(backend.settings.provider).toBe("groq");
+    });
+
+    it("doesn't switch when its key is rejected", async () => {
+      await pickOpenAi();
+      backend.testResult = { kind: "invalid_key", message: "OpenAI rejected this key." };
+      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+      click("Test & Save");
+      await screen.findByText("OpenAI rejected this key.");
+      expect(switches()).toHaveLength(0);
+      expect(backend.named("set_api_key")).toHaveLength(0);
+    });
+
+    it("Done goes back to the provider in use", async () => {
+      await pickOpenAi();
+      click("Done");
+      expect(switches()).toHaveLength(0);
+      expect(
+        await screen.findByText("Groq · about 100 languages · speech is sent to Groq"),
+      ).toBeTruthy();
+      expect(screen.queryByText("! Needs a key")).toBeNull();
+      expect(screen.getByRole("button", { name: "Change key…" })).toBeTruthy();
+    });
+
+    it("switches once a key for it works", async () => {
+      await pickOpenAi();
+      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+      click("Test & Save");
+      expect(await screen.findByText(CONNECTED)).toBeTruthy();
+      await waitFor(() => {
+        expect(switches()[0]?.args).toEqual({ provider: "openai" });
+      });
+      expect(switches()).toHaveLength(1);
+    });
+
+    it("switches at once to a provider that has a saved key", async () => {
+      backend.keys.groq = true;
+      backend.keys.openai = true;
+      await open("speech");
+      click("Change key…");
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+      await waitFor(() => {
+        expect(switches()[0]?.args).toEqual({ provider: "openai" });
+      });
+      expect(await screen.findByText("Saved")).toBeTruthy();
+    });
+
+    it("a slow lookup can't switch after the provider changed again", async () => {
+      backend.keys.groq = true;
+      backend.keys.openai = true;
+      await open("speech");
+      click("Change key…");
+      const slow = gate();
+      backend.holds.set("has_api_key", slow.closed);
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "groq" } });
+      backend.holds.delete("has_api_key");
+      slow.open();
+      await screen.findByText("A key is saved in your Keychain.");
+      expect(switches().filter((call) => call.args.provider === "openai")).toHaveLength(0);
+    });
+
+    it("a provider set up while on this Mac doesn't switch the engine", async () => {
+      onDevice();
+      await open("speech");
+      click("Add key…");
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+      click("Test & Save");
+      expect(await screen.findByText(CONNECTED)).toBeTruthy();
+      expect(switches()).toHaveLength(0);
+      click("Done");
+      expect(
+        await screen.findByText("OpenAI · about 100 languages · speech is sent to OpenAI"),
+      ).toBeTruthy();
+      expect(radio(/^English/).checked).toBe(true);
+    });
+  });
+
+  // Review round 1, finding 2.
+  describe("Remove key is committed once it starts", () => {
+    const removing = async () => {
+      backend.keys.groq = true;
+      await open("speech");
+      click("Change key…");
+      await screen.findByText("A key is saved in your Keychain.");
+      const slow = gate();
+      backend.holds.set("delete_api_key", slow.closed);
+      click("Remove key");
+      await screen.findByRole("button", { name: "Removing…" });
+      return slow;
+    };
+
+    it("Done and Esc wait for it, then the sheet says no key is saved", async () => {
+      const slow = await removing();
+      const done = screen.getByRole<HTMLButtonElement>("button", { name: "Done" });
+      expect(done.disabled).toBe(true);
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      slow.open();
+      expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
+      click("Done");
+      click("Add key…");
+      expect(await screen.findByText("No key saved yet.")).toBeTruthy();
+    });
+
+    it("the field and popup wait too, and the outcome still shows", async () => {
+      const slow = await removing();
+      expect(screen.getByLabelText<HTMLSelectElement>("Provider").disabled).toBe(true);
+      expect(screen.getByLabelText<HTMLInputElement>(/API key/).readOnly).toBe(true);
+      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+      expect(screen.getByLabelText<HTMLInputElement>(/API key/).value).toBe("");
+      slow.open();
+      expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
+    });
+
+    it("a failed removal says so and the key still shows as saved", async () => {
+      backend.failing.set("delete_api_key", "The keychain refused.");
+      const slow = await removing();
+      slow.open();
+      expect((await screen.findByRole("alert")).textContent).toContain("The keychain refused.");
+      expect(backend.keys.groq).toBe(true);
+      click("Done");
+      click("Change key…");
+      expect(await screen.findByText("A key is saved in your Keychain.")).toBeTruthy();
+    });
+
+    it("Speech reopened during it doesn't say saved about the deleted key", async () => {
+      const slow = await removing();
+      fireEvent.click(screen.getByRole("tab", { name: "General" }));
+      await screen.findByRole("heading", { level: 1, name: "General" });
+      fireEvent.click(screen.getByRole("tab", { name: "Speech" }));
+      await screen.findByRole("heading", { level: 1, name: "Speech" });
+      slow.open();
+      expect(await screen.findByRole("button", { name: "Add key…" })).toBeTruthy();
+      expect(screen.queryByText("Groq · about 100 languages · speech is sent to Groq")).toBeNull();
+    });
+  });
+
+  it("the row says Add key… with no key saved, and Change key… with one", async () => {
+    onDevice();
+    await open("speech");
+    expect(await screen.findByRole("button", { name: "Add key…" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Change key…" })).toBeNull();
+    cleanup();
     backend.keys.groq = true;
     await open("speech");
-    click("Change key…");
-    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
-    await waitFor(() => {
-      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openai" });
-    });
-    expect(await screen.findByText("Saved")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Change key…" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add key…" })).toBeNull();
   });
 });
 

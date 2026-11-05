@@ -40,6 +40,13 @@ type KeyNotice = { kind: "ok" | "error"; text: string } | null;
  */
 const keyRun = { current: 0 };
 
+/**
+ * A Remove key still running, whichever panel started it. Asking whether a key
+ * is saved waits for it, or a panel opened meanwhile could say "saved" about a
+ * key that is being deleted (review round 1).
+ */
+const removal: { current: Promise<unknown> | null } = { current: null };
+
 interface Options {
   settings: Settings_Serialize;
   /** The engine in use is on-device, so a provider change doesn't switch it. */
@@ -50,6 +57,12 @@ interface Options {
   refreshEngine: () => Promise<void>;
   /** A key for `which` passed its test and the Keychain kept it. */
   onConnected?: (which: Provider) => Promise<void>;
+  /**
+   * Settings' sheet (U12): the popup only picks whose key to work on, and a
+   * working engine stays until the chosen provider has a key. Without it,
+   * setup's Speech step, where the provider applies at once.
+   */
+  draftProvider?: boolean;
 }
 
 /** The panel's state and actions. */
@@ -59,6 +72,7 @@ export function useOwnKey({
   switchToCloud,
   refreshEngine,
   onConnected,
+  draftProvider = false,
 }: Options) {
   const [provider, setProvider] = useState<Provider>(settings.provider);
   const [keyInput, setKeyInput] = useState("");
@@ -83,6 +97,7 @@ export function useOwnKey({
     setKeyStatus({ state: "checking" });
     let status: KeyStatus;
     try {
+      await removal.current;
       const result = await commands.hasApiKey(which);
       status =
         result.status === "error"
@@ -107,8 +122,25 @@ export function useOwnKey({
     setProvider(next);
     setKeyInput("");
     setKeyNotice(null);
-    // Instant apply: while the own key is the engine, the provider is too.
-    if (!onDevice) void switchToCloud(next);
+    if (onDevice) return;
+    if (!draftProvider) {
+      // Instant apply: while the own key is the engine, the provider is too.
+      void switchToCloud(next);
+      return;
+    }
+    // The sheet switches only to a provider with a saved key: selecting "Your
+    // own key" with one does the same. Otherwise Test & Save decides.
+    const run = keyRun.current;
+    void (async () => {
+      try {
+        const saved = await commands.hasApiKey(next);
+        if (run === keyRun.current && saved.status === "ok" && saved.data) {
+          await switchToCloud(next);
+        }
+      } catch {
+        // The engine stays; the status line says what the lookup found.
+      }
+    })();
   }
 
   function editKey(value: string) {
@@ -119,12 +151,21 @@ export function useOwnKey({
     setKeyNotice(null);
   }
 
-  /** The panel closes: an unfinished test is dropped, and so is what was typed. */
+  /**
+   * The panel closes: an unfinished test is dropped, and so is what was typed.
+   * So is a provider picked but not set up: the row goes back to the settings'
+   * one. A key saved for it stays chosen while the engine is on this Mac, for
+   * when "Your own key" is selected.
+   */
   function abandon() {
     editKey("");
+    if (draftProvider && !(onDevice && keyStatus.state === "saved")) {
+      setProvider(settings.provider);
+    }
   }
 
   async function testAndSave() {
+    if (writing.current) return;
     const typed = keyInput.trim();
     if (typed === "") {
       setKeyNotice({ kind: "error", text: "Paste your API key." });
@@ -179,19 +220,29 @@ export function useOwnKey({
   async function removeKey() {
     keyRun.current += 1;
     const run = keyRun.current;
+    const which = provider;
     setKeyNotice(null);
     setKeyBusy("removing");
+    // Committed once sent: the field, the popup and the sheet wait for it, and
+    // its outcome always counts (review round 1).
+    writing.current = true;
     let notice: KeyNotice = null;
+    const deletion = commands.deleteApiKey(which);
+    const running = deletion.catch(() => undefined);
+    removal.current = running;
     try {
-      const result = await commands.deleteApiKey(provider);
+      const result = await deletion;
       if (result.status === "error") notice = { kind: "error", text: messageOf(result.error) };
     } catch {
       notice = { kind: "error", text: BROKEN };
     }
-    if (run !== keyRun.current) return;
+    writing.current = false;
+    if (removal.current === running) removal.current = null;
     setKeyBusy(null);
-    setKeyNotice(notice ?? { kind: "ok", text: "Key removed from your Keychain." });
-    void checkKeySaved(provider);
+    if (notice !== null || run === keyRun.current) {
+      setKeyNotice(notice ?? { kind: "ok", text: "Key removed from your Keychain." });
+    }
+    void checkKeySaved(which);
     await refreshEngine();
   }
 
@@ -226,7 +277,7 @@ export function OwnKeyPanel({ ownKey }: { ownKey: OwnKey }) {
         <select
           id="provider"
           value={provider}
-          disabled={keyBusy === "saving"}
+          disabled={keyBusy === "saving" || keyBusy === "removing"}
           onChange={(event) => {
             ownKey.changeProvider(event.target.value as Provider);
           }}
@@ -270,7 +321,7 @@ export function OwnKeyPanel({ ownKey }: { ownKey: OwnKey }) {
           }
           aria-describedby="api-key-status"
           aria-invalid={keyNotice?.kind === "error"}
-          readOnly={keyBusy === "saving"}
+          readOnly={keyBusy === "saving" || keyBusy === "removing"}
           onChange={(event) => {
             ownKey.editKey(event.target.value);
           }}
@@ -343,11 +394,11 @@ function KeyStatusLine({ id, ownKey }: { id: string; ownKey: OwnKey }) {
 
 /**
  * The own-key panel as a sheet over the window (U12): modal, Tab stays inside,
- * Esc and Done close it, except while the key is being written.
+ * Esc and Done close it, except while a key is being written or removed.
  */
 export function OwnKeySheet({ ownKey, onDone }: { ownKey: OwnKey; onDone: () => void }) {
   const sheet = useRef<HTMLDivElement>(null);
-  const saving = ownKey.keyBusy === "saving";
+  const writing = ownKey.keyBusy === "saving" || ownKey.keyBusy === "removing";
   useEffect(() => {
     sheet.current?.querySelector<HTMLInputElement>("#api-key")?.focus();
   }, []);
@@ -355,7 +406,7 @@ export function OwnKeySheet({ ownKey, onDone }: { ownKey: OwnKey; onDone: () => 
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      if (!saving) onDone();
+      if (!writing) onDone();
     } else if (event.key === "Tab") {
       const focusable = [
         ...(sheet.current?.querySelectorAll<HTMLElement>(
@@ -388,7 +439,7 @@ export function OwnKeySheet({ ownKey, onDone }: { ownKey: OwnKey; onDone: () => 
         <h2 id="key-sheet-title">Your own key</h2>
         <OwnKeyPanel ownKey={ownKey} />
         <div className="confirm-actions">
-          <button type="button" disabled={saving} onClick={onDone}>
+          <button type="button" disabled={writing} onClick={onDone}>
             Done
           </button>
         </div>

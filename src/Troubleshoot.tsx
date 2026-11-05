@@ -138,114 +138,115 @@ export function Troubleshoot({ onBack, onOpenSettings, onReport }: Props) {
 
   return (
     <main className="settings troubleshoot">
-      <h1>Troubleshoot</h1>
-      <p className="hint">
-        These checks read the state of this Mac. They don&apos;t record audio or contact anyone.
-      </p>
-
-      {checks.state === "loading" ? <p>Checking…</p> : null}
-      {checks.state === "error" ? (
-        <p role="alert" className="notice error">
-          Couldn&apos;t run the checks. {BROKEN}
+      <div className="page-body">
+        <h1>Troubleshoot</h1>
+        <p className="hint">
+          These checks read the state of this Mac. They don&apos;t record audio or contact anyone.
         </p>
-      ) : null}
-      {checks.state === "ready" ? (
-        <ul className="checks" aria-label="Checks">
-          {checks.checks.map((check) => {
-            const action = check.ok ? null : (check.fix ?? null);
-            const button =
-              action !== null && action !== "try_again" && action !== "open_troubleshoot";
-            return (
-              <li key={check.id} className="check-row" data-ok={check.ok}>
-                <span
-                  className={check.ok ? "saved" : "error"}
-                  role="img"
-                  aria-label={check.ok ? "OK" : "Problem"}
-                >
-                  {check.ok ? "✓" : "✗"}
-                </span>
-                <div className="check-body">
-                  <strong>{check.label}</strong>
-                  <p className="hint">{check.detail}</p>
-                  {check.details == null ? null : <Details>{check.details}</Details>}
-                </div>
-                {button ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void fix(action);
-                    }}
-                  >
-                    {check.fix_label}
-                  </button>
-                ) : null}
-                {!check.ok && check.code === "mic_denied" ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void relaunch();
-                    }}
-                  >
-                    Relaunch Vocet
-                  </button>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
 
-      {relaunchError !== null ? (
-        <p role="alert" className="notice error">
-          {relaunchError}
-        </p>
-      ) : null}
+        {checks.state === "loading" ? <p>Checking…</p> : null}
+        {checks.state === "error" ? (
+          <p role="alert" className="notice error">
+            Couldn&apos;t run the checks. {BROKEN}
+          </p>
+        ) : null}
+        {checks.state === "ready" ? (
+          <ul className="checks" aria-label="Checks">
+            {checks.checks.map((check) => {
+              const action = check.ok ? null : (check.fix ?? null);
+              const button =
+                action !== null && action !== "try_again" && action !== "open_troubleshoot";
+              return (
+                <li key={check.id} className="check-row" data-ok={check.ok}>
+                  <span
+                    className={check.ok ? "saved" : "error"}
+                    role="img"
+                    aria-label={check.ok ? "OK" : "Problem"}
+                  >
+                    {check.ok ? "✓" : "✗"}
+                  </span>
+                  <div className="check-body">
+                    <strong>{check.label}</strong>
+                    <p className="hint">{check.detail}</p>
+                    {check.details == null ? null : <Details>{check.details}</Details>}
+                  </div>
+                  {button ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void fix(action);
+                      }}
+                    >
+                      {check.fix_label}
+                    </button>
+                  ) : null}
+                  {!check.ok && check.code === "mic_denied" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void relaunch();
+                      }}
+                    >
+                      Relaunch Vocet
+                    </button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
 
-      <div className="row">
-        <button type="button" onClick={load}>
-          Check again
-        </button>
-        {checks.state !== "loading" && localModel === null ? (
-          <button
-            type="button"
-            disabled={testing}
-            onClick={() => {
-              void testConnection();
-            }}
-          >
-            {testing ? "Testing…" : "Test connection"}
+        {relaunchError !== null ? (
+          <p role="alert" className="notice error">
+            {relaunchError}
+          </p>
+        ) : null}
+
+        <div className="row">
+          <button type="button" onClick={load}>
+            Check again
           </button>
+          {checks.state !== "loading" && localModel === null ? (
+            <button
+              type="button"
+              disabled={testing}
+              onClick={() => {
+                void testConnection();
+              }}
+            >
+              {testing ? "Testing…" : "Test connection"}
+            </button>
+          ) : null}
+        </div>
+        {localModel !== null ? (
+          <p className="hint" data-testid="local-readiness">
+            Model on this Mac. {localModel}
+          </p>
+        ) : (
+          <p className="hint">
+            Test connection sends a short silent clip to your provider with your saved key, only
+            when you press it.
+          </p>
+        )}
+        {connection !== null ? (
+          <>
+            <p role="status" className={`notice ${connection.kind}`}>
+              {connection.text}
+            </p>
+            {connection.code === null ? null : <Details>{connection.code}</Details>}
+          </>
+        ) : null}
+
+        {anyFailed ? (
+          <p className="hint">
+            Still stuck?{" "}
+            <button type="button" className="link" onClick={onReport}>
+              Report a problem…
+            </button>
+          </p>
         ) : null}
       </div>
-      {localModel !== null ? (
-        <p className="hint" data-testid="local-readiness">
-          Model on this Mac. {localModel}
-        </p>
-      ) : (
-        <p className="hint">
-          Test connection sends a short silent clip to your provider with your saved key, only when
-          you press it.
-        </p>
-      )}
-      {connection !== null ? (
-        <>
-          <p role="status" className={`notice ${connection.kind}`}>
-            {connection.text}
-          </p>
-          {connection.code === null ? null : <Details>{connection.code}</Details>}
-        </>
-      ) : null}
-
-      {anyFailed ? (
-        <p className="hint">
-          Still stuck?{" "}
-          <button type="button" className="link" onClick={onReport}>
-            Report a problem…
-          </button>
-        </p>
-      ) : null}
-
-      <div className="row actions">
+      <div className="row actions page-footer">
         <button type="button" onClick={onBack}>
           Back to Settings
         </button>

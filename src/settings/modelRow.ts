@@ -89,7 +89,7 @@ export function modelRow(model: LocalModelInfo_Serialize, context: RowContext): 
       // Pause keeps the part; downloading again continues it.
       if (model.error === null) {
         return row(
-          { text: `Download paused, ${mb(done)} of ${megabytes(size)}`, tone: "attention" },
+          { text: `Paused · ${mb(done)} of ${megabytes(size)}`, tone: "attention" },
           ["resume"],
           { ...partly, blockedBecause: "Finish the download to choose it." },
         );

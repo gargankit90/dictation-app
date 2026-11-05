@@ -232,10 +232,12 @@ export function Speech({
     onDevice,
     switchToCloud,
     refreshEngine,
+    draftProvider: true,
     onConnected: async (which) => {
-      if (!switchOnceConnected.current) return;
+      const waiting = switchOnceConnected.current;
       switchOnceConnected.current = false;
-      await switchToCloud(which);
+      // Also a provider picked in the sheet, while the own key is the engine.
+      if (waiting || (!onDevice && which !== settings.provider)) await switchToCloud(which);
     },
   });
   const { provider, keyStatus } = ownKey;
@@ -420,7 +422,7 @@ export function Speech({
                               className="destructive"
                               onClick={() => void modelAction("delete", model)}
                             >
-                              Delete {title}
+                              Delete model
                             </button>
                           ) : (
                             <span role="presentation" className="row-popover-info">
@@ -438,7 +440,7 @@ export function Speech({
           <EngineRow
             id="engine-own-key"
             name="Your own key"
-            caption={ownKeyCaption(info.name, stored === "saved")}
+            caption={ownKeyCaption(info.name, keyStatus.state === "saved")}
             checked={cloudActive && switching === null}
             blockedBecause={busy && !cloudActive ? waitReason : null}
             disabled={busy}
@@ -451,7 +453,7 @@ export function Speech({
               <Chip tone="attention">! Needs a key</Chip>
             )}
             <button type="button" aria-description="Your own key" onClick={openSheet}>
-              Change key…
+              {keyStatus.state === "none" ? "Add key…" : "Change key…"}
             </button>
           </EngineRow>
         </div>
