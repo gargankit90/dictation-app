@@ -179,9 +179,8 @@ Open an issue: <https://github.com/gargankit90/dictation-app/issues/new/choose>
 and pick **Bug report**. The form asks for:
 
 - your macOS version (Apple menu > **About This Mac**) and Mac model,
-- the Vocet version: menu-bar icon > **Settings…** > About says
-  "Vocet _x.y.z_ is the newest version" (or what you have, if there is
-  an update),
+- the Vocet version: menu-bar icon > **Settings…** > About shows
+  the version,
 - what you did, what you expected and what happened,
 - the log zip from above. The log never holds your API key or what you said
   (keys are removed before it is written; dictated text is not written at all),
