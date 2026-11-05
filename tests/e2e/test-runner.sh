@@ -156,6 +156,14 @@ if [ "${STUB_REAL_VM:-0}" != 1 ]; then
         esac
         return 0
         ;;
+      *"ps -u "*)
+        # vm_load: "<processes> <login>"
+        echo "     ${STUB_PROCS:-300} ${STUB_LOGINS:-0}" # padded, as wc -l pads it
+        ;;
+      *"ApplePersistenceIgnoreState"*)
+        echo "$cmd" >>"$STUB/defaults-writes"
+        return "${STUB_DEFAULTS_STATUS:-0}"
+        ;;
       *"pkill -x"* | *killall* | *osascript* | "open "*)
         return 0 # never here
         ;;
@@ -380,6 +388,7 @@ check "before anything is launched" lacks "launch" "$(calls setup_fails)"
 fakes='s_pass() { :; }
 s_fail() { SCENARIO_FAILED=1; }
 s_skip() { SCENARIO_SKIPPED=1; return 0; }
+s_pass2() { :; }
 s_exit0() { exit 0; echo unreachable; }
 s_false() { false; echo "BAD: set -e was ignored"; }
 '
@@ -407,6 +416,39 @@ check "and says so" has "SKIP     s_skip (REQUIRED: counts as a failure)" "$(err
 run_case a_failure "$fakes"'set +e; run_scenarios s_fail s_pass; echo "status $?"'
 check "a failed check fails the run" has "status 1" "$(stdout a_failure)"
 check "results.txt lists it" has "FAIL     s_fail" "$tmp/case-a_failure/out/results.txt"
+
+# --- The VM load guard and Terminal's restoration (#276) -----------------------------
+
+run_case load_ok "$fakes"'set +e; run_scenarios s_pass s_pass2; echo "status $?"' STUB_PROCS=320 STUB_LOGINS=12
+check "a healthy VM runs every scenario" has "status 0" "$(stdout load_ok)"
+check "the load is logged between scenarios" has "load before s_pass2: 320 processes, 12 login" "$(err load_ok)"
+check "and the peaks are reported" has "peak load: 320 processes, 12 login" "$(err load_ok)"
+
+run_case load_logins "$fakes"'set +e; run_scenarios s_pass s_pass2; echo "status $?"' STUB_PROCS=320 STUB_LOGINS=101
+check "too many login shells stop the run" has "status 1" "$(stdout load_logins)"
+check "with a clear message" has "is filling up (before s_pass): 320 processes (limit 800 of 1333), 101 login (limit 100)" "$(err load_logins)"
+check "before the first scenario" lacks "scenario s_pass" "$(err load_logins)"
+check "and results.txt says so" has "ABORTED  before s_pass" "$tmp/case-load_logins/out/results.txt"
+
+run_case load_procs "$fakes"'set +e; run_scenarios s_pass; echo "status $?"' STUB_PROCS=801 STUB_LOGINS=3
+check "too many processes stop the run" has "status 1" "$(stdout load_procs)"
+check "and say which count" has "801 processes (limit 800 of 1333)" "$(err load_procs)"
+
+run_case load_limits "$fakes"'set +e; run_scenarios s_pass; echo "status $?"' STUB_PROCS=900 STUB_LOGINS=150 E2E_MAX_PROCS=1000 E2E_MAX_LOGINS=200
+check "the thresholds can be raised" has "status 0" "$(stdout load_limits)"
+
+run_case load_unreadable "$fakes"'set +e; vm() { return 1; }; run_scenarios s_pass; echo "status $?"'
+check "counts that can't be read warn and don't stop the run" has "status 0" "$(stdout load_unreadable)"
+check "and the warning is logged" has "could not read" "$(err load_unreadable)"
+
+run_case defaults_set 'terminal_ignore_saved_state'
+check "Terminal's window restoration is turned off in the clone" \
+  has "defaults write com.apple.Terminal ApplePersistenceIgnoreState -bool true" "$tmp/case-defaults_set/defaults-writes"
+run_case defaults_fail 'terminal_ignore_saved_state' STUB_DEFAULTS_STATUS=1
+check "and a write that fails stops the run" test "$(status_of defaults_fail)" != 0
+check "close_terminal no longer removes the saved-state path" \
+  sh -c "! grep -q 'Saved Application State' '$root/tests/e2e/lib_full.sh' || grep -q '^#.*Saved Application State' '$root/tests/e2e/lib_full.sh'"
+check "VM_TERMINAL_TIMEOUT keeps its default of 30 s" grep -q 'VM_TERMINAL_TIMEOUT:-30' "$root/tests/e2e/lib_full.sh"
 
 # --- Quit must work by itself ----------------------------------------------------------
 
