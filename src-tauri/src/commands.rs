@@ -1430,6 +1430,24 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
         }
 
+        /// Round 5: the writes the window's queue sends, in its order, leave
+        /// both the file and the event gate off.
+        #[test]
+        fn on_then_off_leaves_the_file_and_the_gate_off() {
+            let (config, dir) = config("queue", false);
+            let fake = FakeTelemetry::new();
+            let usage = Usage::at_welcome(Arc::new(fake.clone()));
+            let onboarding = Onboarding::new();
+            leave_welcome(&config, &onboarding, &usage);
+            write_sharing(&config, &usage, true).unwrap();
+            write_sharing(&config, &usage, false).unwrap();
+            let before = fake.events().len();
+            usage::onboarding_step(&usage, Step::Speech);
+            assert_eq!(fake.events().len(), before, "the gate is shut");
+            assert!(!config.settings().unwrap().share_usage_events);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
         #[test]
         fn a_saved_opt_in_starts_sending() {
             let (config, dir) = config("on", true);

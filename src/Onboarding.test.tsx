@@ -26,6 +26,7 @@ import { KEY_REASON, MODEL_COPY } from "./onboarding/SpeechStep";
 import { BOTH_REASON } from "./onboarding/PermissionsStep";
 import { CONTINUE_REASON } from "./onboarding/TryStep";
 import { EVENTS_CAPTION, SAVE_FAILED_REASON } from "./onboarding/WelcomeStep";
+import { Privacy } from "./settings/Privacy";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
 const KEY = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
@@ -402,6 +403,108 @@ describe("Welcome", () => {
     fireEvent.click(primary("Continue"));
     await screen.findByText("Which language will you mostly speak?");
     expect(backend.step).toBe("speech");
+  });
+});
+
+describe("one queue for the whole window (round 5)", () => {
+  /** Holds every sharing write until it is released, oldest first. */
+  function holdWrites() {
+    const pending: (() => void)[] = [];
+    const original = backend.handle;
+    mockIPC((command, payload) => {
+      if (command !== "set_share_usage_events") return original(command, payload);
+      return new Promise((resolve) => {
+        pending.push(() => {
+          resolve(original(command, payload));
+        });
+      });
+    });
+    return pending;
+  }
+
+  async function releaseOne(pending: (() => void)[]) {
+    await act(async () => {
+      pending.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+  }
+
+  const noop = () => undefined;
+
+  it("an old write from onboarding can't land after a newer off in Settings", async () => {
+    backend.settings = { ...backend.settings, share_usage_events: false };
+    const pending = holdWrites();
+    const setup = show();
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    await waitFor(() => {
+      expect(share.checked).toBe(false);
+    });
+    fireEvent.click(share); // on, still on its way
+    expect(pending).toHaveLength(1);
+
+    // The tray's Settings… takes the view away; the write goes on.
+    setup.unmount();
+    render(
+      <Privacy settings={{ ...backend.settings, share_usage_events: true }} onStored={noop} />,
+    );
+    const inSettings = screen.getByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    expect(inSettings.checked).toBe(true);
+    fireEvent.click(inSettings); // off, the user's last word
+
+    // Not sent alongside the old one: it waits its turn, so nothing can overtake.
+    expect(pending).toHaveLength(1);
+    await releaseOne(pending);
+    expect(pending).toHaveLength(1);
+    expect(inSettings.checked).toBe(false);
+    await releaseOne(pending);
+
+    expect(backend.settings.share_usage_events).toBe(false);
+    expect(backend.named("set_share_usage_events").map((call) => call.args.share)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("a write from Settings holds onboarding's Continue when it comes back", async () => {
+    const pending = holdWrites();
+    const settings = render(<Privacy settings={backend.settings} onStored={noop} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Share usage and error events" }));
+    expect(pending).toHaveLength(1);
+    settings.unmount();
+
+    show();
+    await screen.findByRole("switch", { name: "Share usage and error events" });
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(true);
+    });
+    fireEvent.click(primary("Continue"));
+    expect(backend.named("set_onboarding_step")).toEqual([]);
+
+    await releaseOne(pending);
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
+    expect(backend.settings.share_usage_events).toBe(false);
+  });
+
+  it("a view that stayed behind learns the final value", async () => {
+    const stored: boolean[] = [];
+    const pending = holdWrites();
+    render(
+      <Privacy
+        settings={backend.settings}
+        onStored={(settings) => stored.push(settings.share_usage_events)}
+      />,
+    );
+    fireEvent.click(screen.getByRole("switch", { name: "Share usage and error events" }));
+    await releaseOne(pending);
+    await waitFor(() => {
+      expect(stored).toEqual([false]);
+    });
   });
 });
 

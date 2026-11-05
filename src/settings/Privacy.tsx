@@ -1,7 +1,7 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { commands } from "../bindings";
 import type { Settings_Serialize } from "../bindings";
-import { messageOf } from "../keyTest";
+import { sharingState, subscribeSharing, writeSharing } from "./sharingQueue";
 import { Group, Row, SaveStatus, Switch, useSave } from "./ui";
 import type { SaveState } from "./ui";
 
@@ -43,49 +43,49 @@ export function WhatsSent() {
 }
 
 /**
- * The sharing switch's writes, one at a time and the last choice wins: the app
- * doesn't promise to apply overlapping commands in the order they were sent,
- * so a slow "on" could otherwise land after the user's final "off" (U8 review).
- * `save` stays "saving" until the queue is empty, and shows the outcome of the
- * last write.
+ * The sharing switch, for any view that shows it. The writes go through the
+ * one queue in `sharingQueue`, which outlives the view. `save` stays "saving"
+ * while any view's write is waiting, and holds the last failure until a later
+ * write succeeds, whichever view made them.
  */
 export function useSharingSwitch(
   stored: boolean,
   onStored: (settings: Settings_Serialize) => void,
 ) {
   const sharing = useSave();
-  // Shown at once; the stored value comes back after the writes.
-  const [shown, setShown] = useState<boolean | null>(null);
-  const wanted = useRef<boolean | null>(null);
-  const writing = useRef(false);
+  const queue = useSyncExternalStore(subscribeSharing, sharingState);
+
+  // Settings read back after a write reach every view, once each: an older
+  // copy must not overwrite what the view has learned since.
+  const latestOnStored = useRef(onStored);
+  const seen = useRef(queue.settings);
+  useLayoutEffect(() => {
+    latestOnStored.current = onStored;
+  });
+  useLayoutEffect(() => {
+    if (queue.settings !== null && queue.settings !== seen.current) {
+      seen.current = queue.settings;
+      latestOnStored.current(queue.settings);
+    }
+  }, [queue.settings]);
 
   async function setSharing(share: boolean) {
-    setShown(share);
-    wanted.current = share;
-    if (writing.current) return;
-    writing.current = true;
-    await sharing.track(async () => {
-      let problem: string | null = null;
-      try {
-        while (wanted.current !== null) {
-          const next = wanted.current;
-          wanted.current = null;
-          const result = await commands.setShareUsageEvents(next);
-          problem = result.status === "error" ? messageOf(result.error) : null;
-        }
-      } finally {
-        wanted.current = null;
-        writing.current = false;
-      }
-      // What the app stores now, not a copy of what this pane was given.
-      const reread = await commands.getSettings();
-      if (reread.status === "ok") onStored(reread.data);
-      return problem;
-    });
-    setShown(null);
+    await sharing.track(() => writeSharing(share));
   }
 
-  return { save: sharing.save, checked: shown ?? stored, setSharing };
+  const save: SaveState = queue.pending
+    ? { state: "saving" }
+    : queue.problem !== null
+      ? { state: "error", message: queue.problem }
+      : sharing.save.state === "saved"
+        ? sharing.save
+        : { state: "idle" };
+
+  return {
+    save,
+    checked: queue.pending && queue.latest !== null ? queue.latest : stored,
+    setSharing,
+  };
 }
 
 export type SharingSwitch = ReturnType<typeof useSharingSwitch>;
