@@ -352,6 +352,16 @@ pre.report {
   position: relative;
 }
 
+.language-field {
+  position: relative;
+}
+
+.language-flag {
+  margin: var(--vc-space-1) 0 0;
+  color: var(--vc-attention);
+  font-size: var(--vc-text-sm);
+}
+
 .language-picker input {
   box-sizing: border-box;
   width: 100%;
@@ -426,6 +436,7 @@ button.link {
   background: none;
   color: var(--vc-accent);
   font: inherit;
+  text-align: left;
   text-decoration: underline;
   cursor: pointer;
 }

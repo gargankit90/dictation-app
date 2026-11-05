@@ -7,10 +7,10 @@
 #
 # Accessibility is really off (System Settings' switch, as in
 # e2e_accessibility_revoked) and the microphone really reset (as in
-# e2e_microphone_denied_then_recover), in this VM's clone only. The app has no
-# stand-in for the model's server, so this starts the real download and cancels
-# it once the strip shows it: nothing depends on it finishing. The cleanup
-# restores both permissions, whatever happens, for the scenarios after it.
+# e2e_microphone_denied_then_recover), in this VM's clone only. The download comes
+# from the stand-in model server (_model_server_helpers.sh), held part way: no
+# internet, and nothing depends on it finishing. The cleanup restores both
+# permissions, whatever happens, for the scenarios after it.
 
 NOPERM_WINDOW="Set up"
 NOPERM_MODELS="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/models"
@@ -20,6 +20,7 @@ noperm_restore() {
   local ok=0
   ax_restore || ok=1
   mic_restore || ok=1
+  model_server_stop || ok=1
   vm "rm -rf $(q "$NOPERM_MODELS")" || ok=1
   return "$ok"
 }
@@ -41,11 +42,12 @@ e2e_setup_no_permissions() {
   settings_reset
   vm "rm -rf $(q "$NOPERM_MODELS")"
 
+  expect "the stand-in model server starts" model_server_start
   AX_SWITCHED_OFF=1
   expect "Accessibility is switched off for the app" ax_switch off
   expect "the microphone permission is reset" mic_reset
 
-  E2E_TRANSCRIBER=settings launch --debug-onboarding
+  E2E_TRANSCRIBER=settings launch --debug-onboarding --debug-model-url "$MODEL_SERVER_URL"
   expect "onboarding shows at launch, at Welcome" \
     wait_for_log 'onboarding shown at launch step=Welcome' 30
   expect "its window is on screen" ax_ok wait-window "$APP_NAME" "$NOPERM_WINDOW" 10

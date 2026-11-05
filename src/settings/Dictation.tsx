@@ -188,9 +188,8 @@ export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props
               <>
                 The English model understands English only. For Hindi and other languages,{" "}
                 <button type="button" className="link" onClick={onOpenSpeech}>
-                  choose a multilingual engine in Speech
+                  choose a multilingual engine in Speech.
                 </button>
-                .
               </>
             ) : (
               "Choose the language you speak, or let Vocet detect it."

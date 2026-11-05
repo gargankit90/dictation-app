@@ -118,7 +118,10 @@ describe("LanguagePicker", () => {
 
   it("flags an unsupported saved code and keeps it", () => {
     render(<Harness initial="ja" />);
-    expect(box().value).toBe("Japanese, not supported by Test engine");
+    expect(box().value).toBe("Japanese (日本語)");
+    // Its own line, whole, and read with the field.
+    const flag = screen.getByText("Japanese, not supported by Test engine");
+    expect(box().getAttribute("aria-describedby")).toContain(flag.id);
     expect(chosen).toEqual([]); // nothing was reported, so the value is untouched
   });
 

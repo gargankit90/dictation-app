@@ -70,6 +70,20 @@ const model: LocalModelInfo_Serialize = {
   default: true,
 };
 
+/** As in the catalogue: without it, any other language would have no model. */
+const multilingual: LocalModelInfo_Serialize = {
+  ...model,
+  id: "qwen",
+  name: "Qwen3 ASR 0.6B",
+  languages: "30 languages, including English and Hindi",
+  language_codes: ["en", "hi", "fr"],
+  size_bytes: 589_000_000,
+  downloaded_bytes: 0,
+  state: "missing",
+  resumed_from_bytes: null,
+  default: false,
+};
+
 const settings: Settings_Serialize = {
   version: 2,
   provider: "groq",
@@ -134,7 +148,7 @@ mockIPC((command) => {
     case "get_app_info":
       return { version: "0.1.0", last_update_check_ms: null };
     case "list_local_models":
-      return [{ ...model }];
+      return [{ ...model }, multilingual];
     case "get_engine_status":
       return { state: "ready", message: null };
     case "has_api_key":
@@ -433,6 +447,19 @@ async function languageProblems(root: HTMLElement): Promise<string[]> {
     found.push("the closed search box has no chevron");
   }
   if (parseFloat(style.borderTopLeftRadius) < 1) found.push("the search box isn't rounded");
+  if (field.scrollWidth > field.clientWidth + 1) found.push("the search box's value is cut off");
+  if (view === "settings-language") {
+    const flag = root.querySelector(".language-flag");
+    if (flag === null) found.push("the unsupported language isn't flagged");
+    else if (flag.scrollWidth > flag.clientWidth + 1) found.push("the flag is cut off");
+    const link = root.querySelector<HTMLElement>("button.link");
+    if (link === null || getComputedStyle(link).textAlign !== "left") {
+      found.push("the helper link isn't left-aligned");
+    }
+    if (link !== null && !link.textContent.includes(".")) {
+      found.push("the helper link's full stop is on its own");
+    }
+  }
   if (style.borderTopColor !== colour("var(--vc-line-strong)")) {
     found.push("the search box's border isn't the design's");
   }
@@ -453,6 +480,11 @@ async function languageProblems(root: HTMLElement): Promise<string[]> {
   }
   field.focus();
   await settle(400);
+  // Search open, nothing new chosen: the footer gives no reason to stop.
+  if (view === "speech-more-plain") {
+    const reason = root.querySelector(".ob-reason")?.textContent.trim() ?? "";
+    if (reason !== "") found.push(`the footer already gives a reason: ${reason}`);
+  }
   const list = root.querySelector(".language-list");
   const first = list === null ? null : list.querySelector('[role="option"]');
   if (list === null || first === null) return [...found, "focusing the search box opens no list"];

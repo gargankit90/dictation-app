@@ -817,6 +817,18 @@ describe("Speech", () => {
   });
 });
 
+describe("Speech with More… open (U9, Design Lead's fix 2)", () => {
+  it("gives no reason in the footer before a language is chosen", async () => {
+    backend.step = "speech";
+    show();
+    fireEvent.click(await screen.findByRole("radio", { name: "More…" }));
+    await screen.findByRole("combobox");
+    const reason = document.querySelector(".ob-reason");
+    expect(reason?.textContent).toBe("");
+    expect(screen.queryByText(/No on-device model speaks this language/)).toBeNull();
+  });
+});
+
 describe("the download strip", () => {
   function downloading() {
     backend.step = "permissions";

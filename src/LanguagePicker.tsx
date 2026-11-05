@@ -48,22 +48,21 @@ export function LanguagePicker({
   invalid = false,
 }: Props) {
   const listId = useId();
+  const flagId = useId();
   const field = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
 
   const unsupported = value !== "" && engineName !== null && !supported.includes(value);
-  const selectedLabel =
-    value === ""
-      ? AUTO_LABEL
-      : unsupported
-        ? `${englishName(value)}, not supported by ${engineName}`
-        : languageLabel(value);
+  const flag = unsupported ? `${englishName(value)}, not supported by ${engineName}` : null;
+  // A field cuts off what doesn't fit, so the flag has its own line below it:
+  // it's what tells someone why their language won't work.
+  const selectedLabel = value === "" ? AUTO_LABEL : languageLabel(value);
 
   const options = useMemo(() => {
     const all: Option[] = [{ value: "", label: AUTO_LABEL }];
-    if (unsupported) all.push({ value, label: selectedLabel });
+    if (flag !== null) all.push({ value, label: flag });
     for (const code of sortedByName(supported)) {
       all.push({ value: code, label: languageLabel(code) });
     }
@@ -73,7 +72,7 @@ export function LanguagePicker({
       if (option.value === "") return AUTO_LABEL.toLowerCase().includes(q);
       return languageMatches(option.value, q);
     });
-  }, [supported, unsupported, value, selectedLabel, query]);
+  }, [supported, flag, value, query]);
 
   // The field and the list both show when it opens, in a short window too: the
   // list is only as tall as what is left of the area it scrolls in.
@@ -149,54 +148,56 @@ export function LanguagePicker({
 
   return (
     <div className="language-picker">
-      <input
-        ref={field}
-        id={id}
-        type="text"
-        role="combobox"
-        aria-expanded={open}
-        aria-controls={listId}
-        aria-autocomplete="list"
-        aria-activedescendant={activeId}
-        aria-describedby={describedBy}
-        aria-invalid={invalid}
-        autoComplete="off"
-        spellCheck={false}
-        disabled={disabled}
-        value={open ? query : selectedLabel}
-        placeholder={open ? "Search languages" : undefined}
-        onFocus={openList}
-        onClick={openList}
-        onBlur={close}
-        onChange={(event) => {
-          const typed = event.target.value;
-          // Closed, the field holds the language's name: only what was added
-          // to it is a search.
-          if (open) setQuery(typed);
-          else {
-            setOpen(true);
-            setQuery(typed.startsWith(selectedLabel) ? typed.slice(selectedLabel.length) : "");
-          }
-          setActive(0);
-        }}
-        onKeyDown={onKeyDown}
-      />
-      <svg
-        className={open ? "language-chevron open" : "language-chevron"}
-        aria-hidden="true"
-        viewBox="0 0 12 12"
-        width="12"
-        height="12"
-      >
-        <path
-          d="M2.5 4.5 6 8l3.5-3.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+      <div className="language-field">
+        <input
+          ref={field}
+          id={id}
+          type="text"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={activeId}
+          aria-describedby={flag === null ? describedBy : `${flagId} ${describedBy ?? ""}`.trim()}
+          aria-invalid={invalid}
+          autoComplete="off"
+          spellCheck={false}
+          disabled={disabled}
+          value={open ? query : selectedLabel}
+          placeholder={open ? "Search languages" : undefined}
+          onFocus={openList}
+          onClick={openList}
+          onBlur={close}
+          onChange={(event) => {
+            const typed = event.target.value;
+            // Closed, the field holds the language's name: only what was added
+            // to it is a search.
+            if (open) setQuery(typed);
+            else {
+              setOpen(true);
+              setQuery(typed.startsWith(selectedLabel) ? typed.slice(selectedLabel.length) : "");
+            }
+            setActive(0);
+          }}
+          onKeyDown={onKeyDown}
         />
-      </svg>
+        <svg
+          className={open ? "language-chevron open" : "language-chevron"}
+          aria-hidden="true"
+          viewBox="0 0 12 12"
+          width="12"
+          height="12"
+        >
+          <path
+            d="M2.5 4.5 6 8l3.5-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
       {open && (
         <ul id={listId} role="listbox" aria-label="Languages" className="language-list">
           {options.length === 0 && <li className="language-empty">No language matches.</li>}
@@ -220,6 +221,11 @@ export function LanguagePicker({
             </li>
           ))}
         </ul>
+      )}
+      {flag !== null && (
+        <p id={flagId} className="language-flag">
+          {flag}
+        </p>
       )}
     </div>
   );
