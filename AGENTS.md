@@ -164,11 +164,24 @@ agent. Local checks add defence in depth:
   whenever `scripts/guard-push.sh` changes. Not lefthook: lefthook skips
   pre-push jobs when it sees no changed files.
 - Claude Code loads `.claude/settings.json`. Its `PreToolUse` hook
-  (`.claude/hooks/guard-git.sh`) keeps role checks (the Code Reviewer merges),
-  hook bypass checks, guard-edit checks (only the owner changes guards), and
-  destructive repository settings checks. It does not inspect push commands
-  or git aliases. Edit/Write deny rules protect guard files. Existing static
-  push deny rules remain in settings.json pending the owner's decision.
+  (`.claude/hooks/guard-git.sh`) matches plain merge, destructive repository
+  API and guard-write commands. It fails open on unreadable input, shell
+  syntax it cannot parse and heredocs; it never executes inspected commands
+  or reads files they name. Edit/Write deny rules still protect guard files;
+  the static push deny rules and command-hook bypass checks are removed.
+  Skipping hooks is still prohibited above, with required CI enforcing the
+  gate. A deliberately disguised command can get past this hook: this is an
+  accepted trade-off to avoid blocking ordinary scripts.
+- `.github/workflows/rulesets.yml` checks names, enforcement, target,
+  conditions and rules daily against `.github/rulesets-expected.json`.
+  GitHub hides bypass actors from callers without ruleset write access, so
+  the read-only workflow warns about that visibility gap and compares only
+  visible fields. It catches visible ruleset drift afterwards; it cannot
+  detect a bypass-list change. The Lead runs
+  `python3 scripts/check-rulesets.py --require-bypass` locally with the
+  existing admin `gh` token to compare bypass actors too. No token is stored
+  in the repository. Failed scheduled runs use GitHub's notification settings;
+  the owner must keep workflow-failure email notifications enabled.
 
 ## Reference repos
 
