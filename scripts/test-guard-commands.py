@@ -36,6 +36,8 @@ allowed = [
     "echo 'gh repo delete o/r'", "echo 'gh api -X DELETE repos/o/r/rulesets/1'",
     "gh api repos/o/r/rulesets/1", "gh api -X GET repos/o/r/rulesets/1",
     "gh api -X POST repos/o/r/issues -f title=test",
+    "gh api repos/$GITHUB_REPOSITORY/issues -f title=test",
+    "gh api repos/${GITHUB_REPOSITORY}/issues/12/comments -f body=test",
     "gh api graphql -f 'query=query { viewer { login } }'",
     "git status\npython3 - <<'PYCODE'\nprint(\"it's fine: lefthook\")\nPYCODE",
     "python3 -c 'unterminated", "cat <<EOF\ngh pr merge 1\nEOF",
