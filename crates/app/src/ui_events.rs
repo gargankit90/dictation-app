@@ -78,12 +78,14 @@ impl Queue {
         let newest = |kind: fn(&UiEvent) -> bool| self.events.iter().rposition(kind);
         let newest_phase = newest(|event| matches!(event, UiEvent::StateChanged(_)));
         let newest_restored = newest(|event| matches!(event, UiEvent::HotkeyRestored));
+        let newest_no_sound = newest(|event| matches!(event, UiEvent::NoSound));
         let mut index = 0;
         self.events.retain(|event| {
             let keep = match event {
                 UiEvent::Error(_) => true,
                 UiEvent::StateChanged(_) => Some(index) == newest_phase,
                 UiEvent::HotkeyRestored => Some(index) == newest_restored,
+                UiEvent::NoSound => Some(index) == newest_no_sound,
             };
             index += 1;
             keep

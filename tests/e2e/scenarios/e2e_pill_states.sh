@@ -11,6 +11,10 @@
 #    has no device name). Nothing is pasted, so on release it goes
 #    Transcribing, then hides without "Done".
 #
+# 3. H2: a silent hold of 1 s or more ends on "No sound · Check your
+#    microphone" in the error look (6 s), and a short tap of the same
+#    fixture (under 1 s) ends with no message.
+#
 # The meter's bars carry no text (aria-hidden); the screenshots show them.
 
 # The pill's Done time (crates/app/src/overlay.rs PASTE_SENT_VISIBLE_FOR) and
@@ -105,10 +109,25 @@ e2e_pill_states() {
     pill_near "$gap" "$PILL_NO_SOUND_MS"
   launch --release
   expect "the silent dictation gets back to Idle" wait_for_idle_count 1
-  expect "the pill hides" overlay_shows "$OVERLAY_HIDDEN"
-  expect "the pill went recording, no_sound, transcribing, hidden (no paste_sent)" \
-    test "$(pill_log_since "$mark")" = "recording no_sound transcribing hidden"
+  expect "the silent dictation gets back to Idle" wait_for_idle_count 1
+  expect "the pill says there was no sound after the release" \
+    overlay_shows "$OVERLAY_NO_SOUND_RELEASED"
+  screenshot e2e_pill_states.no_sound_after_release
+  expect "the pill hides after the error's time" overlay_shows "$OVERLAY_HIDDEN" 10
+  expect "the pill went recording, no_sound, transcribing, error, hidden (no paste_sent)" \
+    test "$(pill_log_since "$mark")" = "recording no_sound transcribing error hidden"
   expect "nothing was pasted" textedit_is_empty
+
+  # 3. A short tap of the silence fixture: nothing to say.
+  mark=$(pill_log_mark)
+  launch --press
+  sleep 0.5
+  launch --release
+  expect "the tap gets back to Idle" wait_for_idle_count 2
+  sleep 1
+  expect "the pill shows no message after the tap" overlay_shows "$OVERLAY_HIDDEN"
+  expect "the pill went recording, transcribing, hidden (no error)" \
+    test "$(pill_log_since "$mark")" = "recording transcribing hidden"
 
   [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_pill_states
   collect_log e2e_pill_states

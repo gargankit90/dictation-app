@@ -133,7 +133,8 @@ impl UsageTracker {
                 self.reporter.report(error);
                 self.reset();
             }
-            UiEvent::HotkeyRestored => {}
+            // Not a failure and not a dictation: nothing to count (H2).
+            UiEvent::HotkeyRestored | UiEvent::NoSound => {}
         }
     }
 

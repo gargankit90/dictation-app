@@ -45,6 +45,10 @@ pub enum Event {
     /// The transcript had nothing to paste once cleaned up
     /// ([`crate::text::clean`] dropped it): back to Idle, no error.
     TranscriptDropped,
+    /// The clip was silent and long enough that the person deserves to be
+    /// told ([`crate::audio_math::silent_clip_is_worth_telling`], H2): back
+    /// to Idle with [`Command::ShowNoSound`], no error.
+    TranscriptSilent,
     /// The text was inserted into the focused app.
     InsertDone,
     /// Inserting failed; `reason` is a short, user-safe summary.
@@ -77,6 +81,9 @@ pub enum Command {
     Insert(String),
     /// Tell the user something went wrong.
     ShowError(DictationError),
+    /// Say that the recording that just ended had no sound (H2). Not an
+    /// error: it never reaches the menu bar or the history.
+    ShowNoSound,
     /// The coordinator moved to this phase (for the UI and tray).
     StateChanged(Phase),
 }
@@ -100,6 +107,7 @@ impl fmt::Debug for Event {
                 .field(&redact::summary(reason))
                 .finish(),
             Event::TranscriptDropped => f.write_str("TranscriptDropped"),
+            Event::TranscriptSilent => f.write_str("TranscriptSilent"),
             Event::InsertDone => f.write_str("InsertDone"),
             Event::InsertFailed(reason) => f
                 .debug_tuple("InsertFailed")
@@ -123,6 +131,7 @@ impl fmt::Debug for Command {
             Command::Transcribe => f.write_str("Transcribe"),
             Command::Insert(text) => f.debug_struct("Insert").field("len", &text.len()).finish(),
             Command::ShowError(error) => f.debug_tuple("ShowError").field(error).finish(),
+            Command::ShowNoSound => f.write_str("ShowNoSound"),
             Command::StateChanged(phase) => f.debug_tuple("StateChanged").field(phase).finish(),
         }
     }
@@ -175,6 +184,7 @@ mod tests {
                 "TranscriptionFailed(\"x\")",
             ),
             (Event::TranscriptDropped, "TranscriptDropped"),
+            (Event::TranscriptSilent, "TranscriptSilent"),
             (Event::SecureInputBlocked, "SecureInputBlocked"),
             (Event::InsertDone, "InsertDone"),
             (Event::InsertFailed("x".into()), "InsertFailed(\"x\")"),
@@ -195,6 +205,7 @@ mod tests {
                 Command::ShowError(DictationError::EmptyTranscript),
                 "ShowError(EmptyTranscript)",
             ),
+            (Command::ShowNoSound, "ShowNoSound"),
             (Command::StateChanged(Phase::Idle), "StateChanged(Idle)"),
         ];
         for (command, debug) in commands {

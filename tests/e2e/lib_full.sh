@@ -400,6 +400,9 @@ OVERLAY_HIDDEN=hidden
 # U4: the recording pill's Listening label and hint (the meter has no text).
 OVERLAY_RECORDING="shown: Listening Release to paste · Esc to cancel"
 OVERLAY_NO_SOUND="shown: No sound Check your microphone"
+# H2: after a silent hold of 1 s or more, in the error look (no device name
+# from the file source).
+OVERLAY_NO_SOUND_RELEASED="shown: No sound · Check your microphone"
 OVERLAY_TRANSCRIBING="shown: Transcribing…"
 OVERLAY_PASTE_SENT="shown: Done"
 

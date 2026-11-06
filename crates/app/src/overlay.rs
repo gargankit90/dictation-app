@@ -42,6 +42,16 @@ pub const ERROR_VISIBLE_FOR: Duration = Duration::from_secs(6);
 /// How long "Done" stays on screen after a paste was sent (U4).
 pub const PASTE_SENT_VISIBLE_FOR: Duration = Duration::from_millis(800);
 
+/// What the pill says after a silent hold (H2): the "No sound" label and
+/// hint of the recording view, in one sentence for the error look.
+#[must_use]
+pub fn no_sound_message(device: Option<&str>) -> String {
+    match device {
+        Some(device) => format!("No sound · Check your microphone ({device})"),
+        None => "No sound · Check your microphone".to_owned(),
+    }
+}
+
 /// What the overlay shows.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum OverlayView {
@@ -93,6 +103,9 @@ pub struct OverlayModel {
     inserting: bool,
     /// Watches the current recording's levels for "No sound".
     silence: SilenceWatch,
+    /// The input device the latest level came from, for the message after a
+    /// silent hold (H2).
+    device: Option<String>,
 }
 
 impl OverlayModel {
@@ -115,6 +128,7 @@ impl OverlayModel {
             UiEvent::StateChanged(Phase::Recording) => {
                 self.inserting = false;
                 self.silence = SilenceWatch::new();
+                self.device = None;
                 OverlayView::Recording
             }
             UiEvent::StateChanged(Phase::Transcribing) => {
@@ -140,6 +154,20 @@ impl OverlayModel {
                     }
                     _ => OverlayView::Hidden,
                 }
+            }
+            // The hold ended with no sound (H2): the pill's error look and
+            // time, but not an error. The tray, the report and History
+            // never hear of it, and the next recording clears it.
+            UiEvent::NoSound => {
+                self.inserting = false;
+                self.view = OverlayView::Error {
+                    message: no_sound_message(self.device.as_deref()),
+                };
+                self.hotkey_error = false;
+                return Some(Change {
+                    view: self.view.clone(),
+                    expires: true,
+                });
             }
             UiEvent::HotkeyRestored if self.hotkey_error => OverlayView::Hidden,
             UiEvent::HotkeyRestored => return None,
@@ -170,6 +198,9 @@ impl OverlayModel {
     pub fn on_level(&mut self, dbfs: f32, device: Option<&str>, now: Duration) -> Option<Change> {
         if !self.is_recording() {
             return None;
+        }
+        if self.device.as_deref() != device {
+            self.device = device.map(str::to_owned);
         }
         let view = if self.silence.on_level(dbfs, now) {
             OverlayView::NoSound {
@@ -493,6 +524,61 @@ mod tests {
         ] {
             model.on_event(&UiEvent::StateChanged(phase));
         }
+        assert_eq!(
+            model.on_event(&UiEvent::StateChanged(Phase::Recording)),
+            shown(OverlayView::Recording)
+        );
+        assert_eq!(model.on_error_expired(), None);
+    }
+
+    fn silent_hold(model: &mut OverlayModel, device: Option<&str>, at_ms: u64) {
+        model.on_event(&UiEvent::StateChanged(Phase::Recording));
+        model.on_level(-90.0, device, ms(at_ms));
+        model.on_event(&UiEvent::StateChanged(Phase::Transcribing));
+    }
+
+    /// H2 criterion 1: after a silent hold the pill shows the "No sound"
+    /// wording with the mic's name, as an expiring error-look view.
+    #[test]
+    fn h2_a_silent_release_shows_no_sound_with_the_mic_name() {
+        let mut model = OverlayModel::default();
+        silent_hold(&mut model, Some("USB Mic"), 0);
+        let change = model.on_event(&UiEvent::NoSound).unwrap();
+        assert_eq!(
+            change.view,
+            OverlayView::Error {
+                message: "No sound · Check your microphone (USB Mic)".into()
+            }
+        );
+        assert!(change.expires);
+        // The Idle that follows keeps it, like an error.
+        assert_eq!(model.on_event(&UiEvent::StateChanged(Phase::Idle)), None);
+        assert_eq!(model.on_error_expired(), shown(OverlayView::Hidden));
+    }
+
+    #[test]
+    fn h2_without_a_known_mic_the_message_has_no_name() {
+        let mut model = OverlayModel::default();
+        silent_hold(&mut model, None, 0);
+        let change = model.on_event(&UiEvent::NoSound).unwrap();
+        assert_eq!(
+            change.view,
+            OverlayView::Error {
+                message: "No sound · Check your microphone".into()
+            }
+        );
+    }
+
+    /// H2 criterion 4: the next recording clears it, levels after the
+    /// release don't bring the meter back, and an earlier mic name isn't
+    /// reused.
+    #[test]
+    fn h2_the_next_recording_clears_it_and_late_levels_are_ignored() {
+        let mut model = OverlayModel::default();
+        silent_hold(&mut model, Some("USB Mic"), 0);
+        model.on_event(&UiEvent::NoSound);
+        model.on_event(&UiEvent::StateChanged(Phase::Idle));
+        assert_eq!(model.on_level(-90.0, Some("USB Mic"), ms(3_000)), None);
         assert_eq!(
             model.on_event(&UiEvent::StateChanged(Phase::Recording)),
             shown(OverlayView::Recording)
