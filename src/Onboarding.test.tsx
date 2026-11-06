@@ -442,6 +442,17 @@ describe("Welcome", () => {
     expect(beat).toContain("align-items: baseline");
   });
 
+  it("round 2: a caption keeps its bold width, so the keycap beside it doesn't move", async () => {
+    show();
+    const caption = (await screen.findByText("Hold the key")).parentElement;
+    expect(caption?.className).toBe("ob-beat-caption");
+    expect(caption?.getAttribute("data-text")).toBe("Hold the key");
+    const copy = /\.ob-beat-caption::after \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(copy).toContain("content: attr(data-text)");
+    expect(copy).toContain("font-weight: 600");
+    expect(/\.ob-beat\.lit \{([^}]*)\}/.exec(css)?.[1]).toContain("font-weight: 600");
+  });
+
   it("Get started moves on", async () => {
     show();
     await screen.findByText("Talk instead of type");
@@ -1231,6 +1242,105 @@ describe("Speech", () => {
     expect(document.body.textContent).not.toContain(KEY);
   });
 
+  describe("Continue with a saved key, while its test is out (round 2)", () => {
+    /** A saved key, Continue pressed, the provider not answering yet. */
+    async function continuePending() {
+      let answer: (result: KeyTestError | null) => void = () => undefined;
+      const pending = new Promise<KeyTestError | null>((resolve) => {
+        answer = resolve;
+      });
+      const original = backend.handle;
+      mockIPC((command, payload) => {
+        if (command !== "test_api_key") return original(command, payload);
+        return pending.then((result) => {
+          if (result === null) return null;
+          // eslint-disable-next-line @typescript-eslint/only-throw-error
+          throw result;
+        });
+      });
+      await chooseSavedKey();
+      await waitFor(() => {
+        expect(primary("Continue").disabled).toBe(false);
+      });
+      fireEvent.click(primary("Continue"));
+      await screen.findByText("One moment…");
+      return async (result: KeyTestError | null) => {
+        await act(async () => {
+          answer(result);
+          await pending;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+      };
+    }
+
+    const REJECTED: KeyTestError = { kind: "invalid_key", message: "Groq rejected this API key." };
+
+    it("Back drops it: no engine switch and no moving on, however late it answers", async () => {
+      const answer = await continuePending();
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      await screen.findByText("Which language will you mostly speak?");
+      await answer(null);
+      expect(backend.named("use_cloud_engine")).toEqual([]);
+      expect(backend.step).toBe("speech");
+      screen.getByText("Which language will you mostly speak?");
+      expect(document.querySelector(".ob-reason")?.textContent).toBe("");
+    });
+
+    it("Back drops a failure too: it isn't shown on the choices", async () => {
+      const answer = await continuePending();
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      await screen.findByText("Which language will you mostly speak?");
+      await answer(REJECTED);
+      expect(screen.queryByText("Groq rejected this API key.")).toBeNull();
+    });
+
+    it("a Provider change drops it: the old provider isn't selected", async () => {
+      const answer = await continuePending();
+      fireEvent.change(screen.getByRole("combobox", { name: "Provider" }), {
+        target: { value: "openai" },
+      });
+      await screen.findByLabelText("OpenAI API key");
+      await answer(null);
+      expect(backend.named("use_cloud_engine")).toEqual([]);
+      expect(backend.step).toBe("speech");
+      screen.getByText("Connect your key");
+    });
+
+    it("a Provider change drops a failure: it isn't blamed on the new provider", async () => {
+      const answer = await continuePending();
+      fireEvent.change(screen.getByRole("combobox", { name: "Provider" }), {
+        target: { value: "openai" },
+      });
+      await screen.findByLabelText("OpenAI API key");
+      await answer(REJECTED);
+      expect(screen.queryByText("Groq rejected this API key.")).toBeNull();
+    });
+
+    it("Replace drops it: the screen stays for the new key", async () => {
+      const answer = await continuePending();
+      fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+      await screen.findByLabelText("Groq API key");
+      await answer(null);
+      expect(backend.named("use_cloud_engine")).toEqual([]);
+      expect(backend.step).toBe("speech");
+    });
+
+    it("leaving the step drops it", async () => {
+      const answer = await continuePending();
+      cleanup();
+      await answer(null);
+      expect(backend.named("use_cloud_engine")).toEqual([]);
+      expect(backend.step).toBe("speech");
+    });
+
+    it("left alone, it still goes through", async () => {
+      const answer = await continuePending();
+      await answer(null);
+      await screen.findByText("Two permissions");
+      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "groq" });
+    });
+  });
+
   it("criterion 3: a key saved earlier is tested before moving on", async () => {
     backend.keys.groq = true;
     backend.testResult = { kind: "invalid_key", message: "Groq rejected this API key." };
@@ -1245,6 +1355,26 @@ describe("Speech", () => {
     screen.getByText("✓ Key saved");
     expect(backend.step).toBe("speech");
     expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "groq", key: null });
+  });
+});
+
+describe("the form's and the chip's looks (round 2)", () => {
+  it("Test & Save is regular height inside the form", () => {
+    const form = /\.ob-key-panel button\.primary \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(form).toContain("min-height: var(--vc-control-h);");
+    // After the onboarding rule of the same weight, so it wins.
+    expect(css.indexOf(".ob-key-panel button.primary")).toBeGreaterThan(
+      css.indexOf(".onboarding button.primary"),
+    );
+  });
+
+  it("the selected chip has the primary colours in every state", () => {
+    const rules = [...css.matchAll(/button\.ob-chip\[aria-checked="true"\][^{]*\{([^}]*)\}/g)];
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, body = ""] of rules) {
+      expect(body).toContain("--vc-primary-");
+      expect(body).not.toContain("--vc-accent");
+    }
   });
 });
 
@@ -1832,7 +1962,7 @@ describe("Ready", () => {
     show();
     await screen.findByText("You're set");
     await screen.findByText("Right ⌥ (hold)");
-    await screen.findByText("On this Mac · Parakeet English · ✓ Ready");
+    await screen.findByText("On this Mac · English · ✓ Ready");
     expect(screen.getByText("Find Vocet in the menu bar", { exact: false })).toBeTruthy();
     expect(screen.queryByText(NOT_TESTED)).toBeNull();
     expect(
@@ -1845,7 +1975,14 @@ describe("Ready", () => {
     model.state = "downloading";
     model.downloaded_bytes = 477_000_000 / 2;
     show();
-    await screen.findByText("On this Mac · Parakeet English · Getting the model ready: 50%");
+    await screen.findByText("On this Mac · English · Getting the model ready: 50%");
+  });
+
+  it("round 2: a multilingual model has Speech's name, with the count from its codes", async () => {
+    backend.settings = { ...backend.settings, local_model: QWEN.id };
+    backend.model(QWEN.id).state = "ready";
+    show();
+    await screen.findByText("On this Mac · 30 languages · ✓ Ready");
   });
 
   it("criterion 6: the own key says Connected only with a key saved", async () => {

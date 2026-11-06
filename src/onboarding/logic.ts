@@ -23,12 +23,6 @@ function englishOnly(model: LocalModelInfo_Serialize): boolean {
   return model.language_codes.join() === "en";
 }
 
-/** A model as Ready names it (U10): "Parakeet English", "Qwen3-ASR Multilingual". */
-export function spokenName(model: LocalModelInfo_Serialize): string {
-  const family = model.name.split(" ")[0] ?? model.name;
-  return `${family} ${englishOnly(model) ? "English" : "Multilingual"}`;
-}
-
 /** "212 of 477 MB". */
 export function progressText(model: LocalModelInfo_Serialize): string {
   return `${String(Math.round(done(model) / 1_000_000))} of ${megabytes(size(model))}`;

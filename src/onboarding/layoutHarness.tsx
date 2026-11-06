@@ -38,6 +38,7 @@ const SETTLE_MS = 1800;
 // Which step: a page per step, since macOS's `open` drops a file URL's query.
 const view = document.body.dataset.step ?? "welcome";
 const isMore = view === "speech-more" || view === "speech-more-plain";
+const isReadyName = view === "ready-english" || view === "ready-30";
 const isWelcomePlain = view === "welcome-plain" || view === "welcome-default";
 const isKeyScreen = view === "key-none" || view === "key-saved";
 const usualSize = view === "ready-strip" || view === "welcome-default";
@@ -57,6 +58,8 @@ const steps: Record<string, Step> = {
   "try-default": "try",
   ready: "ready",
   "ready-strip": "ready",
+  "ready-english": "ready",
+  "ready-30": "ready",
 };
 const size = view === "try-default" || usualSize ? DEFAULT : MIN;
 const isTry = steps[view] === "try";
@@ -69,6 +72,7 @@ const plain =
   view === "speech-more-plain" ||
   view === "settings-language" ||
   isWelcomePlain ||
+  isReadyName ||
   isKeyScreen ||
   usualSize;
 
@@ -96,10 +100,14 @@ const multilingual: LocalModelInfo_Serialize = {
   id: "qwen",
   name: "Qwen3 ASR 0.6B",
   languages: "30 languages, including English and Hindi",
-  language_codes: ["en", "hi", "fr"],
-  size_bytes: 589_000_000,
-  downloaded_bytes: 0,
-  state: "missing",
+  language_codes: [
+    ..."zh en yue ar de fr es pt id it ko ru th vi ja tr hi ms nl sv da fi pl cs fil fa el ro hu mk".split(
+      " ",
+    ),
+  ],
+  size_bytes: 589_560_480,
+  downloaded_bytes: view === "ready-30" ? 589_560_480 : 0,
+  state: view === "ready-30" ? "ready" : "missing",
   resumed_from_bytes: null,
   default: false,
 };
@@ -113,7 +121,7 @@ const settings: Settings_Serialize = {
   hotkey: isTry || view === "welcome-plain" ? "RightAlt+RightCmd" : "RightAlt",
   launch_at_login: false,
   transcription: view === "speech-key" ? "cloud" : "local",
-  local_model: "parakeet",
+  local_model: view === "ready-30" ? "qwen" : "parakeet",
   share_usage_events: true,
   history_limit: 25,
 };
@@ -400,7 +408,7 @@ async function chipProblems(root: HTMLElement): Promise<string[]> {
   const chip = root.querySelector('.ob-chip[aria-checked="true"]');
   if (chip === null) return ["no language button is selected"];
   return withStatesAsClasses(() => {
-    const filled = [colour("var(--vc-accent)"), colour("var(--vc-accent-hover)")];
+    const filled = [colour("var(--vc-primary-bg)"), colour("var(--vc-primary-hover)")];
     const found: string[] = [];
     const states: string[][] = [
       [],
@@ -612,10 +620,21 @@ async function welcomeProblems(root: HTMLElement): Promise<string[]> {
       if (beats !== undefined && box.bottom > beats.top) found.push("the pill covers a caption");
     }
     const beat = root.querySelector(".ob-beat");
-    const caption = beat?.querySelector("span");
+    const caption = beat?.querySelector(".ob-beat-caption > span");
     const keycap = beat?.querySelector("kbd");
-    if (caption == null || keycap == null) found.push("the keycap's line is missing");
-    else {
+    if (beat == null || caption == null || keycap == null) {
+      found.push("the keycap's line is missing");
+    } else {
+      // Lit or not, the keycap stays where it is, on a looping demo.
+      const wasLit = beat.classList.contains("lit");
+      beat.classList.remove("lit");
+      const plainLeft = keycap.getBoundingClientRect().left;
+      beat.classList.add("lit");
+      const litLeft = keycap.getBoundingClientRect().left;
+      beat.classList.toggle("lit", wasLit);
+      if (Math.abs(plainLeft - litLeft) > 0.5) {
+        found.push(`the keycap moves ${String(litLeft - plainLeft)} px as its caption lights`);
+      }
       const gap = Math.abs(baselineOf(caption) - baselineOf(keycap));
       if (gap > 1) found.push(`the keycap's baseline is ${String(gap)} px from its caption's`);
     }
@@ -638,6 +657,16 @@ function keyScreenProblems(root: HTMLElement): string[] {
     found.push("no key saved, and no field");
   }
   if (text.includes("Remove key")) found.push("setup offers Remove key");
+  // Regular height in the form: the footer's Continue is the main action.
+  const save = root.querySelector(".ob-key-panel button.primary");
+  const next = root.querySelector(".ob-footer .primary");
+  if (
+    save !== null &&
+    next !== null &&
+    save.getBoundingClientRect().height >= next.getBoundingClientRect().height
+  ) {
+    found.push("Test & Save is as big as Continue");
+  }
   return found;
 }
 
@@ -665,6 +694,17 @@ function keyRowProblems(root: HTMLElement): string[] {
   ) {
     found.push("the key's row isn't on one line");
   }
+  const [labelPart, keycapPart, buttonPart] = parts;
+  if (labelPart != null && keycapPart != null && buttonPart != null) {
+    const line = baselineOf(labelPart);
+    for (const [name, part] of [
+      ["keycap", keycapPart],
+      ["Change key", buttonPart],
+    ] as const) {
+      const gap = Math.abs(baselineOf(part) - line);
+      if (gap > 1) found.push(`the ${name}'s baseline is ${String(gap)} px from its row's`);
+    }
+  }
   return found;
 }
 
@@ -673,6 +713,12 @@ async function viewProblems(root: HTMLElement): Promise<string[]> {
   const found: string[] = [];
   if (steps[view] === "welcome") found.push(...(await welcomeProblems(root)));
   if (isKeyScreen) found.push(...keyScreenProblems(root));
+  if (isReadyName) {
+    const name = view === "ready-30" ? "30 languages" : "English";
+    if (!root.textContent.includes(`On this Mac · ${name} · ✓ Ready`)) {
+      found.push(`Ready doesn't say On this Mac · ${name} · ✓ Ready`);
+    }
+  }
   if (view === "try-plain" || view === "try-default") found.push(...keyRowProblems(root));
   if (view === "speech" || isMore) found.push(...(await chipProblems(root)));
   if (isTry) found.push(...(await tryProblems(root)));

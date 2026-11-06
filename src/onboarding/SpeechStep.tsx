@@ -115,6 +115,22 @@ function SpeechForm({
 
   const [keyScreen, setKeyScreen] = useState(false);
 
+  // The Continue running, as `keyRun` is for Test & Save in `ownKey.tsx`: anything
+  // that changes what it was for makes it the old one, and an old one neither
+  // switches the engine, nor moves on, nor reports. In the component: nothing can
+  // come back to a step that's gone, so going away just drops it.
+  const continueRun = useRef(0);
+  useEffect(
+    () => () => {
+      continueRun.current += 1;
+    },
+    [],
+  );
+  function dropContinue() {
+    continueRun.current += 1;
+    setWorking(false);
+  }
+
   const supported = useMemo(() => {
     const codes = new Set<string>(cloudLanguages(settings.provider));
     for (const model of models ?? []) {
@@ -175,13 +191,16 @@ function SpeechForm({
     return null;
   }
 
-  async function continueWithKey() {
+  async function continueWithKey(dropped: () => boolean) {
     // A key saved earlier hasn't been through Test & Save here: test it now.
     if (!ownKey.connected) {
       const outcome = await testKey(ownKey.provider, null);
+      if (dropped()) return null;
       if (outcome.kind === "error") return outcome.text;
     }
+    if (dropped()) return null;
     const used = await commands.useCloudEngine(ownKey.provider);
+    if (dropped()) return null;
     if (used.status === "error") return messageOf(used.error);
     await makeRoomFor(null);
     await reread();
@@ -190,6 +209,9 @@ function SpeechForm({
   }
 
   async function go() {
+    continueRun.current += 1;
+    const run = continueRun.current;
+    const dropped = () => run !== continueRun.current;
     setWorking(true);
     setProblem(null);
     let failed: string | null;
@@ -199,11 +221,13 @@ function SpeechForm({
       if ((settings.language ?? "") !== language) {
         await commands.setLanguage(language === "" ? null : language);
       }
-      if (choice === "key") failed = await continueWithKey();
+      if (choice === "key") failed = await continueWithKey(dropped);
       else failed = model === null ? null : await continueLocal(model);
     } catch {
       failed = BROKEN;
     }
+    // The screen it was for has moved on: whatever came back no longer counts.
+    if (dropped()) return;
     setWorking(false);
     if (failed !== null) {
       setProblem(failed);
@@ -222,6 +246,7 @@ function SpeechForm({
   const needsDownload = choice === "local" && model !== null && model.state !== "ready";
 
   function backFromKey() {
+    dropContinue();
     ownKey.abandon();
     setProblem(null);
     setKeyScreen(false);
@@ -231,7 +256,21 @@ function SpeechForm({
     return (
       <KeyScreen
         parts={parts}
-        ownKey={ownKey}
+        ownKey={{
+          ...ownKey,
+          changeProvider: (next) => {
+            dropContinue();
+            ownKey.changeProvider(next);
+          },
+          editKey: (value) => {
+            dropContinue();
+            ownKey.editKey(value);
+          },
+          testAndSave: () => {
+            dropContinue();
+            return ownKey.testAndSave();
+          },
+        }}
         problem={problem}
         working={working}
         onBack={backFromKey}

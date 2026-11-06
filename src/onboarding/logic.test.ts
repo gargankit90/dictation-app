@@ -7,7 +7,6 @@ import {
   holdsWords,
   modelWait,
   recommendedModel,
-  spokenName,
   stripView,
   tryView,
 } from "./logic";
@@ -66,13 +65,6 @@ describe("recommendedModel", () => {
   });
   it("is nothing for a language no model speaks", () => {
     expect(recommendedModel([PARAKEET, QWEN], "xx")).toBeNull();
-  });
-});
-
-describe("spokenName", () => {
-  it("names the language choice", () => {
-    expect(spokenName(PARAKEET)).toBe("Parakeet English");
-    expect(spokenName(QWEN)).toBe("Qwen3-ASR Multilingual");
   });
 });
 

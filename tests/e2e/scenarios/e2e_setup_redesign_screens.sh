@@ -72,6 +72,12 @@ srs_mode() {
   ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" Hindi
   expect "$mode: Hindi" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "30 languages · 590 MB" 10
   srs_settled_shot "speech-hindi-$mode"
+  ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" "More…"
+  expect "$mode: choose Gujarati" \
+    ax_ok combo-pick "$APP_NAME" "$SRS_WINDOW" ob-language gujarati "Gujarati (ગુજરાતી)"
+  expect "$mode: Gujarati needs the key" \
+    ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Gujarati needs your own key" 10
+  srs_settled_shot "speech-uncovered-$mode"
   ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" English
   ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" "Use my own Groq or OpenAI key"
   expect "$mode: no form yet" ax_ok wait-no-text "$APP_NAME" "$SRS_WINDOW" "Test & Save" 2

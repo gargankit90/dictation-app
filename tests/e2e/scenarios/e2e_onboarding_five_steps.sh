@@ -111,9 +111,19 @@ e2e_onboarding_five_steps() {
   expect "press Continue" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Continue
 
   expect "Ready shows the engine really ready" \
-    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "On this Mac · Parakeet English · ✓ Ready" 15
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "On this Mac · English · ✓ Ready" 15
   expect "the test isn't called skipped" \
     ax_ok wait-no-text "$APP_NAME" "$FIVE_WINDOW" "Not tested yet" 5
+  # U11's pictures of the line, in each appearance: it is read at launch.
+  obs_shot "5-ready-english-light"
+  expect "quit at Ready" quit_from_tray
+  clear_app_log
+  obs_appearance dark
+  five_launch
+  expect "dark: Ready again, with the engine ready" \
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "On this Mac · English · ✓ Ready" 120
+  obs_shot "5-ready-english-dark"
+  obs_appearance light
   expect "press Start dictating" ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Start dictating"
   expect "the window hides" ax_ok wait-no-window "$APP_NAME" "$FIVE_WINDOW" 10
   expect "the tray has no Resume setup" tray_has_no_resume_setup

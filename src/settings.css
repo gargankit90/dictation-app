@@ -1213,6 +1213,20 @@ main.ob {
   font-weight: 600;
 }
 
+/* The bold width, kept by an invisible copy: the keycap beside it doesn't move as
+   the caption lights up. */
+.ob-beat-caption {
+  display: inline-grid;
+}
+
+.ob-beat-caption::after {
+  height: 0;
+  overflow: hidden;
+  content: attr(data-text);
+  font-weight: 600;
+  visibility: hidden;
+}
+
 .ob-beat .keycap {
   margin-bottom: 0;
   font-weight: 600;
@@ -1241,6 +1255,7 @@ main.ob {
 
 .ob-key-row .recorder-line {
   flex-wrap: wrap;
+  align-items: baseline;
   white-space: normal;
 }
 
@@ -1251,6 +1266,14 @@ main.ob {
 /* Connect your key: the panel renders in the page, not a sheet. */
 .ob-key-panel .own-key-panel {
   margin-top: 0;
+}
+
+/* The form's button is regular height: Continue is the screen's main action. */
+.ob-key-panel button.primary {
+  min-height: var(--vc-control-h);
+  padding: 0 var(--vc-space-4);
+  border-radius: var(--vc-radius-sm);
+  font-size: inherit;
 }
 
 .ob-key-panel .panel-row:last-child {
@@ -1349,15 +1372,15 @@ main.ob {
    selected look has to win in every state a button has. */
 button.ob-chip[aria-checked="true"],
 button.ob-chip[aria-checked="true"]:active:not(:disabled) {
-  border-color: var(--vc-accent);
-  background: var(--vc-accent);
-  color: var(--vc-accent-fg);
+  border-color: var(--vc-primary-bg);
+  background: var(--vc-primary-bg);
+  color: var(--vc-primary-fg);
 }
 
 button.ob-chip[aria-checked="true"]:hover:not(:disabled) {
-  border-color: var(--vc-accent-hover);
-  background: var(--vc-accent-hover);
-  color: var(--vc-accent-fg);
+  border-color: var(--vc-primary-hover);
+  background: var(--vc-primary-hover);
+  color: var(--vc-primary-fg);
 }
 
 .ob-content > .language-picker {

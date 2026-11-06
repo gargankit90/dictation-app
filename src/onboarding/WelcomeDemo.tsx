@@ -43,6 +43,15 @@ function useDemoFrame(): DemoFrame {
   return reduced ? FINAL_FRAME : frame;
 }
 
+/** Takes its bold width lit or not, so the keycap beside it never moves. */
+function Caption({ text }: { text: string }) {
+  return (
+    <span className="ob-beat-caption" data-text={text}>
+      <span>{text}</span>
+    </span>
+  );
+}
+
 /**
  * The demo card: a small app with the real pill over it, fed by a fixed script.
  * Only `OverlayContent` comes from the overlay, never `Overlay`, which listens
@@ -69,14 +78,14 @@ export function WelcomeDemo({ keyLabel }: { keyLabel: string }) {
       </div>
       <ol className="ob-beats">
         <li className={lit(0)}>
-          <span>{CAPTIONS[0]}</span>
+          <Caption text={CAPTIONS[0]} />
           <kbd className="keycap">{keyLabel}</kbd>
         </li>
         <li className={lit(1)}>
-          <span>{CAPTIONS[1]}</span>
+          <Caption text={CAPTIONS[1]} />
         </li>
         <li className={lit(2)}>
-          <span>{CAPTIONS[2]}</span>
+          <Caption text={CAPTIONS[2]} />
         </li>
       </ol>
     </div>
