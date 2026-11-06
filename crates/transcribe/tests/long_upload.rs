@@ -234,3 +234,136 @@ async fn a_dead_network_fails_fast_for_a_five_minute_clip() {
     assert!(result.is_err());
     assert!(took < Duration::from_secs(35), "{took:?}");
 }
+
+/// A listener that takes a request slowly: it reads the head and the first
+/// 64 KB of the body, then stalls for `stall` (reading nothing, so the
+/// client's upload is held back by socket buffers), then reads the rest and
+/// answers 200. `stalled` is signalled when it starts to stall, `answered`
+/// when the whole upload has been read.
+async fn backpressured_server(
+    stall: Duration,
+) -> (u16, Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let stalled = Arc::new(tokio::sync::Notify::new());
+    let answered = Arc::new(tokio::sync::Notify::new());
+    let (s, a) = (Arc::clone(&stalled), Arc::clone(&answered));
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            let (s, a) = (Arc::clone(&s), Arc::clone(&a));
+            tokio::spawn(async move {
+                let mut data = Vec::new();
+                let mut chunk = vec![0u8; 16 * 1024];
+                let head_end = loop {
+                    let Ok(n) = stream.read(&mut chunk).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    data.extend_from_slice(&chunk[..n]);
+                    if let Some(at) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break at + 4;
+                    }
+                };
+                let head = String::from_utf8_lossy(&data[..head_end]).to_ascii_lowercase();
+                let length: usize = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap();
+                let total = head_end + length;
+                while data.len() < head_end + 64 * 1024 {
+                    let Ok(n) = stream.read(&mut chunk).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    data.extend_from_slice(&chunk[..n]);
+                }
+                s.notify_one();
+                tokio::time::sleep(stall).await;
+                while data.len() < total {
+                    let Ok(n) = stream.read(&mut chunk).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    data.extend_from_slice(&chunk[..n]);
+                }
+                a.notify_one();
+                let body = br#"{"text":"a slow upload"}"#;
+                let reply = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(reply.as_bytes()).await;
+                let _ = stream.write_all(body).await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+    (port, stalled, answered)
+}
+
+/// The upload itself is slow: a 20 s clip (1.3 MB, more than the socket
+/// buffers hold) whose upload the server holds back for 1 s, more than three
+/// times the base limit of 300 ms. With the fixed limit the request times
+/// out while the upload is still incomplete; with the grown limit (300 ms +
+/// 10 s) the same upload finishes and the dictation succeeds. The real
+/// production numbers (30 s base) are scaled down so the test takes about a
+/// second; what is proved is that no limit other than the per-request one
+/// ends a slow upload. Not timing-sensitive: the control fails because
+/// 300 ms passes long before the server's 1 s stall ends, the success has a
+/// 9 s margin, and each step is fenced on the server's own progress.
+#[tokio::test]
+async fn an_upload_held_back_past_the_base_limit_succeeds_only_with_the_grown_limit() {
+    const STALL: Duration = Duration::from_secs(1);
+    let audio = Audio {
+        sample_rate: 32_000,
+        samples: vec![0.1; 32_000 * 20],
+    };
+    let fence = Duration::from_secs(30);
+    let base = |url: String, grows| Config {
+        timeout: Duration::from_millis(300),
+        ..config(url, grows, 1, LONG_CLIP)
+    };
+
+    // Control: the old fixed limit. The request ends while the server is
+    // still stalled, before it has read the upload.
+    let (port, stalled, answered) = backpressured_server(STALL).await;
+    let url = format!("http://127.0.0.1:{port}/v1");
+    let fixed = OpenAiCompat::new(base(url, false), Secret::new(KEY)).unwrap();
+    let result = tokio::time::timeout(fence, fixed.transcribe(&audio)).await;
+    assert_eq!(result.unwrap(), Err(TranscribeError::Timeout));
+    tokio::time::timeout(fence, stalled.notified())
+        .await
+        .unwrap();
+    let early = tokio::time::timeout(Duration::from_millis(200), answered.notified()).await;
+    assert!(early.is_err(), "the fixed limit ended the upload midway");
+
+    // The grown limit: the same stalled upload completes.
+    let (port, stalled, _answered) = backpressured_server(STALL).await;
+    let url = format!("http://127.0.0.1:{port}/v1");
+    let grown = OpenAiCompat::new(base(url, true), Secret::new(KEY)).unwrap();
+    let start = Instant::now();
+    let run = tokio::spawn(async move { grown.transcribe(&audio).await });
+    tokio::time::timeout(fence, stalled.notified())
+        .await
+        .unwrap();
+    assert!(
+        !run.is_finished(),
+        "still uploading while the server stalls"
+    );
+    let result = tokio::time::timeout(fence, run).await.unwrap().unwrap();
+    assert_eq!(result.unwrap(), "a slow upload");
+    assert!(
+        start.elapsed() >= STALL,
+        "the upload outlasted the base limit"
+    );
+}
