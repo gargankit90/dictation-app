@@ -2,7 +2,12 @@
 # step, the download strip and the resume state, in light and dark. The
 # appearance is read when the app launches, so each mode has a launch of its
 # own. Little is asserted; the pictures go to the run's output for the PR, and
-# the appearance is put back to light at the end. Downloads the model twice.
+# the appearance is put back to light at the end.
+#
+# The download comes from the stand-in model server (_model_server_helpers.sh),
+# held part way, so the strip and the paused state are on screen for certain
+# and nothing needs the internet. The server lets the rest go once the
+# pictures that need a running download are taken.
 #
 # U11's own pictures, on the own-key route, are e2e_setup_redesign_screens.
 
@@ -10,7 +15,8 @@ OBS_WINDOW="Set up"
 OBS_MODELS="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/models"
 
 obs_launch() {
-  E2E_TRANSCRIBER=settings launch --debug-audio-file "$VM_FIXTURES/speech-16k.wav" --debug-onboarding
+  E2E_TRANSCRIBER=settings launch --debug-audio-file "$VM_FIXTURES/speech-16k.wav" --debug-onboarding \
+    --debug-model-url "$MODEL_SERVER_URL"
 }
 
 obs_appearance() {
@@ -58,6 +64,7 @@ obs_mode() {
   settings_reset
   vm "rm -rf $(q "$OBS_MODELS")"
   obs_appearance "$mode"
+  expect "$mode: the stand-in model server starts" model_server_start
   obs_launch
   expect "$mode: the window" ax_ok wait-window "$APP_NAME" "$OBS_WINDOW" 30
   expect "$mode: Welcome" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Talk instead of type" 30
@@ -85,8 +92,8 @@ obs_mode() {
   ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Which language" 10
   ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" "Recommended for your language"
   ax_ok press "$APP_NAME" "$OBS_WINDOW" "Download and continue"
-  # The VM downloads in seconds, so each state below cancels, removes what was
-  # fetched and starts again to be sure it is on screen for its picture.
+  # The server holds the download part way, so each state below stays on screen
+  # until the picture is taken.
   expect "$mode: the strip" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Downloading English" 15
   obs_shot "3-permissions-download-strip-$mode"
   ax_ok press "$APP_NAME" "$OBS_WINDOW" Cancel
@@ -117,6 +124,7 @@ obs_mode() {
   obs_shot "3-resume-after-quit-$mode"
   ax_ok press "$APP_NAME" "$OBS_WINDOW" Continue
   ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Your dictation key" 10
+  model_server_release
   VM_TERMINAL_TIMEOUT=1510 ax_ok wait-no-text "$APP_NAME" "$OBS_WINDOW" "Getting the model ready" 1500
   # The test hook's press isn't held back while practice waits, as the key is.
   expect "$mode: the model loaded" wait_for_log 'on-device model loaded' 120
@@ -151,6 +159,7 @@ e2e_onboarding_screenshots() {
   obs_mode light
   obs_mode dark
   obs_appearance light
+  model_server_stop
   [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_onboarding_screenshots
   collect_log e2e_onboarding_screenshots
   fresh_app_state

@@ -179,13 +179,30 @@ upd_dismiss_dialogs() {
   [ "$(upd_dialog_count "Vocet")" = 0 ] && [ "$(upd_dialog_count "update")" = 0 ]
 }
 
+# Presses a Settings section's radio button. The window is up before its page
+# has drawn the tabs, so the press is tried again for a few seconds.
+upd_section() {
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    ax_ok radio-press "$APP_NAME" Settings "$1" && return 0
+    sleep 1
+  done
+  return 1
+}
+
 # U12: the check moved from the tray to Settings, General.
 upd_tray_check() {
   ax_ok tray-click "$APP_NAME" Settings &&
     ax_ok wait-window "$APP_NAME" Settings 10 &&
-    ax_ok radio-press "$APP_NAME" Settings General &&
+    upd_section General &&
     ax_ok wait-text "$APP_NAME" Settings "Check for updates" 10 &&
     ax_ok press "$APP_NAME" Settings "Check now"
+}
+
+# The same check in a build from before U12 (the pre-rename dictation-app),
+# which has no Settings sections: it is "Check for updates…" in the tray.
+upd_tray_check_legacy() {
+  ax_ok tray-click "$APP_NAME" "Check for updates…"
 }
 
 # --- Cleanup -----------------------------------------------------------------------

@@ -1547,7 +1547,10 @@ describe("Permissions", () => {
     });
     fireEvent.click(primary("Back"));
     await screen.findByText("Which language will you mostly speak?");
-    expect(backend.named("stop_microphone_test").length).toBeGreaterThan(0);
+    // The meter's cleanup is a passive effect: it runs after the new step shows.
+    await waitFor(() => {
+      expect(backend.named("stop_microphone_test").length).toBeGreaterThan(0);
+    });
   });
 
   it("criterion 4: denied gives Open System Settings, the exact path, and the relaunch", async () => {
@@ -1691,7 +1694,10 @@ describe("Try it", () => {
       },
       { timeout: 2500 },
     );
-    expect(backend.named("set_hotkey_recording").at(-1)?.args).toEqual({ recording: false });
+    // The pause is lifted by an effect's cleanup, after the box is enabled.
+    await waitFor(() => {
+      expect(backend.named("set_hotkey_recording").at(-1)?.args).toEqual({ recording: false });
+    });
   });
 
   it("criterion 5: a paste that missed shows the words with Copy, and never pastes again", async () => {

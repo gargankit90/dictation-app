@@ -117,7 +117,7 @@ e2e_update_keychain_control() {
   expect "the old build starts" wait_for_log "INFO .*starting version=\"$KC_OLD\""
   expect "the old build reads the key it saved" kc_engine_has_key
   expect "the launch check offers $KC_NEW" upd_dialog "$KC_NEW is available; you have $KC_OLD" Later
-  expect "the tray's check offers it again" upd_tray_check
+  expect "the old build's tray check offers it again" upd_tray_check_legacy
   expect "Install and restart" upd_dialog "$KC_NEW is available; you have $KC_OLD" "Install and restart"
   expect "the app restarts as $KC_NEW" wait_for_log "INFO .*starting version=\"$KC_NEW\""
   sleep 3
