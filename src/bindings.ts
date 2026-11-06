@@ -61,9 +61,8 @@ export const commands = {
 	openSetup: () => typedError<null, string>(__TAURI_INVOKE("open_setup")),
 	/**
 	 *  Moves onboarding to `step`, if every step before it is done (the key is
-	 *  read from the keychain only to move past Speech). Moving past Welcome is
-	 *  the user's go-ahead for usage events (U8), if sharing is on. An error says
-	 *  which step comes first; the user stays where they were.
+	 *  read from the keychain only to move past Speech). An error says which step
+	 *  comes first; the user stays where they were.
 	 */
 	setOnboardingStep: (step: Step) => typedError<OnboardingStatus_Serialize, string>(__TAURI_INVOKE("set_onboarding_step", { step })),
 	/**  Ends onboarding: the window goes back to the settings view and hides. */
@@ -103,6 +102,12 @@ export const commands = {
 	 */
 	setHotkeyRecording: (recording: boolean) => typedError<null, string>(__TAURI_INVOKE("set_hotkey_recording", { recording })),
 	/**
+	 *  What Settings says about the hotkey while it's saved but can't listen yet
+	 *  (U9); `None` while it listens. Off the event loop: a switch in progress
+	 *  holds the hotkey's lock while the old listener stops.
+	 */
+	getHotkeyNotice: () => typedError<string | null, string>(__TAURI_INVOKE("get_hotkey_notice")),
+	/**
 	 *  Turns launch at login on or off, and nothing else. It returns at once
 	 *  with the OS's answer for the latest choice: the OS can take 40 s to
 	 *  unregister the login item (#238), so the window must not wait on it and
@@ -138,7 +143,7 @@ export const commands = {
 	openIssue: () => typedError<null, string>(__TAURI_INVOKE("open_issue")),
 	/**
 	 *  What the tray asked the window to show since the window last asked, as
-	 *  `"troubleshoot"`, `"report"`, `"speech"`, `"shortcut"` or `"history"`; empty if
+	 *  `"settings"`, `"help"`, `"troubleshoot"`, `"speech"`, `"shortcut"` or `"history"`; empty if
 	 *  nothing. Asking clears it.
 	 */
 	takeWindowRequest: () => typedError<string, string>(__TAURI_INVOKE("take_window_request")),
@@ -193,8 +198,10 @@ export const commands = {
 	openLink: (link: Link) => typedError<null, string>(__TAURI_INVOKE("open_link", { link })),
 	/**  The version, and when updates were last checked. */
 	getAppInfo: () => typedError<AppInfo_Serialize, string>(__TAURI_INVOKE("get_app_info")),
-	/**  Checks for updates as the tray's item does: a dialog says what it found. */
+	/**  Check now, in Settings → General: a dialog says what it found. */
 	checkForUpdates: () => typedError<null, string>(__TAURI_INVOKE("check_for_updates")),
+	/**  The page says which screen it shows, for the window's title (U12). */
+	setWindowPage: (page: WindowPage) => typedError<null, string>(__TAURI_INVOKE("set_window_page", { page })),
 	/**
 	 *  Chooses on-device model `id` before it is on this Mac (U8's "Download and
 	 *  continue"): the settings choose it now, so the choice survives a quit and
@@ -205,6 +212,12 @@ export const commands = {
 	chooseLocalModel: (id: string) => typedError<null, string>(__TAURI_INVOKE("choose_local_model", { id })),
 	/**  Keeps how the practice dictation went, for the Ready step and a relaunch. */
 	setTryOutcome: (outcome: TryOutcome) => typedError<null, string>(__TAURI_INVOKE("set_try_outcome", { outcome })),
+	/**
+	 *  Try it: the words of a practice dictation didn't reach the practice box.
+	 *  Only the window can see the box. It says only that this happened: the event
+	 *  is `paste_missed`, chosen here, with nothing from the window in it.
+	 */
+	practicePasteMissed: () => typedError<null, string>(__TAURI_INVOKE("practice_paste_missed")),
 	/**
 	 *  Keeps that the user cancelled (or resumed) the model download, so a
 	 *  relaunch doesn't start a download they stopped.
@@ -320,6 +333,11 @@ export type Check_Deserialize = {
 	detail: string,
 	/**  The error code behind a ✗, if any. */
 	code?: ErrorCode | null,
+	/**
+	 *  What the "Details" disclosure holds: the code, and for the last error
+	 *  its time (U12). Never in `detail`.
+	 */
+	details?: string | null,
 	/**  The button that fixes it, if one does. */
 	fix?: FixAction | null,
 	/**  That button's label. */
@@ -345,6 +363,11 @@ export type Check_Serialize = {
 	detail: string,
 	/**  The error code behind a ✗, if any. */
 	code: ErrorCode | null,
+	/**
+	 *  What the "Details" disclosure holds: the code, and for the last error
+	 *  its time (U12). Never in `detail`.
+	 */
+	details: string | null,
 	/**  The button that fixes it, if one does. */
 	fix: FixAction | null,
 	/**  That button's label. */
@@ -729,6 +752,8 @@ export type OnboardingStatus_Deserialize = {
 	download_paused: boolean,
 	/**  The engine selected on the Speech step, if one was. */
 	speech_choice?: SpeechChoice | null,
+	/**  Sharing has been on for the whole of this walk through setup. */
+	sharing_on_throughout: boolean,
 };
 
 /**  What the settings window needs to show onboarding. */
@@ -752,6 +777,8 @@ export type OnboardingStatus_Serialize = {
 	download_paused: boolean,
 	/**  The engine selected on the Speech step, if one was. */
 	speech_choice: SpeechChoice | null,
+	/**  Sharing has been on for the whole of this walk through setup. */
+	sharing_on_throughout: boolean,
 };
 
 /**  A permission's state, for the onboarding steps. */
@@ -867,7 +894,7 @@ export type SpeechChoice =
 
 /**  One onboarding step, in order. */
 export type Step = 
-/**  What the app does, and the usage and error events switch. */
+/**  What the app does. */
 "welcome" | 
 /**  The language, and the on-device model or the user's own key. */
 "speech" | 
@@ -875,7 +902,10 @@ export type Step =
 "permissions" | 
 /**  The dictation key, and a practice dictation in the onboarding window. */
 "try" | 
-/**  A summary of the real states; closes onboarding. */
+/**
+ *  A summary of the real states, and the usage and error events switch;
+ *  closes onboarding.
+ */
 "ready";
 
 /**  Where speech becomes text (L1). */
@@ -900,6 +930,18 @@ export type View =
 "settings" | 
 /**  The onboarding steps. */
 "onboarding";
+
+/**
+ *  Which Settings screen the window shows (U12): each has its own title, and
+ *  the page says when it changes.
+ */
+export type WindowPage = 
+/**  The sidebar and its sections. */
+"settings" | 
+/**  Troubleshoot's checks. */
+"troubleshoot" | 
+/**  Report a problem. */
+"report";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

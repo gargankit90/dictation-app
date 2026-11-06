@@ -103,6 +103,52 @@ reset_vm() {
   set_vm_resources
   start_vm
   wait_for_vm
+  terminal_ignore_saved_state
+}
+
+# Terminal restores every window it had open when it was last killed (the
+# harness kills it, which macOS treats as a crash), and the restored windows
+# are idle login shells that never close, so they pile up across a run until
+# the lume user hits its process limit (#276). This turns restoration off in
+# the clone's own preferences (never the golden image). A fresh clone needs it
+# after the reset; a run that skips the reset sets it again, as the VM may be
+# one an older run left behind. Nothing starts Terminal before this: the
+# first `open -a Terminal` is a scenario's first vm_terminal job.
+terminal_ignore_saved_state() {
+  vm "defaults write com.apple.Terminal ApplePersistenceIgnoreState -bool true" ||
+    die "could not turn off Terminal's window restoration on $VM"
+}
+
+# Fail fast when the VM is filling up (#276). Per-user process limit on the
+# VM is 1333 (kern.maxprocperuid); the run died of it at ~1200 with 470 idle
+# `login` shells. A healthy clone with restoration off sits near 300 processes
+# and 0-20 logins (a job's own window is one login), so these defaults, which
+# are well below the limit, mean something is leaking:
+#   E2E_MAX_PROCS (default 800)   the lume user's processes
+#   E2E_MAX_LOGINS (default 100)  its `login` processes (Terminal windows)
+# vm_load <what>: logs the counts, keeps the peaks in VM_PEAK_PROCS and
+# VM_PEAK_LOGINS, and returns 1 with a message past a threshold. If the counts
+# can't be read it warns and carries on (the check is a guard, not a test).
+VM_PEAK_PROCS=0
+VM_PEAK_LOGINS=0
+vm_load() {
+  local when=$1 out procs logins max_procs=${E2E_MAX_PROCS:-800} max_logins=${E2E_MAX_LOGINS:-100}
+  out=$(vm "p=\$(ps -u $VM_USER -o comm= | wc -l); l=\$(ps -u $VM_USER -o comm= | grep -Ec '(^|/)login\$' || true); echo \$p \$l" 2>/dev/null || true)
+  # wc pads its count with spaces on macOS; read drops them.
+  read -r procs logins <<<"$out" || true
+  case "$procs/$logins" in
+    '/'* | *'/' | *[!0-9/]*)
+      log "warning: could not read $VM's process counts ($when)"
+      return 0
+      ;;
+  esac
+  [ "$procs" -le "$VM_PEAK_PROCS" ] || VM_PEAK_PROCS=$procs
+  [ "$logins" -le "$VM_PEAK_LOGINS" ] || VM_PEAK_LOGINS=$logins
+  log "  $VM load $when: $procs processes, $logins login"
+  if [ "$procs" -gt "$max_procs" ] || [ "$logins" -gt "$max_logins" ]; then
+    log "$VM is filling up ($when): $procs processes (limit $max_procs of 1333), $logins login (limit $max_logins); stopping the run before jobs starve (#276)"
+    return 1
+  fi
 }
 
 wait_for_vm() {
@@ -171,6 +217,9 @@ fresh_app_state() {
   local name i
   name=$(q "$PROC_NAME")
   vm "pkill -x $name; pkill -x $OLD_PROC_NAME; sleep 1; pkill -9 -x $name; pkill -9 -x $OLD_PROC_NAME; rm -rf $(q "$VM_LOG_DIR"); rm -f $(q "$VM_HISTORY_FILE") $(q "$VM_HISTORY_FILE.tmp")" || true
+  # The window's own storage: the section it remembers and "Got it". Left over,
+  # Speech would reopen first, with the key sheet over the sidebar (U12).
+  vm "rm -rf ~/Library/WebKit/com.dictationapp.desktop ~/Library/WebKit/Vocet" || true
   for i in 1 2 3 4 5; do
     [ "$(app_count)" = 0 ] && return 0
     sleep 1
@@ -346,8 +395,12 @@ is_optional() {
 # (OPTIONAL_SCENARIOS) may skip; the summary still says so. Call it outside
 # any `if`, `||` or `&&`, or the scenarios' `set -e` is ignored.
 run_scenarios() {
-  local scenario summary passed=() failed=() skipped=() bad_skips=() results=()
+  local scenario summary passed=() failed=() skipped=() bad_skips=() results=() aborted=''
   for scenario in "$@"; do
+    if ! vm_load "before $scenario"; then
+      aborted="$scenario"
+      break
+    fi
     log "scenario $scenario"
     run_scenario "$scenario"
     case $SCENARIO_RESULT in
@@ -375,10 +428,16 @@ run_scenarios() {
     esac
   done
   summary="${#passed[@]} passed, ${#failed[@]} failed, ${#skipped[@]} skipped"
+  [ -z "$aborted" ] || results+=("ABORTED  before $aborted: the VM was filling up")
   {
     printf '%s\n' ${results[@]+"${results[@]}"}
     echo "$summary"
   } | tee "$OUT_DIR/results.txt" >&2
+  log "peak load: $VM_PEAK_PROCS processes, $VM_PEAK_LOGINS login"
+  if [ -n "$aborted" ]; then
+    log "$summary; the run stopped before $aborted because the VM was filling up"
+    return 1
+  fi
   if [ ${#failed[@]} -gt 0 ] || [ ${#bad_skips[@]} -gt 0 ]; then
     log "$summary; failed: ${failed[*]:-none}; required but skipped: ${bad_skips[*]:-none}"
     return 1

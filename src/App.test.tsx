@@ -86,19 +86,22 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
     expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "Help" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Troubleshoot…" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open…" }));
     expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Troubleshoot");
     // ⌘, goes back to Settings (U6).
     fireEvent.keyDown(window, { key: ",", metaKey: true });
     expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
   });
 
-  /** A backend whose first window request is `request`. */
-  function backendAsking(request: string, seen: string[] = []) {
+  /** A backend whose first window request is `request`; returns how to ask again. */
+  function backendAsking(request: string, seen: string[] = [], pages: unknown[] = []) {
     let asked = request;
-    mockIPC((command) => {
+    mockIPC((command, payload) => {
       seen.push(command);
       switch (command) {
+        case "set_window_page":
+          pages.push((payload as { page: unknown }).page);
+          return null;
         case "get_onboarding":
           return {
             view: "settings",
@@ -143,6 +146,10 @@ describe("App", () => {
           return false;
       }
     });
+    return (next: string) => {
+      asked = next;
+      fireEvent.focus(window);
+    };
   }
 
   // U5 criterion 3, U6: the fix rows open the section that fixes the problem.
@@ -152,11 +159,11 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Speech" })).toBeTruthy();
   });
 
-  it("opens Dictation, with the shortcut, when the tray's Choose another key asked", async () => {
+  it("opens Dictation, on the dictation key, when the tray's Choose another key asked", async () => {
     backendAsking("shortcut");
     render(<App />);
     expect(await screen.findByRole("heading", { level: 1, name: "Dictation" })).toBeTruthy();
-    expect(await screen.findByRole("button", { name: "Record a different key" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Change…" })).toBeTruthy();
   });
 
   // U7 criterion 6: the menu's "History…".
@@ -173,21 +180,116 @@ describe("App", () => {
     backendAsking("", seen);
     render(<App />);
     fireEvent.click(await screen.findByRole("tab", { name: "Help" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Show log file" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show in Finder" }));
     await waitFor(() => {
       expect(seen).toContain("reveal_log_file");
     });
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  // U5: "Report a problem…" opens Troubleshoot with the report preview built.
-  it("opens Troubleshoot with the report built when the tray asked for it", async () => {
-    const seen: string[] = [];
-    backendAsking("report", seen);
+  const heading = async () => (await screen.findByRole("heading", { level: 1 })).textContent;
+
+  // U12 criterion 1, #277: an old ask from the tray isn't followed again when
+  // Settings comes back.
+  for (const [screenName, button, back] of [
+    ["Troubleshoot", "Open…", "Back to Settings"],
+    ["Report a problem", "Preview…", "Back to Settings"],
+  ] as const) {
+    it(`u12_criterion_1 Back from ${screenName} returns to Help, after the tray opened History`, async () => {
+      window.localStorage.clear();
+      backendAsking("history");
+      render(<App />);
+      expect(await screen.findByRole("heading", { level: 1, name: "History" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("tab", { name: "Help" }));
+      expect(await screen.findByRole("heading", { level: 1, name: "Help" })).toBeTruthy();
+      fireEvent.click(await screen.findByRole("button", { name: button }));
+      expect(await heading()).toBe(screenName);
+      fireEvent.click(screen.getByRole("button", { name: back }));
+      expect(await screen.findByRole("heading", { level: 1, name: "Help" })).toBeTruthy();
+    });
+  }
+
+  it("u12_criterion_1 a repeated ask from the tray still counts", async () => {
+    window.localStorage.clear();
+    const ask = backendAsking("history");
     render(<App />);
-    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Troubleshoot");
+    expect(await screen.findByRole("heading", { level: 1, name: "History" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Help" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Help" })).toBeTruthy();
+    ask("history");
+    expect(await screen.findByRole("heading", { level: 1, name: "History" })).toBeTruthy();
+  });
+
+  // U12 criterion 2.
+  it("u12_criterion_2 Report opened from Troubleshoot goes back to Troubleshoot", async () => {
+    let asked = "troubleshoot";
+    backendAsking("troubleshoot");
+    mockIPC((command) => {
+      switch (command) {
+        case "take_window_request": {
+          const answer = asked;
+          asked = "";
+          return answer;
+        }
+        case "get_onboarding":
+          return { view: "settings" };
+        case "run_checks":
+          return [
+            {
+              id: "microphone",
+              label: "Microphone",
+              ok: false,
+              detail: "Not allowed.",
+              code: "mic_denied",
+              details: "mic_denied",
+              fix: null,
+              fix_label: null,
+              local_model: null,
+            },
+          ];
+        case "build_report":
+          return "Vocet diagnostics report\n";
+        default:
+          return null;
+      }
+    });
+    render(<App />);
+    expect(await heading()).toBe("Troubleshoot");
+    fireEvent.click(await screen.findByRole("button", { name: "Report a problem…" }));
+    expect(await heading()).toBe("Report a problem");
     expect(await screen.findByLabelText("Report")).toBeTruthy();
-    expect(seen.filter((command) => command === "build_report")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Back to Troubleshoot" }));
+    expect(await heading()).toBe("Troubleshoot");
+  });
+
+  it("u12_criterion_2 each screen gives the window its title", async () => {
+    const pages: unknown[] = [];
+    window.localStorage.clear();
+    backendAsking("help", [], pages);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open…" }));
+    expect(await heading()).toBe("Troubleshoot");
+    fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Preview…" }));
+    expect(await heading()).toBe("Report a problem");
+    await waitFor(() => {
+      expect(pages).toEqual(["settings", "troubleshoot", "settings", "report"]);
+    });
+  });
+
+  // U12 criterion 7: the menu's Help… and Settings….
+  it("u12_criterion_7 opens Help when the tray's Help… asked", async () => {
+    backendAsking("help");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Help" })).toBeTruthy();
+  });
+
+  it("u12_criterion_7 the tray's Settings… leaves Troubleshoot for Settings", async () => {
+    const ask = backendAsking("troubleshoot");
+    render(<App />);
+    expect(await heading()).toBe("Troubleshoot");
+    ask("settings");
+    expect(await screen.findByRole("tablist", { name: "Settings sections" })).toBeTruthy();
   });
 
   // U5 criterion 6, U6 criterion 7: "Resume setup…" leaves the tray once setup
@@ -233,7 +335,7 @@ describe("App", () => {
     });
     render(<App />);
     fireEvent.click(await screen.findByRole("tab", { name: "Help" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Run setup again" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Start…" }));
     await waitFor(() => {
       expect(seen).toContain("open_setup");
       expect(screen.queryByRole("tablist", { name: "Settings sections" })).toBeNull();

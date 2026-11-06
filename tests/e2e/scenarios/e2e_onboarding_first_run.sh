@@ -1,6 +1,6 @@
 # U8 criterion 8 (M5.2 criterion 3 before it): a first run with no saved key,
-# down the own-key path. Onboarding shows at launch at Welcome, with the events
-# switch on. In Speech, Test & Save refuses a key the provider rejects, leaving
+# down the own-key path. Onboarding shows at launch at Welcome, without the
+# events switch, which Ready has, on (U10). In Speech, Test & Save refuses a key the provider rejects, leaving
 # Continue locked, and accepts a made-up key the local provider (T4a,
 # _provider_helpers.sh) takes. Permissions shows both allowed, Try it's
 # dictation pastes into the practice box, Ready shows the real states, and
@@ -31,8 +31,6 @@ e2e_onboarding_first_run() {
   expect "its window is on screen" ax_ok wait-window "$APP_NAME" "$ONBOARDING_WINDOW" 10
   expect "it says what the app does" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Talk instead of type" 10
-  expect "the events switch is on" \
-    job_says checked ax check-get "$APP_NAME" "$ONBOARDING_WINDOW" ob-share
   expect "press Continue" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" Continue
   expect "Speech asks for the language" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Which language" 10
@@ -114,7 +112,7 @@ e2e_onboarding_first_run() {
   expect "Help offers Run setup again" \
     ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Go through the first-run steps again" 10
   expect "Run setup again opens it" \
-    ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Run setup again"
+    ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Start…"
   expect "its window is on screen" ax_ok wait-window "$APP_NAME" "$ONBOARDING_WINDOW" 10
   expect "at Welcome" ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Talk instead of type" 10
   expect "closing it hides it" ax_ok close "$APP_NAME" "$ONBOARDING_WINDOW"

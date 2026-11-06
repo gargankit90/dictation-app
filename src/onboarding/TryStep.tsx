@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "../bindings";
 import type { DictationProgressView, OnboardingStatus, Settings_Serialize } from "../bindings";
 import { HotkeyRecorder } from "../HotkeyRecorder";
@@ -65,12 +65,48 @@ export function TryStep({
   const [words, setWords] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [succeeded, setSucceeded] = useState(status.try_outcome === "passed");
+  const [recording, setRecording] = useState(false);
+  // For what runs later than a render: the window's focus event, a key's save.
+  const recordingNow = useRef(false);
   const blocked = wait !== null;
 
-  // The paste goes wherever the focus is: put it in the box.
+  // Taller than the step (very long text in a small window), its top comes
+  // first: "nearest" wouldn't move it, and its button could stay out of sight.
+  const revealFix = useCallback(() => {
+    const panel = fixArea.current;
+    if (panel === null) return;
+    const tall = panel.offsetHeight > (panel.parentElement?.clientHeight ?? 0);
+    panel.scrollIntoView({ block: tall ? "start" : "nearest" });
+  }, []);
+
+  // The paste goes wherever the focus is: put it in the box, so the first
+  // dictation works without a click. Never during a recording, and the failed
+  // paste's panel stays in view: focus alone would scroll to the box.
+  const focusBox = useCallback(() => {
+    const box = field.current;
+    if (box === null || box.disabled || recordingNow.current) return;
+    box.focus({ preventScroll: fixArea.current !== null });
+    revealFix();
+  }, [revealFix]);
+
   useEffect(() => {
-    if (!blocked) field.current?.focus();
-  }, [blocked]);
+    if (!blocked) focusBox();
+  }, [blocked, focusBox]);
+
+  // Back from another app: macOS also reveals the box's caret as the window
+  // activates, so the panel is revealed again after that.
+  useEffect(() => {
+    const returned = () => {
+      focusBox();
+      window.requestAnimationFrame(revealFix);
+    };
+    window.addEventListener("focus", returned);
+    window.addEventListener("resize", revealFix);
+    return () => {
+      window.removeEventListener("focus", returned);
+      window.removeEventListener("resize", revealFix);
+    };
+  }, [focusBox, revealFix]);
 
   // While practice waits for the model the key does nothing here. The hotkey
   // recorder's pause, renewed; it lapses by itself if this window stops.
@@ -150,11 +186,24 @@ export function TryStep({
 
   const view = tryView(progress, baseline, check);
 
-  // role="alert" announces it but doesn't scroll: the panel lands below the
-  // fold in a short window. Again when the words arrive and it grows.
+  // Only this window can see the box, so it tells the app the paste missed,
+  // once per dictation. The app records it, if sharing is on (U10).
+  const missTold = useRef<number | null>(null);
+  const missed = view.fix.kind === "paste";
   useEffect(() => {
-    if (view.fix.kind !== "none") fixArea.current?.scrollIntoView({ block: "nearest" });
-  }, [view.fix.kind, words, copied]);
+    if (!missed || missTold.current === startedNow) return;
+    missTold.current = startedNow;
+    void commands.practicePasteMissed().catch(() => undefined);
+  }, [missed, startedNow]);
+
+  // role="alert" announces it but doesn't scroll: the panel lands below the
+  // fold in a short window. Again when the words arrive and it grows, and when
+  // what is above it changes size. Not during a recording: the user is at the
+  // recorder.
+  const hotkey = settings?.hotkey;
+  useEffect(() => {
+    if (view.fix.kind !== "none" && !recording) revealFix();
+  }, [view.fix.kind, words, copied, hotkey, recording, revealFix]);
 
   async function copy() {
     try {
@@ -180,18 +229,23 @@ export function TryStep({
       <HotkeyRecorder
         value={settings?.hotkey ?? "RightAlt"}
         disabled={settings === null}
-        onRecording={(recording) => {
+        onRecording={(now) => {
           // While practice waits, the key stays paused after recording too.
-          setHotkeyRecording(recording || blocked);
+          setHotkeyRecording(now || blocked);
+          recordingNow.current = now;
+          setRecording(now);
+          // However it ended: a new key, Cancel, Esc.
+          if (!now) focusBox();
         }}
         onChange={async (spec) => {
           const result = await saveHotkey(spec);
           if (result.settings !== null) onStored(result.settings);
+          focusBox();
           return result.error;
         }}
       />
       <label htmlFor="try-field" className="ob-label">
-        Click the box, hold the key, say a sentence, let go.
+        Hold the key, say a sentence, let go.
       </label>
       <textarea
         id="try-field"

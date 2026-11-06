@@ -305,3 +305,35 @@ reach the owner's Mac**: there is no self-hosted runner, and
 - Findings are rated **blocker**, **major** or **minor**. Blockers and majors
   are fixed before merging; minors are fixed or recorded as a
   GitHub issue labelled `tech-debt`, with a reason, linked from the PR.
+
+### Claude command hook and ruleset audit (G1)
+
+`.claude/hooks/guard-git.sh` is a best-effort matcher for plain merge,
+destructive repository API and guard-write commands. It fails open for
+unreadable input, unparsable shell and heredocs. It neither executes the
+inspected command nor reads files named in it. Read-only guard references,
+multiline scripts, unrelated settings.json files and hook-bypass settings
+pass. Skipping hooks remains prohibited by AGENTS.md; required CI enforces
+the gate. Edit/Write denies remain, and the four static push denies are gone.
+The pre-push guard, pre-push runner and installer are unchanged; no reinstall
+is needed.
+
+A deliberately disguised command can get past the hook. We accept this
+trade-off to avoid false positives. The hosted daily `rulesets.yml` workflow
+compares names, enforcement, target, conditions and rules against
+`.github/rulesets-expected.json`, catching visible ruleset drift afterwards.
+It uses only `contents: read` and no secrets. Missing rulesets, API errors
+and policy differences fail the run; ordering and API metadata do not.
+GitHub omits `bypass_actors` without ruleset write access ([API documentation](https://docs.github.com/en/rest/repos/rules#get-a-repository-ruleset)),
+so the workflow logs that limitation and cannot attest bypass policy.
+The Lead runs `python3 scripts/check-rulesets.py --require-bypass` locally
+with the existing admin `gh` token to check bypass actors as well; it fails
+if that field is hidden. The owner must enable GitHub workflow-failure email
+notifications to receive scheduled failure alerts. The audit cannot repair
+a changed policy or protect itself from an admin disabling the workflow.
+
+GitHub disables scheduled workflows in public repositories after 60 days
+without repository activity; this daily audit then stops until the workflow
+is re-enabled. The Lead should check the schedule remains enabled and, after
+merging G1-simple-guard, run `gh workflow run rulesets.yml` once and verify
+the first hosted read-only-token run is green.

@@ -10,9 +10,18 @@ export function WhatsSent() {
   return (
     <details className="row-details">
       <summary>What&apos;s sent</summary>
+      <p className="hint">
+        Sent while this is on, from the first setup screen. Off stops it at once and deletes what is
+        waiting and the ID below; it can&apos;t recall what was already sent.
+      </p>
       <ul className="hint">
         <li>That the app was opened, with its version, your macOS version and chip.</li>
-        <li>Which onboarding steps you reached, and that you finished.</li>
+        <li>Which setup steps you reached, where you stopped, and that you finished.</li>
+        <li>
+          What got in the way in setup, as a fixed reason: a failed download or key test, a
+          permission that was refused (which one), a paste that missed, a skipped practice. Never
+          the details.
+        </li>
         <li>Which speech engine you chose (for example Groq or OpenAI).</li>
         <li>That a dictation worked, with its length and speed in rough ranges (not the words).</li>
         <li>That a dictation failed, and the kind of failure (not the message).</li>
@@ -92,9 +101,10 @@ export type SharingSwitch = ReturnType<typeof useSharingSwitch>;
 
 /**
  * What a step's way forward must say while the switch isn't settled: leaving
- * can send events, so it waits for the user's choice to be saved.
+ * can send events, so it waits for the user's choice to be saved. `failed` is
+ * what to say about a failed write, or `null` if this step can't hold on one.
  */
-export function sharingBlock(save: SaveState, failed: string): string | null {
+export function sharingBlock(save: SaveState, failed: string | null): string | null {
   if (save.state === "saving") return "Saving your choice…";
   return save.state === "error" ? failed : null;
 }

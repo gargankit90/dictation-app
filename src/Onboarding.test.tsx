@@ -21,11 +21,16 @@ import type {
 } from "./bindings";
 import { Onboarding, RELAUNCH_AFTER_POLLS, STEPS } from "./Onboarding";
 import css from "./settings.css?raw";
-import { FINISH_REASON, NOT_TESTED } from "./onboarding/ReadyStep";
+import {
+  EVENTS_CAPTION,
+  EVENTS_FROM_NOW_CAPTION,
+  EVENTS_OFF_CAPTION,
+  FINISH_REASON,
+  NOT_TESTED,
+} from "./onboarding/ReadyStep";
 import { KEY_REASON, MODEL_COPY } from "./onboarding/SpeechStep";
 import { BOTH_REASON } from "./onboarding/PermissionsStep";
 import { CONTINUE_REASON } from "./onboarding/TryStep";
-import { EVENTS_CAPTION, SAVE_FAILED_REASON } from "./onboarding/WelcomeStep";
 import { Privacy } from "./settings/Privacy";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
@@ -86,6 +91,7 @@ class Backend {
   accessibility: PermissionState = "not_determined";
   needsRelaunch = false;
   tryOutcome: TryOutcome = "not_tried";
+  sharingOnThroughout = true;
   downloadPaused = false;
   speechChoice: SpeechChoice | null = null;
   /** The server answers a resume with the whole file. */
@@ -122,6 +128,7 @@ class Backend {
       accessibility: this.accessibility,
       needs_relaunch: this.needsRelaunch,
       try_outcome: this.tryOutcome,
+      sharing_on_throughout: this.sharingOnThroughout,
       download_paused: this.downloadPaused,
       speech_choice: this.speechChoice,
     };
@@ -174,6 +181,8 @@ class Backend {
         return null;
       case "dictation_progress":
         return this.progress;
+      case "practice_paste_missed":
+        return null;
       case "practice_words":
         return this.words;
       case "copy_practice_words":
@@ -376,33 +385,204 @@ describe("the frame", () => {
 });
 
 describe("Welcome", () => {
-  it("criterion 2: the switch is on, with its caption and What's sent", async () => {
+  // Replaces U8's three tests here, which required the switch on this screen
+  // and no event before leaving it (U10 reverses both).
+  it("U10 criterion 1: has no sharing switch, caption or What's sent", async () => {
     show();
-    const share = await screen.findByRole("switch", { name: "Share usage and error events" });
-    expect((share as HTMLInputElement).checked).toBe(true);
-    expect(screen.getByText(EVENTS_CAPTION)).toBeTruthy();
-    expect(screen.getByText("What's sent")).toBeTruthy();
-    expect(screen.getByText("Change any time in Settings → Privacy.")).toBeTruthy();
-  });
-
-  it("criterion 2: the screen itself asks the app to record nothing", async () => {
-    show();
-    await screen.findByRole("switch", { name: "Share usage and error events" });
-    // Moving past Welcome is what opens the gate (ConsentGate, in Rust).
-    expect(backend.named("set_onboarding_step")).toEqual([]);
-  });
-
-  it("criterion 2: switching it off goes through A1's command, then Continue moves on", async () => {
-    show();
-    const share = await screen.findByRole("switch", { name: "Share usage and error events" });
-    fireEvent.click(share);
+    await screen.findByText("Talk instead of type");
     await waitFor(() => {
-      expect(backend.settings.share_usage_events).toBe(false);
+      expect(primary("Continue").disabled).toBe(false);
     });
-    expect(backend.named("set_share_usage_events")[0]?.args).toEqual({ share: false });
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByText(/usage|error events|anonymous/i)).toBeNull();
+    expect(screen.queryByText("What's sent")).toBeNull();
+  });
+
+  it("Continue moves on", async () => {
+    show();
+    await screen.findByText("Talk instead of type");
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
     fireEvent.click(primary("Continue"));
     await screen.findByText("Which language will you mostly speak?");
     expect(backend.step).toBe("speech");
+  });
+});
+
+describe("the sharing switch across setup (U10)", () => {
+  it.each(["speech", "permissions", "try"] as const)(
+    "criterion 1: %s has no sharing switch",
+    async (step) => {
+      backend.allSet(step);
+      show();
+      await screen.findByRole("navigation", { name: "Setup steps" });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(screen.queryByRole("switch", { name: /usage and error events/i })).toBeNull();
+      expect(screen.queryByText("What's sent")).toBeNull();
+    },
+  );
+
+  it("criterion 1: Ready has the switch, on by default, with What's sent", async () => {
+    backend.allSet("ready");
+    show();
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    expect(share.checked).toBe(true);
+    expect(screen.getByText(EVENTS_CAPTION)).toBeTruthy();
+    expect(screen.getByText("What's sent")).toBeTruthy();
+  });
+
+  it("criterion 3: a stored off shows off on Ready, and setup writes nothing", async () => {
+    backend.settings = { ...backend.settings, share_usage_events: false };
+    backend.allSet("ready");
+    show();
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    await waitFor(() => {
+      expect(share.checked).toBe(false);
+    });
+    expect(screen.getByText(EVENTS_OFF_CAPTION)).toBeTruthy();
+    expect(screen.queryByText(EVENTS_CAPTION)).toBeNull();
+    fireEvent.click(primary("Start dictating"));
+    await waitFor(() => {
+      expect(backend.named("finish_onboarding")).toHaveLength(1);
+    });
+    expect(backend.named("set_share_usage_events")).toEqual([]);
+    expect(backend.settings.share_usage_events).toBe(false);
+  });
+
+  it("criterion 7: What's sent says what really happens", async () => {
+    backend.allSet("ready");
+    show();
+    await screen.findByText("What's sent");
+    const words = screen.getByText("What's sent").closest("details")?.textContent ?? "";
+    expect(words).toContain("from the first setup screen");
+    expect(words).toContain("deletes what is waiting");
+    expect(words).toContain("can't recall what was already sent");
+    expect(words).toContain("where you stopped");
+    expect(EVENTS_CAPTION).toContain("On since setup began");
+    expect(EVENTS_CAPTION).toContain("Off stops them and deletes what's waiting");
+    expect(EVENTS_OFF_CAPTION).toContain("Settings → Privacy");
+    expect(EVENTS_CAPTION).not.toMatch(/nothing is sent|until you/i);
+  });
+
+  it("round 2: stored off, then on at Ready, doesn't claim it was on since setup began", async () => {
+    backend.settings = { ...backend.settings, share_usage_events: false };
+    backend.sharingOnThroughout = false;
+    backend.allSet("ready");
+    show();
+    const share = await screen.findByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    await screen.findByText(EVENTS_OFF_CAPTION);
+    fireEvent.click(share);
+    await waitFor(() => {
+      expect(backend.settings.share_usage_events).toBe(true);
+    });
+    await screen.findByText(EVENTS_FROM_NOW_CAPTION);
+    expect(screen.queryByText(EVENTS_CAPTION)).toBeNull();
+    expect(EVENTS_FROM_NOW_CAPTION).not.toMatch(/since/i);
+  });
+
+  // What the app reports for this, an old progress file and one it can't read too:
+  // u10_unknown_sharing_history_never_claims_on_since_setup_began, in Rust.
+  it("round 3: history that says off or is unknown doesn't claim it", async () => {
+    backend.sharingOnThroughout = false;
+    backend.allSet("ready");
+    show();
+    await screen.findByText(EVENTS_FROM_NOW_CAPTION);
+    expect(screen.queryByText(EVENTS_CAPTION)).toBeNull();
+  });
+
+  it("round 2: off and on again at Ready says from now, before the app's next report", async () => {
+    backend.allSet("ready");
+    show();
+    await screen.findByText(EVENTS_CAPTION);
+    const share = screen.getByRole<HTMLInputElement>("switch", {
+      name: "Share usage and error events",
+    });
+    fireEvent.click(share);
+    await screen.findByText(EVENTS_OFF_CAPTION);
+    fireEvent.click(share);
+    await screen.findByText(EVENTS_FROM_NOW_CAPTION);
+    expect(backend.sharingOnThroughout).toBe(true);
+    expect(screen.queryByText(EVENTS_CAPTION)).toBeNull();
+  });
+
+  it("round 2: no caption claims anything before the stored choice is read", async () => {
+    backend.allSet("ready");
+    const held: { finish: () => void } = { finish: () => undefined };
+    const original = backend.handle;
+    mockIPC((command, payload) => {
+      if (command !== "get_settings") return original(command, payload);
+      return new Promise((resolve) => {
+        held.finish = () => {
+          resolve(original(command, payload));
+        };
+      });
+    });
+    show();
+    await screen.findByText("You're set");
+    expect(screen.queryByText(EVENTS_CAPTION)).toBeNull();
+    expect(screen.queryByText(EVENTS_FROM_NOW_CAPTION)).toBeNull();
+    act(() => {
+      held.finish();
+    });
+    await screen.findByText(EVENTS_CAPTION);
+  });
+
+  it("item 1: a click on What's sent opens it on Ready, and it stays open", async () => {
+    backend.allSet("ready");
+    show();
+    const summary = await screen.findByText("What's sent");
+    const details = summary.closest("details");
+    if (details === null) throw new Error("no disclosure");
+    expect(details.open).toBe(false);
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
+    // And stays open through the shell's polling, which re-renders the step.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    });
+    expect(details.open).toBe(true);
+    fireEvent.click(summary);
+    expect(details.open).toBe(false);
+  });
+
+  it("item 1: What's sent opens on Settings → Privacy too", () => {
+    render(<Privacy settings={backend.settings} onStored={() => undefined} />);
+    const summary = screen.getByText("What's sent");
+    const details = summary.closest("details");
+    if (details === null) throw new Error("no disclosure");
+    expect(details.open).toBe(false);
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
+  });
+
+  it("a failed write made elsewhere doesn't trap a step with no switch", async () => {
+    const original = backend.handle;
+    mockIPC((command, payload) => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      if (command === "set_share_usage_events") throw "Couldn't write the settings file.";
+      return original(command, payload);
+    });
+    const settings = render(<Privacy settings={backend.settings} onStored={() => undefined} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Share usage and error events" }));
+    await screen.findByRole("alert");
+    settings.unmount();
+
+    show();
+    await screen.findByText("Talk instead of type");
+    await waitFor(() => {
+      expect(primary("Continue").disabled).toBe(false);
+    });
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Which language will you mostly speak?");
   });
 });
 
@@ -433,6 +613,7 @@ describe("one queue for the whole window (round 5)", () => {
 
   it("an old write from onboarding can't land after a newer off in Settings", async () => {
     backend.settings = { ...backend.settings, share_usage_events: false };
+    backend.allSet("ready");
     const pending = holdWrites();
     const setup = show();
     const share = await screen.findByRole<HTMLInputElement>("switch", {
@@ -477,7 +658,7 @@ describe("one queue for the whole window (round 5)", () => {
     settings.unmount();
 
     show();
-    await screen.findByRole("switch", { name: "Share usage and error events" });
+    await screen.findByText("Talk instead of type");
     await waitFor(() => {
       expect(primary("Continue").disabled).toBe(true);
     });
@@ -508,7 +689,14 @@ describe("one queue for the whole window (round 5)", () => {
   });
 });
 
-describe("Welcome's switch before Continue (finding 1)", () => {
+// U8 finding 1 and round 2, moved from Welcome with the switch (U10 criterion 5):
+// Off on Ready, right before Start dictating, can't be overtaken.
+describe("Ready's switch before Start dictating", () => {
+  beforeEach(() => {
+    backend.allSet("ready");
+    backend.tryOutcome = "passed";
+  });
+
   /** Holds `set_share_usage_events` until `finish` is called. */
   function holdTheWrite(fail = false) {
     const held: { finish: () => void } = { finish: () => undefined };
@@ -529,26 +717,28 @@ describe("Welcome's switch before Continue (finding 1)", () => {
     return held;
   }
 
-  it("Continue can't overtake an opt-out still being written", async () => {
+  it("Start dictating can't overtake an opt-out still being written", async () => {
     const held = holdTheWrite();
     show();
     fireEvent.click(await screen.findByRole("switch", { name: "Share usage and error events" }));
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(true);
+      expect(primary("Start dictating").disabled).toBe(true);
     });
     expect(screen.getByText(SAVING_REASON)).toBeTruthy();
-    fireEvent.click(primary("Continue"));
-    expect(backend.named("set_onboarding_step")).toEqual([]);
+    fireEvent.click(primary("Start dictating"));
+    expect(backend.named("finish_onboarding")).toEqual([]);
 
     act(() => {
       held.finish();
     });
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(false);
+      expect(primary("Start dictating").disabled).toBe(false);
     });
     expect(backend.settings.share_usage_events).toBe(false);
-    fireEvent.click(primary("Continue"));
-    await screen.findByText("Which language will you mostly speak?");
+    fireEvent.click(primary("Start dictating"));
+    await waitFor(() => {
+      expect(backend.named("finish_onboarding")).toHaveLength(1);
+    });
   });
 
   /**
@@ -593,18 +783,18 @@ describe("Welcome's switch before Continue (finding 1)", () => {
     fireEvent.click(share); // off, the user's last word
     expect(share.checked).toBe(false);
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(true);
+      expect(primary("Start dictating").disabled).toBe(true);
     });
     // With overlapping writes, this applies off and then on.
     await releaseNewestFirst(pending);
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(false);
+      expect(primary("Start dictating").disabled).toBe(false);
     });
     expect(backend.settings.share_usage_events).toBe(false);
     expect(share.checked).toBe(false);
   });
 
-  it("round 2: on, off, on ends on, and Continue waits for all of it", async () => {
+  it("round 2: on, off, on ends on, and Start dictating waits for all of it", async () => {
     const pending = holdEveryWrite();
     show();
     const share = await screen.findByRole<HTMLInputElement>("switch", {
@@ -615,17 +805,17 @@ describe("Welcome's switch before Continue (finding 1)", () => {
     fireEvent.click(share); // off
     fireEvent.click(share); // on
     expect(pending).toHaveLength(1);
-    expect(primary("Continue").disabled).toBe(true);
+    expect(primary("Start dictating").disabled).toBe(true);
     await act(async () => {
       pending.pop()?.();
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
-    // The first write done: only the last choice is sent next, and Continue waits for it.
+    // The first write done: only the last choice is sent next, and Start dictating waits for it.
     expect(pending).toHaveLength(1);
-    expect(primary("Continue").disabled).toBe(true);
+    expect(primary("Start dictating").disabled).toBe(true);
     await releaseNewestFirst(pending);
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(false);
+      expect(primary("Start dictating").disabled).toBe(false);
     });
     expect(backend.settings.share_usage_events).toBe(true);
     expect(backend.named("set_share_usage_events").map((call) => call.args.share)).toEqual([
@@ -642,16 +832,16 @@ describe("Welcome's switch before Continue (finding 1)", () => {
     });
     fireEvent.click(share);
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(true);
+      expect(primary("Start dictating").disabled).toBe(true);
     });
     act(() => {
       held.finish();
     });
-    await screen.findByText(SAVE_FAILED_REASON);
-    expect(primary("Continue").disabled).toBe(true);
+    await screen.findByText(FINISH_REASON);
+    expect(primary("Start dictating").disabled).toBe(true);
     expect(share.checked).toBe(true);
-    fireEvent.click(primary("Continue"));
-    expect(backend.named("set_onboarding_step")).toEqual([]);
+    fireEvent.click(primary("Start dictating"));
+    expect(backend.named("finish_onboarding")).toEqual([]);
   });
 });
 
@@ -814,6 +1004,18 @@ describe("Speech", () => {
     await screen.findByText("Groq rejected this API key.");
     expect(backend.step).toBe("speech");
     expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "groq", key: null });
+  });
+});
+
+describe("Speech with More… open (U9, Design Lead's fix 2)", () => {
+  it("gives no reason in the footer before a language is chosen", async () => {
+    backend.step = "speech";
+    show();
+    fireEvent.click(await screen.findByRole("radio", { name: "More…" }));
+    await screen.findByRole("combobox");
+    const reason = document.querySelector(".ob-reason");
+    expect(reason?.textContent).toBe("");
+    expect(screen.queryByText(/No on-device model speaks this language/)).toBeNull();
   });
 });
 
@@ -1019,9 +1221,7 @@ describe("Try it", () => {
     await waitFor(() => {
       expect(backend.named("dictation_progress").length).toBeGreaterThan(0);
     });
-    return screen.getByLabelText<HTMLTextAreaElement>(
-      "Click the box, hold the key, say a sentence, let go.",
-    );
+    return screen.getByLabelText<HTMLTextAreaElement>("Hold the key, say a sentence, let go.");
   }
 
   function stage(name: string) {
@@ -1142,6 +1342,40 @@ describe("Try it", () => {
     expect(backend.named("copy_practice_words")).toHaveLength(1);
   });
 
+  it("U10 criterion 4: a missed paste tells the app once, with nothing from the box", async () => {
+    await stepOpen();
+    backend.words = WORDS;
+    report({
+      started: 1,
+      finished: 1,
+      completed: 1,
+      heard: true,
+      stages: ["recorded", "transcribed", "pasted"],
+    });
+    await screen.findByText(WORDS, undefined, { timeout: 2500 });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 900));
+    });
+    expect(backend.named("practice_paste_missed")).toEqual([
+      { command: "practice_paste_missed", args: {} },
+    ]);
+  });
+
+  it("U10 criterion 4: a paste that landed isn't a missed one", async () => {
+    await stepOpen();
+    backend.words = WORDS;
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: WORDS } });
+    report({
+      started: 1,
+      finished: 1,
+      completed: 1,
+      heard: true,
+      stages: ["recorded", "transcribed", "pasted"],
+    });
+    await screen.findByText(/It works/, undefined, { timeout: 2500 });
+    expect(backend.named("practice_paste_missed")).toEqual([]);
+  });
+
   it("Design Lead: the title is Try it, with the key as a small label", async () => {
     await stepOpen();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Try it");
@@ -1243,6 +1477,112 @@ describe("Try it", () => {
     });
     releaseAllKeys();
   });
+
+  describe("the box's focus (U9 criterion 6)", () => {
+    it("has it on arriving, so the first dictation needs no click", async () => {
+      const box = await stepOpen();
+      expect(document.activeElement).toBe(box);
+    });
+
+    it("gets it back after a new key is recorded, and stays empty", async () => {
+      const box = await stepOpen();
+      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      box.blur();
+      keyDown("MetaRight");
+      keyUp("MetaRight");
+      await waitFor(() => {
+        expect(backend.settings.hotkey).toBe("RightCmd");
+      });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(box);
+      });
+      expect(box.value).toBe("");
+      releaseAllKeys();
+    });
+
+    it("gets it back after a cancelled recording, by Cancel and by Esc", async () => {
+      const box = await stepOpen();
+      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      box.blur();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      await waitFor(() => {
+        expect(document.activeElement).toBe(box);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      box.blur();
+      keyDown("Escape");
+      keyUp("Escape");
+      await waitFor(() => {
+        expect(document.activeElement).toBe(box);
+      });
+      expect(box.value).toBe("");
+      releaseAllKeys();
+    });
+
+    it("gets it back after Reset to default", async () => {
+      const box = await stepOpen();
+      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      keyDown("MetaRight");
+      keyUp("MetaRight");
+      await waitFor(() => {
+        expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌘");
+      });
+      releaseAllKeys();
+      box.blur();
+      fireEvent.click(screen.getByRole("button", { name: "Reset to default" }));
+      await waitFor(() => {
+        expect(backend.settings.hotkey).toBe("RightAlt");
+      });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(box);
+      });
+    });
+
+    it("gets it back when the window becomes active again", async () => {
+      const box = await stepOpen();
+      box.blur();
+      expect(document.activeElement).not.toBe(box);
+      window.dispatchEvent(new Event("focus"));
+      expect(document.activeElement).toBe(box);
+    });
+
+    it("isn't taken during a recording, not even by the window returning", async () => {
+      const box = await stepOpen();
+      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      await screen.findByText("Press a key…");
+      box.blur();
+      const button = screen.getByRole("button", { name: "Cancel" });
+      button.focus();
+      window.dispatchEvent(new Event("focus"));
+      expect(document.activeElement).toBe(button);
+      expect(box.value).toBe("");
+      fireEvent.click(button);
+    });
+
+    it("keeps the failed paste's panel in view while it refocuses", async () => {
+      const box = await stepOpen();
+      backend.words = WORDS;
+      report({
+        started: 1,
+        finished: 1,
+        errors: 1,
+        stages: ["recorded", "transcribed"],
+        error: "Vocet couldn't paste the text.",
+        failure: "paste",
+        heard: true,
+      });
+      const panel = await screen.findByText(/didn't reach the box/);
+      const area = panel.closest(".ob-fix-area");
+      const focus = vi.spyOn(box, "focus");
+      const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+      box.blur();
+      window.dispatchEvent(new Event("focus"));
+      expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+      expect(scroll.mock.instances).toContain(area);
+      scroll.mockRestore();
+    });
+  });
 });
 
 describe("Ready", () => {
@@ -1282,12 +1622,11 @@ describe("Ready", () => {
     backend.settings = { ...backend.settings, share_usage_events: false };
     show();
     const share = await screen.findByRole<HTMLInputElement>("switch", {
-      name: "Usage and error events",
+      name: "Share usage and error events",
     });
     await waitFor(() => {
       expect(share.checked).toBe(false);
     });
-    expect(screen.getByText("Off")).toBeTruthy();
     fireEvent.click(share);
     await waitFor(() => {
       expect(backend.settings.share_usage_events).toBe(true);
@@ -1296,7 +1635,7 @@ describe("Ready", () => {
       { command: "set_share_usage_events", args: { share: true } },
     ]);
     expect(backend.step).toBe("ready");
-    expect(screen.getByText("On")).toBeTruthy();
+    expect(share.checked).toBe(true);
     expect(screen.queryByRole("button", { name: "Change" })?.closest("div")?.textContent).toContain(
       "History",
     );
@@ -1315,7 +1654,7 @@ describe("Ready", () => {
     });
     show();
     const share = await screen.findByRole<HTMLInputElement>("switch", {
-      name: "Usage and error events",
+      name: "Share usage and error events",
     });
     fireEvent.click(share); // off
     fireEvent.click(share); // on
@@ -1363,7 +1702,7 @@ describe("Ready", () => {
     });
     show();
     const share = await screen.findByRole<HTMLInputElement>("switch", {
-      name: "Usage and error events",
+      name: "Share usage and error events",
     });
     await screen.findByRole("button", { name: "Use my own key" });
     const pressExit = () => {
@@ -1426,7 +1765,7 @@ describe("Ready", () => {
       return original(name, payload);
     });
     show();
-    fireEvent.click(await screen.findByRole("switch", { name: "Usage and error events" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Share usage and error events" }));
     await screen.findByText(FINISH_REASON);
     for (const name of ["Start dictating", "Back", "Change", "Use my own key"]) {
       fireEvent.click(screen.getByRole("button", { name }));
@@ -1451,7 +1790,7 @@ describe("Ready", () => {
       return original(command, payload);
     });
     show();
-    fireEvent.click(await screen.findByRole("switch", { name: "Usage and error events" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Share usage and error events" }));
     await screen.findByText(FINISH_REASON);
     expect(primary("Start dictating").disabled).toBe(true);
     fireEvent.click(primary("Start dictating"));

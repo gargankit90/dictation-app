@@ -92,7 +92,7 @@ body {
 }
 
 .field label.check input[type="checkbox"]:checked {
-  background: var(--vc-accent);
+  background: var(--vc-primary-bg);
 }
 
 .field label.check input[type="checkbox"]:checked::after {
@@ -133,6 +133,10 @@ p.error:empty {
   color: var(--vc-ready);
 }
 
+.notice.attention {
+  color: var(--vc-attention);
+}
+
 .row {
   display: flex;
   align-items: center;
@@ -158,14 +162,14 @@ button:hover:not(:disabled) {
 }
 
 button.primary {
-  border-color: var(--vc-accent);
-  background: var(--vc-accent);
-  color: var(--vc-accent-fg);
+  border-color: var(--vc-primary-bg);
+  background: var(--vc-primary-bg);
+  color: var(--vc-primary-fg);
 }
 
 button.primary:hover:not(:disabled) {
-  border-color: var(--vc-accent-hover);
-  background: var(--vc-accent-hover);
+  border-color: var(--vc-primary-hover);
+  background: var(--vc-primary-hover);
 }
 
 button.plain {
@@ -301,6 +305,29 @@ fieldset.choice {
   margin: 2px 0 0;
 }
 
+/* The way back stays in view, whatever the window's size (U12). */
+.settings.troubleshoot {
+  display: flex;
+  box-sizing: border-box;
+  height: 100vh;
+  flex-direction: column;
+  padding: 0;
+}
+
+.page-body {
+  min-height: 0;
+  flex: 1;
+  padding: var(--vc-space-5) var(--vc-space-6);
+  overflow-y: auto;
+}
+
+.row.page-footer {
+  flex: none;
+  margin: 0;
+  padding: var(--vc-space-3) var(--vc-space-6);
+  border-top: 1px solid var(--vc-line);
+}
+
 .troubleshoot h2 {
   margin: var(--vc-space-5) 0 var(--vc-space-2);
   font-size: var(--vc-text-xl);
@@ -348,13 +375,61 @@ pre.report {
   position: relative;
 }
 
+.language-field {
+  position: relative;
+}
+
+.language-flag {
+  margin: var(--vc-space-1) 0 0;
+  color: var(--vc-attention);
+  font-size: var(--vc-text-sm);
+}
+
+.language-picker input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--vc-control-h);
+  padding: var(--vc-space-1) calc(var(--vc-space-2) * 2 + 12px) var(--vc-space-1) var(--vc-space-2);
+  border: 1px solid var(--vc-line-strong);
+  border-radius: var(--vc-radius-sm);
+  background: var(--vc-bg);
+  color: var(--vc-ink);
+  font: inherit;
+  text-overflow: ellipsis;
+}
+
+.language-picker input[aria-expanded="false"]:not(:disabled) {
+  cursor: pointer;
+}
+
+.language-picker input[aria-invalid="true"] {
+  border-color: var(--vc-danger);
+}
+
+/* Part of the field's look: a click on it reaches the field. */
+.language-chevron {
+  position: absolute;
+  top: 50%;
+  right: var(--vc-space-2);
+  color: var(--vc-muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.language-chevron.open {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+/* Clear of the field's focus ring (3 px, 2 px out), or it covers the first row.
+   The picker shortens it further to fit the area it opens in. */
 .language-list {
   position: absolute;
   z-index: 10;
   left: 0;
   right: 0;
+  box-sizing: border-box;
   max-height: 220px;
-  margin: 2px 0 0;
+  margin: var(--vc-space-2) 0 0;
   padding: var(--vc-space-1);
   overflow: auto;
   list-style: none;
@@ -379,11 +454,14 @@ pre.report {
 }
 
 button.link {
+  display: inline;
+  min-height: 0;
   padding: 0;
   border: 0;
   background: none;
   color: var(--vc-accent);
   font: inherit;
+  text-align: left;
   text-decoration: underline;
   cursor: pointer;
 }
@@ -422,8 +500,19 @@ button.link {
 }
 
 .settings-sidebar button.selected {
-  background: var(--vc-accent);
-  color: var(--vc-accent-fg);
+  background: var(--vc-selection-bg);
+  color: var(--vc-selection-fg);
+}
+
+/* Inside the row, so it can't run into the next one; never on a mouse click. */
+.settings-sidebar button:focus-visible {
+  outline: 2px solid var(--vc-accent);
+  outline-offset: -2px;
+}
+
+.settings-sidebar button.selected:focus-visible {
+  outline-color: var(--vc-selection-fg);
+  outline-offset: -4px;
 }
 
 .settings-pane {
@@ -559,7 +648,7 @@ input.switch::after {
 }
 
 input.switch:checked {
-  background: var(--vc-accent);
+  background: var(--vc-primary-bg);
 }
 
 input.switch:checked::after {
@@ -588,11 +677,110 @@ button.menu-button {
   white-space: nowrap;
 }
 
-/* The own-key panel, under its row. */
+.row-popover {
+  width: 260px;
+  white-space: normal;
+}
+
+.row-popover button {
+  margin: var(--vc-space-1) var(--vc-space-2);
+}
+
+.row-popover-info {
+  display: block;
+  padding: var(--vc-space-1) var(--vc-space-2);
+  color: var(--vc-muted);
+  font-size: var(--vc-text-sm);
+}
+
+/* U12: Speech's pick-one list. The whole left of a row selects it. */
+.engine-pick {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: var(--vc-space-3);
+  cursor: default;
+}
+
+.engine-pick input {
+  flex: none;
+  margin: 0;
+  accent-color: var(--vc-primary-bg);
+}
+
+/* U12: a sheet from the top of the window. */
+.key-sheet {
+  position: fixed;
+  z-index: 11;
+  top: 0;
+  left: 50%;
+  box-sizing: border-box;
+  width: min(440px, calc(100vw - var(--vc-space-12)));
+  max-height: calc(100vh - var(--vc-space-6));
+  padding: var(--vc-space-4) var(--vc-space-5);
+  overflow-y: auto;
+  border: 1px solid var(--vc-line);
+  border-top: 0;
+  border-radius: 0 0 var(--vc-radius-md) var(--vc-radius-md);
+  background: var(--vc-bg);
+  box-shadow: var(--vc-shadow-pop);
+  transform: translateX(-50%);
+}
+
+.key-sheet h2 {
+  margin: 0 0 var(--vc-space-3);
+  font-size: var(--vc-text-md);
+  font-weight: 600;
+}
+
+.key-sheet .confirm-actions {
+  margin-top: var(--vc-space-4);
+}
+
+.key-sheet .key-steps {
+  font-size: var(--vc-text-sm);
+}
+
+/* The Keychain notice: advice, not a success. */
+.notice-info {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--vc-space-3);
+  margin-bottom: var(--vc-space-4);
+  padding: var(--vc-space-3);
+  border-radius: var(--vc-radius-md);
+  background: var(--vc-accent-soft);
+  color: var(--vc-ink);
+}
+
+.notice-info p {
+  margin: 0;
+}
+
+.notice-info button {
+  flex: none;
+}
+
+/* The own-key panel: in the sheet, and in setup's Speech step. */
 .own-key-panel {
   margin-top: var(--vc-space-3);
-  padding-top: var(--vc-space-3);
-  border-top: 1px solid var(--vc-line);
+}
+
+.key-sheet .own-key-panel {
+  margin-top: 0;
+}
+
+/* Provider: a normal row with a compact, native popup, like History's. */
+.panel-row.provider-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.own-key-actions {
+  margin-top: var(--vc-space-3);
 }
 
 .panel-row {
@@ -606,8 +794,7 @@ button.menu-button {
   font-weight: 600;
 }
 
-.panel-row input,
-.panel-row select {
+.panel-row input {
   box-sizing: border-box;
   width: 100%;
   min-height: var(--vc-control-h);
@@ -664,27 +851,54 @@ button.menu-button {
 }
 
 .row-control .language-picker {
-  width: 240px;
-}
-
-.row-control .language-picker input {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: var(--vc-control-h);
-  padding: var(--vc-space-1) var(--vc-space-2);
-  border: 1px solid var(--vc-line-strong);
-  border-radius: var(--vc-radius-sm);
-  background: var(--vc-bg);
-  color: var(--vc-ink);
-  font: inherit;
-}
-
-.row-control .language-picker input[aria-invalid="true"] {
-  border-color: var(--vc-danger);
+  width: 220px;
 }
 
 .row-control .hotkey-recorder .row {
   margin-top: var(--vc-space-1);
+}
+
+/* U12: Settings' dictation key, on one line at the window's smallest. */
+.hotkey-recorder.compact {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+
+.recorder-line {
+  display: flex;
+  align-items: center;
+  gap: var(--vc-space-2);
+  white-space: nowrap;
+}
+
+.recorder-line .keycap {
+  margin-bottom: 0;
+}
+
+/* Recording needs the width below the default window size: the controls take
+   a line of their own under the label. */
+@media (max-width: 719px) {
+  .row-main:has(.keycap.recording) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .row-main:has(.keycap.recording) .hotkey-recorder.compact {
+    align-items: flex-start;
+  }
+
+  .row-main:has(.keycap.recording) .hotkey-recorder.compact p {
+    text-align: left;
+  }
+}
+
+/* As wide as the line above, not the sentence. */
+.hotkey-recorder.compact p {
+  width: 0;
+  min-width: 100%;
+  text-align: right;
 }
 
 /* U8: the five-step onboarding. Rail, scrolling content, fixed footer. */
@@ -961,10 +1175,24 @@ main.ob {
   gap: var(--vc-space-2);
 }
 
-.ob-chip[aria-checked="true"] {
+/* `button:hover:not(:disabled)` weighs more than one class and one attribute:
+   it took the fill away under the pointer and left the light label on it. The
+   selected look has to win in every state a button has. */
+button.ob-chip[aria-checked="true"],
+button.ob-chip[aria-checked="true"]:active:not(:disabled) {
   border-color: var(--vc-accent);
   background: var(--vc-accent);
   color: var(--vc-accent-fg);
+}
+
+button.ob-chip[aria-checked="true"]:hover:not(:disabled) {
+  border-color: var(--vc-accent-hover);
+  background: var(--vc-accent-hover);
+  color: var(--vc-accent-fg);
+}
+
+.ob-content > .language-picker {
+  width: min(320px, 100%);
 }
 
 .ob-allowed {
@@ -1050,7 +1278,10 @@ main.ob {
   background: var(--vc-attention-soft);
 }
 
+/* Long words scroll here, so the panel and its Copy button still fit the step. */
 .ob-words {
+  max-height: 5.5em;
+  overflow-y: auto;
   padding: var(--vc-space-2) var(--vc-space-3);
   border: 1px solid var(--vc-line);
   border-radius: var(--vc-radius-sm);
@@ -1077,14 +1308,6 @@ main.ob {
   gap: var(--vc-space-1) var(--vc-space-3);
 }
 
-.ob-summary-control {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--vc-space-2);
-}
-
 .ob-summary dt {
   color: var(--vc-muted);
 }
@@ -1094,7 +1317,40 @@ main.ob {
   margin: 0;
 }
 
+.ob-summary > .ob-summary-switch {
+  align-items: center;
+}
+
+.ob-summary-switch > dt {
+  color: inherit;
+}
+
+.ob-summary-note {
+  flex-basis: 100%;
+}
+
+.ob-summary-note:empty {
+  display: none;
+}
+
+.ob-summary-note .ob-caption {
+  margin: 0;
+}
+
+.ob-notes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--vc-space-1) var(--vc-space-3);
+  margin-top: var(--vc-space-3);
+}
+
+.ob-notes p {
+  margin-block: 0;
+}
+
 .ob-menubar {
+  margin-left: auto;
   font-weight: 600;
   text-align: right;
 }
@@ -1182,6 +1438,11 @@ main.ob {
   padding: 0;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+.history-clear {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* The question before deleting. */

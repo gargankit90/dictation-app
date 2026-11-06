@@ -6,13 +6,18 @@
 # the words with Copy and doesn't count, and one that lands in the practice box
 # does. Ready shows the real states, and Start dictating ends setup.
 #
-# Downloads the model (~477 MB), as e2e_local_model does.
+# The download comes from the stand-in model server (_model_server_helpers.sh),
+# which holds it part way until the scenario lets it finish. So nothing here
+# races a download that's already over: it used to delete the models folder while
+# a fast one was being verified, which failed it with "Couldn't save". No
+# internet; the model and its SHA-256 check are real.
 
 FIVE_WINDOW="Set up"
 FIVE_MODELS="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/models"
 
 five_launch() {
-  E2E_TRANSCRIBER=settings launch --debug-audio-file "$VM_FIXTURES/speech-16k.wav" --debug-onboarding
+  E2E_TRANSCRIBER=settings launch --debug-audio-file "$VM_FIXTURES/speech-16k.wav" --debug-onboarding \
+    --debug-model-url "$MODEL_SERVER_URL"
 }
 
 five_box_has_phrase() {
@@ -28,9 +33,8 @@ five_model_ready() {
   VM_TERMINAL_TIMEOUT=1510 ax_ok wait-no-text "$APP_NAME" "$FIVE_WINDOW" "Getting the model ready" 1500
 }
 
-# The server's answer about the earlier part, from the log: on a fast
-# connection the download can be over before the strip's note can be read. The
-# note's wording follows this answer and is tested in logic.test.ts.
+# The server's answer about the earlier part, from the log. The note's wording
+# follows this answer and is tested in logic.test.ts.
 five_download_picked_up() {
   wait_for_log 'model download answered resume=(Continued|Restarted)' 30
 }
@@ -39,6 +43,7 @@ e2e_onboarding_five_steps() {
   fresh_app_state
   settings_reset
   vm "rm -rf $(q "$FIVE_MODELS")"
+  expect "the stand-in model server starts" model_server_start
   five_launch
   expect "onboarding shows at launch, at Welcome" \
     wait_for_log 'onboarding shown at launch step=Welcome' 30
@@ -68,17 +73,19 @@ e2e_onboarding_five_steps() {
   expect "the download picks up by itself" \
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading Parakeet English" 30
   expect "and the server answered about the earlier part" five_download_picked_up
+  expect "the server was asked for the rest only" model_server_saw_resume
   expect "allowed" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Allowed" 10
 
-  # Try it waits for a model that isn't here. The VM may download in seconds,
-  # so the wait is made sure of: stop the download, if it still runs, and
-  # remove what was fetched.
-  ax press "$APP_NAME" "$FIVE_WINDOW" Cancel >/dev/null 2>&1 || true
+  # Try it waits for a model that isn't here: the download is held, so it can be
+  # stopped for certain, and only then is what was fetched removed.
+  expect "press Cancel in the strip" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Cancel
+  expect "the download pauses" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Download paused" 15
   vm "rm -rf $(q "$FIVE_MODELS")"
   expect "the strip offers to resume" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "isn't downloaded yet" 15
   expect "press Continue" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Continue
   expect "Try it blocks practice while the model is missing" \
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Practice starts once it is" 15
+  model_server_release
   expect "press Resume in the strip" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Resume
   expect "the wait moves on" ax_ok wait-no-text "$APP_NAME" "$FIVE_WINDOW" "Practice starts once it is" 15
   expect "the model finishes and practice opens" five_model_ready
@@ -114,6 +121,7 @@ e2e_onboarding_five_steps() {
   [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_onboarding_five_steps
   collect_log e2e_onboarding_five_steps
   fresh_app_state
+  model_server_stop
   settings_reset
   vm "rm -rf $(q "$FIVE_MODELS")"
 }

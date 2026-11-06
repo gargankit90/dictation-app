@@ -59,10 +59,10 @@ keycap_shows() {
   ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "$1" 10
 }
 
-# record_shortcut <post-key.js key>: Record a different key, then the key,
+# record_shortcut <post-key.js key>: Change…, then the key,
 # pressed in Settings (the recorder listens to the window's own key events).
 record_shortcut() {
-  ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Record a different key" &&
+  ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Change…" &&
     ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Press a key" 5 &&
     job_says "posted down
 posted up" post_key_hold "$1" 0.4 "$APP_NAME"

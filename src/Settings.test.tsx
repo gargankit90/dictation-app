@@ -14,7 +14,8 @@ import type {
 } from "./bindings";
 import { SECTION_KEY, Settings } from "./Settings";
 import type { SectionId } from "./Settings";
-import { CONNECTED, KEY_NOT_SAVED } from "./settings/Speech";
+import { HOTKEY_NOTICE_POLL_MS } from "./settings/Dictation";
+import { CONNECTED, KEY_NOT_SAVED, NOTICE_DISMISSED_KEY } from "./settings/Speech";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
 const KEY = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
@@ -72,6 +73,8 @@ class Backend {
   /** Holds the command named until the promise settles. */
   holds = new Map<string, Promise<void>>();
   calls: Call[] = [];
+
+  hotkeyNotice: string | null = null;
 
   handle = async (command: string, payload: unknown): Promise<unknown> => {
     const args = (payload ?? {}) as Record<string, unknown>;
@@ -153,6 +156,8 @@ class Backend {
         return null;
       case "get_app_info":
         return { version: "0.1.0", last_update_check_ms: null };
+      case "get_hotkey_notice":
+        return this.hotkeyNotice;
       case "check_for_updates":
       case "open_link":
         return null;
@@ -290,8 +295,8 @@ describe("criterion_u6_1 sections, keyboard and names", () => {
 
   it("gives every control in every section an accessible name", async () => {
     await open("speech");
-    // The own-key panel is open while the own key is the engine.
-    expect(screen.getByRole("button", { name: "Hide" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add key…" })).toBeTruthy();
+    click("Done");
     for (const name of Object.values(SECTION_NAMES)) {
       fireEvent.click(screen.getByRole("tab", { name }));
       await screen.findByRole("heading", { level: 1, name });
@@ -315,10 +320,10 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     }
   });
 
-  it("shortcut: recording a key saves it at once and says Saved", async () => {
+  it("dictation key: recording a key saves it at once and says Saved", async () => {
     await open("dictation");
     expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌥");
-    click("Record a different key");
+    click("Change…");
     keyDown("MetaRight");
     keyUp("MetaRight");
     expect((await screen.findByRole("status")).textContent).toBe("Saved");
@@ -326,10 +331,13 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌘");
   });
 
-  it("shortcut: a key the app can't switch to keeps the old one and says why", async () => {
+  it("dictation key: a key the app can't switch to keeps the old one and says why", async () => {
     await open("dictation");
-    backend.failing.set("set_hotkey", "Couldn't switch the hotkey to F6. RightAlt still works.");
-    click("Record a different key");
+    backend.failing.set(
+      "set_hotkey",
+      "Couldn't switch the dictation key to F6. RightAlt still works.",
+    );
+    click("Change…");
     keyDown("F6");
     expect((await screen.findByRole("alert")).textContent).toContain("RightAlt still works");
     expect(screen.queryByText("Saved")).toBeNull();
@@ -390,7 +398,7 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
   it("closing and reopening shows the saved values, and nothing ever calls save_settings", async () => {
     await open("dictation");
     pick("German");
-    click("Record a different key");
+    click("Change…");
     keyDown("F6");
     await waitFor(() => {
       expect(backend.settings.hotkey).toBe("F6");
@@ -422,6 +430,38 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     });
     expect(backend.settings.hotkey).toBe("F7");
     expect(screen.getByLabelText("Dictation key").textContent).toBe("F7");
+  });
+});
+
+describe("U9 a hotkey waiting for Accessibility", () => {
+  const WAITING = "The hotkey Right ⌥ is saved, but Vocet can't listen to the keyboard yet.";
+
+  it("is said on the Dictation key row, while saving other settings still works", async () => {
+    backend.hotkeyNotice = WAITING;
+    await open("dictation");
+    expect((await screen.findByText(WAITING)).getAttribute("role")).toBe("status");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("goes by itself once the key listens", async () => {
+    backend.hotkeyNotice = WAITING;
+    await open("dictation");
+    await screen.findByText(WAITING);
+    backend.hotkeyNotice = null;
+    await waitFor(
+      () => {
+        expect(screen.queryByText(WAITING)).toBeNull();
+      },
+      { timeout: HOTKEY_NOTICE_POLL_MS + 1_000 },
+    );
+  });
+
+  it("says nothing while the key listens", async () => {
+    await open("dictation");
+    await waitFor(() => {
+      expect(backend.named("get_hotkey_notice").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText(/can't listen/)).toBeNull();
   });
 });
 
@@ -502,144 +542,462 @@ describe("criterion_u6_3 launch at login never blocks", () => {
   });
 });
 
-describe("criterion_u6_4 Speech: exactly one Active engine", () => {
-  const actives = () => screen.queryAllByText("✓ Active");
-  // The own key is Active only with a key saved (Design Lead, round 1).
+describe("u12_criterion_3 Speech is one pick-one list", () => {
+  const radio = (name: string | RegExp) => screen.getByRole<HTMLInputElement>("radio", { name });
+  const checked = () =>
+    screen.getAllByRole<HTMLInputElement>("radio").filter((candidate) => candidate.checked);
+  const ready = (id: string) => model(id, { state: "ready", downloaded_bytes: 477_274_496 });
   beforeEach(() => {
     backend.keys.groq = true;
   });
 
-  it("the own key without a saved key says Needs a key until Test & Save works", async () => {
-    backend.keys.groq = false;
+  it("names lead, with no Downloaded, Use this, Active or Hide", async () => {
+    backend.models = [ready(ENGLISH), model(MULTI)];
     await open("speech");
-    expect(await screen.findByText("! Needs a key")).toBeTruthy();
-    expect(actives()).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
-    click("Test & Save");
-    expect(await screen.findByText("✓ Active")).toBeTruthy();
-    expect(screen.queryByText("! Needs a key")).toBeNull();
-  });
-
-  // Tester run 1 (minor): after Cancel the part is kept, and Resume continues it.
-  it("a cancelled download says it is paused and Resume continues it", async () => {
-    backend.models = [model(ENGLISH, { state: "partial", downloaded_bytes: 212_000_000 })];
-    await open("speech");
-    expect(await screen.findByText("Download paused, 212 of 477 MB")).toBeTruthy();
-    click("Resume");
-    expect(await screen.findByText("↓ 212 of 477 MB")).toBeTruthy();
-    expect(backend.named("download_local_model")[0]?.args).toEqual({ id: ENGLISH });
-  });
-
-  it("titles are English and Multilingual, with honest captions", async () => {
-    await open("speech");
-    expect(await screen.findByText("Multilingual")).toBeTruthy();
+    expect(radio(/^English/)).toBeTruthy();
+    expect(radio(/^3 languages/)).toBeTruthy();
+    expect(radio(/^Your own key/)).toBeTruthy();
     expect(
-      screen.getByText(/3 languages, including English and Hindi · works offline/),
+      within(screen.getByRole("radiogroup", { name: "Speech engine" })).getAllByRole("radio"),
+    ).toHaveLength(3);
+    expect(screen.getAllByText("On this Mac · works offline")).toHaveLength(2);
+    expect(
+      await screen.findByText("Groq · about 100 languages · speech is sent to Groq"),
     ).toBeTruthy();
-    expect(screen.queryByText(/nothing is sent/)).toBeNull();
+    for (const gone of ["Downloaded", "✓ Active", "Use this", "Hide", "Set up…", "Multilingual"]) {
+      expect(screen.queryByText(gone), gone).toBeNull();
+    }
   });
 
-  it("the own key is Active with the cloud; models show their size and Download", async () => {
+  it("exactly one row is selected", async () => {
+    backend.models = [ready(ENGLISH), ready(MULTI)];
     await open("speech");
-    await screen.findByText("English");
-    expect(actives()).toHaveLength(1);
-    expect(screen.getByText("477 MB")).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Download" })).toHaveLength(2);
+    expect(checked().map((row) => row.id)).toEqual(["engine-own-key"]);
   });
 
-  it("Download starts at once and shows progress with Cancel", async () => {
+  it("a row not downloaded shows Download and its size, and can't be selected", async () => {
     await open("speech");
-    await screen.findByText("English");
-    const [download] = screen.getAllByRole("button", { name: "Download" });
-    if (download === undefined) throw new Error("no Download button");
-    fireEvent.click(download);
+    expect(radio(/^English/).disabled).toBe(true);
+
+    expect(screen.getByRole("button", { name: "Download · 477 MB" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download · 600 MB" })).toBeTruthy();
+    fireEvent.click(radio(/^English/));
+    expect(backend.named("use_local_model")).toHaveLength(0);
+  });
+
+  it("Download starts at once and shows progress with Pause; it can't be selected yet", async () => {
+    await open("speech");
+    click("Download · 477 MB");
     expect(await screen.findByText("↓ 212 of 477 MB")).toBeTruthy();
     expect(screen.getByRole("progressbar", { name: "English download" })).toBeTruthy();
-    click("Cancel");
+    expect(radio(/^English/).disabled).toBe(true);
+    expect(screen.getByTestId("blocked-reason").textContent).toBe(
+      "You can choose it when the download finishes.",
+    );
+    click("Pause");
     await waitFor(() => {
       expect(backend.named("cancel_local_model_download")[0]?.args).toEqual({ id: ENGLISH });
     });
   });
 
-  it("Use this switches only once the model is ready; until then the own key stays Active", async () => {
-    backend.models = [model(ENGLISH, { state: "ready", downloaded_bytes: 477_274_496 })];
+  // Tester run 1 (minor): after Pause the part is kept, and Resume continues it.
+  it("a paused download says so, can't be selected, and Resume continues it", async () => {
+    backend.models = [model(ENGLISH, { state: "partial", downloaded_bytes: 212_000_000 })];
+    await open("speech");
+    expect(await screen.findByText("Paused · 212 of 477 MB")).toBeTruthy();
+    expect(radio(/^English/).disabled).toBe(true);
+    expect(screen.getByTestId("blocked-reason").textContent).toBe(
+      "Finish the download to choose it.",
+    );
+    click("Resume");
+    expect(await screen.findByText("↓ 212 of 477 MB")).toBeTruthy();
+    expect(backend.named("download_local_model")[0]?.args).toEqual({ id: ENGLISH });
+  });
+
+  it("a model already chosen while it downloads is the selected row", async () => {
+    backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
+    backend.models = [model(ENGLISH, { state: "downloading", downloaded_bytes: 212_000_000 })];
+    await open("speech");
+    expect(checked().map((row) => row.id)).toEqual([`engine-${ENGLISH}`]);
+    expect(radio(/^English/).disabled).toBe(true);
+  });
+
+  it("selecting a model loads it, blocks the others with a reason, then selects it", async () => {
+    backend.models = [ready(ENGLISH), ready(MULTI)];
     const loading = gate();
     backend.holds.set("use_local_model", loading.closed);
     await open("speech");
-    click("Use this");
+    fireEvent.click(radio(/^English/));
     expect(await screen.findByText("Loading…")).toBeTruthy();
-    // The own-key row is still the one in use.
-    expect(actives()).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Use this" })).toBeNull();
+    expect(checked().map((row) => row.id)).toEqual([`engine-${ENGLISH}`]);
+    expect(radio(/^3 languages/).disabled).toBe(true);
+    expect(radio(/^Your own key/).disabled).toBe(true);
+    expect(screen.getByTestId("blocked-reason").textContent).toBe("Wait until English has loaded.");
     loading.open();
     await waitFor(() => {
       expect(screen.queryByText("Loading…")).toBeNull();
     });
-    expect(actives()).toHaveLength(1);
-    // Now the model is Active and the own key offers Use this.
-    expect(screen.getByRole("button", { name: "Use this" }).getAttribute("aria-describedby")).toBe(
-      "own-key-label",
-    );
     expect(backend.settings.transcription).toBe("local");
+    expect(checked().map((row) => row.id)).toEqual([`engine-${ENGLISH}`]);
   });
 
-  it("a model that fails to load says Couldn't load, with Retry and Delete", async () => {
-    backend.models = [model(ENGLISH, { state: "ready" })];
+  it("a model that fails to load says so, with Retry and Delete in its menu", async () => {
+    backend.models = [ready(ENGLISH)];
     backend.failing.set("use_local_model", "Couldn't load Parakeet English: the file is damaged.");
     await open("speech");
-    click("Use this");
+    fireEvent.click(radio(/^English/));
     expect(await screen.findByText("! Couldn't load")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("file is damaged");
+    expect(checked().map((row) => row.id)).toEqual(["engine-own-key"]);
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
-    expect(actives()).toHaveLength(1);
+    click("More actions for English");
+    expect(screen.getByRole("menuitem", { name: "Delete model" })).toBeTruthy();
   });
 
-  it("the active model has no Delete; a downloaded one has Delete in its … menu", async () => {
+  it("Delete is in the … menu; the row in use has the menu but can't be deleted", async () => {
     backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
-    backend.models = [model(ENGLISH, { state: "ready" }), model(MULTI, { state: "ready" })];
+    backend.models = [ready(ENGLISH), ready(MULTI)];
     await open("speech");
-    await screen.findByText("English");
-    expect(actives()).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "More actions for English" })).toBeNull();
-    click("More actions for Multilingual");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Delete Multilingual" }));
+    click("More actions for English");
+    expect(screen.queryByRole("menuitem")).toBeNull();
+    expect(screen.getByText(/Choose another engine to delete it/)).toBeTruthy();
+    expect(screen.getByText(/Parakeet English · English only · works offline/)).toBeTruthy();
+    click("More actions for English");
+    click("More actions for 3 languages");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete model" }));
     await waitFor(() => {
       expect(backend.named("delete_local_model")[0]?.args).toEqual({ id: MULTI });
     });
   });
 
-  it("an active model the engine couldn't load says so", async () => {
+  it("the engine in use couldn't load: it says so and stays selected", async () => {
     backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
-    backend.models = [model(ENGLISH, { state: "ready" })];
+    backend.models = [ready(ENGLISH)];
     backend.engine = { state: "failed", message: "The on-device model couldn't be loaded." };
     await open("speech");
     expect(await screen.findByText("! Couldn't load")).toBeTruthy();
-    expect(actives()).toHaveLength(0);
-    expect(screen.getByRole("button", { name: "Use this" })).toBeTruthy();
+    expect(checked().map((row) => row.id)).toEqual([`engine-${ENGLISH}`]);
   });
 
-  it("choosing the own key again switches at once", async () => {
+  it("selecting the own key with a key saved switches at once, without the sheet", async () => {
     backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
-    backend.models = [model(ENGLISH, { state: "ready" })];
+    backend.models = [ready(ENGLISH)];
     await open("speech");
-    await screen.findByText("English");
-    click("Use this");
+    fireEvent.click(radio(/^Your own key/));
+    await waitFor(() => {
+      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "groq" });
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => {
+      expect(checked().map((row) => row.id)).toEqual(["engine-own-key"]);
+    });
+  });
+});
+
+describe("u12_criterion_4 the key sheet", () => {
+  const radio = (name: string | RegExp) => screen.getByRole<HTMLInputElement>("radio", { name });
+  const onDevice = () => {
+    backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
+    backend.models = [model(ENGLISH, { state: "ready", downloaded_bytes: 477_274_496 })];
+  };
+
+  it("selecting the own key with no key opens the sheet and doesn't switch until one works", async () => {
+    onDevice();
+    await open("speech");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(radio(/^Your own key/));
+    expect(await screen.findByRole("dialog", { name: "Your own key" })).toBeTruthy();
+    expect(backend.named("use_cloud_engine")).toHaveLength(0);
+    expect(radio(/^Your own key/).checked).toBe(false);
+    // A key the provider rejects switches nothing.
+    backend.testResult = { kind: "invalid_key", message: "Groq rejected this key." };
+    fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+    click("Test & Save");
+    await screen.findByText("Groq rejected this key.");
+    expect(backend.named("use_cloud_engine")).toHaveLength(0);
+    // One that works does.
+    backend.testResult = null;
+    click("Test & Save");
+    expect(await screen.findByText(CONNECTED)).toBeTruthy();
     await waitFor(() => {
       expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "groq" });
     });
     await waitFor(() => {
-      expect(actives()).toHaveLength(1);
+      expect(radio(/^Your own key/).checked).toBe(true);
     });
   });
 
-  it("while the own key is Active, changing the provider applies at once", async () => {
+  it("Done without a working key leaves the engine, and a later key doesn't switch it", async () => {
+    onDevice();
     await open("speech");
-    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+    fireEvent.click(radio(/^Your own key/));
+    await screen.findByRole("dialog");
+    click("Done");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(radio(/^English/).checked).toBe(true);
+    click("Add key…");
+    fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+    click("Test & Save");
+    expect(await screen.findByText(CONNECTED)).toBeTruthy();
+    expect(backend.named("use_cloud_engine")).toHaveLength(0);
+  });
+
+  it("closed unless asked for, while another engine is in use", async () => {
+    onDevice();
+    await open("speech");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByLabelText(/API key/)).toBeNull();
+  });
+
+  it("opens by itself when the own key is the engine and needs a key", async () => {
+    await open("speech");
+    expect(await screen.findByRole("dialog", { name: "Your own key" })).toBeTruthy();
+    expect(screen.getByText("! Needs a key")).toBeTruthy();
+    expect(screen.getByText("About 100 languages · uses internet")).toBeTruthy();
+    click("Done");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("! Needs a key")).toBeTruthy();
+  });
+
+  it("opens by itself once, not on every return to Speech", async () => {
+    await open("speech");
+    click("Done");
+    fireEvent.click(screen.getByRole("tab", { name: "General" }));
+    await screen.findByRole("heading", { level: 1, name: "General" });
+    fireEvent.click(screen.getByRole("tab", { name: "Speech" }));
+    await screen.findByText("! Needs a key");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("shows one status line: saved, or connected after a test", async () => {
+    backend.keys.groq = true;
+    await open("speech");
+    click("Change key…");
+    expect(await screen.findByText("A key is saved in your Keychain.")).toBeTruthy();
+    expect(screen.queryByText(/never shown again/)).toBeNull();
+    fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+    click("Test & Save");
+    expect(await screen.findByText(CONNECTED)).toBeTruthy();
+    expect(screen.queryByText("A key is saved in your Keychain.")).toBeNull();
+    expect(screen.queryByText(/never shown again/)).toBeNull();
+  });
+
+  it("has Provider, the how-to, the field, Test & Save, Remove key and Done", async () => {
+    backend.keys.groq = true;
+    await open("speech");
+    click("Change key…");
+    const sheet = within(await screen.findByRole("dialog"));
+    expect(sheet.getByLabelText("Provider")).toBeTruthy();
+    expect(sheet.getByRole("button", { name: "console.groq.com" })).toBeTruthy();
+    expect(sheet.getByLabelText("Groq API key")).toBeTruthy();
+    for (const name of ["Test & Save", "Remove key", "Done"]) {
+      expect(sheet.getByRole("button", { name })).toBeTruthy();
+    }
+  });
+
+  it("the keyboard stays inside; Esc closes it and drops what was typed", async () => {
+    backend.keys.groq = true;
+    await open("speech");
+    const opener = screen.getByRole("button", { name: "Change key…" });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = await screen.findByRole("dialog");
+    const field = screen.getByLabelText<HTMLInputElement>(/API key/);
+    expect(document.activeElement).toBe(field);
+    const done = screen.getByRole("button", { name: "Done" });
+    done.focus();
+    fireEvent.keyDown(done, { key: "Tab" });
+    expect(document.activeElement).toBe(screen.getByLabelText("Provider"));
+    fireEvent.change(field, { target: { value: KEY } });
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    click("Change key…");
+    expect(screen.getByLabelText<HTMLInputElement>(/API key/).value).toBe("");
+  });
+
+  it("closing it during a test drops the test, so its key isn't saved", async () => {
+    backend.keys.groq = true;
+    await open("speech");
+    click("Change key…");
+    const slow = gate();
+    backend.holds.set("test_api_key", slow.closed);
+    fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+    click("Test & Save");
     await waitFor(() => {
-      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openai" });
+      expect(backend.named("test_api_key")).toHaveLength(1);
     });
-    expect(await screen.findByText("Saved")).toBeTruthy();
+    click("Done");
+    slow.open();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(backend.named("set_api_key")).toHaveLength(0);
+  });
+
+  // Review round 1, finding 1: the popup is a draft while Groq works.
+  describe("changing the provider while the own key is the engine", () => {
+    const pickOpenAi = async () => {
+      backend.keys.groq = true;
+      await open("speech");
+      click("Change key…");
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+      await screen.findByText("No key saved yet.");
+    };
+    const switches = () => backend.named("use_cloud_engine");
+
+    it("doesn't switch to a provider with no key", async () => {
+      await pickOpenAi();
+      expect(switches()).toHaveLength(0);
+      expect(backend.settings.provider).toBe("groq");
+    });
+
+    it("doesn't switch when its key is rejected", async () => {
+      await pickOpenAi();
+      backend.testResult = { kind: "invalid_key", message: "OpenAI rejected this key." };
+      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+      click("Test & Save");
+      await screen.findByText("OpenAI rejected this key.");
+      expect(switches()).toHaveLength(0);
+      expect(backend.named("set_api_key")).toHaveLength(0);
+    });
+
+    it("Done goes back to the provider in use", async () => {
+      await pickOpenAi();
+      click("Done");
+      expect(switches()).toHaveLength(0);
+      expect(
+        await screen.findByText("Groq · about 100 languages · speech is sent to Groq"),
+      ).toBeTruthy();
+      expect(screen.queryByText("! Needs a key")).toBeNull();
+      expect(screen.getByRole("button", { name: "Change key…" })).toBeTruthy();
+    });
+
+    it("switches once a key for it works", async () => {
+      await pickOpenAi();
+      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+      click("Test & Save");
+      expect(await screen.findByText(CONNECTED)).toBeTruthy();
+      await waitFor(() => {
+        expect(switches()[0]?.args).toEqual({ provider: "openai" });
+      });
+      expect(switches()).toHaveLength(1);
+    });
+
+    it("switches at once to a provider that has a saved key", async () => {
+      backend.keys.groq = true;
+      backend.keys.openai = true;
+      await open("speech");
+      click("Change key…");
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+      await waitFor(() => {
+        expect(switches()[0]?.args).toEqual({ provider: "openai" });
+      });
+      expect(await screen.findByText("Saved")).toBeTruthy();
+    });
+
+    it("a slow lookup can't switch after the provider changed again", async () => {
+      backend.keys.groq = true;
+      backend.keys.openai = true;
+      await open("speech");
+      click("Change key…");
+      const slow = gate();
+      backend.holds.set("has_api_key", slow.closed);
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "groq" } });
+      backend.holds.delete("has_api_key");
+      slow.open();
+      await screen.findByText("A key is saved in your Keychain.");
+      expect(switches().filter((call) => call.args.provider === "openai")).toHaveLength(0);
+    });
+
+    it("a provider set up while on this Mac doesn't switch the engine", async () => {
+      onDevice();
+      await open("speech");
+      click("Add key…");
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
+      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+      click("Test & Save");
+      expect(await screen.findByText(CONNECTED)).toBeTruthy();
+      expect(switches()).toHaveLength(0);
+      click("Done");
+      expect(
+        await screen.findByText("OpenAI · about 100 languages · speech is sent to OpenAI"),
+      ).toBeTruthy();
+      expect(radio(/^English/).checked).toBe(true);
+    });
+  });
+
+  // Review round 1, finding 2.
+  describe("Remove key is committed once it starts", () => {
+    const removing = async () => {
+      backend.keys.groq = true;
+      await open("speech");
+      click("Change key…");
+      await screen.findByText("A key is saved in your Keychain.");
+      const slow = gate();
+      backend.holds.set("delete_api_key", slow.closed);
+      click("Remove key");
+      await screen.findByRole("button", { name: "Removing…" });
+      return slow;
+    };
+
+    it("Done and Esc wait for it, then the sheet says no key is saved", async () => {
+      const slow = await removing();
+      const done = screen.getByRole<HTMLButtonElement>("button", { name: "Done" });
+      expect(done.disabled).toBe(true);
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      slow.open();
+      expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
+      click("Done");
+      click("Add key…");
+      expect(await screen.findByText("No key saved yet.")).toBeTruthy();
+    });
+
+    it("the field and popup wait too, and the outcome still shows", async () => {
+      const slow = await removing();
+      expect(screen.getByLabelText<HTMLSelectElement>("Provider").disabled).toBe(true);
+      expect(screen.getByLabelText<HTMLInputElement>(/API key/).readOnly).toBe(true);
+      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+      expect(screen.getByLabelText<HTMLInputElement>(/API key/).value).toBe("");
+      slow.open();
+      expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
+    });
+
+    it("a failed removal says so and the key still shows as saved", async () => {
+      backend.failing.set("delete_api_key", "The keychain refused.");
+      const slow = await removing();
+      slow.open();
+      expect((await screen.findByRole("alert")).textContent).toContain("The keychain refused.");
+      expect(backend.keys.groq).toBe(true);
+      click("Done");
+      click("Change key…");
+      expect(await screen.findByText("A key is saved in your Keychain.")).toBeTruthy();
+    });
+
+    it("Speech reopened during it doesn't say saved about the deleted key", async () => {
+      const slow = await removing();
+      fireEvent.click(screen.getByRole("tab", { name: "General" }));
+      await screen.findByRole("heading", { level: 1, name: "General" });
+      fireEvent.click(screen.getByRole("tab", { name: "Speech" }));
+      await screen.findByRole("heading", { level: 1, name: "Speech" });
+      slow.open();
+      expect(await screen.findByRole("button", { name: "Add key…" })).toBeTruthy();
+      expect(screen.queryByText("Groq · about 100 languages · speech is sent to Groq")).toBeNull();
+    });
+  });
+
+  it("the row says Add key… with no key saved, and Change key… with one", async () => {
+    onDevice();
+    await open("speech");
+    expect(await screen.findByRole("button", { name: "Add key…" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Change key…" })).toBeNull();
+    cleanup();
+    backend.keys.groq = true;
+    await open("speech");
+    expect(await screen.findByRole("button", { name: "Change key…" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add key…" })).toBeNull();
   });
 });
 
@@ -650,9 +1008,7 @@ describe("criterion_u6_5 own key: Test & Save", () => {
 
   // Review round 1, finding 1: an obsolete test must not write its key.
   it("a test still running when the key is removed doesn't put its key back", async () => {
-    backend.keys.groq = true;
-    await open("speech");
-    await screen.findByText("A key is saved in your Keychain.");
+    await openWithKey();
     const slow = gate();
     backend.holds.set("test_api_key", slow.closed);
     fireEvent.change(keyBox(), { target: { value: OLD } });
@@ -675,13 +1031,19 @@ describe("criterion_u6_5 own key: Test & Save", () => {
     fireEvent.click(screen.getByRole("tab", { name: "General" }));
     await screen.findByRole("heading", { level: 1, name: "General" });
     fireEvent.click(screen.getByRole("tab", { name: "Speech" }));
+    await screen.findByRole("button", { name: "Change key…" });
+    click("Change key…");
+    await screen.findByText("A key is saved in your Keychain.");
+  };
+  const openWithKey = async () => {
+    backend.keys.groq = true;
+    await open("speech");
+    click("Change key…");
     await screen.findByText("A key is saved in your Keychain.");
   };
 
   it("after leaving Speech and coming back, an old test doesn't undo Remove key", async () => {
-    backend.keys.groq = true;
-    await open("speech");
-    await screen.findByText("A key is saved in your Keychain.");
+    await openWithKey();
     const slow = gate();
     backend.holds.set("test_api_key", slow.closed);
     fireEvent.change(keyBox(), { target: { value: OLD } });
@@ -698,9 +1060,7 @@ describe("criterion_u6_5 own key: Test & Save", () => {
   });
 
   it("after leaving Speech and coming back, an old test can't replace a newer key", async () => {
-    backend.keys.groq = true;
-    await open("speech");
-    await screen.findByText("A key is saved in your Keychain.");
+    await openWithKey();
     const slow = gate();
     backend.holds.set("test_api_key", slow.closed);
     fireEvent.change(keyBox(), { target: { value: OLD } });
@@ -753,7 +1113,6 @@ describe("criterion_u6_5 own key: Test & Save", () => {
     expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "groq", key: KEY });
     expect(keyBox().value).toBe("");
     expect(document.body.innerHTML).not.toContain(KEY);
-    expect(screen.getByText("A key is saved in your Keychain.")).toBeTruthy();
   });
 
   it("a key the provider rejects is not saved", async () => {
@@ -790,12 +1149,13 @@ describe("criterion_u6_5 own key: Test & Save", () => {
   });
 
   it("Remove key deletes the saved key", async () => {
-    backend.keys.groq = true;
-    await open("speech");
+    await openWithKey();
     click("Remove key");
     expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
     expect(backend.named("delete_api_key")[0]?.args).toEqual({ provider: "groq" });
-    expect(await screen.findByText("No key saved yet.", { exact: false })).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
+    });
   });
 
   it("the how-to links to the provider's key page through the app", async () => {
@@ -807,9 +1167,7 @@ describe("criterion_u6_5 own key: Test & Save", () => {
   });
 
   it("asks the app only whether a key exists, never for the key", async () => {
-    backend.keys.groq = true;
-    await open("speech");
-    await screen.findByText("A key is saved in your Keychain.");
+    await openWithKey();
     expect(keyBox().value).toBe("");
     expect(backend.calls.every((call) => !("key" in call.args) || call.command === "test_api_key"));
   });
@@ -855,19 +1213,35 @@ describe("criterion_u6_7 Help", () => {
     const onShowLog = vi.fn(() => Promise.resolve(null));
     const onSetup = vi.fn();
     await open("help", { onTroubleshoot, onReport, onShowLog, onSetup });
-    click("Troubleshoot…");
-    click("Report a problem…");
-    click("Show log file");
-    click("Run setup again");
+    click("Open…");
+    click("Preview…");
+    click("Show in Finder");
+    click("Start…");
     expect(onTroubleshoot).toHaveBeenCalledOnce();
     expect(onReport).toHaveBeenCalledOnce();
     expect(onShowLog).toHaveBeenCalledOnce();
     expect(onSetup).toHaveBeenCalledOnce();
   });
 
+  // U12 criterion 12.
+  it("no button repeats its row, and setup's steps are in their real order", async () => {
+    await open("help", {
+      onTroubleshoot: () => undefined,
+      onReport: () => undefined,
+      onShowLog: () => Promise.resolve(null),
+      onSetup: () => undefined,
+    });
+    const pane = within(screen.getByRole("tabpanel"));
+    for (const label of ["Troubleshoot", "Report a problem", "Log file", "Run setup again"]) {
+      expect(pane.getByText(label)).toBeTruthy();
+      expect(pane.queryByRole("button", { name: new RegExp(label, "i") }), label).toBeNull();
+    }
+    expect(pane.getByText(/speech, permissions and a test/)).toBeTruthy();
+  });
+
   it("says so when the log can't be shown", async () => {
     await open("help", { onShowLog: () => Promise.resolve("Couldn't open the log folder.") });
-    click("Show log file");
+    click("Show in Finder");
     expect((await screen.findByRole("alert")).textContent).toContain("log folder");
   });
 });
@@ -910,13 +1284,52 @@ describe("Privacy", () => {
 });
 
 describe("loading", () => {
+  const KEYCHAIN_NOTICE =
+    "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to your speech provider (Groq or OpenAI).";
+
   it("U1: says what to expect from the Keychain on the first launch after the rename", async () => {
-    backend.launchNotice =
-      "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to your speech provider (Groq or OpenAI).";
-    await open();
+    backend.launchNotice = KEYCHAIN_NOTICE;
+    backend.keys.groq = true;
+    await open("speech");
     const notice = await screen.findByTestId("launch-notice");
     expect(notice.textContent).toContain("Choose Always Allow");
     expect(notice.textContent).toContain("sent only to your speech provider (Groq or OpenAI)");
+  });
+
+  // U12 criterion 11.
+  it("the Keychain notice shows only in Speech, and isn't styled as a success", async () => {
+    backend.launchNotice = KEYCHAIN_NOTICE;
+    backend.keys.groq = true;
+    await open("speech");
+    const notice = await screen.findByTestId("launch-notice");
+    expect(notice.className).not.toMatch(/\bok\b/);
+    for (const name of ["General", "Dictation", "Privacy", "History", "Help", "About"]) {
+      fireEvent.click(screen.getByRole("tab", { name }));
+      await screen.findByRole("heading", { level: 1, name });
+      expect(screen.queryByTestId("launch-notice"), name).toBeNull();
+    }
+  });
+
+  it("the Keychain notice doesn't show with no key saved", async () => {
+    backend.launchNotice = KEYCHAIN_NOTICE;
+    await open("speech");
+    await screen.findByText("! Needs a key");
+    expect(screen.queryByTestId("launch-notice")).toBeNull();
+  });
+
+  it("Got it hides the Keychain notice for good", async () => {
+    backend.launchNotice = KEYCHAIN_NOTICE;
+    backend.keys.groq = true;
+    await open("speech");
+    await screen.findByTestId("launch-notice");
+    click("Got it");
+    expect(screen.queryByTestId("launch-notice")).toBeNull();
+    expect(window.localStorage.getItem(NOTICE_DISMISSED_KEY)).toBe("1");
+    cleanup();
+    await open("speech");
+    await screen.findByRole("button", { name: "Change key…" });
+    expect(screen.queryByTestId("launch-notice")).toBeNull();
+    window.localStorage.removeItem(NOTICE_DISMISSED_KEY);
   });
 
   it("U1: says nothing about the Keychain on any other launch", async () => {

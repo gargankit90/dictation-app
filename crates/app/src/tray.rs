@@ -1,10 +1,11 @@
 //! The menu-bar menu as Vocet's home (U5): what the tray's icon, tooltip and
 //! menu show, as pure data the shell applies to a native menu.
 //!
-//! The menu, top to bottom: a status line (ready and which key and engine,
-//! a download's progress, or the one problem), one fix row while there is a
-//! problem, "Copy last dictation", History, Settings, Troubleshoot, Report a problem
-//! (and Resume setup while onboarding is incomplete), then updates and Quit.
+//! The menu, top to bottom (U12): a status line (ready and which key, a
+//! download's progress, or the one problem), one fix row while there is a
+//! problem, "Copy last dictation", History, Settings, Help (and Resume setup
+//! while onboarding is incomplete), then Quit. Updates, Troubleshoot and
+//! Report a problem live in Settings.
 //! The tray never has a text title: the problem state is a second icon.
 //!
 //! [`TrayStatus`] follows the pipeline's [`UiEvent`]s and what the shell
@@ -24,8 +25,6 @@ pub const APP_NAME: &str = "Vocet";
 pub mod id {
     /// The status line.
     pub const STATUS: &str = "status";
-    /// The engine line under a ready status.
-    pub const ENGINE: &str = "engine";
     /// "Open Speech settings…".
     pub const FIX_SPEECH: &str = "fix-speech-settings";
     /// "Open Microphone settings…".
@@ -46,14 +45,10 @@ pub mod id {
     pub const HISTORY: &str = "history";
     /// "Settings…".
     pub const SETTINGS: &str = "settings";
-    /// "Troubleshoot…".
-    pub const TROUBLESHOOT: &str = "troubleshoot";
-    /// "Report a problem…".
-    pub const REPORT: &str = "report";
+    /// "Help…": Settings, on Help.
+    pub const HELP: &str = "help";
     /// "Resume setup…".
     pub const RESUME_SETUP: &str = "onboarding";
-    /// "Check for updates…" (the updater's own id).
-    pub const CHECK_UPDATES: &str = "check-updates";
     /// "Quit Vocet".
     pub const QUIT: &str = "quit";
 }
@@ -71,7 +66,7 @@ pub enum Fix {
     Relaunch,
     /// Settings, Speech, where models download.
     DownloadModel,
-    /// Settings, on the shortcut.
+    /// Settings, on the dictation key.
     ChooseAnotherKey,
     /// The Troubleshoot page.
     Troubleshoot,
@@ -185,51 +180,20 @@ pub const fn is_engine_error(code: ErrorCode) -> bool {
     )
 }
 
-/// The keycap text for a stored hotkey, as Settings' recorder shows it:
-/// `RightAlt` is `Right ⌥`, `Ctrl+Shift+Space` is `⌃⇧Space`. Anything
-/// unrecognised is shown as written. Mirrors `keycapLabel` in
-/// `src/hotkeyKeys.ts`.
+/// Whether a download answers the engine error `code`: an engine that isn't
+/// set up yet, or any engine error when the download is the chosen engine
+/// (the user is already fixing it, Design Lead item 11).
 #[must_use]
-pub fn keycap_label(spec: &str) -> String {
-    let labels: Vec<(String, Option<&'static str>)> = spec
-        .split('+')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let lower = part.to_ascii_lowercase();
-            let (side, rest) = if let Some(rest) = lower.strip_prefix("left") {
-                (Some("Left"), rest.to_owned())
-            } else if let Some(rest) = lower.strip_prefix("right") {
-                (Some("Right"), rest.to_owned())
-            } else {
-                (None, lower)
-            };
-            let symbol = match rest.as_str() {
-                "ctrl" | "control" => Some("⌃"),
-                "alt" | "option" | "opt" => Some("⌥"),
-                "shift" => Some("⇧"),
-                "cmd" | "command" | "meta" | "super" | "win" => Some("⌘"),
-                _ => None,
-            };
-            match symbol {
-                Some(symbol) => (symbol.to_owned(), side),
-                None => (part.to_owned(), None),
-            }
-        })
-        .collect();
-    if labels.iter().any(|(_, side)| side.is_some()) {
-        labels
-            .iter()
-            .map(|(text, side)| match side {
-                Some(side) => format!("{side} {text}"),
-                None => text.clone(),
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-    } else {
-        labels.iter().map(|(text, _)| text.as_str()).collect()
-    }
+pub const fn download_answers(code: ErrorCode, chosen: bool) -> bool {
+    is_engine_error(code)
+        && (chosen
+            || matches!(
+                code,
+                ErrorCode::KeyMissing | ErrorCode::ModelMissing | ErrorCode::ModelLoading
+            ))
 }
+
+pub use dictation_core::hotkey_spec::keycap_label;
 
 /// Which template image the tray shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -243,13 +207,14 @@ pub enum TrayIcon {
     Recording,
 }
 
-/// A model downloading.
+/// A model downloading. The menu calls it "speech model": it doesn't bring
+/// back the names Settings leaves to the "…" menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Download {
-    /// The model's display name.
-    pub name: String,
     /// Percent done, 0 to 100.
     pub percent: u8,
+    /// Whether the settings already choose this model as the engine.
+    pub chosen: bool,
 }
 
 /// What the shell reads each second, apart from the pipeline's events.
@@ -500,14 +465,14 @@ impl TrayStatus {
     /// What the tray shows now.
     #[must_use]
     pub fn menu(&self) -> MenuModel {
-        // A runtime problem outranks a download; a download outranks what
-        // the engine's state says (the model it waits for is coming).
+        // A runtime problem outranks a download, unless the download is the
+        // fix for it; a download outranks what the engine's state says (the
+        // model it waits for is coming).
         let runtime = self.runtime_problem();
-        let download = if runtime.is_none() {
-            self.ambient.download.as_ref()
-        } else {
-            None
-        };
+        let download =
+            self.ambient.download.as_ref().filter(|download| {
+                runtime.is_none_or(|code| download_answers(code, download.chosen))
+            });
         let relaunch = self.relaunch_needed();
         let problem = if download.is_some() || relaunch {
             None
@@ -537,13 +502,12 @@ impl TrayStatus {
             entries.push(Entry::item(Fix::Relaunch.id(), Fix::Relaunch.label()));
             format!("{APP_NAME}: {RELAUNCH_SENTENCE}")
         } else if let Some(download) = download {
-            let text = format!("↓ Downloading {}, {}%", download.name, download.percent);
+            let text = format!("↓ Downloading speech model, {}%", download.percent);
             entries.push(Entry::disabled(id::STATUS, text));
-            format!("{APP_NAME}: downloading {}", download.name)
+            format!("{APP_NAME}: downloading speech model")
         } else {
             let key = keycap_label(&self.ambient.hotkey);
             entries.push(Entry::disabled(id::STATUS, format!("✓ Ready · Hold {key}")));
-            entries.push(Entry::disabled(id::ENGINE, self.ambient.engine.clone()));
             format!("{APP_NAME}: Ready")
         };
         entries.push(Entry::Separator);
@@ -561,13 +525,11 @@ impl TrayStatus {
             enabled: true,
             accelerator: Some("CmdOrCtrl+,"),
         });
-        entries.push(Entry::item(id::TROUBLESHOOT, "Troubleshoot…"));
-        entries.push(Entry::item(id::REPORT, "Report a problem…"));
+        entries.push(Entry::item(id::HELP, "Help…"));
         if self.ambient.setup_incomplete {
             entries.push(Entry::item(id::RESUME_SETUP, "Resume setup…"));
         }
         entries.push(Entry::Separator);
-        entries.push(Entry::item(id::CHECK_UPDATES, "Check for updates…"));
         entries.push(Entry::Item {
             id: id::QUIT,
             label: format!("Quit {APP_NAME}"),
@@ -640,25 +602,22 @@ mod tests {
         })
     }
 
-    /// U5 criterion 1: the order for a ready Mac with the on-device engine.
+    /// U12 criterion 7: the menu, exactly, whichever engine is in use.
     #[test]
-    fn criterion_1_ready_local_menu_in_order() {
+    fn u12_criterion_7_ready_menu_in_order() {
         let tray = ready("RightAlt", "On this Mac (Parakeet English)");
         let menu = tray.menu();
         assert_eq!(
             menu.outline(),
             [
                 ("status", "✓ Ready · Hold Right ⌥"),
-                ("engine", "On this Mac (Parakeet English)"),
                 ("-", ""),
                 ("copy-last", "Copy last dictation"),
                 ("history", "History…"),
                 ("-", ""),
                 ("settings", "Settings…"),
-                ("troubleshoot", "Troubleshoot…"),
-                ("report", "Report a problem…"),
+                ("help", "Help…"),
                 ("-", ""),
-                ("check-updates", "Check for updates…"),
                 ("quit", "Quit Vocet"),
             ]
             .map(|(id, label)| (id.to_owned(), label.to_owned()))
@@ -667,7 +626,96 @@ mod tests {
         assert_eq!(menu.tooltip, "Vocet: Ready");
         // The status lines can't be clicked.
         assert_eq!(enabled(&menu, id::STATUS), Some(false));
-        assert_eq!(enabled(&menu, id::ENGINE), Some(false));
+        // The shortcuts the design shows.
+        let accelerator = |wanted: &str| {
+            menu.entries.iter().find_map(|entry| match entry {
+                Entry::Item {
+                    id, accelerator, ..
+                } if *id == wanted => *accelerator,
+                _ => None,
+            })
+        };
+        assert_eq!(accelerator(id::SETTINGS), Some("CmdOrCtrl+,"));
+        assert_eq!(accelerator(id::QUIT), Some("CmdOrCtrl+Q"));
+        assert_eq!(accelerator(id::HELP), None);
+    }
+
+    /// U12 criterion 7: no engine line, no Troubleshoot, Report a problem or
+    /// Check for updates, in any state but a fix row of its own.
+    #[test]
+    fn u12_criterion_7_the_old_items_are_gone() {
+        let mut problem = ready("RightAlt", "Groq");
+        problem.on_event(&transcription_failed("The provider rejected your API key."));
+        for tray in [ready("RightAlt", "Groq"), problem] {
+            for (item, label) in tray.menu().outline() {
+                assert_ne!(item, "engine");
+                assert_ne!(label, "Groq");
+                for gone in ["Troubleshoot", "Report a problem", "Check for updates"] {
+                    assert!(!label.contains(gone), "{label}");
+                }
+            }
+        }
+    }
+
+    /// U12 criterion 7, Design Lead item 11: while the chosen model downloads
+    /// the menu says so, whatever a press with no engine said meanwhile.
+    #[test]
+    fn u12_criterion_7_a_download_of_the_chosen_model_outranks_no_key() {
+        let local = "On this Mac (Parakeet English)";
+        let downloading = |chosen| Ambient {
+            download: Some(Download {
+                percent: 42,
+                chosen,
+            }),
+            ..ambient("RightAlt", local)
+        };
+        for chosen in [true, false] {
+            // The ambient problem: no key saved, a download running.
+            let mut tray = ready("RightAlt", local);
+            tray.set_ambient(Ambient {
+                problem: Some(ErrorCode::KeyMissing),
+                ..downloading(chosen)
+            });
+            // A press after the download began: the pipeline says no key.
+            tray.on_event(&transcription_failed("Add your API key in Settings."));
+            assert_eq!(tray.problem(), Some(ErrorCode::KeyMissing));
+            let menu = tray.menu();
+            assert_eq!(
+                label_of(&menu, id::STATUS).as_deref(),
+                Some("↓ Downloading speech model, 42%"),
+                "chosen: {chosen}"
+            );
+            assert!(label_of(&menu, id::FIX_SPEECH).is_none());
+            assert_eq!(menu.icon, TrayIcon::Normal);
+        }
+    }
+
+    /// A download of another model doesn't hide what is wrong with the engine
+    /// that is in use, and nothing hides a problem a download can't fix.
+    #[test]
+    fn u12_criterion_7_a_download_doesnt_hide_other_problems() {
+        let downloading = |chosen| Ambient {
+            download: Some(Download {
+                percent: 42,
+                chosen,
+            }),
+            ..ambient("RightAlt", "Groq")
+        };
+        let mut tray = ready("RightAlt", "Groq");
+        tray.set_ambient(downloading(false));
+        tray.on_event(&transcription_failed("The provider rejected your API key."));
+        assert!(label_of(&tray.menu(), id::STATUS).unwrap().starts_with('!'));
+        // The chosen model's download doesn't answer a microphone refusal.
+        let mut tray = TrayStatus::new(true);
+        tray.set_ambient(downloading(true));
+        assert_eq!(
+            label_of(&tray.menu(), id::FIX_MICROPHONE).as_deref(),
+            Some("Open Microphone settings…")
+        );
+        let mut tray = ready("RightAlt", "Groq");
+        tray.set_ambient(downloading(true));
+        tray.on_event(&error(DictationError::HotkeyFailed));
+        assert!(label_of(&tray.menu(), id::STATUS).unwrap().starts_with('!'));
     }
 
     #[test]
@@ -677,7 +725,6 @@ mod tests {
             label_of(&menu, id::STATUS).as_deref(),
             Some("✓ Ready · Hold ⌃⇧Space")
         );
-        assert_eq!(label_of(&menu, id::ENGINE).as_deref(), Some("Groq"));
     }
 
     #[test]
@@ -685,8 +732,8 @@ mod tests {
         let mut tray = ready("RightAlt", "On this Mac (Parakeet English)");
         tray.set_ambient(Ambient {
             download: Some(Download {
-                name: "Parakeet English".to_owned(),
                 percent: 42,
+                chosen: true,
             }),
             problem: Some(ErrorCode::ModelMissing),
             ..ambient("RightAlt", "On this Mac (Parakeet English)")
@@ -696,7 +743,7 @@ mod tests {
             menu.outline().first().cloned(),
             Some((
                 "status".to_owned(),
-                "↓ Downloading Parakeet English, 42%".to_owned()
+                "↓ Downloading speech model, 42%".to_owned()
             ))
         );
         assert_eq!(&ids(&menu)[1], "-");
@@ -704,16 +751,16 @@ mod tests {
     }
 
     #[test]
-    fn criterion_1_setup_incomplete_adds_resume_setup_after_report() {
+    fn criterion_1_setup_incomplete_adds_resume_setup_after_help() {
         let mut tray = ready("RightAlt", "Groq");
         tray.set_ambient(Ambient {
             setup_incomplete: true,
             ..ambient("RightAlt", "Groq")
         });
         let listed = ids(&tray.menu());
-        let report = listed.iter().position(|id| id == "report").unwrap();
-        assert_eq!(listed[report + 1], "onboarding");
-        assert_eq!(listed[report + 2], "-");
+        let help = listed.iter().position(|id| id == "help").unwrap();
+        assert_eq!(listed[help + 1], "onboarding");
+        assert_eq!(listed[help + 2], "-");
         let complete = ids(&ready("RightAlt", "Groq").menu());
         assert!(!complete.contains(&"onboarding".to_owned()));
     }
@@ -862,7 +909,6 @@ mod tests {
             label_of(&menu, id::STATUS).as_deref(),
             Some("✓ Ready · Hold Left ⌘")
         );
-        assert_eq!(label_of(&menu, id::ENGINE).as_deref(), Some("OpenAI"));
     }
 
     #[test]
@@ -1015,8 +1061,8 @@ mod tests {
         tray.set_ambient(Ambient {
             engine_generation: 1,
             download: Some(Download {
-                name: "Parakeet English".to_owned(),
                 percent: 10,
+                chosen: true,
             }),
             problem: Some(ErrorCode::ModelMissing),
             ..ambient("RightAlt", local)

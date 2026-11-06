@@ -83,6 +83,25 @@ pre_push_refuses() { # name refs-line
 pre_push_refuses "push to main is refused" "refs/heads/x $zero refs/heads/main $zero"
 pre_push_refuses "deleting a branch is refused" "(delete) $zero refs/heads/m1-x $zero"
 
+# The nested isolation probe needs only the scratch push checks above.
+[ "${TEST_GUARDS_ISOLATION_ONLY:-0}" != 1 ] || exit "$failed"
+bait="$tmp/inherited"
+git init -q -b bait "$bait"
+git -C "$bait" -c user.name=test -c user.email=test@example.invalid commit -q --allow-empty -m bait
+snapshot() {
+  git -C "$bait" symbolic-ref HEAD
+  git -C "$bait" for-each-ref --format='%(refname) %(objectname)'
+  git -C "$bait" config --local --list
+  git -C "$bait" count-objects
+}
+before=$(snapshot)
+code=0
+TEST_GUARDS_ISOLATION_ONLY=1 GIT_DIR="$bait/.git" GIT_WORK_TREE="$bait" GIT_INDEX_FILE="$bait/.git/index" \
+  "$root/scripts/test-guards.sh" >/dev/null 2>&1 || code=$?
+check "isolation: inherited GIT_DIR run passes" 0 "$code"
+if [ "$(snapshot)" = "$before" ]; then same=0; else same=1; fi
+check "isolation: inherited repository is untouched" 0 "$same"
+
 ROOT=$root
 TMP_ROOT=$tmp
 WT_BASE="$TMP_ROOT/Dictation App"
@@ -240,304 +259,8 @@ else
 fi
 
 
-# --- Claude Code hook -----------------------------------------------------
-
-hook_case() { # expected-exit command
-  local code=0
-  jq -n --arg c "$2" '{tool_input: {command: $c}}' | "$hook" 2>/dev/null || code=$?
-  check "guard-git: $2" "$1" "$code"
-}
-blocked() { hook_case 2 "$1"; }
-allowed() { hook_case 0 "$1"; }
-
-allowed "git push --force origin m1-x"
-allowed "git push --force-with-lease origin m1-x"
-allowed "git push -f origin m1-x"
-allowed "git push origin +m1-x"
-allowed "git push origin :m1-x"
-allowed "git push --delete origin m1-x"
-allowed "git push -d origin m1-x"
-allowed "git push origin main"
-allowed "git push origin HEAD:main"
-allowed "git push --all origin"
-allowed "git -C . push --force origin m1-x"
-allowed "cd repo && git push -f"
-blocked "git commit --no-verify -m x"
-blocked "git commit -n -m x"
-blocked "git commit -anm x"
-blocked "git -c core.hooksPath=/dev/null commit -m x"
-blocked "LEFTHOOK=0 git commit -m x"
-blocked "lefthook uninstall"
-blocked "rm .git/hooks/pre-push"
-blocked "gh pr merge 1 --merge"
-blocked "gh api -X PUT repos/o/r/pulls/1/merge"
-blocked "gh api -X PATCH repos/o/r/git/refs/heads/main"
-blocked "gh repo delete o/r --yes"
-blocked "gh release delete v1 --yes"
-blocked "gh repo edit --visibility public"
-blocked "echo x > scripts/guard-push.sh"
-blocked "sed -i '' s/main/x/ scripts/pre-push"
-blocked "rm lefthook.yml"
-blocked "cp /tmp/x .claude/settings.json"
-blocked "git checkout -- .claude/hooks/guard-git.sh"
-blocked "python3 -c 'open(\"scripts/install-hooks.sh\",\"w\")'"
-
-# Added with the hardened hook (M0.2 guard patches): patches, aliases and
-# hookspath variants are blocked; message text no longer trips the checks.
-blocked "git apply fix.patch"
-blocked "git am 0001-fix.patch"
-blocked "patch -p1 < fix.patch"
-allowed "git config alias.p 'push --force'"
-blocked "gh alias set m 'pr merge'"
-blocked "git -c core.hookspath=/dev/null commit -m x"
-allowed "git apply --check fix.patch"
-allowed "git commit -m 'docs: explain -n and --no-verify are banned'"
-
-# Fails closed on input it can't read.
-raw_input_blocked() { # name input
-  local code=0
-  printf '%s' "$2" | "$hook" 2>/dev/null || code=$?
-  check "guard-git: $1" 2 "$code"
-}
-raw_input_blocked "empty input is blocked" ""
-raw_input_blocked "non-JSON input is blocked" "git push --force"
-
-allowed "git push -u origin m0.3-quality-gate"
-allowed "git push origin m1-maintenance"
-allowed "git commit -m 'feat(core): add step'"
-allowed "git status"
-allowed "cat lefthook.yml"
-allowed "gh pr create --base main --head m1-x"
-allowed "gh pr comment 3 --body 'Tester: PASS'"
-allowed "cargo clippy --workspace --all-targets -- -D warnings"
-
-# Review Major 3: case-insensitive core.hooksPath, LEFTHOOK=false/LEFTHOOK_*, lefthook-local, .GIT/HOOKS, git-path, git alias
-blocked 'git config core.hookspath /tmp/empty'
-blocked 'git config --local Core.HooksPath /dev/null'
-blocked 'git -c core.hookspath=/tmp/empty commit -m "x"'
-blocked 'git -c CORE.HOOKSPATH=/tmp/empty push origin m0.2-agent-docs'
-blocked "printf '[core]\\n\\thooksPath = /dev/null\\n' >> .git/config"
-blocked 'LEFTHOOK=false git commit -m x'
-blocked "LEFTHOOK='0' git commit -m x"
-blocked 'export LEFTHOOK=FALSE; git commit -m x'
-blocked 'LEFTHOOK_EXCLUDE=gate git push origin m1'
-blocked 'lefthook uninstall'
-blocked 'echo "pre-push: {skip: true}" > lefthook-local.yml'
-blocked 'cp x .lefthook-local.yml'
-blocked 'rm .GIT/HOOKS/pre-push'
-blocked 'rm "$(git rev-parse --git-path hooks)/pre-push"'
-
-# Minor #16: < and > redirections right after message flag clear pending flag
-blocked 'git commit -m > scripts/guard-push.sh'
-blocked 'git commit -m>scripts/guard-push.sh'
-blocked 'gh pr comment 2 --body > .claude/hooks/guard-git.sh'
-allowed 'git commit -m "x > y"'
-allowed 'git commit -m "notes on scripts/guard-push.sh > ok"'
-
-# Minor #18: expanded guard self-tamper check (subshells, relative paths, .claude/hooks/*, patches, 2>&1 / >/dev/null)
-blocked '(rm scripts/guard-push.sh)'
-blocked '(cp /dev/null scripts/pre-push)'
-blocked 'cp /dev/null .claude/hooks/other.sh'
-blocked 'rm -rf .claude/hooks'
-blocked 'rm -rf .claude'
-blocked 'rm -rf scripts'
-blocked 'cd scripts && cp /dev/null pre-push'
-blocked 'cd .claude && cp x settings.local.json'
-blocked 'patch -p1 < fix.patch'
-blocked "bash -c 'patch -p1 < x.diff'"
-blocked 'git apply guard-fixes-2.patch'
-blocked 'git apply --check x.patch && git apply x.patch'
-blocked 'git am 0001-x.patch'
-blocked 'sed -E -i "" s/x/y/ scripts/guard-push.sh'
-blocked 'unlink scripts/pre-push'
-blocked 'echo x 2>&1 > scripts/guard-push.sh'
-blocked 'echo x >/dev/null > scripts/install-hooks.sh'
-allowed 'git apply --check guard-fixes-2.patch'
-allowed 'patch --dry-run -p1 < x.patch'
-allowed 'git stash apply'
-allowed 'cat scripts/guard-push.sh 2>&1'
-allowed 'scripts/install-hooks.sh 2>&1 | tail -3'
-allowed 'lefthook run pre-push-gate > /tmp/gate.log'
-
-
-# G1: endpoint/method combinations and false positives.
-for flag in '-X PUT' '-XPUT' '--method PUT' '--method=PUT'; do
-  blocked "gh api $flag repos/o/r/pulls/12/merge"
-done
-blocked "gh api repos/o/r/merges --method POST"
-blocked "gh alias import aliases.yml"
-for method in DELETE PATCH PUT; do
-  for endpoint in repos/o/r repos/o/r/rulesets/1 repos/o/r/branches/main repos/o/r/tags/v1 repos/o/r/git/refs/tags/v1; do
-    blocked "gh api -X $method $endpoint"
-  done
-done
-for endpoint in repos/o/r/rules/branches/main repos/o/r/rulesets/1 repos/o/r/branches/main repos/o/r/git/refs; do
-  allowed "gh api $endpoint"
-  allowed "gh api -X GET $endpoint"
-done
-allowed 'git commit -m "--no-verify"'
-allowed 'git config core.hooksPath'
-allowed 'git add crates/core/src/alias.rs'
-allowed 'git log --grep="patch 2"'
-allowed 'gh pr view 1 --json mergeable'
-allowed 'git commit -m "push to main; patch 2; hooks; merges; --no-verify"'
-allowed 'cat docs/hooks.md'
-allowed 'echo "push to main hooks merges patch 2" > /tmp/spec.md'
-allowed 'gh api -X GET repos/o/r/pulls/1/merge'
-allowed 'gh api -X GET repos/o/r/merges'
-allowed 'gh api -X POST repos/o/r/issues'
-blocked '/usr/bin/git commit -n -m msg'
-blocked 'gh -R o/r pr merge 2'
-blocked 'gh --repo=o/r pr merge 2'
-blocked 'bash -c "gh pr merge 2"'
-blocked 'git commit -m "$(gh pr merge 2)"'
-raw_input_blocked "array root" '[1,2]'
-raw_input_blocked "multiple JSON values" '{} {}'
-raw_input_blocked "non-string command" '{"tool_input":{"command":5}}'
-raw_input_blocked "non-object tool input" '{"tool_input":"x"}'
-# Literal patches are inspected, not executed.
-cat > "$tmp/safe.patch" <<'PATCH'
-diff --git a/README.md b/README.md
---- a/README.md
-+++ b/README.md
-@@ -1 +1 @@
--old
-+new
-PATCH
-sed 's@README.md@scripts/pre-push@g' "$tmp/safe.patch" > "$tmp/guard.patch"
-allowed "git apply $tmp/safe.patch"
-blocked "git apply $tmp/guard.patch"
-blocked "patch -p1 < $tmp/guard.patch"
-allowed 'cp scripts/guard-push.sh /tmp/guard-copy'
-blocked 'tee scripts/pre-push < /tmp/x'
-blocked 'ln -sf /tmp/x .claude/hooks/guard-git.sh'
-blocked 'mv /tmp/x lefthook.yml'
-blocked 'gh pr -R o/r merge 2'
-blocked $'git status;\ngh pr merge 2'
-allowed 'gh pr comment 2 --body "merge"'
-allowed 'gh pr comment 2 --body "push to main; hooks; merges; patch 2"'
-# Round 1 B1: API option values never replace the endpoint.
-for option in '-H "Accept: application/vnd.github+json"' '--header="X-GitHub-Api-Version: 2022-11-28"' '--jq .sha' '-q .sha' '-t "{{.sha}}"' '--template={{.sha}}' '--hostname github.com' '-p foo' '--preview=foo' '--cache 1h' '-f note=value' '-F note=value' '--field note=value' '--raw-field=note=value'; do
-  for request in '-X PUT repos/o/r/pulls/186/merge' '-X POST repos/o/r/merges' '-X DELETE repos/o/r/rulesets/1' '-X PUT repos/o/r/rulesets/1' '-X PATCH repos/o/r/rulesets/1' '-X PATCH repos/o/r' '-X DELETE repos/o/r/git/refs/heads/work'; do
-    blocked "gh api $option $request"
-  done
-  allowed "gh api $option --method GET repos/o/r/rulesets/1"
-done
-blocked 'gh api --method PUT -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" /repos/o/r/pulls/186/merge -f merge_method=merge'
-blocked 'gh api -X PUT "repos/o/r/pulls/186/merge?x=1#fragment"'
-blocked 'gh api -X DELETE "repos/o/r/rulesets/1?x=1"'
-blocked 'gh api -X PUT ignored repos/o/r/pulls/186/merge'
-allowed 'gh api -f note=value --method=get -H "Accept: application/json" repos/o/r/rulesets/1'
-allowed 'gh api --method GET -f query=mergePullRequest graphql'
-# --input is a value option, not an endpoint, even for REST requests.
-printf '{}' > "$tmp/request.json"
-blocked "gh api --input $tmp/request.json -X PUT repos/o/r/pulls/186/merge"
-allowed "gh api --input=$tmp/request.json -X GET repos/o/r/rulesets/1"
-
-# Round 1 M1: unwrap commands without treating quoted message data as code.
-for wrapper in 'timeout 300' 'timeout -s TERM -k 5 300' 'nohup' 'xargs' 'xargs -n 1 -I {}' 'env' 'env -u DEBUG' 'command' 'exec' 'nice' 'nice -n 5' 'time' 'time -p' 'sudo' 'sudo -u root' 'caffeinate -t 300' 'stdbuf -oL'; do
-  blocked "$wrapper gh pr merge 186 --merge"
-  blocked "$wrapper gh api -H 'Accept: application/json' -X PUT repos/o/r/pulls/186/merge"
-  allowed "$wrapper gh pr view 186 --json mergeable"
-done
-for shell in 'sh -c' 'bash -c' 'bash -lc' 'bash -ec' 'bash -xc' 'zsh -c' 'zsh -lc' 'eval'; do
-  blocked "$shell 'gh pr merge 186 --merge'"
-  blocked "$shell 'gh api -X POST repos/o/r/merges'"
-  allowed "$shell 'gh pr view 186 --json mergeable'"
-done
-blocked 'echo 186 | xargs gh pr merge --merge'
-blocked 'echo "$(timeout 300 gh api -X PUT repos/o/r/pulls/1/merge)"'
-blocked 'echo `nohup gh pr merge 186`'
-allowed 'git commit -m "timeout 300 gh pr merge; core.hooksPath; mergePullRequest; hooks; merges"'
-allowed 'echo "gh api --method PUT -H headers repos/o/r/pulls/1/merge"'
-
-# Round 1 M2: only GraphQL mutation payloads trigger the role/settings block.
-for mutation in mergePullRequest enablePullRequestAutoMerge enqueuePullRequest mergeBranch createCommitOnBranch createRef deleteRef updateRef updateRefs updateRepository deleteBranchProtectionRule createBranchProtectionRule deleteRepositoryRuleset updateRepositoryRuleset createRepositoryRuleset; do
-  blocked "gh api graphql -f 'query=mutation { $mutation(input:{}) { clientMutationId } }'"
-  printf '{"query":"mutation { %s(input:{}) { clientMutationId } }"}' "$mutation" > "$tmp/mutation.json"
-  blocked "gh api --input $tmp/mutation.json graphql"
-done
-printf '%s\n' '{"query":"query { repository(owner: \"o\", name: \"r\") { name } }"}' > "$tmp/query.json"
-printf 'mutation { deleteRef(input:{}) { clientMutationId } }' > "$tmp/query.graphql"
-blocked "gh api graphql -F query=@$tmp/query.graphql"
-allowed "gh api --input=$tmp/query.json graphql"
-allowed 'gh api graphql -f "query=query { repository { name } }"'
-allowed 'gh api graphql -f '\''query=query { search(query:"mergePullRequest mutation", type:ISSUE) { issueCount } }'\'''
-allowed 'gh pr comment 1 --body "mutation { mergePullRequest(input:{}) }"'
-
-# Round 1 M3: environment and all git config scopes still enforce hook policy.
-blocked 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git push --force origin work'
-blocked 'env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_1=CORE.HOOKSPATH GIT_CONFIG_VALUE_1=/dev/null git push origin work'
-blocked 'export GIT_CONFIG_KEY_0=core.hooksPath'
-blocked 'GIT_CONFIG_PARAMETERS="'\''core.hooksPath'\''='\''/dev/null'\''" git push origin +work'
-blocked 'export GIT_CONFIG_PARAMETERS="'\''core.hooksPath'\''='\''/dev/null'\''"'
-blocked 'git --config-env=core.hooksPath=HP push --force origin work'
-blocked 'git --config-env core.hooksPath=HP push origin work'
-blocked 'git push -c core.hooksPath=/dev/null origin work'
-blocked 'git -c core.hooksPath=/dev/null config --get user.name'
-for scope in '--global' '--system' '--worktree' '--file /tmp/git-config'; do
-  blocked "git config $scope core.hooksPath /dev/null"
-  allowed "git config $scope --get core.hooksPath"
-done
-allowed 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=Tester git status'
-allowed 'git --config-env=user.name=NAME status'
-allowed 'git commit -m "GIT_CONFIG_KEY_0=core.hooksPath; --config-env=core.hooksPath=HP"'
-
-# Round 2 M2: GraphQL endpoint spellings share the same mutation checks.
-printf '%s\n' '{"query":"mutation { mergePullRequest(input:{}) { clientMutationId } }"}' > "$tmp/round2-mutation.json"
-for endpoint in graphql /graphql graphql/ '/graphql?x=1' '/graphql/?x=1#fragment' https://api.github.com/graphql https://api.github.com/graphql/ 'https://api.github.com/graphql?x=1' /api/graphql api/graphql http://ghe.example/api/graphql https://ghe.example/api/graphql/ 'https://ghe.example:8443/api/graphql/?x=1'; do
-  blocked "gh api '$endpoint' -f 'query=mutation { mergePullRequest(input:{}) { clientMutationId } }'"
-  blocked "gh api '$endpoint' --input '$tmp/round2-mutation.json'"
-  allowed "gh api '$endpoint' -f 'query=query { viewer { login } }'"
-done
-blocked "gh api --hostname ghe.example /api/graphql -f 'query=mutation { deleteRef(input:{}) { clientMutationId } }'"
-allowed "gh api --hostname ghe.example /api/graphql -f 'query=query { viewer { login } }'"
-# REST endpoint normalization must preserve merge/settings blocks and GET reads.
-for prefix in repos /repos https://api.github.com/repos https://ghe.example/api/v3/repos; do
-  blocked "gh api -X PUT '$prefix/o/r/pulls/1/merge/?x=1#fragment'"
-  blocked "gh api -X POST '$prefix/o/r/merges/'"
-  blocked "gh api -X PATCH '$prefix/o/r?x=1' -f visibility=private"
-  blocked "gh api -X DELETE '$prefix/o/r/rulesets/1/'"
-  allowed "gh api -X GET '$prefix/o/r/rulesets/1/'"
-done
-
-# Block messages must name the actual role policy.
-message=$(jq -n '{tool_input:{command:"gh pr merge 1"}}' | "$hook" 2>&1) || :
-if [[ "$message" == *"Code Reviewer merges"* && "$message" == *"owner changes guards"* ]]; then code=0; else code=1; fi
-check "guard-git: policy message" 0 "$code"
-# Confirm Edit/Write protections remain in the unchanged settings deny list.
-for path in .claude/settings.json '.claude/hooks/**' scripts/guard-push.sh scripts/pre-push scripts/install-hooks.sh lefthook.yml; do
-  for tool in Edit Write; do
-    code=0
-    jq -e --arg rule "$tool(**/$path)" '.permissions.deny | index($rule) != null' "$root/.claude/settings.json" >/dev/null || code=$?
-    check "settings: $tool $path" 0 "$code"
-  done
-done
-
-# --- isolation from an inherited GIT_DIR ----------------------------------
-
-# Run this script again the way git's pre-push hook does from a linked
-# worktree: GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE exported, here pointing
-# at a throwaway repo. The run must pass and leave that repo exactly as it was.
-if [ -z "${TEST_GUARDS_NESTED:-}" ]; then
-  bait="$tmp/inherited"
-  git init -q -b bait "$bait"
-  git -C "$bait" -c user.name=test -c user.email=test@example.invalid commit -q --allow-empty -m bait
-  snapshot() {
-    git -C "$bait" symbolic-ref HEAD
-    git -C "$bait" rev-parse HEAD
-    git -C "$bait" for-each-ref --format='%(refname) %(objectname)'
-    git -C "$bait" config --local --list
-    git -C "$bait" count-objects
-  }
-  before=$(snapshot)
-  code=0
-  TEST_GUARDS_NESTED=1 GIT_DIR="$bait/.git" GIT_WORK_TREE="$bait" GIT_INDEX_FILE="$bait/.git/index" \
-    "$root/scripts/test-guards.sh" >/dev/null 2>&1 || code=$?
-  check "isolation: run with an inherited GIT_DIR passes" 0 "$code"
-  if [ "$(snapshot)" = "$before" ]; then same=0; else same=1; fi
-  check "isolation: the inherited GIT_DIR's repo is untouched" 0 "$same"
-fi
-
-echo "test-guards: $passed passed, $failed failed"
+# --- Plain-command hook policy: table-driven, no inspected command executes. ---
+python3 "$root/scripts/test-guard-commands.py"
+python3 "$root/scripts/test-check-rulesets.py"
+echo "test-guards: $passed push checks passed, $failed failed"
 [ "$failed" -eq 0 ]

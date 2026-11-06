@@ -24,9 +24,10 @@ pub const LEVEL_FLOOR_DBFS: f32 = -100.0;
 /// input stays below it.
 pub const NO_SOUND_THRESHOLD_DBFS: f32 = -50.0;
 
-/// How long the level must stay below [`NO_SOUND_THRESHOLD_DBFS`] while
-/// recording before the pill says "No sound".
-pub const NO_SOUND_AFTER: Duration = Duration::from_millis(1_500);
+/// How long a recording must stay below [`NO_SOUND_THRESHOLD_DBFS`], from
+/// its start, before the pill says "No sound" (U13). Only while nothing has
+/// been heard yet: people pause mid-sentence for longer than this.
+pub const NO_SOUND_AFTER: Duration = Duration::from_millis(2_500);
 
 /// An RMS (`0.0..=1.0`) in dBFS: `20 · log10(rms)`, never below
 /// [`LEVEL_FLOOR_DBFS`]. A sine whose RMS is 0.1 reads −20 dBFS (its peak is
@@ -47,15 +48,18 @@ pub fn is_quiet(dbfs: f32) -> bool {
     dbfs < NO_SOUND_THRESHOLD_DBFS
 }
 
-/// Watches one recording's levels for "No sound": silent once every level
-/// for [`NO_SOUND_AFTER`] has been quiet, and loud again at the first level
-/// that isn't. Times are any monotonic clock's (a [`Duration`] since some
-/// start), passed in.
+/// Watches one recording's levels for "No sound": silent only while nothing
+/// has been heard yet in this hold and every level for [`NO_SOUND_AFTER`] has
+/// been quiet. It goes back to loud at the first level that isn't quiet, and
+/// once the input has been loud it never reports silent again (U13): a pause
+/// after speech is a thinking pause, not a dead microphone. Times are any
+/// monotonic clock's (a [`Duration`] since some start), passed in.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SilenceWatch {
-    /// When the current quiet run began; `None` while the input is loud or
-    /// before the first level.
+    /// When the current quiet run began; `None` before the first level.
     quiet_since: Option<Duration>,
+    /// Whether any level was loud in this hold.
+    heard: bool,
 }
 
 impl SilenceWatch {
@@ -68,13 +72,16 @@ impl SilenceWatch {
     /// Takes a level read at `now`; returns whether the input counts as
     /// silent ("No sound") from now on.
     pub fn on_level(&mut self, dbfs: f32, now: Duration) -> bool {
-        if is_quiet(dbfs) {
-            let since = *self.quiet_since.get_or_insert(now);
-            now.saturating_sub(since) >= NO_SOUND_AFTER
-        } else {
+        if !is_quiet(dbfs) {
+            self.heard = true;
             self.quiet_since = None;
-            false
+            return false;
         }
+        if self.heard {
+            return false;
+        }
+        let since = *self.quiet_since.get_or_insert(now);
+        now.saturating_sub(since) >= NO_SOUND_AFTER
     }
 }
 
@@ -112,33 +119,40 @@ mod tests {
     }
 
     #[test]
-    fn criterion_u4_4_silent_after_one_and_a_half_seconds_of_quiet() {
+    fn criterion_u13_1_silence_from_the_start_says_no_sound_at_2_5_s_not_before() {
         let mut watch = SilenceWatch::new();
         assert!(!watch.on_level(LEVEL_FLOOR_DBFS, ms(0)));
-        assert!(!watch.on_level(-70.0, ms(750)));
-        assert!(!watch.on_level(-70.0, ms(1_499)));
-        assert!(watch.on_level(-70.0, ms(1_500)));
-        assert!(watch.on_level(-70.0, ms(3_000)));
+        assert!(!watch.on_level(-70.0, ms(1_500)));
+        assert!(!watch.on_level(-70.0, ms(2_499)));
+        assert!(watch.on_level(-70.0, ms(2_500)));
+        assert!(watch.on_level(-70.0, ms(4_000)));
     }
 
     #[test]
-    fn criterion_u4_4_sound_ends_silence_at_once_and_restarts_the_wait() {
+    fn criterion_u13_1_speech_then_a_long_pause_is_never_no_sound() {
+        let mut watch = SilenceWatch::new();
+        assert!(!watch.on_level(-30.0, ms(0)));
+        for step in 1..=100_u64 {
+            assert!(!watch.on_level(-80.0, ms(step * 50)), "{step}");
+        }
+        assert!(!watch.on_level(-80.0, ms(60_000)));
+    }
+
+    #[test]
+    fn criterion_u13_1_silence_then_speech_goes_back_to_listening_for_good() {
         let mut watch = SilenceWatch::new();
         watch.on_level(-80.0, ms(0));
-        assert!(watch.on_level(-80.0, ms(2_000)));
-        // Speech: loud at once.
-        assert!(!watch.on_level(-30.0, ms(2_050)));
-        // Quiet again: a fresh 1.5 s wait.
-        assert!(!watch.on_level(-80.0, ms(2_100)));
-        assert!(!watch.on_level(-80.0, ms(3_550)));
-        assert!(watch.on_level(-80.0, ms(3_600)));
+        assert!(watch.on_level(-80.0, ms(3_000)));
+        assert!(!watch.on_level(-30.0, ms(3_050)));
+        // Quiet again after speech: never No sound.
+        assert!(!watch.on_level(-80.0, ms(3_100)));
+        assert!(!watch.on_level(-80.0, ms(9_000)));
     }
 
     #[test]
     fn a_short_pause_between_words_is_not_silence() {
         let mut watch = SilenceWatch::new();
         for step in 0..60_u64 {
-            // 1 s of quiet, then a word, repeated.
             let now = ms(step * 50);
             let level = if step % 20 == 0 { -30.0 } else { -70.0 };
             assert!(!watch.on_level(level, now), "{now:?}");

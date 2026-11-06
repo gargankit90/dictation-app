@@ -413,13 +413,11 @@ export function History({
           {copied === null ? "" : "Copied"}
         </p>
         {count === 0 && !unreadable ? null : (
-          <Group>
-            <Row label="Clear history">
-              <button ref={clearButton} type="button" className="destructive" onClick={askToClear}>
-                Clear history…
-              </button>
-            </Row>
-          </Group>
+          <div className="history-clear">
+            <button ref={clearButton} type="button" className="destructive" onClick={askToClear}>
+              Clear history…
+            </button>
+          </div>
         )}
       </div>
       {asking === null ? null : (

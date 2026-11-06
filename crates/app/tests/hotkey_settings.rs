@@ -28,6 +28,7 @@ use dictation_pipeline::hotkey_setting::{
 };
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
 use dictation_pipeline::stand_ins::{FIXED_TRANSCRIPT, FixedTranscriber, ToneAudio};
+use dictation_pipeline::tray::keycap_label;
 use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::fakes::{
     FakeClock, FakeHotkey, FakeInserter, FakePermissions, MemSecretStore,
@@ -381,9 +382,13 @@ async fn failed_reregistration_keeps_the_old_hotkey_and_says_why() {
         }
     );
     let problem = change.problem().expect("the user is told");
-    assert!(problem.contains("Ctrl+Shift+Space"), "{problem}");
+    assert!(problem.contains("⌃⇧Space"), "{problem}");
+    assert!(!problem.contains("Ctrl+Shift+Space"), "{problem}");
     assert!(problem.contains("tap refused"), "{problem}");
-    assert!(problem.contains(&format!("{old} still works")), "{problem}");
+    assert!(
+        problem.contains(&format!("{} still works", keycap_label(&old.to_string()))),
+        "{problem}"
+    );
 
     // The file, the control and the keyboard all still say the old hotkey.
     assert_eq!(file.settings().unwrap().hotkey, old.to_string());
@@ -482,9 +487,12 @@ async fn without_keyboard_access_the_saved_hotkey_starts_once_allowed() {
     assert!(problem.contains("by itself"), "{problem}");
     assert!(!problem.contains("restart"), "{problem}");
     assert_eq!(file.settings().unwrap().hotkey, "F6");
+    // U9: Settings asks for this rather than hearing it from a save.
+    assert_eq!(app.control.notice().as_deref(), Some(problem.as_str()));
 
     app.keyboard.deny_access(false);
     assert_eq!(app.next().await, UiEvent::HotkeyRestored);
+    assert_eq!(app.control.notice(), None);
     assert_eq!(app.control.spec(), spec("F6"));
     app.dictate_with(spec("F6")).await;
     app.pipeline.shutdown().await;
@@ -535,11 +543,14 @@ async fn a_failed_undo_names_the_hotkey_that_still_works() {
     );
     let message = failed.to_string();
     assert!(
-        message.contains(&format!("back to {old} failed")),
+        message.contains(&format!(
+            "back to {} failed",
+            keycap_label(&old.to_string())
+        )),
         "{message}"
     );
     assert!(
-        message.contains("F6 is the hotkey that works now"),
+        message.contains("F6 is the dictation key that works now"),
         "{message}"
     );
 

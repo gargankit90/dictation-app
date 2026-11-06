@@ -6,14 +6,17 @@ enforced in code: events are a closed enum (`crates/ports/src/telemetry.rs`),
 and error reports are built field by field from an allow-list
 (`crates/telemetry/src/errors.rs`), so a field not listed here cannot be sent.
 
-- **On by default.** Turn it off in Settings → Privacy → "Share usage and
-  error events". One switch covers both. Off takes effect at once: nothing
-  more is sent, events and reports still waiting are deleted, requests under
-  way are dropped, and the install ID is deleted. Turning it on again makes a
-  new ID.
-- **Nothing before you choose.** On a first run the same switch is on the
-  first setup screen. Nothing is sent, and no install ID is made, until you
-  continue past that screen, and nothing at all if you switched it off there.
+- **On by default.** During first setup, anonymous usage events and error
+  reports are sent from the first screen, so we can see where and why people
+  stop.
+- **The switch.** "Share usage and error events" is on the last setup screen
+  and in Settings → Privacy. One switch covers both. Off takes effect at once:
+  nothing more is sent, events and reports still waiting are deleted, requests
+  under way are dropped, and the install ID is deleted. It can't recall what
+  was already sent. Turning it on again makes a new ID.
+- **A stored choice wins.** If sharing is already off (for example you turned it
+  off earlier and run setup again), nothing is sent at any step and no install
+  ID is made. If the settings file can't be read, the app treats it as off.
 - **Where it goes.** PostHog Cloud US (`https://us.i.posthog.com`), sent by
   the app itself, never by the webview.
 - **A build without a PostHog key sends nothing.** Development builds, CI and
@@ -81,8 +84,10 @@ links one install's events together. Turning sharing off deletes it.
 | Event | When | Properties |
 | --- | --- | --- |
 | `app_opened` | The app starts | `version` (for example `0.1.0`), `macos_major` (for example `15`), `arch` (`apple_silicon`, `intel`, `other`) |
-| `onboarding_step_reached` | You get to an onboarding step | `step` (`welcome`, `speech`, `permissions`, `try`, `ready`) |
+| `onboarding_step_reached` | Setup opens on a step, or you get to one | `step` (`welcome`, `speech`, `permissions`, `try`, `ready`) |
 | `onboarding_completed` | You finish onboarding | `step` (`ready`) |
+| `onboarding_left` | You close setup's window or quit with setup on it, and it isn't finished | `step`, as above: where you stopped |
+| `setup_problem` | Something gets in the way during setup | `reason`, one of the values under [Setup problems](#setup-problems) |
 | `engine_selected` | You pick a provider or save its key, or switch between On this Mac and Your own key | `kind` (`cloud`, `local`), `provider` (`groq`, `openai`; cloud only; which local model is never sent) |
 | `dictation_finished` | A dictation was pasted | `engine_kind` (`cloud`, `local`), `duration_bucket` (`under2s`, `from2_to5s`, `from5_to15s`, `from15_to60s`, `over60s`), `latency_bucket` (`under500ms`, `from500_to1000ms`, `from1_to2s`, `from2_to5s`, `over5s`) |
 | `dictation_failed` | A dictation failed | `error_type` (`transcription`, `empty_transcript`, `insert`, `secure_input`, `microphone_permission`, `accessibility_permission`, `hotkey`) |
@@ -91,6 +96,36 @@ links one install's events together. Turning sharing off deletes it.
 
 Versions hold only digits, letters, dots, dashes and plus signs, at most 32
 characters.
+
+## Setup problems
+
+Each `reason` is a fixed word, the app's own and nothing else: no paths, app
+names, typed text, transcripts, key material or provider responses. Sent only
+while setup is on the window, not when the same thing happens in Settings.
+
+| `reason` | What happened |
+| --- | --- |
+| `download_failed_no_space` | The model download stopped: not enough free disk space |
+| `download_failed_network` | The model download stopped: the network or the server failed |
+| `download_failed_checksum` | The model download stopped: the file failed its checksum |
+| `download_failed_disk` | The model download stopped: the file couldn't be written |
+| `download_cancelled` | You cancelled the model download |
+| `model_load_failed` | The downloaded model couldn't be loaded |
+| `key_test_failed_no_key` | The key test found no key to test |
+| `key_test_failed_rejected` | The key test failed: the provider rejected the key, or it can't be one |
+| `key_test_failed_rate_limited` | The key test failed: the provider is rate limiting |
+| `key_test_failed_network` | The key test failed: the provider couldn't be reached |
+| `key_test_failed_server` | The key test failed: the provider failed or gave an unusable answer |
+| `key_test_failed_keychain` | The key test failed: the saved key couldn't be read from the keychain |
+| `microphone_denied` | macOS reports the microphone as refused |
+| `accessibility_denied` | You asked for Accessibility and it still wasn't on when you closed setup or quit (macOS doesn't report a refusal of this one) |
+| `microphone_request_failed` | macOS's microphone prompt or its settings page couldn't be opened |
+| `accessibility_request_failed` | macOS's Accessibility prompt or its settings page couldn't be opened |
+| `relaunch_needed` | You relaunched the app because a permission hadn't taken effect |
+| `paste_missed` | The practice dictation's words didn't reach the practice box |
+| `practice_skipped` | You skipped the practice dictation |
+
+A failed practice dictation is `dictation_failed`, above, with its kind.
 
 ## Delivery
 
@@ -131,9 +166,8 @@ recent dictations": Off, 10, 25, 50 or 100. The default is the last 25.
 
 ## Troubleshoot and "Report a problem" (separate from analytics)
 
-Tray menu → Troubleshoot… (also Settings → Help → Troubleshoot…) checks, on
-this Mac, the microphone and Accessibility permissions, whether the hotkey
-works, whether the engine is ready (a saved key can be read, or the chosen
+Settings → Help → Troubleshoot checks, on this Mac, the microphone and
+Accessibility permissions, whether the dictation key works, whether the engine is ready (a saved key can be read, or the chosen
 model is downloaded and the engine has loaded it, or says it is still loading
 or couldn't load), and the last error. These checks record no
 audio and contact nobody. "Test connection" is the one button that does: it
@@ -145,7 +179,7 @@ when you press it.
 
 - the app version, macOS version and chip
 - whether the microphone and Accessibility permissions are granted
-- your hotkey, as the setting writes it
+- your dictation key, as its keycap label (for example `Right ⌥`)
 - the engine: cloud with the provider's name, or on this Mac with the model id
 - whether the engine is ready
 - whether anonymous usage events are on

@@ -6,10 +6,19 @@
 # on a fake backend, since the app's strings can't be swapped in the app, and
 # prints its verdict, which is read through Accessibility.
 #
+# U9: the owner's Try it (a two-key shortcut, the failed-paste panel open) at the
+# default and the minimum size, the text box's focus there, the selected language
+# button in each state (criterion 4), and the language search box in setup and in
+# Settings (criterion 7): see the checks in the test page.
+#
+# The page ready-strip is Ready at the usual size with its real text and the
+# download strip showing: the sharing switch's row is in view without scrolling
+# (U10).
+#
 # Pictures of each step, light and dark, go to the run's output.
 
 LAYOUT_DIR="/Users/$VM_USER/onboarding-layout"
-LAYOUT_STEPS="welcome speech speech-key permissions try ready"
+LAYOUT_STEPS="welcome speech speech-more speech-more-plain speech-key permissions try try-plain try-default ready ready-strip settings-language"
 
 layout_build() {
   local out=target/onboarding-layout
