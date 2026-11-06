@@ -235,135 +235,180 @@ async fn a_dead_network_fails_fast_for_a_five_minute_clip() {
     assert!(took < Duration::from_secs(35), "{took:?}");
 }
 
-/// A listener that takes a request slowly: it reads the head and the first
-/// 64 KB of the body, then stalls for `stall` (reading nothing, so the
-/// client's upload is held back by socket buffers), then reads the rest and
-/// answers 200. `stalled` is signalled when it starts to stall, `answered`
-/// when the whole upload has been read.
-async fn backpressured_server(
-    stall: Duration,
-) -> (u16, Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let stalled = Arc::new(tokio::sync::Notify::new());
-    let answered = Arc::new(tokio::sync::Notify::new());
-    let (s, a) = (Arc::clone(&stalled), Arc::clone(&answered));
-    tokio::spawn(async move {
-        loop {
-            let Ok((mut stream, _)) = listener.accept().await else {
-                return;
-            };
-            let (s, a) = (Arc::clone(&s), Arc::clone(&a));
-            tokio::spawn(async move {
-                let mut data = Vec::new();
-                let mut chunk = vec![0u8; 16 * 1024];
-                let head_end = loop {
-                    let Ok(n) = stream.read(&mut chunk).await else {
-                        return;
-                    };
-                    if n == 0 {
-                        return;
-                    }
-                    data.extend_from_slice(&chunk[..n]);
-                    if let Some(at) = data.windows(4).position(|w| w == b"\r\n\r\n") {
-                        break at + 4;
-                    }
-                };
-                let head = String::from_utf8_lossy(&data[..head_end]).to_ascii_lowercase();
-                let length: usize = head
-                    .lines()
-                    .find_map(|l| l.strip_prefix("content-length:"))
-                    .and_then(|v| v.trim().parse().ok())
-                    .unwrap();
-                let total = head_end + length;
-                while data.len() < head_end + 64 * 1024 {
-                    let Ok(n) = stream.read(&mut chunk).await else {
-                        return;
-                    };
-                    if n == 0 {
-                        return;
-                    }
-                    data.extend_from_slice(&chunk[..n]);
-                }
-                s.notify_one();
-                tokio::time::sleep(stall).await;
-                while data.len() < total {
-                    let Ok(n) = stream.read(&mut chunk).await else {
-                        return;
-                    };
-                    if n == 0 {
-                        return;
-                    }
-                    data.extend_from_slice(&chunk[..n]);
-                }
-                a.notify_one();
-                let body = br#"{"text":"a slow upload"}"#;
-                let reply = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-                    body.len()
-                );
-                let _ = stream.write_all(reply.as_bytes()).await;
-                let _ = stream.write_all(body).await;
-                let _ = stream.shutdown().await;
-            });
-        }
-    });
-    (port, stalled, answered)
+/// What the stalling server shows the test.
+struct Stalling {
+    port: u16,
+    /// Signalled once the server has read a little of the body and stopped.
+    stalled: Arc<tokio::sync::Notify>,
+    /// Body bytes the server has read so far.
+    body_read: Arc<AtomicUsize>,
+    /// The test's explicit release: the server reads the rest only after it.
+    release: Arc<tokio::sync::Notify>,
 }
 
-/// The upload itself is slow: a 20 s clip (1.3 MB, more than the socket
-/// buffers hold) whose upload the server holds back for 1 s, more than three
-/// times the base limit of 300 ms. With the fixed limit the request times
-/// out while the upload is still incomplete; with the grown limit (300 ms +
-/// 10 s) the same upload finishes and the dictation succeeds. The real
-/// production numbers (30 s base) are scaled down so the test takes about a
-/// second; what is proved is that no limit other than the per-request one
-/// ends a slow upload. Not timing-sensitive: the control fails because
-/// 300 ms passes long before the server's 1 s stall ends, the success has a
-/// 9 s margin, and each step is fenced on the server's own progress.
+/// A listener with a tiny receive buffer (so the client's upload is held back
+/// by TCP, not just by the server not reading) that reads the head and about
+/// 16 KB of the body, signals `stalled`, then waits for `release` (no timer)
+/// before it reads the rest and answers 200.
+async fn stalling_server() -> Stalling {
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.set_recv_buffer_size(8 * 1024).unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let listener = socket.listen(8).unwrap();
+    let server = Stalling {
+        port: listener.local_addr().unwrap().port(),
+        stalled: Arc::default(),
+        body_read: Arc::default(),
+        release: Arc::default(),
+    };
+    let (stalled, body_read, release) = (
+        Arc::clone(&server.stalled),
+        Arc::clone(&server.body_read),
+        Arc::clone(&server.release),
+    );
+    tokio::spawn(async move {
+        let Ok((mut stream, _)) = listener.accept().await else {
+            return;
+        };
+        let mut data = Vec::new();
+        let mut chunk = vec![0u8; 4 * 1024];
+        let mut head_end = None;
+        let mut length = 0usize;
+        let mut stalled_once = false;
+        loop {
+            if stalled_once {
+                // Reading again only because the test released the server.
+            } else if head_end.is_some() && body_read.load(Ordering::SeqCst) >= 16 * 1024 {
+                stalled.notify_one();
+                release.notified().await;
+                stalled_once = true;
+            }
+            let Ok(n) = stream.read(&mut chunk).await else {
+                return;
+            };
+            if n == 0 {
+                return;
+            }
+            if head_end.is_none() {
+                data.extend_from_slice(&chunk[..n]);
+                if let Some(at) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                    head_end = Some(at + 4);
+                    let head = String::from_utf8_lossy(&data[..at]).to_ascii_lowercase();
+                    length = head
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length:"))
+                        .and_then(|v| v.trim().parse().ok())
+                        .unwrap();
+                    body_read.store(data.len() - (at + 4), Ordering::SeqCst);
+                    data.clear();
+                }
+            } else {
+                body_read.fetch_add(n, Ordering::SeqCst);
+            }
+            if head_end.is_some() && body_read.load(Ordering::SeqCst) >= length {
+                break;
+            }
+        }
+        let body = br#"{"text":"a slow upload"}"#;
+        let reply = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            body.len()
+        );
+        let _ = stream.write_all(reply.as_bytes()).await;
+        let _ = stream.write_all(body).await;
+        let _ = stream.shutdown().await;
+    });
+    server
+}
+
+/// Criterion 4 with the real numbers: a real 5-minute clip (9.6 MB of WAV)
+/// whose upload is held back by the server for more than 32 s, past the old
+/// fixed 30 s limit. Two clients run at once against two such servers:
+///
+/// - the control, with the old fixed 30 s limit, times out while its upload
+///   is still incomplete;
+/// - the engine as shipped (30 s + 0.5 s per second of audio = 180 s) is
+///   still uploading at that point, then finishes when the test releases
+///   the server and returns the transcript.
+///
+/// That the upload itself is what is pending is shown from the server: it
+/// holds under a tenth of the body when the test checks. The server has a
+/// tiny receive buffer and releases only on the test's signal, so a slow or
+/// loaded runner cannot make it finish early. The only clocks are the real
+/// limits: the control must time out at 30 s (the test waits for that,
+/// however long it takes, up to a generous fence) and the shipped engine has
+/// 150 s of margin after the 32 s check. Takes about 35 s.
 #[tokio::test]
-async fn an_upload_held_back_past_the_base_limit_succeeds_only_with_the_grown_limit() {
-    const STALL: Duration = Duration::from_secs(1);
+async fn a_five_minute_upload_held_back_for_32_seconds_succeeds_and_fails_under_the_old_limit() {
     let audio = Audio {
-        sample_rate: 32_000,
-        samples: vec![0.1; 32_000 * 20],
+        sample_rate: 16_000,
+        samples: vec![0.1; 16_000 * 300],
     };
-    let fence = Duration::from_secs(30);
-    let base = |url: String, grows| Config {
-        timeout: Duration::from_millis(300),
-        ..config(url, grows, 1, LONG_CLIP)
+    let wav_len = dictation_core::wav::encode_f32(&audio.samples, audio.sample_rate)
+        .unwrap()
+        .len();
+    assert!(wav_len > 9_000_000, "a 5-minute clip is about 9.6 MB");
+
+    let engine = |server: &Stalling, grows| {
+        let config = Config {
+            base_url: format!("http://127.0.0.1:{}/v1", server.port),
+            timeout_grows_with_audio: grows,
+            retry: RetryPolicy {
+                max_attempts: 1,
+                ..RetryPolicy::default()
+            },
+            ..Config::from_preset(dictation_transcribe::openai_compat::GROQ)
+        };
+        OpenAiCompat::new(config, Secret::new(KEY)).unwrap()
     };
+    assert_eq!(
+        Config::from_preset(dictation_transcribe::openai_compat::GROQ).timeout,
+        Duration::from_secs(30),
+        "the real base limit"
+    );
 
-    // Control: the old fixed limit. The request ends while the server is
-    // still stalled, before it has read the upload.
-    let (port, stalled, answered) = backpressured_server(STALL).await;
-    let url = format!("http://127.0.0.1:{port}/v1");
-    let fixed = OpenAiCompat::new(base(url, false), Secret::new(KEY)).unwrap();
-    let result = tokio::time::timeout(fence, fixed.transcribe(&audio)).await;
-    assert_eq!(result.unwrap(), Err(TranscribeError::Timeout));
-    tokio::time::timeout(fence, stalled.notified())
-        .await
-        .unwrap();
-    let early = tokio::time::timeout(Duration::from_millis(200), answered.notified()).await;
-    assert!(early.is_err(), "the fixed limit ended the upload midway");
-
-    // The grown limit: the same stalled upload completes.
-    let (port, stalled, _answered) = backpressured_server(STALL).await;
-    let url = format!("http://127.0.0.1:{port}/v1");
-    let grown = OpenAiCompat::new(base(url, true), Secret::new(KEY)).unwrap();
+    let fence = Duration::from_secs(150);
+    let (fixed_server, grown_server) = (stalling_server().await, stalling_server().await);
+    let (fixed, grown) = (engine(&fixed_server, false), engine(&grown_server, true));
+    let (fixed_audio, grown_audio) = (audio.clone(), audio);
     let start = Instant::now();
-    let run = tokio::spawn(async move { grown.transcribe(&audio).await });
-    tokio::time::timeout(fence, stalled.notified())
+    let fixed_run = tokio::spawn(async move { fixed.transcribe(&fixed_audio).await });
+    let grown_run = tokio::spawn(async move { grown.transcribe(&grown_audio).await });
+
+    // Both uploads are held back by their servers.
+    tokio::time::timeout(fence, fixed_server.stalled.notified())
         .await
         .unwrap();
+    tokio::time::timeout(fence, grown_server.stalled.notified())
+        .await
+        .unwrap();
+    tokio::time::sleep_until((start + Duration::from_secs(32)).into()).await;
+
+    // The control: past 30 s, timed out, with its upload far from complete.
+    let result = tokio::time::timeout(fence, fixed_run)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result, Err(TranscribeError::Timeout));
+    assert!(start.elapsed() >= Duration::from_secs(30));
+    assert!(fixed_server.body_read.load(Ordering::SeqCst) < wav_len / 10);
+
+    // The shipped engine: still uploading, the server holding a sliver.
+    assert!(!grown_run.is_finished(), "still uploading past 30 s");
+    let held = grown_server.body_read.load(Ordering::SeqCst);
     assert!(
-        !run.is_finished(),
-        "still uploading while the server stalls"
+        held < wav_len / 10,
+        "the server holds {held} of {wav_len} bytes"
     );
-    let result = tokio::time::timeout(fence, run).await.unwrap().unwrap();
+
+    // Released by the test: the rest goes up and the transcript comes back.
+    grown_server.release.notify_one();
+    fixed_server.release.notify_one();
+    let result = tokio::time::timeout(fence, grown_run)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(result.unwrap(), "a slow upload");
-    assert!(
-        start.elapsed() >= STALL,
-        "the upload outlasted the base limit"
-    );
+    // The whole body: the WAV and the multipart framing around it.
+    assert!(grown_server.body_read.load(Ordering::SeqCst) >= wav_len);
 }
