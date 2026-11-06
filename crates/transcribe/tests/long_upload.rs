@@ -394,7 +394,14 @@ async fn a_five_minute_upload_held_back_for_32_seconds_succeeds_and_fails_under_
     assert!(fixed_server.body_read.load(Ordering::SeqCst) < wav_len / 10);
 
     // The shipped engine: still uploading, the server holding a sliver.
-    assert!(!grown_run.is_finished(), "still uploading past 30 s");
+    if grown_run.is_finished() {
+        let ended = grown_run.await;
+        panic!(
+            "still uploading past 30 s: ended with {ended:?} after {:?}, server held {} of {wav_len}",
+            start.elapsed(),
+            grown_server.body_read.load(Ordering::SeqCst)
+        );
+    }
     let held = grown_server.body_read.load(Ordering::SeqCst);
     assert!(
         held < wav_len / 10,
