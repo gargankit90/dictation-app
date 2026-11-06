@@ -18,7 +18,7 @@ e2e_onboarding_round2() {
   r2_launch
   expect "onboarding shows at Welcome" wait_for_log 'onboarding shown at launch step=Welcome' 30
   expect "Welcome" ax_ok wait-text "$APP_NAME" "$R2_WINDOW" "Talk instead of type" 15
-  ax press "$APP_NAME" "$R2_WINDOW" Continue >/dev/null 2>&1 || true
+  ax press "$APP_NAME" "$R2_WINDOW" "Get started" >/dev/null 2>&1 || true
   expect "Speech" ax_ok wait-text "$APP_NAME" "$R2_WINDOW" "Which language" 15
   expect "choose my own key" \
     ax_ok radio-press "$APP_NAME" "$R2_WINDOW" "Use my own Groq or OpenAI key"
@@ -27,7 +27,9 @@ e2e_onboarding_round2() {
   clear_app_log
   r2_launch
   expect "it comes back at Speech" wait_for_log 'onboarding shown at launch step=Speech' 30
-  expect "own key is still the choice (panel shown)" \
+  expect "the own key is still the choice: Continue opens its screen" \
+    ax_ok press "$APP_NAME" "$R2_WINDOW" Continue
+  expect "which waits for Test & Save" \
     ax_ok wait-text "$APP_NAME" "$R2_WINDOW" "Continue unlocks after Test" 15
   ax dump "$APP_NAME" 2>/dev/null | grep -a -i -E "resum|continue|earlier|picked|kept" | head -10 |
     while IFS= read -r line; do log "  UI: $line"; done

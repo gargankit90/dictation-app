@@ -225,25 +225,28 @@ export function TryStep({
       }}
       secondary={succeeded ? undefined : { label: "Skip for now", onClick: onSkip }}
     >
-      <span className="ob-label">Your dictation key</span>
-      <HotkeyRecorder
-        value={settings?.hotkey ?? "RightAlt"}
-        disabled={settings === null}
-        onRecording={(now) => {
-          // While practice waits, the key stays paused after recording too.
-          setHotkeyRecording(now || blocked);
-          recordingNow.current = now;
-          setRecording(now);
-          // However it ended: a new key, Cancel, Esc.
-          if (!now) focusBox();
-        }}
-        onChange={async (spec) => {
-          const result = await saveHotkey(spec);
-          if (result.settings !== null) onStored(result.settings);
-          focusBox();
-          return result.error;
-        }}
-      />
+      <div className="ob-key-row">
+        <span className="ob-label">Your dictation key</span>
+        <HotkeyRecorder
+          setup
+          value={settings?.hotkey ?? "RightAlt"}
+          disabled={settings === null}
+          onRecording={(now) => {
+            // While practice waits, the key stays paused after recording too.
+            setHotkeyRecording(now || blocked);
+            recordingNow.current = now;
+            setRecording(now);
+            // However it ended: a new key, Cancel, Esc.
+            if (!now) focusBox();
+          }}
+          onChange={async (spec) => {
+            const result = await saveHotkey(spec);
+            if (result.settings !== null) onStored(result.settings);
+            focusBox();
+            return result.error;
+          }}
+        />
+      </div>
       <label htmlFor="try-field" className="ob-label">
         Hold the key, say a sentence, let go.
       </label>

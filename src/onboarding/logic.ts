@@ -8,7 +8,7 @@ import type {
   LocalModelInfo_Serialize,
   Settings_Serialize,
 } from "../bindings";
-import { megabytes } from "../settings/modelRow";
+import { megabytes, modelTitle } from "../settings/modelRow";
 
 /** The bindings allow null for sizes (NaN); the app never sends it. */
 function size(model: LocalModelInfo_Serialize): number {
@@ -21,12 +21,6 @@ function done(model: LocalModelInfo_Serialize): number {
 
 function englishOnly(model: LocalModelInfo_Serialize): boolean {
   return model.language_codes.join() === "en";
-}
-
-/** A model as onboarding names it: "Parakeet English", "Qwen3-ASR Multilingual". */
-export function spokenName(model: LocalModelInfo_Serialize): string {
-  const family = model.name.split(" ")[0] ?? model.name;
-  return `${family} ${englishOnly(model) ? "English" : "Multilingual"}`;
 }
 
 /** "212 of 477 MB". */
@@ -92,7 +86,7 @@ export function stripView(
       note = `Continued from ${megabytes(running.resumed_from_bytes)}.`;
     }
     return {
-      text: `Downloading ${spokenName(running)} · ${progressText(running)}`,
+      text: `Downloading ${modelTitle(running)} · ${progressText(running)}`,
       note,
       percent: total > 0 ? Math.min(100, Math.round((bytes / total) * 100)) : 0,
       actions: ["cancel"],
@@ -102,7 +96,7 @@ export function stripView(
   if (chosen === null || chosen.state === "ready") return null;
   if (chosen.error !== null) {
     return {
-      text: `Download of ${spokenName(chosen)} stopped: ${chosen.error}`,
+      text: `Download of ${modelTitle(chosen)} stopped: ${chosen.error}`,
       note: null,
       percent: null,
       actions: ["retry", "use-key"],
@@ -113,7 +107,7 @@ export function stripView(
     text:
       chosen.state === "partial"
         ? `Download paused · ${progressText(chosen)}`
-        : `${spokenName(chosen)} isn't downloaded yet`,
+        : `${modelTitle(chosen)} isn't downloaded yet`,
     note: null,
     percent: null,
     actions: ["resume", "use-key"],

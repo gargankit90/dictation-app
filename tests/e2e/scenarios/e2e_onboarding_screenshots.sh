@@ -3,6 +3,8 @@
 # appearance is read when the app launches, so each mode has a launch of its
 # own. Little is asserted; the pictures go to the run's output for the PR, and
 # the appearance is put back to light at the end. Downloads the model twice.
+#
+# U11's own pictures, on the own-key route, are e2e_setup_redesign_screens.
 
 OBS_WINDOW="Set up"
 OBS_MODELS="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/models"
@@ -60,11 +62,11 @@ obs_mode() {
   expect "$mode: the window" ax_ok wait-window "$APP_NAME" "$OBS_WINDOW" 30
   expect "$mode: Welcome" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Talk instead of type" 30
   obs_shot "1-welcome-$mode"
-  ax_ok press "$APP_NAME" "$OBS_WINDOW" Continue
-  expect "$mode: Speech" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Parakeet English" 15
+  ax_ok press "$APP_NAME" "$OBS_WINDOW" "Get started"
+  expect "$mode: Speech" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "English · 477 MB" 15
   obs_shot "2-speech-english-$mode"
   ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" Hindi
-  expect "$mode: Hindi" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Multilingual" 10
+  expect "$mode: Hindi" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "30 languages · 590 MB" 10
   obs_shot "2-speech-hindi-$mode"
   # The longest labels, at the smallest window.
   obs_size 680 520
@@ -72,13 +74,20 @@ obs_mode() {
   obs_size 740 560
   ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" English
   ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" "Use my own Groq or OpenAI key"
-  expect "$mode: the own key panel" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Continue unlocks after Test" 10
-  obs_shot "2-speech-own-key-$mode"
+  obs_shot "2-speech-own-key-selected-$mode"
+  ax_ok press "$APP_NAME" "$OBS_WINDOW" Continue
+  expect "$mode: Connect your key" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Continue unlocks after Test" 10
+  obs_shot "2-key-none-$mode"
+  obs_size 680 520
+  obs_shot "2-key-none-680x520-$mode"
+  obs_size 740 560
+  ax_ok press "$APP_NAME" "$OBS_WINDOW" Back
+  ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Which language" 10
   ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" "Recommended for your language"
   ax_ok press "$APP_NAME" "$OBS_WINDOW" "Download and continue"
   # The VM downloads in seconds, so each state below cancels, removes what was
   # fetched and starts again to be sure it is on screen for its picture.
-  expect "$mode: the strip" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Downloading Parakeet English" 15
+  expect "$mode: the strip" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Downloading English" 15
   obs_shot "3-permissions-download-strip-$mode"
   ax_ok press "$APP_NAME" "$OBS_WINDOW" Cancel
   expect "$mode: paused" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Download paused" 10
@@ -100,7 +109,7 @@ obs_mode() {
   ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Two permissions" 10
   vm "rm -rf $(q "$OBS_MODELS")"
   ax_ok press "$APP_NAME" "$OBS_WINDOW" Resume
-  ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Downloading Parakeet English" 10
+  ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Downloading English" 10
   expect "$mode: quit mid-download" quit_from_tray
   clear_app_log
   obs_launch
@@ -113,6 +122,9 @@ obs_mode() {
   expect "$mode: the model loaded" wait_for_log 'on-device model loaded' 120
   sleep 2
   obs_shot "4-try-open-$mode"
+  obs_size 680 520
+  obs_shot "4-try-open-680x520-$mode"
+  obs_size 740 560
   textedit_fresh
   dictate_once 2
   expect "$mode: the missed paste" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "didn't reach the box" 10

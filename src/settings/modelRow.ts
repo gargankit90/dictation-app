@@ -137,6 +137,14 @@ export function modelTitle(model: LocalModelInfo_Serialize): string {
   return codes.join() === "en" ? "English" : `${String(codes.length)} languages`;
 }
 
+/**
+ * The name and size together, as setup's card shows them (U11): "English ·
+ * 477 MB", "30 languages · 590 MB". Settings shows the same two parts apart.
+ */
+export function modelLabel(model: LocalModelInfo_Serialize): string {
+  return `${modelTitle(model)} · ${megabytes(model.size_bytes ?? 0)}`;
+}
+
 /** Its languages in words, counted from the codes the language picker uses. */
 export function languagesLabel(codes: readonly string[]): string {
   if (codes.join() === "en") return "English only";

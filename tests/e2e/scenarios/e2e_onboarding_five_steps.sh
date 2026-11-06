@@ -43,6 +43,7 @@ e2e_onboarding_five_steps() {
   fresh_app_state
   settings_reset
   vm "rm -rf $(q "$FIVE_MODELS")"
+  obs_appearance light
   expect "the stand-in model server starts" model_server_start
   five_launch
   expect "onboarding shows at launch, at Welcome" \
@@ -50,16 +51,16 @@ e2e_onboarding_five_steps() {
   expect "its window is on screen" ax_ok wait-window "$APP_NAME" "$FIVE_WINDOW" 10
   expect "Welcome" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Talk instead of type" 10
   expect "the rail has the five steps" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Permissions" 5
-  expect "press Continue" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Continue
+  expect "press Get started" ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Get started"
 
-  expect "Speech recommends Parakeet English" \
-    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Parakeet English" 15
+  expect "Speech recommends the English model" \
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "English · 477 MB" 15
   expect "with its real size" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "477 MB" 5
   expect "press Download and continue" \
     ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Download and continue"
   expect "Permissions" \
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Records only while you hold your key" 15
-  expect "the strip shows the download" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading Parakeet English" 15
+  expect "the strip shows the download" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading English" 15
   expect "the rail says it runs" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Download running" 5
   expect "the settings choose the model already" settings_file_has transcription local
   expect "some of it is on disk" wait_for_part
@@ -71,7 +72,7 @@ e2e_onboarding_five_steps() {
   expect "it comes back at Permissions" \
     wait_for_log 'onboarding shown at launch step=Permissions' 30
   expect "the download picks up by itself" \
-    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading Parakeet English" 30
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading English" 30
   expect "and the server answered about the earlier part" five_download_picked_up
   expect "the server was asked for the rest only" model_server_saw_resume
   expect "allowed" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Allowed" 10
@@ -111,9 +112,19 @@ e2e_onboarding_five_steps() {
   expect "press Continue" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Continue
 
   expect "Ready shows the engine really ready" \
-    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "On this Mac · Parakeet English · ✓ Ready" 15
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "On this Mac · English · ✓ Ready" 15
   expect "the test isn't called skipped" \
     ax_ok wait-no-text "$APP_NAME" "$FIVE_WINDOW" "Not tested yet" 5
+  # U11's pictures of the line, in each appearance: it is read at launch.
+  obs_shot "5-ready-english-light"
+  expect "quit at Ready" quit_from_tray
+  clear_app_log
+  obs_appearance dark
+  five_launch
+  expect "dark: Ready again, with the engine ready" \
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "On this Mac · English · ✓ Ready" 120
+  obs_shot "5-ready-english-dark"
+  obs_appearance light
   expect "press Start dictating" ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Start dictating"
   expect "the window hides" ax_ok wait-no-window "$APP_NAME" "$FIVE_WINDOW" 10
   expect "the tray has no Resume setup" tray_has_no_resume_setup

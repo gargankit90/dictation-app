@@ -12,7 +12,8 @@ import { providerInfo } from "../providers";
 import { WhatsSent } from "../settings/Privacy";
 import type { SharingSwitch } from "../settings/Privacy";
 import { SaveStatus, Switch, useSave } from "../settings/ui";
-import { chosenModel, modelWait, spokenName } from "./logic";
+import { modelTitle } from "../settings/modelRow";
+import { chosenModel, modelWait } from "./logic";
 import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";
 
@@ -46,7 +47,7 @@ export function historyLine(limit: number): string {
   return `Keeps your last ${String(limit)} dictations on this Mac`;
 }
 
-/** "On this Mac · Parakeet English · ✓ Ready", or where it really is. */
+/** "On this Mac · English · ✓ Ready", or where it really is. */
 function useEngineLine(
   settings: Settings_Serialize | null,
   models: LocalModelInfo_Serialize[] | null,
@@ -83,7 +84,7 @@ function useEngineLine(
       : `${name} · ✓ Connected`;
   }
   const model = chosenModel(settings, models);
-  const name = model === null ? "On-device model" : spokenName(model);
+  const name = model === null ? "On-device model" : modelTitle(model);
   const wait = modelWait(settings, models, engine);
   return `On this Mac · ${name} · ${wait ?? "✓ Ready"}`;
 }
