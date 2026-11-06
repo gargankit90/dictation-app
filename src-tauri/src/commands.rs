@@ -1247,7 +1247,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 53,
+            commands, 54,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -3595,7 +3595,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 53);
+        assert_eq!(COMMAND_NAMES.len(), 54);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");
