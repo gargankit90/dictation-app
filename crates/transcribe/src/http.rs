@@ -46,6 +46,18 @@ pub(crate) fn client(base_url: &str) -> Result<Client, TranscribeError> {
     if is_loopback_http(base_url) {
         builder = builder.no_proxy();
     }
+    // reqwest 0.13 sets TCP_USER_TIMEOUT to 30 s on every socket by default
+    // (Linux and Android only). A stalled upload, e.g. a slow link or a
+    // server that has stopped reading, is then closed by the kernel at 30 s
+    // with ETIMEDOUT, which reads as a timeout, whatever per-request limit
+    // the clip has earned (H1). The per-request timeout is the one limit.
+    // This is a recorded exception to "`#[cfg(target_os)]` only in
+    // `platform`" (H1 fix round, Lead decision): the reqwest method exists
+    // only on those targets, so the call can't be written without a cfg.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        builder = builder.tcp_user_timeout(None);
+    }
     builder
         .tls_backend_preconfigured(tls)
         .connect_timeout(CONNECT_TIMEOUT)
