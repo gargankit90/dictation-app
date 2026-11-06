@@ -260,8 +260,6 @@ mod tests {
         }
     }
 
-    /// H2 criteria 1 and 2: only a Silent clip of at least 1 s is told.
-
     const RATE: u32 = 16_000;
 
     /// A sine wave of `amplitude` at 440 Hz, `millis` long.

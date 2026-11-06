@@ -179,7 +179,7 @@ mod tests {
     }
 
     /// H2 criterion 1/3/4: a silent clip goes Transcribing → Idle with
-    /// ShowNoSound only: no error, nothing to insert.
+    /// `ShowNoSound` only: no error, nothing to insert.
     #[test]
     fn h2_a_silent_clip_returns_to_idle_and_says_so() {
         let (state, commands) = step(State::Transcribing, Event::TranscriptSilent);
