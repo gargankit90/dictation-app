@@ -58,14 +58,22 @@ jobs:
       # An Ubuntu mirror download has stalled for 15-30 minutes here, so nothing
       # may wait that long: apt gives up a silent connection after 30 s and
       # retries a failed download 3 times; each of up to 3 attempts is killed
-      # after 5 minutes; the step as a whole after 15.
+      # after 4 minutes (+10 s grace). A killed apt can leave dpkg half-done, so
+      # before each retry `dpkg --configure -a` repairs it (limit 2 minutes,
+      # +10 s). Worst case: 3 x 250 s + 2 x 130 s + 3 x 5 s = 1025 s, under the
+      # step's 20 minutes (normally ~25 s).
       - name: Install Tauri system libraries
-        timeout-minutes: 15
+        timeout-minutes: 20
         run: |
           apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=60)
           for attempt in 1 2 3; do
-            echo "apt: attempt $attempt of 3 (each limited to ${APT_ATTEMPT_SECS:-300} s)"
-            if sudo timeout -k 10 "${APT_ATTEMPT_SECS:-300}" bash -c '
+            if [ "$attempt" -gt 1 ]; then
+              echo "apt: repairing an interrupted dpkg before the retry"
+              sudo timeout -k 10 "${APT_RECOVER_SECS:-120}" dpkg --configure -a ||
+                echo "apt: dpkg --configure -a did not finish cleanly; retrying anyway" >&2
+            fi
+            echo "apt: attempt $attempt of 3 (each limited to ${APT_ATTEMPT_SECS:-240} s)"
+            if sudo timeout -k 10 "${APT_ATTEMPT_SECS:-240}" bash -c '
               set -e
               apt-get "$@" update
               apt-get "$@" install -y --no-install-recommends \
