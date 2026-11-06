@@ -57,6 +57,9 @@ pub enum UiEvent {
     /// The hotkey listens again after it stopped working
     /// ([`DictationError::HotkeyFailed`]); stop showing that.
     HotkeyRestored,
+    /// The recording that just ended had no sound and lasted long enough to
+    /// say so (H2). Not an error: only the overlay shows it.
+    NoSound,
 }
 
 /// The input level while recording (U4): what [`Pipeline::levels`]
@@ -394,6 +397,9 @@ enum JobResult {
     /// The audio was empty, too short or silent, so nothing was sent to the
     /// transcriber (#69, #72).
     NotTranscribed(u64),
+    /// [`JobResult::NotTranscribed`], and the clip was silent for at least
+    /// [`audio_math::SILENT_NOTICE_MIN`]: the person is told (H2).
+    NotTranscribedSilent(u64),
     /// The recording the transcription was waiting for failed.
     AudioFailed(u64, AudioError),
     Inserted(u64, Result<(), InsertError>),
@@ -968,6 +974,9 @@ where
             }
             // Nothing to paste, and no error to show: straight back to Idle.
             JobResult::NotTranscribed(job) if job == self.job => Some(Event::TranscriptDropped),
+            JobResult::NotTranscribedSilent(job) if job == self.job => {
+                Some(Event::TranscriptSilent)
+            }
             JobResult::Inserted(job, result) if job == self.job => Some(match result {
                 Ok(()) => Event::InsertDone,
                 Err(InsertError::SecureInput) => Event::SecureInputBlocked,
@@ -983,6 +992,7 @@ where
             ),
             JobResult::Transcribed(job, ..)
             | JobResult::NotTranscribed(job)
+            | JobResult::NotTranscribedSilent(job)
             | JobResult::Inserted(job, _)
             | JobResult::AudioFailed(job, _) => {
                 tracing::debug!(job, current = self.job, "dropping a stale result");
@@ -1052,6 +1062,7 @@ where
                 tracing::info!(%error, "dictation failed");
                 self.ui.send(UiEvent::Error(error));
             }
+            Command::ShowNoSound => self.ui.send(UiEvent::NoSound),
             Command::StateChanged(phase) => {
                 if phase != Phase::Recording {
                     // No level outside a recording.
@@ -1095,7 +1106,11 @@ where
             );
             if verdict != Verdict::Transcribe {
                 tracing::info!(job, ?verdict, duration = ?audio.duration(), "not transcribing");
-                return JobResult::NotTranscribed(job);
+                return if audio_math::silent_clip_is_worth_telling(verdict, audio.duration()) {
+                    JobResult::NotTranscribedSilent(job)
+                } else {
+                    JobResult::NotTranscribed(job)
+                };
             }
             tracing::debug!(job, duration = ?audio.duration(), "transcribing");
             let result = transcriber.transcribe_detailed(&audio).await;

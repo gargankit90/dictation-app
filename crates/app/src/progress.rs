@@ -120,6 +120,8 @@ impl DictationProgress {
             UiEvent::StateChanged(Phase::Transcribing) => {
                 self.recording = false;
             }
+            // Setup's practice has its own "no sound" hint (H2).
+            UiEvent::NoSound => {}
             UiEvent::StateChanged(Phase::Inserting) => {
                 self.recording = false;
                 if self.view.stages.last() == Some(&Stage::Recorded) {
