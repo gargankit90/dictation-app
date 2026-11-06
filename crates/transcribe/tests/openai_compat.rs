@@ -56,6 +56,8 @@ fn config(server: &MockServer) -> Config {
         model: "whisper-large-v3-turbo".into(),
         language: Some("en".into()),
         timeout: Duration::from_secs(5),
+        timeout_grows_with_audio: false,
+        long_clip: dictation_core::upload_limits::LONG_CLIP,
         retry: RetryPolicy {
             max_attempts: 3,
             base_delay: ms(100),

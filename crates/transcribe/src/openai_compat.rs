@@ -24,6 +24,7 @@ use std::time::{Duration, SystemTime};
 use dictation_core::retry::{RetryPolicy, SplitMix64};
 use dictation_core::settings::Provider;
 use dictation_core::text::{Transcript, mean_no_speech_prob};
+use dictation_core::upload_limits::{LONG_CLIP, may_retry_after_timeout, request_timeout};
 use dictation_core::wav;
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, RETRY_AFTER};
@@ -35,7 +36,8 @@ use serde::Deserialize;
 /// [`TranscribeError::RateLimited`] instead of a long silent wait.
 pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 
-/// How long one request may take before it counts as a timeout.
+/// How long one request may take before it counts as a timeout, before
+/// [`Config::timeout_grows_with_audio`] adds time for a long clip.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A provider's endpoint and default model.
@@ -137,8 +139,16 @@ pub struct Config {
     /// An ISO-639-1 language code (`"en"`), or `None` to let the model
     /// detect it.
     pub language: Option<String>,
-    /// Per-request timeout.
+    /// Per-request timeout, for a clip of no length.
     pub timeout: Duration,
+    /// Whether each request gets extra time for the length of its clip
+    /// ([`request_timeout`]). On for dictation; off for the key check, which
+    /// has a fixed budget.
+    pub timeout_grows_with_audio: bool,
+    /// The clip length from which a timeout is retried at most once
+    /// ([`LONG_CLIP`] in the app; a test uses a short one to avoid waiting
+    /// out a real 30 s limit).
+    pub long_clip: Duration,
     /// Retries for rate limits, server errors, timeouts and network errors.
     pub retry: RetryPolicy,
 }
@@ -153,6 +163,8 @@ impl Config {
             model: preset.model.to_owned(),
             language: None,
             timeout: DEFAULT_TIMEOUT,
+            timeout_grows_with_audio: true,
+            long_clip: LONG_CLIP,
             retry: RetryPolicy::default(),
         }
     }
@@ -195,7 +207,7 @@ impl<W: Wait> OpenAiCompat<W> {
         wait: W,
         seed: u64,
     ) -> Result<Self, TranscribeError> {
-        let client = crate::http::client(config.timeout, &config.base_url)?;
+        let client = crate::http::client(&config.base_url)?;
         let endpoint = format!(
             "{}/audio/transcriptions",
             config.base_url.trim_end_matches('/')
@@ -221,10 +233,17 @@ impl<W: Wait> OpenAiCompat<W> {
     ) -> Result<Transcription, TranscribeError> {
         let wav = wav::encode_f32(&audio.samples, audio.sample_rate)
             .map_err(|e| TranscribeError::Engine(format!("could not encode the audio: {e}")))?;
-        tracing::debug!(bytes = wav.len(), model = %self.config.model, "transcribing");
+        let clip = audio_duration(audio);
+        let timeout = if self.config.timeout_grows_with_audio {
+            request_timeout(self.config.timeout, clip)
+        } else {
+            self.config.timeout
+        };
+        tracing::debug!(bytes = wav.len(), model = %self.config.model, ?timeout, "transcribing");
         let mut failures = 0u32;
+        let mut timeouts = 0u32;
         loop {
-            let error = match self.attempt(&wav).await {
+            let error = match self.attempt(&wav, timeout).await {
                 Ok(transcription) => {
                     tracing::debug!(
                         chars = transcription.text.chars().count(),
@@ -236,6 +255,13 @@ impl<W: Wait> OpenAiCompat<W> {
                 Err(failure) => failure,
             };
             failures = failures.saturating_add(1);
+            if error.error == TranscribeError::Timeout {
+                timeouts = timeouts.saturating_add(1);
+                if !may_retry_after_timeout(clip, self.config.long_clip, timeouts) {
+                    tracing::debug!(failures, timeouts, "a long clip timed out again; giving up");
+                    return Err(error.error);
+                }
+            }
             let Some(delay) = self.retry_delay(&error, failures) else {
                 tracing::debug!(failures, error = %error.error, "giving up");
                 return Err(error.error);
@@ -261,7 +287,7 @@ impl<W: Wait> OpenAiCompat<W> {
         }
     }
 
-    async fn attempt(&self, wav: &[u8]) -> Result<Transcription, Failure> {
+    async fn attempt(&self, wav: &[u8], timeout: Duration) -> Result<Transcription, Failure> {
         let file = Part::bytes(wav.to_vec())
             .file_name("audio.wav")
             .mime_str("audio/wav")
@@ -277,6 +303,7 @@ impl<W: Wait> OpenAiCompat<W> {
             .client
             .post(&self.endpoint)
             .headers(self.auth_header()?)
+            .timeout(timeout)
             .multipart(form)
             .send()
             .await
@@ -321,6 +348,17 @@ impl<W> std::fmt::Debug for OpenAiCompat<W> {
             .field("key", &self.key)
             .finish_non_exhaustive()
     }
+}
+
+/// How long `audio` plays.
+fn audio_duration(audio: &Audio) -> Duration {
+    if audio.sample_rate == 0 {
+        return Duration::ZERO;
+    }
+    let seconds = audio.samples.len() as u64 / u64::from(audio.sample_rate);
+    let rest = audio.samples.len() as u64 % u64::from(audio.sample_rate);
+    Duration::from_secs(seconds)
+        + Duration::from_nanos(rest * 1_000_000_000 / u64::from(audio.sample_rate))
 }
 
 /// A failed attempt and whether to retry it.

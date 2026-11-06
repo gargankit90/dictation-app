@@ -12,7 +12,18 @@ use dictation_ports::TranscribeError;
 use reqwest::Client;
 use rustls_platform_verifier::BuilderVerifierExt;
 
-/// A client with `timeout` per request for the API at `base_url`.
+/// How long a connection may take to open. A dead network fails after this,
+/// however long the clip is: the per-request limit (which grows with the
+/// clip) only starts to matter once connected. 10 s covers a slow mobile
+/// link's DNS, TCP and TLS set-up with room to spare, and is short enough
+/// that three attempts at a long clip don't sit for minutes with nothing
+/// reachable.
+pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A client for the API at `base_url`, with [`CONNECT_TIMEOUT`] to connect.
+/// It has no limit on a whole request: the caller sets one per request
+/// (`RequestBuilder::timeout`), because it depends on the length of the
+/// audio.
 ///
 /// A plain `http` loopback `base_url` (a test build's local provider) is
 /// reached directly, never through `HTTP_PROXY`/`ALL_PROXY`: the request
@@ -23,7 +34,7 @@ use rustls_platform_verifier::BuilderVerifierExt;
 ///
 /// [`TranscribeError::Engine`] if the TLS setup or the client can't be
 /// built.
-pub(crate) fn client(timeout: Duration, base_url: &str) -> Result<Client, TranscribeError> {
+pub(crate) fn client(base_url: &str) -> Result<Client, TranscribeError> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let tls = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
@@ -35,9 +46,21 @@ pub(crate) fn client(timeout: Duration, base_url: &str) -> Result<Client, Transc
     if is_loopback_http(base_url) {
         builder = builder.no_proxy();
     }
+    // reqwest 0.13 sets TCP_USER_TIMEOUT to 30 s on every socket by default
+    // (Linux and Android only). A stalled upload, e.g. a slow link or a
+    // server that has stopped reading, is then closed by the kernel at 30 s
+    // with ETIMEDOUT, which reads as a timeout, whatever per-request limit
+    // the clip has earned (H1). The per-request timeout is the one limit.
+    // This is a recorded exception to "`#[cfg(target_os)]` only in
+    // `platform`" (H1 fix round, Lead decision): the reqwest method exists
+    // only on those targets, so the call can't be written without a cfg.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        builder = builder.tcp_user_timeout(None);
+    }
     builder
         .tls_backend_preconfigured(tls)
-        .timeout(timeout)
+        .connect_timeout(CONNECT_TIMEOUT)
         // Never follow a redirect: requests go only to the configured
         // provider, and a 3xx is a provider error (issue #76).
         .redirect(reqwest::redirect::Policy::none())
@@ -110,8 +133,8 @@ mod tests {
 
     #[test]
     fn builds_a_client_with_rustls_and_ring() {
-        assert!(client(Duration::from_secs(1), "https://api.groq.com/openai/v1").is_ok());
-        assert!(client(Duration::from_secs(1), "http://127.0.0.1:9/v1").is_ok());
+        assert!(client("https://api.groq.com/openai/v1").is_ok());
+        assert!(client("http://127.0.0.1:9/v1").is_ok());
     }
 
     #[test]
