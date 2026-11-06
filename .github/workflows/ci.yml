@@ -60,8 +60,8 @@ jobs:
       # retries a failed download 3 times; each of up to 3 attempts is killed
       # after 4 minutes (+10 s grace). A killed apt can leave dpkg half-done, so
       # before each retry `dpkg --configure -a` repairs it (limit 2 minutes,
-      # +10 s). Worst case: 3 x 250 s + 2 x 130 s + 3 x 5 s = 1025 s, under the
-      # step's 20 minutes (normally ~25 s).
+      # +10 s); the mirror switch is instant. Worst case: 3 x 250 s + 2 x 130 s
+      # + 3 x 5 s = 1025 s, under the step's 20 minutes (normally ~25 s).
       - name: Install Tauri system libraries
         timeout-minutes: 20
         run: |
@@ -71,6 +71,20 @@ jobs:
               echo "apt: repairing an interrupted dpkg before the retry"
               sudo timeout -k 10 "${APT_RECOVER_SECS:-120}" dpkg --configure -a ||
                 echo "apt: dpkg --configure -a did not finish cleanly; retrying anyway" >&2
+              # The runner's sources use a mirror list (file:/etc/apt/apt-mirrors.txt,
+              # azure.archive.ubuntu.com for every pocket, security included). When
+              # that mirror is the one stalling, retrying it is pointless: put
+              # archive.ubuntu.com first, keeping the old entries as fallbacks.
+              mirrors=${APT_MIRRORS_FILE:-/etc/apt/apt-mirrors.txt}
+              if [ -f "$mirrors" ]; then
+                echo "apt: switching to archive.ubuntu.com for attempt $attempt (security updates are served there too)"
+                { printf 'http://archive.ubuntu.com/ubuntu/\tpriority:1\n'
+                  { grep -v '^http://archive.ubuntu.com/' "$mirrors" || true; } | sed -E 's/priority:[0-9]+/priority:2/'
+                } | sudo tee "$mirrors.new" >/dev/null && sudo mv "$mirrors.new" "$mirrors" ||
+                  echo "apt: could not switch mirror; retrying anyway" >&2
+              else
+                echo "apt: $mirrors not found; the mirror is not switched" >&2
+              fi
             fi
             echo "apt: attempt $attempt of 3 (each limited to ${APT_ATTEMPT_SECS:-240} s)"
             if sudo timeout -k 10 "${APT_ATTEMPT_SECS:-240}" bash -c '
