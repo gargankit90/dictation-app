@@ -118,12 +118,18 @@ e2e_pill_states() {
     test "$(pill_log_since "$mark")" = "recording no_sound transcribing error hidden"
   expect "nothing was pasted" textedit_is_empty
 
-  # 3. A short tap of the silence fixture: nothing to say.
+  # 3. A silent clip under 1 s (a tap): nothing to say.
+  fresh_app_state
+  launch_full "$VM_SILENCE_SHORT"
+  expect "the app starts a third time and logs ready" wait_for_log 'INFO .*ready'
+  textedit_fresh
   mark=$(pill_log_mark)
   launch --press
+  expect "the pill shows Listening" wait_for_log 'overlay shown state="?recording' 5
   sleep 0.5
   launch --release
-  expect "the tap gets back to Idle" wait_for_idle_count 2
+  expect "the tap gets back to Idle" wait_for_idle_count 1
+  expect "the log says why nothing was transcribed" wait_for_log 'not transcribing.*Silent'
   sleep 1
   expect "the pill shows no message after the tap" overlay_shows "$OVERLAY_HIDDEN"
   expect "the pill went recording, transcribing, hidden (no error)" \

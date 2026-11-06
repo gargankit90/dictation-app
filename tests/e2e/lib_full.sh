@@ -6,6 +6,8 @@
 # What the mock transcriber answers (--mock-text on the first launch).
 MOCK_TEXT="hello world"
 VM_SILENCE="$VM_FIXTURES/silence-16k.wav"
+# H2: 0.5 s of zeros, a silent clip under the 1 s that is told.
+VM_SILENCE_SHORT="$VM_FIXTURES/silence-short-16k.wav"
 VM_RIGHT_OPTION="$VM_FIXTURES/right-option.js"
 VM_POST_KEY="$VM_FIXTURES/post-key.js"
 VM_AX="$VM_FIXTURES/ax.js"
