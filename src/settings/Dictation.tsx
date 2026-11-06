@@ -14,7 +14,7 @@ export const MIC_TEST_MS = 5_000;
 export { MIC_POLL_MS } from "./MicMeter";
 /** Louder than this, in dBFS, is sound (`NO_SOUND_THRESHOLD_DBFS` in `dictation-core`). */
 export const SOUND_DBFS = -50;
-/** How often the Shortcut row asks whether the hotkey still waits. */
+/** How often the Dictation key row asks whether the hotkey still waits. */
 export const HOTKEY_NOTICE_POLL_MS = 2_000;
 
 export interface LanguageChoice {
@@ -31,7 +31,7 @@ interface Props {
   /** The app's settings after a change (what Settings shows from now). */
   onStored: (settings: Settings_Serialize) => void;
   languages: LanguageChoice;
-  /** Opens the Speech section (to pick a multilingual engine). */
+  /** Opens the Speech section (to pick a model with more languages). */
   onOpenSpeech: () => void;
 }
 
@@ -43,7 +43,7 @@ type MicTest =
   | { state: "error"; message: string };
 
 /**
- * Dictation: the shortcut (K1's recorder, applied at once), the language
+ * Dictation: the dictation key (K1's recorder, applied at once), the language
  * (saved on change) and the microphone with a 5 s level test.
  */
 export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props) {
@@ -161,9 +161,9 @@ export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props
     <>
       <Group>
         <Row
-          label="Shortcut"
+          label="Dictation key"
           labelId="hotkey-label"
-          caption="Hold it to talk, release to paste. It works as soon as you record it."
+          caption="Hold it to talk, release to paste."
           below={
             <>
               <SaveStatus save={hotkey.save} />
@@ -179,6 +179,8 @@ export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props
             value={settings.hotkey}
             onChange={recordHotkey}
             onRecording={setHotkeyRecording}
+            compact
+            describedBy="hotkey-label"
           />
         </Row>
         <Row
@@ -188,7 +190,7 @@ export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props
               <>
                 The English model understands English only. For Hindi and other languages,{" "}
                 <button type="button" className="link" onClick={onOpenSpeech}>
-                  choose a multilingual engine in Speech.
+                  choose a model with more languages in Speech.
                 </button>
               </>
             ) : (

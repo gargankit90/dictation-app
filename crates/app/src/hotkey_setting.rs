@@ -789,13 +789,13 @@ impl HotkeyChange {
                 let key = shown(wanted);
                 Some(match reason {
                     Some(HotkeyError::PermissionDenied) => format!(
-                        "The hotkey {key} is saved, but Vocet can't listen to the keyboard yet: allow it in System Settings → Privacy & Security → Accessibility, and {key} starts working by itself."
+                        "The dictation key {key} is saved, but Vocet can't listen to the keyboard yet: allow it in System Settings → Privacy & Security → Accessibility, and {key} starts working by itself."
                     ),
                     Some(error) => format!(
-                        "The hotkey {key} is saved, but no hotkey is listening right now ({error}). {key} starts working as soon as it can."
+                        "The dictation key {key} is saved, but no dictation key is listening right now ({error}). {key} starts working as soon as it can."
                     ),
                     None => format!(
-                        "The hotkey {key} is saved, but no hotkey is listening right now. Restart Vocet to use it."
+                        "The dictation key {key} is saved, but no dictation key is listening right now. Restart Vocet to use it."
                     ),
                 })
             }
@@ -804,7 +804,7 @@ impl HotkeyChange {
                 wanted,
                 error,
             } => Some(format!(
-                "Couldn't switch the hotkey to {} ({error}). {} still works, and your other settings were saved.",
+                "Couldn't switch the dictation key to {} ({error}). {} still works, and your other settings were saved.",
                 shown(wanted),
                 shown(kept),
             )),
@@ -855,7 +855,7 @@ fn shown(spec: &HotkeySpec) -> String {
 /// text is for the user and says which hotkey works now.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(
-    "Switching the hotkey back to {} failed ({error}), so {} is the hotkey that works now; Settings shows it, and saving again keeps it.",
+    "Switching the dictation key back to {} failed ({error}), so {} is the dictation key that works now; Settings shows it, and saving again keeps it.",
     shown(.previous),
     shown(.active)
 )]

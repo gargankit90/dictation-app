@@ -18,6 +18,62 @@ pub fn title(view: View) -> &'static str {
     }
 }
 
+/// Which Settings screen the window shows (U12): each has its own title, and
+/// the page says when it changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowPage {
+    /// The sidebar and its sections.
+    Settings,
+    /// Troubleshoot's checks.
+    Troubleshoot,
+    /// Report a problem.
+    Report,
+}
+
+/// The window's title on `page`.
+#[must_use]
+pub const fn page_title(page: WindowPage) -> &'static str {
+    match page {
+        WindowPage::Settings => "Vocet Settings",
+        WindowPage::Troubleshoot => "Vocet Troubleshoot",
+        WindowPage::Report => "Vocet Report a Problem",
+    }
+}
+
+/// Whether a window titled `current` is already on `view`: every title but
+/// setup's is the Settings view.
+#[must_use]
+fn on_view(current: &str, view: View) -> bool {
+    (current == title(View::Onboarding)) == (view == View::Onboarding)
+}
+
+/// The title to show `view` with: a window staying on its view keeps the one
+/// its page gave it (Settings or Troubleshoot).
+#[must_use]
+fn title_for(current: &str, view: View) -> &str {
+    if on_view(current, view) {
+        current
+    } else {
+        title(view)
+    }
+}
+
+/// The page says which screen it shows. Setup's title stays while setup shows.
+///
+/// # Errors
+///
+/// If the window can't be read or retitled.
+pub fn set_page<R: Runtime>(app: &AppHandle<R>, page: WindowPage) -> tauri::Result<()> {
+    let Some(window) = app.get_webview_window(MAIN) else {
+        return Ok(());
+    };
+    if on_view(&window.title()?, View::Onboarding) {
+        return Ok(());
+    }
+    window.set_title(page_title(page))
+}
+
 /// The window's size for `view`, and the smallest it may get, in points:
 /// `tauri.conf.json`'s for Settings, U8's for onboarding.
 #[must_use]
@@ -31,7 +87,7 @@ pub fn sizes(view: View) -> ((f64, f64), (f64, f64)) {
 /// When the window changes view, gives it that view's size. A window that
 /// stays on its view keeps the size the user gave it.
 fn fit<R: Runtime>(window: &tauri::WebviewWindow<R>, view: View) -> tauri::Result<()> {
-    if window.title()? == title(view) {
+    if on_view(&window.title()?, view) {
         return Ok(());
     }
     let ((width, height), (min_width, min_height)) = sizes(view);
@@ -58,8 +114,9 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, view: View) {
     if let Err(error) = fit(&window, view) {
         tracing::warn!(%error, "could not size the settings window");
     }
+    let current = window.title().unwrap_or_default();
     let shown = window
-        .set_title(title(view))
+        .set_title(title_for(&current, view))
         .and_then(|()| window.unminimize())
         .and_then(|()| window.show())
         .and_then(|()| window.set_focus())
@@ -87,6 +144,29 @@ mod tests {
     fn each_view_has_its_own_title() {
         assert_eq!(title(View::Settings), "Vocet Settings");
         assert_eq!(title(View::Onboarding), "Set up Vocet");
+    }
+
+    /// U12 criterion 2: each screen's title.
+    #[test]
+    fn u12_criterion_2_each_page_has_its_own_title() {
+        assert_eq!(page_title(WindowPage::Settings), "Vocet Settings");
+        assert_eq!(page_title(WindowPage::Troubleshoot), "Vocet Troubleshoot");
+        assert_eq!(page_title(WindowPage::Report), "Vocet Report a Problem");
+        assert_eq!(page_title(WindowPage::Settings), title(View::Settings));
+    }
+
+    /// Troubleshoot is still the Settings view: showing the window again
+    /// keeps its size and title, and setup replaces them.
+    #[test]
+    fn u12_criterion_2_a_screen_of_settings_stays_on_its_view() {
+        let troubleshoot = page_title(WindowPage::Troubleshoot);
+        assert!(on_view(troubleshoot, View::Settings));
+        assert!(!on_view(troubleshoot, View::Onboarding));
+        assert!(on_view("Set up Vocet", View::Onboarding));
+        assert!(!on_view("Set up Vocet", View::Settings));
+        assert_eq!(title_for(troubleshoot, View::Settings), troubleshoot);
+        assert_eq!(title_for(troubleshoot, View::Onboarding), "Set up Vocet");
+        assert_eq!(title_for("Set up Vocet", View::Settings), "Vocet Settings");
     }
 
     /// U8 criterion 1.

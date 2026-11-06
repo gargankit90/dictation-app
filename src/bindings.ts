@@ -143,7 +143,7 @@ export const commands = {
 	openIssue: () => typedError<null, string>(__TAURI_INVOKE("open_issue")),
 	/**
 	 *  What the tray asked the window to show since the window last asked, as
-	 *  `"troubleshoot"`, `"report"`, `"speech"`, `"shortcut"` or `"history"`; empty if
+	 *  `"settings"`, `"help"`, `"troubleshoot"`, `"speech"`, `"shortcut"` or `"history"`; empty if
 	 *  nothing. Asking clears it.
 	 */
 	takeWindowRequest: () => typedError<string, string>(__TAURI_INVOKE("take_window_request")),
@@ -198,8 +198,10 @@ export const commands = {
 	openLink: (link: Link) => typedError<null, string>(__TAURI_INVOKE("open_link", { link })),
 	/**  The version, and when updates were last checked. */
 	getAppInfo: () => typedError<AppInfo_Serialize, string>(__TAURI_INVOKE("get_app_info")),
-	/**  Checks for updates as the tray's item does: a dialog says what it found. */
+	/**  Check now, in Settings → General: a dialog says what it found. */
 	checkForUpdates: () => typedError<null, string>(__TAURI_INVOKE("check_for_updates")),
+	/**  The page says which screen it shows, for the window's title (U12). */
+	setWindowPage: (page: WindowPage) => typedError<null, string>(__TAURI_INVOKE("set_window_page", { page })),
 	/**
 	 *  Chooses on-device model `id` before it is on this Mac (U8's "Download and
 	 *  continue"): the settings choose it now, so the choice survives a quit and
@@ -331,6 +333,11 @@ export type Check_Deserialize = {
 	detail: string,
 	/**  The error code behind a ✗, if any. */
 	code?: ErrorCode | null,
+	/**
+	 *  What the "Details" disclosure holds: the code, and for the last error
+	 *  its time (U12). Never in `detail`.
+	 */
+	details?: string | null,
 	/**  The button that fixes it, if one does. */
 	fix?: FixAction | null,
 	/**  That button's label. */
@@ -356,6 +363,11 @@ export type Check_Serialize = {
 	detail: string,
 	/**  The error code behind a ✗, if any. */
 	code: ErrorCode | null,
+	/**
+	 *  What the "Details" disclosure holds: the code, and for the last error
+	 *  its time (U12). Never in `detail`.
+	 */
+	details: string | null,
 	/**  The button that fixes it, if one does. */
 	fix: FixAction | null,
 	/**  That button's label. */
@@ -918,6 +930,18 @@ export type View =
 "settings" | 
 /**  The onboarding steps. */
 "onboarding";
+
+/**
+ *  Which Settings screen the window shows (U12): each has its own title, and
+ *  the page says when it changes.
+ */
+export type WindowPage = 
+/**  The sidebar and its sections. */
+"settings" | 
+/**  Troubleshoot's checks. */
+"troubleshoot" | 
+/**  Report a problem. */
+"report";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

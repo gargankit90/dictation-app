@@ -69,6 +69,80 @@ describe("design tokens", () => {
     expect(fontLicence["/site/fonts/LICENSE.txt"]).toContain("SIL OPEN FONT LICENSE");
   });
 
+  // U12 criterion 8, from the Design Lead.
+  describe("calmer fills", () => {
+    const css = sources["/src/styles/tokens.css"] ?? "";
+    const darkAt = css.indexOf("prefers-color-scheme: dark");
+    const value = (name: string, dark: boolean): string => {
+      const part = dark ? css.slice(darkAt) : css.slice(0, darkAt);
+      const found = new RegExp(`--vc-${name}:\\s*(#[0-9a-f]{6})`).exec(part);
+      if (found?.[1] === undefined) throw new Error(`no ${name}`);
+      return found[1];
+    };
+    const luminance = (hex: string): number => {
+      const [r = 0, g = 0, b = 0] = [1, 3, 5].map((at) => {
+        const channel = parseInt(hex.slice(at, at + 2), 16) / 255;
+        return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const contrast = (a: string, b: string): number => {
+      const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return ((high ?? 0) + 0.05) / ((low ?? 0) + 0.05);
+    };
+
+    it("has the Design Lead's values; light is unchanged", () => {
+      expect(value("primary-bg", false)).toBe(value("accent", false));
+      expect(value("primary-hover", false)).toBe(value("accent-hover", false));
+      expect(value("primary-fg", false)).toBe("#ffffff");
+      expect(value("selection-bg", false)).toBe(value("accent", false));
+      expect(value("primary-bg", true)).toBe("#3b6be0");
+      expect(value("primary-hover", true)).toBe("#3461cf");
+      expect(value("primary-fg", true)).toBe("#ffffff");
+      // Setup's navy, the fill of its rail's current step.
+      expect(value("selection-bg", true)).toBe(value("accent-soft", true));
+    });
+
+    it("passes contrast in both appearances", () => {
+      for (const dark of [false, true]) {
+        for (const [fill, text] of [
+          ["primary-bg", "primary-fg"],
+          ["primary-hover", "primary-fg"],
+          ["selection-bg", "selection-fg"],
+        ] as const) {
+          expect(contrast(value(fill, dark), value(text, dark)), fill).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    });
+
+    it("is what the primary button, the switch and the sidebar use", () => {
+      const sheet = sources["/src/settings.css"] ?? "";
+      expect(sheet).toMatch(/button\.primary \{[^}]*background: var\(--vc-primary-bg\)/);
+      expect(sheet).toMatch(/input\.switch:checked \{[^}]*background: var\(--vc-primary-bg\)/);
+      expect(sheet).toMatch(
+        /\.settings-sidebar button\.selected \{[^}]*background: var\(--vc-selection-bg\)/,
+      );
+    });
+
+    // Design Lead: Settings' popup is capped, and recording gets its own line.
+    it("keeps the Dictation rows' controls in their room", () => {
+      const sheet = sources["/src/settings.css"] ?? "";
+      expect(sheet).toMatch(/\.row-control \.language-picker \{[^}]*width: 220px/);
+      expect(sheet).toMatch(
+        /@media \(max-width: 719px\) \{\s*\.row-main:has\(\.keycap\.recording\) \{[^}]*flex-direction: column/,
+      );
+    });
+
+    // U12 criterion 9.
+    it("draws the sidebar's focus ring inside the row", () => {
+      const sheet = sources["/src/settings.css"] ?? "";
+      expect(sheet).toMatch(
+        /\.settings-sidebar button\.selected:focus-visible \{[^}]*outline-offset: -4px/,
+      );
+      expect(sheet).toMatch(/\.settings-sidebar button:focus-visible \{[^}]*outline-offset: -2px/);
+    });
+  });
+
   it("styles app sheets with --vc-* variables only (no legacy names)", () => {
     for (const path of ["/src/settings.css", "/src/overlay/overlay.css"]) {
       const text = sources[path] ?? "";
