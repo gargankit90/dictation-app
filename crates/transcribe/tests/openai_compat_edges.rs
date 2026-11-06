@@ -32,6 +32,8 @@ fn config(server: &MockServer, max_attempts: u32) -> Config {
         model: "m".into(),
         language: None,
         timeout: Duration::from_secs(5),
+        timeout_grows_with_audio: false,
+        long_clip: dictation_core::upload_limits::LONG_CLIP,
         retry: RetryPolicy {
             max_attempts,
             base_delay: Duration::from_millis(100),

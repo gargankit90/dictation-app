@@ -67,6 +67,8 @@ fn check_config(config: Config, timeout: Duration) -> Config {
     Config {
         language: None,
         timeout,
+        // The check's budget is fixed, whatever the (tiny) clip.
+        timeout_grows_with_audio: false,
         retry: RetryPolicy {
             max_attempts: 1,
             ..config.retry
