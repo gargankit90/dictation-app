@@ -1,0 +1,435 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Vocet design system: DS1 draft</title><style>
+.theme-light{
+  color-scheme: light dark;
+
+  /* Brand */
+  --vc-accent: #1f4fc9; /* buttons, links, focus, selection */
+  --vc-accent-hover: #163c9a;
+  --vc-accent-fg: #ffffff; /* text on accent */
+  --vc-accent-soft: #e8eefb; /* info background */
+  --vc-selection-bg: #1f4fc9; /* selected sidebar row */
+  --vc-selection-fg: #ffffff;
+  --vc-primary-bg: #1f4fc9; /* primary button fill */
+  --vc-primary-hover: #163c9a;
+  --vc-primary-fg: #ffffff;
+
+  /* Neutrals */
+  --vc-ink: #1c1b19; /* primary text */
+  --vc-ink-2: #3b3a36; /* secondary text */
+  --vc-muted: #5c5a55; /* hints, captions */
+  --vc-faint: #6e6b64; /* placeholders (large or non-essential only) */
+  --vc-line: #e4e1d9; /* separators, card borders */
+  --vc-line-strong: #d6d2c8; /* control borders */
+  --vc-bg: #ffffff; /* app window */
+  --vc-bg-grouped: #f5f4f0; /* settings group background, site bands */
+  --vc-bg-site: #fbfaf7; /* website page */
+
+  /* States: always with an icon or word, never colour alone */
+  --vc-ready: #1e7a44; /* ready, success, "Pasted" */
+  --vc-ready-soft: #e6f4ec;
+  --vc-attention: #9a5300; /* needs attention, paused, skipped */
+  --vc-attention-soft: #fdf1e0;
+  --vc-danger: #c4261d; /* errors, destructive */
+  --vc-danger-soft: #fbe9e7;
+  --vc-recording: #e5484d; /* the recording dot only */
+
+  /* Overlay (recording pill): dark in both appearances */
+  --vc-overlay-bg: rgba(28, 27, 25, 0.92);
+  --vc-overlay-fg: #ffffff;
+  --vc-overlay-muted: #c9c6bf;
+  --vc-meter: #ffffff;
+  --vc-meter-idle: rgba(255, 255, 255, 0.28);
+  --vc-overlay-attention: #f2b544; /* warning badge on the dark pill */
+  --vc-overlay-attention-fg: #1c1b19; /* the "!" on that badge */
+  --vc-overlay-ready: #4cc26a; /* "Pasted" check on the dark pill */
+
+  /* Type */
+  --vc-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --vc-font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  --vc-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  /* App scale (px). Devanagari falls back to the system's Kohinoor/Devanagari MT. */
+  --vc-text-xs: 11px; /* badges */
+  --vc-text-sm: 12px; /* captions, overlay hint */
+  --vc-text-md: 13px; /* body, controls (macOS default) */
+  --vc-text-lg: 15px; /* practice box, overlay label */
+  --vc-text-xl: 17px; /* section titles */
+  --vc-text-2xl: 22px; /* onboarding step titles */
+  --vc-text-3xl: 28px; /* onboarding welcome */
+  --vc-leading: 1.45;
+
+  /* Space: 4 px grid */
+  --vc-space-1: 4px;
+  --vc-space-2: 8px;
+  --vc-space-3: 12px;
+  --vc-space-4: 16px;
+  --vc-space-5: 20px;
+  --vc-space-6: 24px;
+  --vc-space-8: 32px;
+  --vc-space-12: 48px;
+
+  /* Shape */
+  --vc-radius-sm: 6px; /* controls, keycaps */
+  --vc-radius-md: 10px; /* settings groups, cards */
+  --vc-radius-lg: 14px; /* onboarding cards, site cards */
+  --vc-radius-pill: 999px;
+
+  /* Size */
+  --vc-control-h: 28px; /* settings buttons, fields */
+  --vc-control-h-lg: 44px; /* onboarding and website primary actions */
+  --vc-target-min: 44px; /* website touch targets */
+
+  /* Elevation */
+  --vc-shadow-card: 0 1px 2px rgba(28, 27, 25, 0.06);
+  --vc-shadow-pop: 0 12px 32px rgba(28, 27, 25, 0.18);
+
+  /* Motion */
+  --vc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --vc-dur-fast: 120ms;
+  --vc-dur: 200ms;}
+.theme-dark{
+  color-scheme: light dark;
+
+  /* Brand */
+  --vc-accent: #1f4fc9; /* buttons, links, focus, selection */
+  --vc-accent-hover: #163c9a;
+  --vc-accent-fg: #ffffff; /* text on accent */
+  --vc-accent-soft: #e8eefb; /* info background */
+  --vc-selection-bg: #1f4fc9; /* selected sidebar row */
+  --vc-selection-fg: #ffffff;
+  --vc-primary-bg: #1f4fc9; /* primary button fill */
+  --vc-primary-hover: #163c9a;
+  --vc-primary-fg: #ffffff;
+
+  /* Neutrals */
+  --vc-ink: #1c1b19; /* primary text */
+  --vc-ink-2: #3b3a36; /* secondary text */
+  --vc-muted: #5c5a55; /* hints, captions */
+  --vc-faint: #6e6b64; /* placeholders (large or non-essential only) */
+  --vc-line: #e4e1d9; /* separators, card borders */
+  --vc-line-strong: #d6d2c8; /* control borders */
+  --vc-bg: #ffffff; /* app window */
+  --vc-bg-grouped: #f5f4f0; /* settings group background, site bands */
+  --vc-bg-site: #fbfaf7; /* website page */
+
+  /* States: always with an icon or word, never colour alone */
+  --vc-ready: #1e7a44; /* ready, success, "Pasted" */
+  --vc-ready-soft: #e6f4ec;
+  --vc-attention: #9a5300; /* needs attention, paused, skipped */
+  --vc-attention-soft: #fdf1e0;
+  --vc-danger: #c4261d; /* errors, destructive */
+  --vc-danger-soft: #fbe9e7;
+  --vc-recording: #e5484d; /* the recording dot only */
+
+  /* Overlay (recording pill): dark in both appearances */
+  --vc-overlay-bg: rgba(28, 27, 25, 0.92);
+  --vc-overlay-fg: #ffffff;
+  --vc-overlay-muted: #c9c6bf;
+  --vc-meter: #ffffff;
+  --vc-meter-idle: rgba(255, 255, 255, 0.28);
+  --vc-overlay-attention: #f2b544; /* warning badge on the dark pill */
+  --vc-overlay-attention-fg: #1c1b19; /* the "!" on that badge */
+  --vc-overlay-ready: #4cc26a; /* "Pasted" check on the dark pill */
+
+  /* Type */
+  --vc-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --vc-font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  --vc-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  /* App scale (px). Devanagari falls back to the system's Kohinoor/Devanagari MT. */
+  --vc-text-xs: 11px; /* badges */
+  --vc-text-sm: 12px; /* captions, overlay hint */
+  --vc-text-md: 13px; /* body, controls (macOS default) */
+  --vc-text-lg: 15px; /* practice box, overlay label */
+  --vc-text-xl: 17px; /* section titles */
+  --vc-text-2xl: 22px; /* onboarding step titles */
+  --vc-text-3xl: 28px; /* onboarding welcome */
+  --vc-leading: 1.45;
+
+  /* Space: 4 px grid */
+  --vc-space-1: 4px;
+  --vc-space-2: 8px;
+  --vc-space-3: 12px;
+  --vc-space-4: 16px;
+  --vc-space-5: 20px;
+  --vc-space-6: 24px;
+  --vc-space-8: 32px;
+  --vc-space-12: 48px;
+
+  /* Shape */
+  --vc-radius-sm: 6px; /* controls, keycaps */
+  --vc-radius-md: 10px; /* settings groups, cards */
+  --vc-radius-lg: 14px; /* onboarding cards, site cards */
+  --vc-radius-pill: 999px;
+
+  /* Size */
+  --vc-control-h: 28px; /* settings buttons, fields */
+  --vc-control-h-lg: 44px; /* onboarding and website primary actions */
+  --vc-target-min: 44px; /* website touch targets */
+
+  /* Elevation */
+  --vc-shadow-card: 0 1px 2px rgba(28, 27, 25, 0.06);
+  --vc-shadow-pop: 0 12px 32px rgba(28, 27, 25, 0.18);
+
+  /* Motion */
+  --vc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --vc-dur-fast: 120ms;
+  --vc-dur: 200ms;
+    --vc-accent: #7ea2ff;
+    --vc-accent-hover: #a3bdff;
+    --vc-accent-fg: #0b1430;
+    --vc-accent-soft: #1c2747;
+    --vc-selection-bg: #1c2747; /* setup's navy, matches the rail */
+    --vc-selection-fg: #ffffff;
+    --vc-primary-bg: #3b6be0; /* white 4.8:1; 3.5:1 against the window */
+    --vc-primary-hover: #3461cf;
+    --vc-primary-fg: #ffffff;
+
+    --vc-ink: #f2f1ee;
+    --vc-ink-2: #d9d6cf;
+    --vc-muted: #aaa69e;
+    --vc-faint: #8f8b83;
+    --vc-line: #3a3936;
+    --vc-line-strong: #4a4844;
+    --vc-bg: #1e1e1e;
+    --vc-bg-grouped: #262624;
+    --vc-bg-site: #161614;
+
+    --vc-ready: #4cc26a;
+    --vc-ready-soft: #17301f;
+    --vc-attention: #f2b544;
+    --vc-attention-soft: #33270f;
+    --vc-danger: #ff6b62;
+    --vc-danger-soft: #3a1a17;
+
+    --vc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --vc-shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.5);}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:var(--background,#fff);color:var(--foreground,#111)}
+.top{padding:16px 20px 4px} .top h1{margin:0;font-size:20px} .top p{margin:4px 0 0;font-size:13px;opacity:.75}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(680px,1fr));gap:16px;padding:16px}
+.panel{background:var(--vc-bg);color:var(--vc-ink);font-family:var(--vc-font-ui);font-size:var(--vc-text-md);line-height:var(--vc-leading);border-radius:16px;padding:20px 22px;border:1px solid var(--vc-line)}
+.ph{margin:0 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--vc-muted)}
+h3{font-size:var(--vc-text-xl);margin:22px 0 10px;font-weight:600}
+.cap{font-size:var(--vc-text-sm);color:var(--vc-muted);font-weight:400;margin:8px 0 0}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px}
+.wordmark{display:flex;gap:8px;align-items:center;margin-left:8px} .wm{font-family:var(--vc-font-display);font-weight:800;font-size:22px;letter-spacing:-.01em}
+.tag{font-size:12px;font-weight:600;background:var(--vc-bg-grouped);color:var(--vc-ink-2);border-radius:999px;padding:3px 9px}
+.mb{--mb:#ECEBE8;display:flex;gap:14px;background:var(--mb);color:#1c1b19;padding:6px 12px;border-radius:8px;margin-left:auto}
+.theme-dark .mb{--mb:#2C2C2E;color:#f2f1ee} .recg{color:var(--vc-recording)}
+.sw{display:grid;grid-template-columns:repeat(5,1fr);gap:8px} .sw div{font-size:11px;color:var(--vc-muted)} .sw b{display:block;height:34px;border-radius:8px;border:1px solid var(--vc-line);margin-bottom:4px}
+.type>div{margin:4px 0}
+.btn{white-space:nowrap;font:inherit;height:var(--vc-control-h);padding:0 12px;border-radius:var(--vc-radius-sm);border:1px solid transparent;cursor:pointer;font-weight:500}
+.btn.lg{height:var(--vc-control-h-lg);padding:0 20px;font-size:15px;border-radius:10px;font-weight:600}
+.pri{background:var(--vc-accent);color:var(--vc-accent-fg)} .pri:hover{background:var(--vc-accent-hover)}
+.sec{background:var(--vc-bg);color:var(--vc-ink);border-color:var(--vc-line-strong)}
+.plain{background:none;color:var(--vc-accent);padding:0 4px} .danger{background:var(--vc-bg);color:var(--vc-danger);border-color:var(--vc-line-strong)}
+.btn:focus-visible{outline:3px solid var(--vc-accent);outline-offset:2px}
+.kc{font-family:var(--vc-font-ui);font-size:12px;font-weight:600;background:var(--vc-bg-grouped);border:1px solid var(--vc-line-strong);border-bottom-width:3px;border-radius:6px;padding:2px 8px;color:var(--vc-ink)} .kc.sm{font-size:11px;padding:0 6px}
+.tg{display:inline-flex;gap:8px;align-items:center;font-size:13px} .tg input{display:none} .tg span{width:32px;height:18px;border-radius:999px;background:var(--vc-line-strong);position:relative}
+.tg span:after{content:"";position:absolute;width:14px;height:14px;border-radius:50%;background:#fff;top:2px;left:2px;transition:left var(--vc-dur)} .tg input:checked+span{background:var(--vc-accent)} .tg input:checked+span:after{left:16px}
+.chip{font-size:11px;font-weight:600;border-radius:999px;padding:2px 8px;white-space:nowrap}
+.ok{background:var(--vc-ready-soft);color:var(--vc-ready)} .info{background:var(--vc-accent-soft);color:var(--vc-accent)} .att{background:var(--vc-attention-soft);color:var(--vc-attention)} .err{background:var(--vc-danger-soft);color:var(--vc-danger)}
+.stage{background:linear-gradient(135deg,#7b8a6a,#4f5f47);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;align-items:center}
+.theme-dark .stage{background:linear-gradient(135deg,#2d3329,#1b2019)}
+.pill{display:flex;align-items:center;gap:10px;background:var(--vc-overlay-bg);color:var(--vc-overlay-fg);border-radius:999px;height:40px;padding:0 16px;font-size:var(--vc-text-lg);font-weight:600;box-shadow:var(--vc-shadow-pop);backdrop-filter:blur(12px)}
+.pill .ph2{font-size:var(--vc-text-sm);font-weight:500;color:var(--vc-overlay-muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--vc-recording)}
+.meter{display:inline-flex;gap:2px;align-items:center;height:18px} .meter i{width:3px;height:6px;border-radius:2px;background:var(--vc-meter)}
+.meter.live i{animation:lv .9s var(--vc-ease) infinite alternate} .meter i.z{background:var(--vc-meter-idle);height:4px}
+@keyframes lv{0%{height:4px}100%{height:18px}}
+@media (prefers-reduced-motion:reduce){.meter.live i{animation:none;height:12px}}
+.spin{width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp .8s linear infinite} @keyframes sp{to{transform:rotate(360deg)}}
+.okc{color:#4cc26a;font-weight:800} .ex{width:18px;height:18px;border-radius:50%;background:#f2b544;color:#1c1b19;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800}
+.two{display:grid;grid-template-columns:250px minmax(400px,1fr);gap:18px}
+.menu{background:var(--vc-bg);border:1px solid var(--vc-line);border-radius:10px;box-shadow:var(--vc-shadow-pop);padding:6px;font-size:13px}
+.theme-light .menu{background:#f6f5f2} .mstat{display:flex;flex-direction:column;gap:4px;padding:6px 8px;font-size:12px;color:var(--vc-ink-2)} .mstat .chip{align-self:flex-start}
+.mhead{font-size:11px;font-weight:600;color:var(--vc-muted);padding:4px 8px 2px}
+.mi{display:flex;justify-content:space-between;gap:8px;padding:4px 8px;border-radius:5px} .mi:hover{background:var(--vc-accent);color:var(--vc-accent-fg)} .mi em{font-style:normal;color:var(--vc-muted)}
+.mi.rec span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis} .mi.fix{color:var(--vc-accent);font-weight:600}
+.msep{height:1px;background:var(--vc-line);margin:5px 8px}
+.win{display:grid;grid-template-columns:110px 1fr;border:1px solid var(--vc-line);border-radius:12px;overflow:hidden;font-size:13px}
+.side{background:var(--vc-bg-grouped);padding:10px 6px} .side div{padding:4px 8px;border-radius:6px;color:var(--vc-ink-2)} .side .on{background:var(--vc-accent);color:var(--vc-accent-fg)}
+.pane{padding:12px 14px} .gt{font-size:12px;font-weight:600;color:var(--vc-muted);margin:6px 2px}
+.grp{background:var(--vc-bg-grouped);border-radius:var(--vc-radius-md);margin-bottom:10px}
+.r small,.r b{white-space:normal} .r>div{min-width:0;flex:1} .r{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px;border-top:1px solid var(--vc-line)} .r:first-child{border-top:0}
+.r small{display:block;color:var(--vc-muted);font-size:12px} .sel{font:inherit;height:24px;border-radius:6px;border:1px solid var(--vc-line-strong);background:var(--vc-bg);color:var(--vc-ink)}
+</style></head><body>
+<div class="top"><h1>Vocet design system · DS1 draft 1</h1><p>One set of tokens for the app and vocetlabs.com. Light and dark side by side. Hover the menu items and buttons.</p></div>
+<div class="grid">
+<section class="theme-light panel">
+ <h2 class="ph">Light</h2>
+
+ <h3>Brand</h3>
+ <div class="row">
+  <svg viewBox="0 0 64 64" width="64" height="64" aria-label="Vocet app icon"><defs><linearGradient id="g64" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3567E0"/><stop offset="1" stop-color="#1A43AE"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g64)"/><rect x="17" y="24" width="6" height="16" rx="3" fill="#fff"/><rect x="29" y="16" width="6" height="32" rx="3" fill="#fff"/><rect x="41" y="22" width="6" height="20" rx="3" fill="#fff"/></svg> <svg viewBox="0 0 64 64" width="32" height="32" aria-label="Vocet app icon"><defs><linearGradient id="g32" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3567E0"/><stop offset="1" stop-color="#1A43AE"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g32)"/><rect x="17" y="24" width="6" height="16" rx="3" fill="#fff"/><rect x="29" y="16" width="6" height="32" rx="3" fill="#fff"/><rect x="41" y="22" width="6" height="20" rx="3" fill="#fff"/></svg>
+  <div class="wordmark"><span class="wm">Vocet</span><span class="tag">Dictation</span></div>
+  <div class="mb" title="Menu-bar glyph: idle, recording, needs attention">
+   <span><svg viewBox="0 0 18 16" width="22" height="20" aria-hidden="true"><rect x="2" y="5.5" width="3" height="5" rx="1.5" fill="currentColor"/><rect x="7" y="3.0" width="3" height="10" rx="1.5" fill="currentColor"/><rect x="12" y="5.0" width="3" height="6" rx="1.5" fill="currentColor"/></svg></span><span class="recg"><svg viewBox="0 0 18 16" width="22" height="20" aria-hidden="true"><rect x="2" y="4.0" width="3" height="8" rx="1.5" fill="currentColor"/><rect x="7" y="2.0" width="3" height="12" rx="1.5" fill="currentColor"/><rect x="12" y="6.0" width="3" height="4" rx="1.5" fill="currentColor"/></svg></span><span><svg viewBox="0 0 18 16" width="22" height="20" aria-hidden="true"><rect x="2" y="5.5" width="3" height="5" rx="1.5" fill="currentColor"/><rect x="7" y="3.0" width="3" height="10" rx="1.5" fill="currentColor"/><rect x="12" y="5.0" width="3" height="6" rx="1.5" fill="currentColor"/><circle cx="15" cy="3.5" r="3" fill="var(--vc-attention)" stroke="var(--mb)" stroke-width="1.2"/></svg></span>
+  </div>
+ </div>
+ <p class="cap">The mark is a level meter: the same three bars appear in the menu bar and come alive in the recording pill. The menu-bar glyph is a monochrome template image; "needs attention" adds a small amber dot instead of text.</p>
+
+ <h3>Colour</h3>
+ <div class="sw">
+  <div><b style="background:var(--vc-accent)"></b><span>accent</span></div><div><b style="background:var(--vc-accent-soft)"></b><span>accent-soft</span></div><div><b style="background:var(--vc-ink)"></b><span>ink</span></div><div><b style="background:var(--vc-muted)"></b><span>muted</span></div><div><b style="background:var(--vc-line)"></b><span>line</span></div><div><b style="background:var(--vc-bg-grouped)"></b><span>bg-grouped</span></div><div><b style="background:var(--vc-ready)"></b><span>ready</span></div><div><b style="background:var(--vc-attention)"></b><span>attention</span></div><div><b style="background:var(--vc-danger)"></b><span>danger</span></div><div><b style="background:var(--vc-recording)"></b><span>recording</span></div>
+ </div>
+
+ <h3>Type <span class="cap">(app: system font; website: Inter + Inter Tight)</span></h3>
+ <div class="type">
+  <div style="font-size:var(--vc-text-3xl);font-weight:700;letter-spacing:-.02em">Talk instead of type</div>
+  <div style="font-size:var(--vc-text-2xl);font-weight:650">How should speech become text?</div>
+  <div style="font-size:var(--vc-text-xl);font-weight:600">Speech</div>
+  <div style="font-size:var(--vc-text-md)">Body and controls, 13 px. Hindi: नमस्ते, यह एक परीक्षण है।</div>
+  <div style="font-size:var(--vc-text-sm);color:var(--vc-muted)">Caption, 12 px: saved in your macOS Keychain</div>
+ </div>
+
+ <h3>Controls</h3>
+ <div class="row">
+  <button class="btn pri">Continue</button><button class="btn sec">Back</button><button class="btn plain">Learn more</button><button class="btn danger">Clear history</button>
+  <button class="btn pri lg">Download 477 MB</button>
+ </div>
+ <div class="row">
+  <span class="kc">Right ⌥</span><span class="kc">⌘</span><span class="kc">Space</span><span class="kc">Esc</span>
+  <label class="tg"><input type="checkbox" checked><span></span> Share usage and error events</label>
+  <span class="chip ok">✓ Ready</span><span class="chip info">↓ 212 of 477 MB</span><span class="chip att">⏸ Paused</span><span class="chip err">! Error</span>
+ </div>
+
+ <h3>Recording pill</h3>
+ <div class="stage">
+  <div class="pill"><span class="dot"></span><span class="meter live"><i style="animation-delay:0ms"></i><i style="animation-delay:120ms"></i><i style="animation-delay:240ms"></i><i style="animation-delay:90ms"></i><i style="animation-delay:300ms"></i><i style="animation-delay:180ms"></i><i style="animation-delay:60ms"></i></span><span class="pl">Listening</span><span class="ph2">Release to paste · Esc to cancel</span></div>
+  <div class="pill"><span class="dot"></span><span class="meter"><i class="z" style="animation-delay:0ms"></i><i class="z" style="animation-delay:120ms"></i><i class="z" style="animation-delay:240ms"></i><i class="z" style="animation-delay:90ms"></i><i class="z" style="animation-delay:300ms"></i><i class="z" style="animation-delay:180ms"></i><i class="z" style="animation-delay:60ms"></i></span><span class="pl">No sound</span><span class="ph2">Check your microphone</span></div>
+  <div class="pill"><span class="spin"></span><span class="pl">Transcribing…</span></div>
+  <div class="pill"><span class="okc">✓</span><span class="pl">Done</span></div>
+  <div class="pill err"><span class="ex">!</span><span class="pl">Your Groq key was rejected.</span><span class="ph2">Fix it from the menu bar</span></div>
+ </div>
+ <p class="cap">Dark in both appearances, bottom centre, never takes focus. The meter is the real microphone level. Errors are one sentence; the fix lives in the menu.</p>
+
+ <div class="two">
+  <div>
+   <h3>Menu-bar menu</h3>
+   <div class="menu">
+    <div class="mstat"><span class="chip ok">✓ Ready</span><span>Hold <span class="kc sm">Right ⌥</span></span></div>
+    <div class="msep"></div>
+    <div class="mi">Copy last dictation</div>
+    <div class="mi">History…</div>
+    <div class="msep"></div>
+    <div class="mi">Settings…<em>⌘,</em></div><div class="mi">Help…</div>
+    <div class="msep"></div>
+    <div class="mi">Quit Vocet<em>⌘Q</em></div>
+   </div>
+   <div class="menu" style="margin-top:12px">
+    <div class="mstat"><span class="chip att">! Needs attention</span><span>Your Groq key was rejected</span></div>
+    <div class="mi fix">Fix: open Speech settings</div>
+    <div class="msep"></div>
+    <div class="mi">Settings…<em>⌘,</em></div><div class="mi">Quit Vocet<em>⌘Q</em></div>
+   </div>
+  </div>
+  <div>
+   <h3>Settings rows</h3>
+   <div class="win">
+    <div class="side"><div>General</div><div>Dictation</div><div class="on">Speech</div><div>Privacy</div><div>History</div><div>Help</div><div>About</div></div>
+    <div class="pane">
+     <div class="gt">Speech engine</div>
+     <div class="grp">
+      <div class="r"><div><b>On this Mac</b><small>Parakeet English · 477 MB · works offline</small></div><span class="chip ok">✓ Active</span></div>
+      <div class="r"><div><b>Hindi and more languages</b><small>Qwen3-ASR · [SIZE]</small></div><button class="btn sec">Download</button></div>
+      <div class="r"><div><b>Your own key</b><small>Groq or OpenAI · needs internet</small></div><button class="btn sec">Set up…</button></div>
+     </div>
+     <div class="gt">History</div>
+     <div class="grp">
+      <div class="r"><div><b>Keep recent dictations</b><small>Text only, on this Mac, never sent</small></div><select class="sel"><option>Off</option><option>10</option><option selected>25</option><option>50</option><option>100</option></select></div>
+      <div class="r"><div><b>Clear history</b></div><button class="btn danger">Clear…</button></div>
+     </div>
+    </div>
+   </div>
+  </div>
+ </div>
+</section>
+<section class="theme-dark panel">
+ <h2 class="ph">Dark</h2>
+
+ <h3>Brand</h3>
+ <div class="row">
+  <svg viewBox="0 0 64 64" width="64" height="64" aria-label="Vocet app icon"><defs><linearGradient id="g64" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3567E0"/><stop offset="1" stop-color="#1A43AE"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g64)"/><rect x="17" y="24" width="6" height="16" rx="3" fill="#fff"/><rect x="29" y="16" width="6" height="32" rx="3" fill="#fff"/><rect x="41" y="22" width="6" height="20" rx="3" fill="#fff"/></svg> <svg viewBox="0 0 64 64" width="32" height="32" aria-label="Vocet app icon"><defs><linearGradient id="g32" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3567E0"/><stop offset="1" stop-color="#1A43AE"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g32)"/><rect x="17" y="24" width="6" height="16" rx="3" fill="#fff"/><rect x="29" y="16" width="6" height="32" rx="3" fill="#fff"/><rect x="41" y="22" width="6" height="20" rx="3" fill="#fff"/></svg>
+  <div class="wordmark"><span class="wm">Vocet</span><span class="tag">Dictation</span></div>
+  <div class="mb" title="Menu-bar glyph: idle, recording, needs attention">
+   <span><svg viewBox="0 0 18 16" width="22" height="20" aria-hidden="true"><rect x="2" y="5.5" width="3" height="5" rx="1.5" fill="currentColor"/><rect x="7" y="3.0" width="3" height="10" rx="1.5" fill="currentColor"/><rect x="12" y="5.0" width="3" height="6" rx="1.5" fill="currentColor"/></svg></span><span class="recg"><svg viewBox="0 0 18 16" width="22" height="20" aria-hidden="true"><rect x="2" y="4.0" width="3" height="8" rx="1.5" fill="currentColor"/><rect x="7" y="2.0" width="3" height="12" rx="1.5" fill="currentColor"/><rect x="12" y="6.0" width="3" height="4" rx="1.5" fill="currentColor"/></svg></span><span><svg viewBox="0 0 18 16" width="22" height="20" aria-hidden="true"><rect x="2" y="5.5" width="3" height="5" rx="1.5" fill="currentColor"/><rect x="7" y="3.0" width="3" height="10" rx="1.5" fill="currentColor"/><rect x="12" y="5.0" width="3" height="6" rx="1.5" fill="currentColor"/><circle cx="15" cy="3.5" r="3" fill="var(--vc-attention)" stroke="var(--mb)" stroke-width="1.2"/></svg></span>
+  </div>
+ </div>
+ <p class="cap">The mark is a level meter: the same three bars appear in the menu bar and come alive in the recording pill. The menu-bar glyph is a monochrome template image; "needs attention" adds a small amber dot instead of text.</p>
+
+ <h3>Colour</h3>
+ <div class="sw">
+  <div><b style="background:var(--vc-accent)"></b><span>accent</span></div><div><b style="background:var(--vc-accent-soft)"></b><span>accent-soft</span></div><div><b style="background:var(--vc-ink)"></b><span>ink</span></div><div><b style="background:var(--vc-muted)"></b><span>muted</span></div><div><b style="background:var(--vc-line)"></b><span>line</span></div><div><b style="background:var(--vc-bg-grouped)"></b><span>bg-grouped</span></div><div><b style="background:var(--vc-ready)"></b><span>ready</span></div><div><b style="background:var(--vc-attention)"></b><span>attention</span></div><div><b style="background:var(--vc-danger)"></b><span>danger</span></div><div><b style="background:var(--vc-recording)"></b><span>recording</span></div>
+ </div>
+
+ <h3>Type <span class="cap">(app: system font; website: Inter + Inter Tight)</span></h3>
+ <div class="type">
+  <div style="font-size:var(--vc-text-3xl);font-weight:700;letter-spacing:-.02em">Talk instead of type</div>
+  <div style="font-size:var(--vc-text-2xl);font-weight:650">How should speech become text?</div>
+  <div style="font-size:var(--vc-text-xl);font-weight:600">Speech</div>
+  <div style="font-size:var(--vc-text-md)">Body and controls, 13 px. Hindi: नमस्ते, यह एक परीक्षण है।</div>
+  <div style="font-size:var(--vc-text-sm);color:var(--vc-muted)">Caption, 12 px: saved in your macOS Keychain</div>
+ </div>
+
+ <h3>Controls</h3>
+ <div class="row">
+  <button class="btn pri">Continue</button><button class="btn sec">Back</button><button class="btn plain">Learn more</button><button class="btn danger">Clear history</button>
+  <button class="btn pri lg">Download 477 MB</button>
+ </div>
+ <div class="row">
+  <span class="kc">Right ⌥</span><span class="kc">⌘</span><span class="kc">Space</span><span class="kc">Esc</span>
+  <label class="tg"><input type="checkbox" checked><span></span> Share usage and error events</label>
+  <span class="chip ok">✓ Ready</span><span class="chip info">↓ 212 of 477 MB</span><span class="chip att">⏸ Paused</span><span class="chip err">! Error</span>
+ </div>
+
+ <h3>Recording pill</h3>
+ <div class="stage">
+  <div class="pill"><span class="dot"></span><span class="meter live"><i style="animation-delay:0ms"></i><i style="animation-delay:120ms"></i><i style="animation-delay:240ms"></i><i style="animation-delay:90ms"></i><i style="animation-delay:300ms"></i><i style="animation-delay:180ms"></i><i style="animation-delay:60ms"></i></span><span class="pl">Listening</span><span class="ph2">Release to paste · Esc to cancel</span></div>
+  <div class="pill"><span class="dot"></span><span class="meter"><i class="z" style="animation-delay:0ms"></i><i class="z" style="animation-delay:120ms"></i><i class="z" style="animation-delay:240ms"></i><i class="z" style="animation-delay:90ms"></i><i class="z" style="animation-delay:300ms"></i><i class="z" style="animation-delay:180ms"></i><i class="z" style="animation-delay:60ms"></i></span><span class="pl">No sound</span><span class="ph2">Check your microphone</span></div>
+  <div class="pill"><span class="spin"></span><span class="pl">Transcribing…</span></div>
+  <div class="pill"><span class="okc">✓</span><span class="pl">Done</span></div>
+  <div class="pill err"><span class="ex">!</span><span class="pl">Your Groq key was rejected.</span><span class="ph2">Fix it from the menu bar</span></div>
+ </div>
+ <p class="cap">Dark in both appearances, bottom centre, never takes focus. The meter is the real microphone level. Errors are one sentence; the fix lives in the menu.</p>
+
+ <div class="two">
+  <div>
+   <h3>Menu-bar menu</h3>
+   <div class="menu">
+    <div class="mstat"><span class="chip ok">✓ Ready</span><span>Hold <span class="kc sm">Right ⌥</span></span></div>
+    <div class="msep"></div>
+    <div class="mi">Copy last dictation</div>
+    <div class="mi">History…</div>
+    <div class="msep"></div>
+    <div class="mi">Settings…<em>⌘,</em></div><div class="mi">Help…</div>
+    <div class="msep"></div>
+    <div class="mi">Quit Vocet<em>⌘Q</em></div>
+   </div>
+   <div class="menu" style="margin-top:12px">
+    <div class="mstat"><span class="chip att">! Needs attention</span><span>Your Groq key was rejected</span></div>
+    <div class="mi fix">Fix: open Speech settings</div>
+    <div class="msep"></div>
+    <div class="mi">Settings…<em>⌘,</em></div><div class="mi">Quit Vocet<em>⌘Q</em></div>
+   </div>
+  </div>
+  <div>
+   <h3>Settings rows</h3>
+   <div class="win">
+    <div class="side"><div>General</div><div>Dictation</div><div class="on">Speech</div><div>Privacy</div><div>History</div><div>Help</div><div>About</div></div>
+    <div class="pane">
+     <div class="gt">Speech engine</div>
+     <div class="grp">
+      <div class="r"><div><b>On this Mac</b><small>Parakeet English · 477 MB · works offline</small></div><span class="chip ok">✓ Active</span></div>
+      <div class="r"><div><b>Hindi and more languages</b><small>Qwen3-ASR · [SIZE]</small></div><button class="btn sec">Download</button></div>
+      <div class="r"><div><b>Your own key</b><small>Groq or OpenAI · needs internet</small></div><button class="btn sec">Set up…</button></div>
+     </div>
+     <div class="gt">History</div>
+     <div class="grp">
+      <div class="r"><div><b>Keep recent dictations</b><small>Text only, on this Mac, never sent</small></div><select class="sel"><option>Off</option><option>10</option><option selected>25</option><option>50</option><option>100</option></select></div>
+      <div class="r"><div><b>Clear history</b></div><button class="btn danger">Clear…</button></div>
+     </div>
+    </div>
+   </div>
+  </div>
+ </div>
+</section></div>
+</body></html>
