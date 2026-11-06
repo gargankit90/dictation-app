@@ -37,6 +37,11 @@
         /* Brand */
         --vc-accent: #1f4fc9; /* buttons, links, focus, selection */
         --vc-accent-hover: #163c9a;
+        --vc-selection-bg: #1f4fc9;
+        --vc-selection-fg: #ffffff;
+        --vc-primary-bg: #1f4fc9;
+        --vc-primary-hover: #163c9a;
+        --vc-primary-fg: #ffffff;
         --vc-accent-fg: #ffffff; /* text on accent */
         --vc-accent-soft: #e8eefb; /* selected row, info background */
 
@@ -121,6 +126,11 @@
         :root {
           --vc-accent: #7ea2ff;
           --vc-accent-hover: #a3bdff;
+          --vc-selection-bg: #1c2747;
+          --vc-selection-fg: #ffffff;
+          --vc-primary-bg: #3b6be0;
+          --vc-primary-hover: #3461cf;
+          --vc-primary-fg: #ffffff;
           --vc-accent-fg: #0b1430;
           --vc-accent-soft: #1c2747;
 
@@ -314,6 +324,11 @@
           color-scheme: light;
           --vc-accent: #1f4fc9;
           --vc-accent-hover: #163c9a;
+          --vc-selection-bg: #1f4fc9;
+          --vc-selection-fg: #ffffff;
+          --vc-primary-bg: #1f4fc9;
+          --vc-primary-hover: #163c9a;
+          --vc-primary-fg: #ffffff;
           --vc-ink: #1c1b19;
           --vc-ink-2: #3b3a36;
           --vc-muted: #5c5a55;
@@ -1728,6 +1743,19 @@
         line-height: 1.55;
         max-width: 880px;
       }
+      .faq {
+        border-top: 1px solid var(--line);
+        padding: 12px 0;
+      }
+      .faq summary {
+        min-height: 28px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .faq p {
+        margin-top: 6px;
+        color: var(--muted);
+      }
       .compare strong {
         color: var(--ink);
         display: block;
@@ -1956,12 +1984,13 @@
         <span class="brand-tag">Dictation</span>
       </a>
       <nav class="nav" aria-label="Main">
-        <a href="#uses">Uses</a>
-        <a href="#setup">Setup</a>
+        <a href="#uses">Works with</a>
+        <a href="#setup">How it works</a>
         <a href="#data">Privacy</a>
         <a href="https://github.com/gargankit90/dictation-app">GitHub</a>
         <a
           class="nav-cta"
+          hidden
           data-download
           data-ready-label="Download"
           href="https://github.com/gargankit90/dictation-app"
@@ -1975,9 +2004,8 @@
         <div class="hero-copy">
           <h1>Talk instead of type in every app you use.</h1>
           <p class="lede">
-            Hold one key, say what you mean, let go — the words are pasted where your cursor is.
-            Runs on your Mac, even offline, or with your own Groq or OpenAI key. Free and open
-            source.
+            Hold one key, say what you mean, let go. The words appear where your cursor is. Free,
+            and it can run entirely on your Mac, even offline.
           </p>
           <div class="ctas">
             <a
@@ -1986,9 +2014,14 @@
               data-download
               data-ready-label="Download for Mac"
               href="https://github.com/gargankit90/dictation-app"
-              >Alpha coming soon</a
+              >Follow the alpha on GitHub</a
             >
-            <a class="btn btn-secondary" href="https://github.com/gargankit90/dictation-app">
+            <a
+              class="btn btn-secondary"
+              data-release-only
+              hidden
+              href="https://github.com/gargankit90/dictation-app"
+            >
               <svg
                 width="18"
                 height="18"
@@ -2005,11 +2038,11 @@
             </a>
           </div>
           <p class="fine">
-            <span id="release-version">Alpha in testing</span> · Apple Silicon · macOS 13 or later ·
+            <span id="release-version" hidden></span>Apple Silicon · macOS 13 or later ·
             <span id="release-notes" hidden
               ><a href="https://github.com/gargankit90/dictation-app/releases">Release notes</a> ·
             </span>
-            Windows is on the roadmap
+            Windows coming soon
           </p>
           <p class="fine phone-only">
             On your phone? Vocet runs on a Mac.
@@ -2039,7 +2072,7 @@
               <div class="composer demo" id="hero-demo" data-state="pasted">
                 <div class="dict-pill">
                   <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
-                  ><span class="d-label">Pasted</span>
+                  ><span class="d-label">Done</span>
                 </div>
                 <p class="composer-text c-input">
                   <span class="ph" id="h-ph">Message #design-review</span
@@ -2061,6 +2094,7 @@
       <section id="uses" class="band-white">
         <div class="wrap section">
           <h2 class="h2">Wherever you’d type</h2>
+          <p class="note">Tested on macOS with these apps. Other apps are still being tested.</p>
           <div class="tabs" role="tablist" aria-label="Use cases">
             <button
               type="button"
@@ -2070,7 +2104,7 @@
               aria-controls="panel-chat"
               aria-selected="true"
             >
-              Slack / Teams
+              Slack
             </button>
             <button
               type="button"
@@ -2081,7 +2115,7 @@
               aria-selected="false"
               tabindex="-1"
             >
-              Gmail / Outlook
+              Gmail
             </button>
             <button
               type="button"
@@ -2107,7 +2141,7 @@
             </button>
           </div>
 
-          <!-- Slack / Teams (animated) -->
+          <!-- Slack (animated) -->
           <div class="use-row" id="panel-chat" role="tabpanel" aria-labelledby="tab-chat">
             <div
               class="illo"
@@ -2116,7 +2150,7 @@
             >
               <div class="illo-bar">
                 <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
-                ><strong>Slack · Teams</strong><span class="illo-where">#launch</span>
+                ><strong>Slack</strong><span class="illo-where">#launch</span>
               </div>
               <div class="panel chatapp">
                 <div class="rail" aria-hidden="true">
@@ -2158,7 +2192,7 @@
                   >
                     <div class="dict-pill">
                       <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
-                      ><span class="d-label">Pasted</span>
+                      ><span class="d-label">Done</span>
                     </div>
                     <p class="c-input">
                       <span class="ph">Message #launch</span
@@ -2195,7 +2229,7 @@
             </div>
           </div>
 
-          <!-- Gmail / Outlook (animated) -->
+          <!-- Gmail (animated) -->
           <div class="use-row" id="panel-mail" role="tabpanel" aria-labelledby="tab-mail" hidden>
             <div
               class="illo"
@@ -2204,7 +2238,7 @@
             >
               <div class="illo-bar">
                 <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
-                ><strong>Gmail · Outlook</strong><span class="illo-where">Inbox</span>
+                ><strong>Gmail</strong><span class="illo-where">Inbox</span>
               </div>
               <div class="panel mailapp">
                 <div class="inbox2" aria-hidden="true">
@@ -2255,7 +2289,7 @@
                     </p>
                     <div class="dict-pill">
                       <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
-                      ><span class="d-label">Pasted</span>
+                      ><span class="d-label">Done</span>
                     </div>
                   </div>
                   <div class="cw-foot">
@@ -2320,7 +2354,7 @@
                       </p>
                       <div class="dict-pill">
                         <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
-                        ><span class="d-label">Pasted</span>
+                        ><span class="d-label">Done</span>
                       </div>
                     </div>
                   </div>
@@ -2368,7 +2402,7 @@
                   >
                     <div class="dict-pill">
                       <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
-                      ><span class="d-label">Pasted</span>
+                      ><span class="d-label">Done</span>
                     </div>
                     <p class="c-input">
                       <span class="ph">Ask anything</span
@@ -2418,7 +2452,9 @@
               <li>
                 English: fast, a one-time 477 MB download <span class="model">(Parakeet)</span>
               </li>
-              <li>Other languages: a multilingual model <span class="model">(Qwen3-ASR)</span></li>
+              <li>
+                30 languages: a one-time 590 MB download <span class="model">(Qwen3-ASR)</span>
+              </li>
               <li>No API key needed</li>
               <li>Needs disk space and an Apple Silicon Mac</li>
             </ul>
@@ -2436,11 +2472,15 @@
             </ul>
           </div>
         </div>
-        <p class="note">You can switch between the two any time in Settings.</p>
+        <p class="note">
+          Works in English or 30 languages right on your Mac, or about 100 with your own Groq or
+          OpenAI key. You can switch between the two any time in Settings.
+        </p>
         <p class="compare">
-          <strong>How is this different from the Mac’s built-in dictation?</strong> You choose the
-          speech model — one on your Mac, or your own Groq or OpenAI key — you dictate by holding a
-          single key, and every line of the code is open to check.
+          <strong>How is this different from the Mac’s built-in dictation?</strong> You use it the
+          same way wherever you type: hold one key, talk, let go. You choose where speech becomes
+          text, on your Mac or with your own key, and with History on, your recent dictations are
+          there to copy again.
         </p>
       </section>
 
@@ -2448,24 +2488,24 @@
         <h2 class="h2">Setup ends with a test dictation</h2>
         <ol class="setup-steps">
           <li>
-            <span class="num">1</span><strong>Allow two permissions</strong
+            <span class="num">1</span><strong>Choose how speech becomes text</strong
+            ><span
+              >The model on your Mac, which downloads during setup, or your own Groq or OpenAI
+              key.</span
+            >
+          </li>
+          <li>
+            <span class="num">2</span><strong>Allow two permissions</strong
             ><span
               >Microphone, and Accessibility to paste at your cursor — it doesn’t read your
               screen.</span
             >
           </li>
           <li>
-            <span class="num">2</span><strong>Choose how speech becomes text</strong
+            <span class="num">3</span><strong>Say a sentence</strong
             ><span
-              >Paste a Groq or OpenAI key, or use the model on your Mac (download it once in
-              Settings).</span
-            >
-          </li>
-          <li>
-            <span class="num">3</span><strong>Try your key</strong
-            ><span
-              >Right Option (⌥) by default, or record a different one. Hold it, say a sentence, and
-              let go.</span
+              >Hold Right Option (⌥) or a key you choose, say a sentence and let go, so you know it
+              works.</span
             >
           </li>
         </ol>
@@ -2478,14 +2518,21 @@
             <div>
               <h3>Usage and error events are on by default</h3>
               <p>
-                Anonymous usage events go to PostHog and error reports to Sentry, so we can see
-                where setup and dictation break. They carry a random install ID, not your name or
-                account. Turn them off any time in Settings → Privacy; one switch covers both.
+                From the first setup screen, anonymous usage events go to PostHog and error reports
+                to Sentry, so we can see where setup and dictation break. Usage events carry a
+                random install ID, not your name or account. Turn them off on the last setup screen,
+                or any time in Settings → Privacy; one switch covers both.
               </p>
+
               <p>
                 <a href="https://github.com/gargankit90/dictation-app/blob/main/docs/privacy.md"
                   >See the full list of what's sent</a
                 >
+              </p>
+              <h3 style="margin-top: var(--vc-space-5)">Recent dictations stay on your Mac</h3>
+              <p>
+                Vocet keeps your last 25 dictations, text only, so you can get the words back. They
+                are never sent. Change the number or turn it off in Settings → History.
               </p>
             </div>
             <div>
@@ -2502,6 +2549,31 @@
         </div>
       </section>
 
+      <section id="questions" class="wrap section" style="gap: 12px">
+        <h2 class="h2">Questions</h2>
+        <details class="faq">
+          <summary>What does it cost?</summary>
+          <p>
+            Vocet is free. The model on your Mac costs nothing to use. With your own key, the
+            provider may charge your account.
+          </p>
+        </details>
+        <details class="faq">
+          <summary>Why does it need Accessibility?</summary>
+          <p>
+            To notice your dictation key in any app and paste at your cursor. It doesn’t read your
+            screen.
+          </p>
+        </details>
+        <details class="faq">
+          <summary>What if a paste doesn’t land?</summary>
+          <p>
+            With History on, which is the default, copy the words from Settings → History or the
+            menu bar. If a password field blocked the paste, the words aren’t kept, on purpose.
+          </p>
+        </details>
+      </section>
+
       <section class="wrap closing">
         <div class="closing-copy">
           <h2 class="h2">Free, open source, and yours to inspect</h2>
@@ -2514,9 +2586,13 @@
             data-download
             data-ready-label="Download for Mac"
             href="https://github.com/gargankit90/dictation-app"
-            >Alpha coming soon</a
+            >Follow the alpha on GitHub</a
           >
-          <a class="btn btn-secondary" href="https://github.com/gargankit90/dictation-app"
+          <a
+            class="btn btn-secondary"
+            data-release-only
+            hidden
+            href="https://github.com/gargankit90/dictation-app"
             ><svg
               width="18"
               height="18"
@@ -2540,9 +2616,7 @@
 
     <footer class="site-footer">
       <div class="wrap footer-row">
-        <span
-          ><strong>Vocet Labs</strong> — Dictation for Mac today; Windows is on the roadmap.</span
-        >
+        <span><strong>Vocet Labs</strong> — Dictation for Mac today; Windows coming soon.</span>
         <span
           >© 2026 Vocet Labs · MIT ·
           <a href="https://github.com/gargankit90/dictation-app">GitHub</a> ·
@@ -2577,11 +2651,18 @@
               a.href = dmg.browser_download_url;
               a.setAttribute("download", "");
               if (a.dataset.readyLabel) a.textContent = a.dataset.readyLabel;
+              a.hidden = false;
             });
             var notes = document.getElementById("release-notes");
             if (notes) notes.hidden = false;
             var v = document.getElementById("release-version");
-            if (v && rel.tag_name) v.textContent = "Alpha " + rel.tag_name;
+            if (v && rel.tag_name) {
+              v.textContent = "Alpha " + rel.tag_name + " · ";
+              v.hidden = false;
+            }
+            document.querySelectorAll("[data-release-only]").forEach(function (a) {
+              a.hidden = false;
+            });
           })
           .catch(function () {
             /* keep the "coming soon" link to the repository */
@@ -2665,7 +2746,7 @@
           idle: "",
           listening: "Listening…",
           transcribing: "Transcribing…",
-          pasted: "Pasted",
+          pasted: "Done",
         };
         function setState(d, s) {
           d.dataset.state = s;

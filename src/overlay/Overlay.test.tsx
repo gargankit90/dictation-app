@@ -1,5 +1,5 @@
 // M5.1 criterion 1, U4: the overlay renders the recording pill's states
-// (Listening with the level meter, No sound, Transcribing, Paste sent, Error) and
+// (Listening with the level meter, No sound, Transcribing, Done, Error) and
 // nothing while hidden; it follows the events the Rust side sends.
 
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -71,7 +71,7 @@ describe("criterion_m5_1_1 criterion_u4_3 OverlayContent", () => {
   it("draws each bar from its level, newest on the right", () => {
     const levels = [-100, -60, -35, -10, 0, -47.5, -22.5];
     render(<OverlayContent view={{ state: "recording" }} levels={levels} />);
-    expect(barHeights()).toEqual([4, 4, 11, 18, 18, 8, 15]);
+    expect(barHeights()).toEqual([4, 4, 11, 18, 18, 5, 17]);
   });
 
   it("hides the meter from assistive tech", () => {
@@ -112,11 +112,11 @@ describe("criterion_m5_1_1 criterion_u4_3 OverlayContent", () => {
     expect(screen.queryByText("mic_denied")).toBeNull();
   });
 
-  it("shows Paste sent with a check", () => {
+  it("shows Done with a check", () => {
     render(<OverlayContent view={{ state: "paste_sent" }} />);
     const status = screen.getByRole("status");
     expect(status.dataset.state).toBe("paste_sent");
-    expect(status.querySelector(".overlay-label")?.textContent).toBe("Paste sent");
+    expect(status.querySelector(".overlay-label")?.textContent).toBe("Done");
     expect(status.querySelector(".overlay-check")?.textContent).toBe("✓");
   });
 
@@ -142,9 +142,9 @@ describe("criterion_m5_1_1 criterion_u4_3 OverlayContent", () => {
 });
 
 describe("criterion_u4_3 the meter", () => {
-  it("maps -60 dBFS to 4 px and -10 dBFS to 18 px, clamped", () => {
-    expect(barHeight(-60)).toBe(BAR_MIN_PX);
-    expect(barHeight(-10)).toBe(BAR_MAX_PX);
+  it("maps -50 dBFS to 4 px and -20 dBFS to 18 px, clamped", () => {
+    expect(barHeight(-50)).toBe(BAR_MIN_PX);
+    expect(barHeight(-20)).toBe(BAR_MAX_PX);
     expect(barHeight(FLOOR_DBFS)).toBe(4);
     expect(barHeight(0)).toBe(18);
     expect(barHeight(-35)).toBe(11);
@@ -219,7 +219,7 @@ describe("criterion_m5_1_1 criterion_u4_2 Overlay follows the overlay events", (
     expect(screen.getByRole("status").textContent).toBe("Transcribing…");
 
     await send({ state: "paste_sent" });
-    expect(screen.getByRole("status").textContent).toContain("Paste sent");
+    expect(screen.getByRole("status").textContent).toContain("Done");
     // The old state name is not a view.
     await send({ state: "pasted" });
     expect(screen.queryByRole("status")).toBeNull();

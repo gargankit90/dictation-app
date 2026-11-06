@@ -248,6 +248,65 @@ async fn criterion_3_a_longer_body_than_the_catalogue_says_is_a_checksum_error()
     assert_eq!(store.status(&model), ModelStatus::Missing);
 }
 
+/// U9: the models folder removed during a download. It says so plainly, not
+/// "check the free space", stops at once, and trying again recovers.
+#[tokio::test]
+async fn a_folder_removed_during_the_download_is_said_plainly_and_a_retry_recovers() {
+    let bytes = content();
+    let model = model_for(&bytes);
+    let (server, _) = serve(bytes.clone(), false).await;
+    let dir = TempDir::new();
+    let models = store(&dir, plenty());
+    let url = format!("{}/model.gguf", server.uri());
+    let removed = dir.0.clone();
+    let mut gone = false;
+    let error = models
+        .download_from(&model, &url, &DownloadCancel::new(), move |progress| {
+            if !gone && progress.downloaded > 0 {
+                gone = true;
+                std::fs::remove_dir_all(&removed).unwrap();
+            }
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error, DownloadError::Removed);
+    assert!(error.user_message().contains("removed"), "{error}");
+    assert!(!error.user_message().contains("free space"), "{error}");
+
+    let path = models
+        .download_from(&model, &url, &DownloadCancel::new(), |_| {})
+        .await
+        .expect("trying again starts over");
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    assert_eq!(models.status(&model), ModelStatus::Ready);
+}
+
+/// The folder goes right after the last byte, before the check and the rename.
+#[tokio::test]
+async fn a_folder_removed_before_the_rename_is_said_plainly() {
+    let bytes = content();
+    let total = bytes.len() as u64;
+    let model = model_for(&bytes);
+    let (server, _) = serve(bytes, false).await;
+    let dir = TempDir::new();
+    let models = store(&dir, plenty());
+    let url = format!("{}/model.gguf", server.uri());
+    let removed = dir.0.clone();
+    // Once: the total is reported twice if the last chunk crosses a progress
+    // step, from the fetch and again after it.
+    let mut gone = false;
+    let error = models
+        .download_from(&model, &url, &DownloadCancel::new(), move |progress| {
+            if !gone && progress.downloaded == total {
+                gone = true;
+                std::fs::remove_dir_all(&removed).unwrap();
+            }
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error, DownloadError::Removed);
+}
+
 #[tokio::test]
 async fn criterion_3_no_space_is_refused_before_anything_is_fetched() {
     let bytes = content();

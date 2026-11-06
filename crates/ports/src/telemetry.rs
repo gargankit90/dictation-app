@@ -137,7 +137,7 @@ impl EngineChoice {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OnboardingStep {
-    /// What the app does, and the events switch.
+    /// What the app does.
     Welcome,
     /// Choose the language and the engine.
     Speech,
@@ -145,7 +145,7 @@ pub enum OnboardingStep {
     Permissions,
     /// Try a dictation.
     Try,
-    /// The summary.
+    /// The summary, and the sharing switch.
     Ready,
 }
 
@@ -277,6 +277,78 @@ pub enum SettingName {
     HistoryLimit,
 }
 
+/// What went wrong during first setup, or what the user chose instead of
+/// going on (U10). Fixed values only: no text from the OS, a provider, a path
+/// or the user has a field to travel in. Each is listed in `docs/privacy.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetupProblem {
+    /// The model download stopped: not enough free disk space.
+    DownloadFailedNoSpace,
+    /// The model download stopped: the network or the server failed.
+    DownloadFailedNetwork,
+    /// The model download stopped: the file failed its checksum.
+    DownloadFailedChecksum,
+    /// The model download stopped: the file couldn't be written.
+    DownloadFailedDisk,
+    /// The user cancelled the model download.
+    DownloadCancelled,
+    /// The downloaded model couldn't be loaded.
+    ModelLoadFailed,
+    /// The key test found no key to test.
+    KeyTestFailedNoKey,
+    /// The key test failed: the provider rejected the key, or it can't be one.
+    KeyTestFailedRejected,
+    /// The key test failed: the provider is rate limiting.
+    KeyTestFailedRateLimited,
+    /// The key test failed: the provider couldn't be reached.
+    KeyTestFailedNetwork,
+    /// The key test failed: the provider failed or gave an unusable answer.
+    KeyTestFailedServer,
+    /// The key test failed: the saved key couldn't be read from the keychain.
+    KeyTestFailedKeychain,
+    /// macOS reports the microphone as refused.
+    MicrophoneDenied,
+    /// Accessibility was asked for and still wasn't on when setup was closed.
+    /// macOS doesn't report a refusal of this one.
+    AccessibilityDenied,
+    /// macOS's microphone prompt or its settings page couldn't be opened.
+    MicrophoneRequestFailed,
+    /// macOS's Accessibility prompt or its settings page couldn't be opened.
+    AccessibilityRequestFailed,
+    /// The user relaunched the app because a permission hadn't taken effect.
+    RelaunchNeeded,
+    /// The practice dictation's words didn't reach the practice box.
+    PasteMissed,
+    /// The user skipped the practice dictation.
+    PracticeSkipped,
+}
+
+impl SetupProblem {
+    /// Every value, in the order `docs/privacy.md` lists them.
+    pub const ALL: [Self; 19] = [
+        Self::DownloadFailedNoSpace,
+        Self::DownloadFailedNetwork,
+        Self::DownloadFailedChecksum,
+        Self::DownloadFailedDisk,
+        Self::DownloadCancelled,
+        Self::ModelLoadFailed,
+        Self::KeyTestFailedNoKey,
+        Self::KeyTestFailedRejected,
+        Self::KeyTestFailedRateLimited,
+        Self::KeyTestFailedNetwork,
+        Self::KeyTestFailedServer,
+        Self::KeyTestFailedKeychain,
+        Self::MicrophoneDenied,
+        Self::AccessibilityDenied,
+        Self::MicrophoneRequestFailed,
+        Self::AccessibilityRequestFailed,
+        Self::RelaunchNeeded,
+        Self::PasteMissed,
+        Self::PracticeSkipped,
+    ];
+}
+
 /// What can be recorded. Serialises as `{"event": name, "properties": {…}}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", content = "properties", rename_all = "snake_case")]
@@ -299,6 +371,16 @@ pub enum Event {
     OnboardingCompleted {
         /// The last step they were on.
         step: OnboardingStep,
+    },
+    /// Setup's window was closed, or the app quit, with setup not finished.
+    OnboardingLeft {
+        /// The step they stopped on.
+        step: OnboardingStep,
+    },
+    /// Something got in the way during setup (U10).
+    SetupProblem {
+        /// Which fixed reason.
+        reason: SetupProblem,
     },
     /// The user picked or changed the engine.
     EngineSelected {
@@ -431,6 +513,18 @@ mod tests {
                 json!({"event":"onboarding_completed","properties":{"step":"ready"}}),
             ),
             (
+                Event::OnboardingLeft {
+                    step: OnboardingStep::Permissions,
+                },
+                json!({"event":"onboarding_left","properties":{"step":"permissions"}}),
+            ),
+            (
+                Event::SetupProblem {
+                    reason: SetupProblem::MicrophoneDenied,
+                },
+                json!({"event":"setup_problem","properties":{"reason":"microphone_denied"}}),
+            ),
+            (
                 Event::EngineSelected {
                     engine: EngineChoice::Cloud(Provider::OpenAi),
                 },
@@ -472,6 +566,61 @@ mod tests {
         ];
         for (event, expected) in cases {
             assert_eq!(wire(&event), expected);
+        }
+    }
+
+    /// U10 criterion 4: the page lists every value, and none can hold free text.
+    #[test]
+    fn every_setup_problem_is_a_plain_word_and_on_the_privacy_page() {
+        let page = include_str!("../../../docs/privacy.md");
+        let table = page
+            .split("## Setup problems")
+            .nth(1)
+            .expect("the page has the section");
+        let mut seen = Vec::new();
+        for problem in SetupProblem::ALL {
+            let event = wire(&Event::SetupProblem { reason: problem });
+            let properties = event["properties"].as_object().expect("properties");
+            assert_eq!(properties.len(), 1, "only the reason: {event}");
+            let reason = properties["reason"].as_str().expect("a word").to_owned();
+            assert!(
+                reason.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{reason}"
+            );
+            assert!(
+                table.contains(&format!("`{reason}`")),
+                "{reason} isn't listed"
+            );
+            assert!(!seen.contains(&reason), "{reason} twice");
+            seen.push(reason);
+        }
+    }
+
+    /// Adding a value breaks this match, which says to add it to `ALL`.
+    #[test]
+    fn the_list_of_setup_problems_is_complete() {
+        for problem in SetupProblem::ALL {
+            match problem {
+                SetupProblem::DownloadFailedNoSpace
+                | SetupProblem::DownloadFailedNetwork
+                | SetupProblem::DownloadFailedChecksum
+                | SetupProblem::DownloadFailedDisk
+                | SetupProblem::DownloadCancelled
+                | SetupProblem::ModelLoadFailed
+                | SetupProblem::KeyTestFailedNoKey
+                | SetupProblem::KeyTestFailedRejected
+                | SetupProblem::KeyTestFailedRateLimited
+                | SetupProblem::KeyTestFailedNetwork
+                | SetupProblem::KeyTestFailedServer
+                | SetupProblem::KeyTestFailedKeychain
+                | SetupProblem::MicrophoneDenied
+                | SetupProblem::AccessibilityDenied
+                | SetupProblem::MicrophoneRequestFailed
+                | SetupProblem::AccessibilityRequestFailed
+                | SetupProblem::RelaunchNeeded
+                | SetupProblem::PasteMissed
+                | SetupProblem::PracticeSkipped => {}
+            }
         }
     }
 

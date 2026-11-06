@@ -234,7 +234,7 @@ Every testable behaviour gets a test, at the cheapest level that catches it.
 ## Quality gate
 
 Runs in git's pre-push hook (`lefthook run pre-push-gate`) and CI (from M0.3);
-every finding is fixed.
+every finding is fixed. Locally it skips work it has already done, see below.
 
 | Check | Tool | Gate |
 | --- | --- | --- |
@@ -248,6 +248,39 @@ every finding is fixed.
 
 A suppression (`#[allow]`, `eslint-disable`) needs a comment explaining why,
 and the Code Reviewer must agree.
+
+### Not running the same checks twice (G2)
+
+The rule stays: run the gate before you push. `scripts/gate.sh` (helpers in
+`scripts/gate-lib.sh`, tests in `scripts/test-gate.sh`) decides what that costs:
+
+- **Receipt.** A full pass on a clean tree writes a receipt (atomically, at the
+  very end; a failure or interruption writes none) in the worktree's git
+  directory, outside the tracked tree. A later run on identical input is
+  skipped. The key covers the tree (a dirty tree, untracked non-ignored files
+  included, never reuses or writes a receipt), the gate scripts, OS and
+  architecture, Rust, Node and check-tool versions, env flags and profiles
+  (`NEXTEST_*`, `CARGO_*`, `RUST*`, `DICTATION_*`, `LLVM_*`, and the checks' own
+  controls `COVERAGE_*` and `LICENCES_*`), and the installed npm packages (the
+  lockfile copy, `.bin` and every package.json, so a deleted tool changes it; a
+  missing npm tool also refuses reuse). It expires after 4 hours (`GATE_RECEIPT_TTL`, seconds) so
+  advisory and dependency checks don't go stale.
+- **Prose shortcut.** When every file changed against the merge base of
+  `origin/main` is on a short allowlist of plain Markdown, only prettier, typos
+  and the link check run. Unknown paths, deletions or renames out of the
+  allowlist, an empty diff, a dirty tree, a detached HEAD, a shallow clone, a
+  missing `origin/main`, or several merge bases run the full gate; the base,
+  candidate, mode and reason are printed. Not on the allowlist: `AGENTS.md`,
+  `CLAUDE.md`, `SECURITY.md`, `CHANGELOG.md`, `NOTICE`, licences,
+  `docs/TESTERS.md`, `docs/releasing.md`, `docs/privacy.md`, `docs/agents/`,
+  `site/`, `.github/`, `scripts/`, `.claude/`.
+- **`scripts/gate.sh --full`** ignores both. **CI** (`CI` or `GITHUB_ACTIONS`
+  set) always runs everything and never reads or writes a receipt. Tag pushes
+  get no special case: a receipt either matches or it doesn't.
+- **Only on the owner's Mac** (the macOS CI job runs the Rust checks only):
+  coverage thresholds and the shell self-tests (`test-guards`, `test-release`,
+  `test-check-licences`, `test-coverage`, `test-gate`, the e2e stub tests) run
+  in the full gate on Linux CI and locally, not on the macOS runner.
 
 ## CI
 
@@ -265,7 +298,8 @@ reach the owner's Mac**: there is no self-hosted runner, and
   cargo-nextest, cargo-llvm-cov, typos) with `Swatinem/rust-cache`. `macos`
   builds, lints and tests `dictation-platform` and `dictation-transcribe` (the Metal build of the on-device engine, #219) on `macos-15` (Apple Silicon,
   checked with `uname -m`), the `#[cfg(target_os = "macos")]` code Linux
-  compiles out. `dmg.yml` builds the tester DMG on `macos-15`, signed ad hoc
+  compiles out, then also runs workspace clippy, nextest and doctests with
+  `DICTATION_NO_LAUNCH=1` (G2), so every crate's tests run on a Mac too. `dmg.yml` builds the tester DMG on `macos-15`, signed ad hoc
   (`DMG_ADHOC=1`): there is no certificate and no secret in CI.
 - **Job names are stable** (they become required status checks): `Quality gate (Linux)`,
   `Platform crate (macOS)` and, for packaging changes, `DMG (macOS)`. Renaming
@@ -305,3 +339,35 @@ reach the owner's Mac**: there is no self-hosted runner, and
 - Findings are rated **blocker**, **major** or **minor**. Blockers and majors
   are fixed before merging; minors are fixed or recorded as a
   GitHub issue labelled `tech-debt`, with a reason, linked from the PR.
+
+### Claude command hook and ruleset audit (G1)
+
+`.claude/hooks/guard-git.sh` is a best-effort matcher for plain merge,
+destructive repository API and guard-write commands. It fails open for
+unreadable input, unparsable shell and heredocs. It neither executes the
+inspected command nor reads files named in it. Read-only guard references,
+multiline scripts, unrelated settings.json files and hook-bypass settings
+pass. Skipping hooks remains prohibited by AGENTS.md; required CI enforces
+the gate. Edit/Write denies remain, and the four static push denies are gone.
+The pre-push guard, pre-push runner and installer are unchanged; no reinstall
+is needed.
+
+A deliberately disguised command can get past the hook. We accept this
+trade-off to avoid false positives. The hosted daily `rulesets.yml` workflow
+compares names, enforcement, target, conditions and rules against
+`.github/rulesets-expected.json`, catching visible ruleset drift afterwards.
+It uses only `contents: read` and no secrets. Missing rulesets, API errors
+and policy differences fail the run; ordering and API metadata do not.
+GitHub omits `bypass_actors` without ruleset write access ([API documentation](https://docs.github.com/en/rest/repos/rules#get-a-repository-ruleset)),
+so the workflow logs that limitation and cannot attest bypass policy.
+The Lead runs `python3 scripts/check-rulesets.py --require-bypass` locally
+with the existing admin `gh` token to check bypass actors as well; it fails
+if that field is hidden. The owner must enable GitHub workflow-failure email
+notifications to receive scheduled failure alerts. The audit cannot repair
+a changed policy or protect itself from an admin disabling the workflow.
+
+GitHub disables scheduled workflows in public repositories after 60 days
+without repository activity; this daily audit then stops until the workflow
+is re-enabled. The Lead should check the schedule remains enabled and, after
+merging G1-simple-guard, run `gh workflow run rulesets.yml` once and verify
+the first hosted read-only-token run is green.

@@ -11,9 +11,9 @@ one as OK or with finding numbers. Severity guide:
 
 Push rules (no push to `main`, no force push, no branch deletion, no tag
 moves) are enforced by the GitHub rulesets (see `AGENTS.md`) and by git's
-pre-push guard. `.claude/hooks/guard-git.sh` only checks merging, hook
-bypass, guard edits and destructive repository settings. A way around one of
-those checks is **major**; anything else about the guards is **minor**.
+pre-push guard. `.claude/hooks/guard-git.sh` matches plain merging, guard-write and destructive repository settings commands.
+It fails open and does not enforce hook-bypass policy; deliberately disguised
+commands are an accepted trade-off, while missed ordinary spellings are **major**.
 
 ## 1. Scope
 

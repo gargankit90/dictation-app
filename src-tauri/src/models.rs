@@ -10,7 +10,8 @@
 //! the selected model rebuilds it into "download the model in Settings".
 //!
 //! Nothing here sends or logs audio, text or keys; the download goes only to
-//! the catalogue's pinned Hugging Face URL.
+//! the catalogue's pinned Hugging Face URL (in a test build, a local stand-in
+//! if `--debug-model-url` says so).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -24,6 +25,8 @@ use tauri::State;
 
 use crate::commands::AppConfig;
 use crate::engine::LiveEngine;
+use crate::onboarding::Onboarding;
+use crate::usage::{self, Usage};
 
 /// Where a model is, as Settings shows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
@@ -73,6 +76,9 @@ pub struct LocalModelInfo {
 #[derive(Clone, Default)]
 pub struct ModelDownloads {
     inner: Arc<Mutex<Downloads>>,
+    /// Where models download from instead of their own URL: only test builds
+    /// set it (`--debug-model-url`).
+    stand_in: Option<String>,
 }
 
 #[derive(Default)]
@@ -103,6 +109,14 @@ fn no_local() -> String {
 }
 
 impl ModelDownloads {
+    /// Downloads from the local server at `url` from now on.
+    #[cfg_attr(not(debug_assertions), allow(dead_code, reason = "test builds only"))]
+    #[must_use]
+    pub fn from_stand_in(mut self, url: &str) -> Self {
+        self.stand_in = Some(url.trim_end_matches('/').to_owned());
+        self
+    }
+
     /// Every catalogue model with its status.
     #[must_use]
     pub fn list(&self, live: &LiveEngine) -> Vec<LocalModelInfo> {
@@ -169,6 +183,10 @@ impl ModelDownloads {
         let model = find(id)?;
         let store = live.local().ok_or_else(no_local)?.store().clone();
         let cancel = DownloadCancel::new();
+        let url = url.or_else(|| {
+            let base = self.stand_in.as_ref()?;
+            Some(format!("{base}/{}", model.file_name))
+        });
         {
             let mut downloads = lock(&self.inner);
             if downloads.running.contains_key(model.id) {
@@ -276,12 +294,18 @@ pub async fn download_local_model(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
     downloads: State<'_, ModelDownloads>,
+    onboarding: State<'_, Arc<Onboarding>>,
+    usage: State<'_, Usage>,
     id: String,
 ) -> Result<(), String> {
     let (config, live) = (Arc::clone(&state.0), engine.inner().clone());
-    downloads.start(engine.inner(), &id, None, move |result| {
-        if result.is_ok() {
-            rebuild_later(config, live);
+    let (onboarding, usage) = (Arc::clone(&onboarding), usage.inner().clone());
+    downloads.start(engine.inner(), &id, None, move |result| match result {
+        Ok(()) => rebuild_later(config, live),
+        Err(error) => {
+            if let Some(problem) = usage::download_problem(&error) {
+                usage::setup_problem(&usage, &onboarding, problem);
+            }
         }
     })
 }

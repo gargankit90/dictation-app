@@ -45,7 +45,7 @@ ALL_SCENARIOS=(
   e2e_update_keychain_control
   e2e_launch_at_login
   e2e_hotkey_shortcuts e2e_no_words_transcript e2e_hotkey_recorder
-  e2e_accessibility_revoked
+  e2e_accessibility_revoked e2e_setup_no_permissions e2e_setup_own_key_no_permissions
   e2e_local_model
   e2e_first_paste_after_launch e2e_quit_right_after_paste e2e_tray_menu_screenshots
   e2e_onboarding_screenshots
@@ -126,6 +126,7 @@ if [ $reset = 1 ]; then
   reset_vm
 else
   wait_for_vm
+  terminal_ignore_saved_state
 fi
 install_app "$APP_PATH"
 install_fixtures "$E2E_DIR/fixtures"

@@ -53,7 +53,7 @@ describe("validateHotkey", () => {
   });
 
   it("refuses empty and malformed hotkeys", () => {
-    expect(validateHotkey("")).toMatch(/Enter a hotkey/);
+    expect(validateHotkey("")).toMatch(/Enter a dictation key/);
     for (const bad of ["Ctrl+", "+A", "Ctrl++A", "Ctrl Shift", "Ctrl-A"]) {
       expect(validateHotkey(bad), bad).toMatch(/joined by/);
     }

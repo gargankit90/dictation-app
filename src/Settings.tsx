@@ -5,6 +5,7 @@ import type { EngineStatus, LocalModelInfo_Serialize, Settings_Serialize } from 
 import { BROKEN, messageOf } from "./keyTest";
 import { cloudLanguages } from "./languages";
 import { providerInfo } from "./providers";
+import { modelTitle } from "./settings/modelRow";
 import "./settings.css";
 import { Dictation } from "./settings/Dictation";
 import type { LanguageChoice } from "./settings/Dictation";
@@ -141,7 +142,7 @@ function languageChoice(
   const englishOnly = model.language_codes.join() === "en";
   return {
     supported: model.language_codes,
-    engineName: englishOnly ? "the English model" : "the multilingual model",
+    engineName: `the ${modelTitle(model)} model`,
     englishOnly,
   };
 }
@@ -149,6 +150,11 @@ function languageChoice(
 interface Props extends HelpActions {
   /** Open at this section (the tray's fix rows); `id` makes a repeated ask count. */
   open?: { section: SectionId; id: number } | null;
+  /**
+   * The ask was followed. The app forgets it, so coming back from Troubleshoot
+   * or Report (which remounts Settings) can't follow it again (#277).
+   */
+  onOpened?: () => void;
 }
 
 /**
@@ -156,16 +162,17 @@ interface Props extends HelpActions {
  * grouped rows. Every control saves on change through a command that writes
  * only its own setting, so there is no Save button and no form whose older
  * values could overwrite another control's; operations with a lifecycle of
- * their own keep their buttons (Download, Use this, Test & Save, the
- * shortcut recorder, Remove key). The API key is never loaded back.
+ * their own keep their buttons (Download, Test & Save, the dictation
+ * key's recorder, Remove key). The API key is never loaded back.
  */
-export function Settings({ open = null, ...help }: Props) {
+export function Settings({ open = null, onOpened, ...help }: Props) {
   const [settings, setSettings] = useState<Settings_Serialize | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [section, setSection] = useState<SectionId>(rememberedSection);
   const { models, error: modelsError, refresh: refreshModels } = useModels();
   const { engine, refresh: refreshEngine } = useEngineStatus();
-  // The first launch after the rename says something about the Keychain (U1).
+  // The first launch after the rename says something about the Keychain (U1);
+  // Speech shows it, and only with a key saved.
   const [launchNotice, setLaunchNotice] = useState<string | null>(null);
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -181,6 +188,10 @@ export function Settings({ open = null, ...help }: Props) {
     return () => {
       window.clearTimeout(timer);
     };
+  }, []);
+  const [sheetOffered, setSheetOffered] = useState(false);
+  const offerSheet = useCallback(() => {
+    setSheetOffered(true);
   }, []);
   const launch = useLaunchAtLogin(settings?.launch_at_login ?? false);
   const tabs = useRef<Partial<Record<SectionId, HTMLButtonElement | null>>>({});
@@ -198,6 +209,9 @@ export function Settings({ open = null, ...help }: Props) {
   useEffect(() => {
     remember(section);
   }, [section]);
+  useEffect(() => {
+    if (open !== null) onOpened?.();
+  }, [open, onOpened]);
 
   // The window is hidden, not closed, so it outlives what it loaded:
   // whenever it comes back, read the settings again (the login item may
@@ -289,6 +303,9 @@ export function Settings({ open = null, ...help }: Props) {
             refreshModels={refreshModels}
             engine={engine}
             refreshEngine={refreshEngine}
+            launchNotice={launchNotice}
+            sheetOffered={sheetOffered}
+            onSheetOffered={offerSheet}
           />
         );
         break;
@@ -345,11 +362,6 @@ export function Settings({ open = null, ...help }: Props) {
         tabIndex={0}
       >
         <h1>{current.name}</h1>
-        {launchNotice !== null ? (
-          <p role="status" className="notice ok" data-testid="launch-notice">
-            {launchNotice}
-          </p>
-        ) : null}
         {pane}
       </div>
     </main>

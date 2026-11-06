@@ -30,9 +30,9 @@ export function validateLanguage(language: string): string | null {
 /** `null` if `hotkey` looks like `RightAlt` or `Ctrl+Shift+Space`. */
 export function validateHotkey(hotkey: string): string | null {
   const trimmed = hotkey.trim();
-  if (trimmed === "") return "Enter a hotkey, such as RightAlt or Ctrl+Shift+Space.";
+  if (trimmed === "") return "Enter a dictation key, such as Right ⌥ or ⌃⇧Space.";
   if (!/^[A-Za-z0-9]+(\+[A-Za-z0-9]+)*$/u.test(trimmed)) {
-    return "Write the hotkey as keys joined by +, such as Ctrl+Shift+Space.";
+    return "Write the dictation key as keys joined by +, such as Ctrl+Shift+Space.";
   }
   return null;
 }

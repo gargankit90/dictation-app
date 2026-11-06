@@ -401,7 +401,7 @@ OVERLAY_HIDDEN=hidden
 OVERLAY_RECORDING="shown: Listening Release to paste · Esc to cancel"
 OVERLAY_NO_SOUND="shown: No sound Check your microphone"
 OVERLAY_TRANSCRIBING="shown: Transcribing…"
-OVERLAY_PASTE_SENT="shown: Paste sent"
+OVERLAY_PASTE_SENT="shown: Done"
 
 # overlay_shows <want> [seconds]: until the overlay shows exactly <want>,
 # within [seconds] (default 5); says what it showed instead.
@@ -496,11 +496,12 @@ terminal_secure_entry() {
   vm "defaults write com.apple.Terminal SecureKeyboardEntry -bool $1"
 }
 
-# Closes Terminal and removes its scripts and saved windows.
+# Closes Terminal and removes its scripts. Terminal's own window restoration
+# is off for the whole run (terminal_ignore_saved_state, lib.sh).
 # Waits (up to 10 s) for Terminal to be gone, so a following `open -a
 # Terminal` starts a new one, which reads its preferences again.
 close_terminal() {
-  vm "pkill -x Terminal; i=0; while pgrep -x Terminal >/dev/null && [ \$i -lt 20 ]; do sleep 0.5; i=\$((i + 1)); done; rm -rf $(q "$VM_RUN_DIR") $(q "$VM_HOME/Library/Saved Application State/com.apple.Terminal.savedState")" || true
+  vm "pkill -x Terminal; i=0; while pgrep -x Terminal >/dev/null && [ \$i -lt 20 ]; do sleep 0.5; i=\$((i + 1)); done; rm -rf $(q "$VM_RUN_DIR")" || true
 }
 
 # --- Cleanup for the scenarios that post real keys -------------------------------

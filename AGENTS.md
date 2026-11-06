@@ -64,7 +64,20 @@ push guard, and CI runs it on every PR. Run it before you push:
 
 ```sh
 scripts/gate.sh                        # the whole gate, stops at the first failure
+scripts/gate.sh --full                 # ignore receipts and the prose shortcut
 ```
+
+Locally the gate does not repeat work (G2). After a full pass on a clean tree
+it stores a receipt in the worktree's git directory; the same input (tree,
+gate scripts, OS and architecture, tool versions, env flags, installed npm
+packages) within 4 hours is skipped with a message, so the manual run and the
+pre-push run cost one run. A dirty tree never reuses or writes a receipt. If
+every file changed against the merge base of `origin/main` is plain prose
+(README, CONTRIBUTING, `docs/ENGINEERING.md`, `docs/review-checklist.md`,
+`docs/history/**/*.md`), only formatting, spelling and link checks run; any
+other path, an empty diff, a dirty tree, a detached HEAD, a shallow clone or a
+missing `origin/main` runs everything, and the reason is printed. CI always
+runs everything and never reads a receipt. Tag pushes get no special case.
 
 ## Workflow: every change goes through a pull request
 
@@ -164,11 +177,24 @@ agent. Local checks add defence in depth:
   whenever `scripts/guard-push.sh` changes. Not lefthook: lefthook skips
   pre-push jobs when it sees no changed files.
 - Claude Code loads `.claude/settings.json`. Its `PreToolUse` hook
-  (`.claude/hooks/guard-git.sh`) keeps role checks (the Code Reviewer merges),
-  hook bypass checks, guard-edit checks (only the owner changes guards), and
-  destructive repository settings checks. It does not inspect push commands
-  or git aliases. Edit/Write deny rules protect guard files. Existing static
-  push deny rules remain in settings.json pending the owner's decision.
+  (`.claude/hooks/guard-git.sh`) matches plain merge, destructive repository
+  API and guard-write commands. It fails open on unreadable input, shell
+  syntax it cannot parse and heredocs; it never executes inspected commands
+  or reads files they name. Edit/Write deny rules still protect guard files;
+  the static push deny rules and command-hook bypass checks are removed.
+  Skipping hooks is still prohibited above, with required CI enforcing the
+  gate. A deliberately disguised command can get past this hook: this is an
+  accepted trade-off to avoid blocking ordinary scripts.
+- `.github/workflows/rulesets.yml` checks names, enforcement, target,
+  conditions and rules daily against `.github/rulesets-expected.json`.
+  GitHub hides bypass actors from callers without ruleset write access, so
+  the read-only workflow warns about that visibility gap and compares only
+  visible fields. It catches visible ruleset drift afterwards; it cannot
+  detect a bypass-list change. The Lead runs
+  `python3 scripts/check-rulesets.py --require-bypass` locally with the
+  existing admin `gh` token to compare bypass actors too. No token is stored
+  in the repository. Failed scheduled runs use GitHub's notification settings;
+  the owner must keep workflow-failure email notifications enabled.
 
 ## Reference repos
 

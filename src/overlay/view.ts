@@ -85,17 +85,17 @@ export const BAR_MIN_PX = 4;
 /** A bar's height at or above {@link METER_HIGH_DBFS}, in px. */
 export const BAR_MAX_PX = 18;
 /** The level drawn as the shortest bar. */
-export const METER_LOW_DBFS = -60;
+export const METER_LOW_DBFS = -50;
 /** The level drawn as the tallest bar. */
-export const METER_HIGH_DBFS = -10;
+export const METER_HIGH_DBFS = -20;
 /** Silence, for an empty meter (`LEVEL_FLOOR_DBFS` in `dictation-core`). */
 export const FLOOR_DBFS = -100;
 
 /**
  * A bar's height for a level: linear in dBFS from {@link METER_LOW_DBFS}
  * ({@link BAR_MIN_PX}) to {@link METER_HIGH_DBFS} ({@link BAR_MAX_PX}),
- * clamped, to the nearest pixel. So silence is flat and speech (about −40 to
- * −20 dBFS) moves the bars.
+ * clamped, to the nearest pixel. So silence (at or below the "No sound"
+ * threshold) is flat and speech (about −40 to −20 dBFS) uses the full height.
  */
 export function barHeight(dbfs: number): number {
   const span = METER_HIGH_DBFS - METER_LOW_DBFS;

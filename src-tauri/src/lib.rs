@@ -29,7 +29,7 @@
 //! again.
 //!
 //! M5.1, U4: the `overlay` window (the recording pill) shows Listening with
-//! a level meter, No sound, Transcribing, Paste sent and errors
+//! a level meter, No sound, Transcribing, Done and errors
 //! without taking focus ([`overlay`]).
 //!
 //! M5.2: onboarding. The settings window shows the first-run steps
@@ -295,6 +295,7 @@ pub fn run() {
             // again; destroying it would leave the tray nothing to show.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
+                setup_left(window.app_handle());
                 if let Err(error) = window.hide() {
                     tracing::warn!(%error, "could not hide the settings window");
                 }
@@ -420,10 +421,14 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
             live
         }
     };
-    app.manage(models::ModelDownloads::default());
+    app.manage(with_model_url(models::ModelDownloads::default(), &launch));
     let handle = app.handle().clone();
     app.manage(preferences::UpdateCheck(Arc::new(move || {
         updater::check_from_tray(&handle);
+    })));
+    let handle = app.handle().clone();
+    app.manage(preferences::WindowPages(Arc::new(move |page| {
+        window::set_page(&handle, page).map_err(|error| error.to_string())
     })));
     // Settings' "Test microphone" (U6) records from a microphone of its own.
     app.manage(preferences::AppMicTest(
@@ -442,15 +447,9 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         false,
     );
     // Anonymous usage events (A1): on by default, a no-op without a build
-    // key, silent in scripted test launches, and held until the user has
-    // left onboarding's first screen (U8).
-    let usage = usage::start(
-        &data_dir,
-        &config.settings().unwrap_or_default(),
-        scripted,
-        &version,
-        setup.welcome_passed(),
-    );
+    // key, silent in scripted test launches. They follow the stored choice
+    // from here on, first setup included (U10).
+    let usage = usage::start(&data_dir, usage::stored_choice(&config), scripted, &version);
     usage::launched(usage.clone(), &data_dir, &version);
     app.manage(usage.clone());
     let recordings = data_dir.join("debug-recordings");
@@ -622,7 +621,7 @@ fn onboarding_at_launch(
                 tracing::info!(?readiness, ?launch, "onboarding not shown at launch");
                 return;
             }
-            let step = onboarding.open(readiness);
+            let step = usage::setup_opened(&app.state::<usage::Usage>(), &onboarding, readiness);
             // This line's text is what the e2e scenario waits for.
             tracing::info!(?step, ?readiness, ?launch, "onboarding shown at launch");
             window::show(&app, onboarding::View::Onboarding);
@@ -652,12 +651,23 @@ fn show_onboarding(app: &AppHandle) {
                 onboarding::readiness(&SystemPermissions::new(), welcome_passed, true, || {
                     onboarding::key_saved(&config, &live)
                 });
-            let step = onboarding.open(readiness);
+            let step = usage::setup_opened(&app.state::<usage::Usage>(), &onboarding, readiness);
             tracing::info!(?step, "onboarding opened from the tray");
             window::show(&app, onboarding::View::Onboarding);
         });
     if let Err(error) = spawned {
         tracing::error!(%error, "could not open onboarding");
+    }
+}
+
+/// Setup's window was closed or the app is quitting: where the user stopped.
+fn setup_left(app: &AppHandle) {
+    if let (Some(usage), Some(onboarding), Some(permissions)) = (
+        app.try_state::<usage::Usage>(),
+        app.try_state::<Arc<onboarding::Onboarding>>(),
+        app.try_state::<onboarding::OsPermissions>(),
+    ) {
+        usage::setup_left(&usage, &onboarding, &*permissions.0);
     }
 }
 
@@ -667,6 +677,28 @@ fn show_settings(app: &AppHandle) {
         onboarding.close();
     }
     window::show(app, onboarding::View::Settings);
+}
+
+/// Test builds: downloads models from `--debug-model-url` (a local stand-in
+/// server). Release builds have no such flag and this does nothing.
+#[cfg(debug_assertions)]
+fn with_model_url(
+    downloads: models::ModelDownloads,
+    launch: &flags::LaunchFlags,
+) -> models::ModelDownloads {
+    let Some(url) = &launch.model_url else {
+        return downloads;
+    };
+    tracing::info!(%url, "test hook: models download from a local URL");
+    downloads.from_stand_in(url)
+}
+
+#[cfg(not(debug_assertions))]
+fn with_model_url(
+    downloads: models::ModelDownloads,
+    _: &flags::LaunchFlags,
+) -> models::ModelDownloads {
+    downloads
 }
 
 /// Test builds: points the real engine at `--debug-provider-url` (a local
@@ -755,6 +787,9 @@ fn handle_flags(
             from,
             "the API key commands only run as a process of their own; ignored"
         );
+    }
+    for url in &flags.refused_model_urls {
+        tracing::warn!(%url, from, "ignoring --debug-model-url: only a loopback http URL is allowed");
     }
     for url in &flags.refused_provider_urls {
         tracing::warn!(%url, from, "ignoring --debug-provider-url: only a loopback http URL is allowed");
@@ -872,6 +907,7 @@ fn shut_down(app: &AppHandle) {
             tracing::info!("stopped");
         }
     }
+    setup_left(app);
     if let Some(usage) = app.try_state::<usage::Usage>() {
         usage::flush_on_quit(&usage, std::time::Duration::from_secs(2));
     }

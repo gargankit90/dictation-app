@@ -19,6 +19,13 @@ interface Props {
    * uses it to keep the real hotkey from dictating meanwhile.
    */
   onRecording?: (recording: boolean) => void;
+  /**
+   * Settings' row (U12): the keycap and one "Change…" on one line, and only
+   * while recording "Use default" and "Cancel". Without it, setup's layout.
+   */
+  compact?: boolean;
+  /** What describes the compact row's button, by id. */
+  describedBy?: string;
 }
 
 /** How often recording tells the app it still goes on (its pause lapses). */
@@ -29,12 +36,20 @@ export const RENEW_MS = 10_000;
  * or combination pressed while this window is focused becomes the key. It
  * listens to the page's own key events, so it needs no extra permission.
  */
-export function HotkeyRecorder({ value, onChange, disabled = false, onRecording }: Props) {
+export function HotkeyRecorder({
+  value,
+  onChange,
+  disabled = false,
+  onRecording,
+  compact = false,
+  describedBy,
+}: Props) {
   const [recording, setRecording] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const change = useRef(onChange);
   const tell = useRef(onRecording);
+  const changeButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     change.current = onChange;
     tell.current = onRecording;
@@ -103,6 +118,69 @@ export function HotkeyRecorder({ value, onChange, disabled = false, onRecording 
       window.removeEventListener("blur", cancel);
     };
   }, [recording]);
+
+  // When recording ends, the button that started it is back; the keyboard goes there.
+  const wasRecording = useRef(false);
+  useEffect(() => {
+    if (wasRecording.current && !recording) changeButton.current?.focus();
+    wasRecording.current = recording;
+  }, [recording]);
+
+  if (compact) {
+    return (
+      <div className="hotkey-recorder compact">
+        <div className="recorder-line">
+          <kbd className={recording ? "keycap recording" : "keycap"} aria-label="Dictation key">
+            {recording ? "Press a key…" : keycapLabel(value)}
+          </kbd>
+          {recording ? (
+            <>
+              <button
+                type="button"
+                disabled={value === DEFAULT_HOTKEY}
+                onClick={() => {
+                  setRecording(false);
+                  setProblem(null);
+                  void apply(DEFAULT_HOTKEY);
+                }}
+              >
+                Use default
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRecording(false);
+                }}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              ref={changeButton}
+              type="button"
+              aria-describedby={describedBy}
+              disabled={disabled || busy}
+              onClick={() => {
+                setProblem(null);
+                setRecording(true);
+              }}
+            >
+              Change…
+            </button>
+          )}
+        </div>
+        {recording && (
+          <p role="status" className="hint">
+            A modifier alone works too, such as the right ⌘. Esc cancels.
+          </p>
+        )}
+        <p role={problem === null ? undefined : "alert"} className="error">
+          {problem}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="hotkey-recorder">

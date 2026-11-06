@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "../bindings";
 import type { Settings_Serialize } from "../bindings";
 import { HotkeyRecorder } from "../HotkeyRecorder";
@@ -14,6 +14,8 @@ export const MIC_TEST_MS = 5_000;
 export { MIC_POLL_MS } from "./MicMeter";
 /** Louder than this, in dBFS, is sound (`NO_SOUND_THRESHOLD_DBFS` in `dictation-core`). */
 export const SOUND_DBFS = -50;
+/** How often the Dictation key row asks whether the hotkey still waits. */
+export const HOTKEY_NOTICE_POLL_MS = 2_000;
 
 export interface LanguageChoice {
   /** The codes the engine in use offers. */
@@ -29,7 +31,7 @@ interface Props {
   /** The app's settings after a change (what Settings shows from now). */
   onStored: (settings: Settings_Serialize) => void;
   languages: LanguageChoice;
-  /** Opens the Speech section (to pick a multilingual engine). */
+  /** Opens the Speech section (to pick a model with more languages). */
   onOpenSpeech: () => void;
 }
 
@@ -41,7 +43,7 @@ type MicTest =
   | { state: "error"; message: string };
 
 /**
- * Dictation: the shortcut (K1's recorder, applied at once), the language
+ * Dictation: the dictation key (K1's recorder, applied at once), the language
  * (saved on change) and the microphone with a 5 s level test.
  */
 export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props) {
@@ -51,6 +53,28 @@ export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props
   const [device, setDevice] = useState<string | null>(null);
   // Bumped by every test, so an old one's timers stop.
   const micRun = useRef(0);
+  const [hotkeyNotice, setHotkeyNotice] = useState<string | null>(null);
+
+  const readHotkeyNotice = useCallback(async () => {
+    try {
+      const result = await commands.getHotkeyNotice();
+      if (result.status === "ok") setHotkeyNotice(result.data);
+    } catch {
+      // What is shown stays; the next read tries again.
+    }
+  }, []);
+
+  // A hotkey waiting for Accessibility isn't a failed save, so no save says so:
+  // the row does, until the key listens. That happens by itself once it's
+  // allowed in System Settings, so the row keeps asking.
+  useEffect(() => {
+    const first = window.setTimeout(() => void readHotkeyNotice(), 0);
+    const timer = window.setInterval(() => void readHotkeyNotice(), HOTKEY_NOTICE_POLL_MS);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+    };
+  }, [readHotkeyNotice]);
 
   useEffect(
     () => () => {
@@ -70,6 +94,7 @@ export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props
       return result.error === null ? null : "";
     });
     if (outcome.problem !== null) hotkey.clear();
+    void readHotkeyNotice();
     return outcome.problem;
   }
 
@@ -136,15 +161,26 @@ export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props
     <>
       <Group>
         <Row
-          label="Shortcut"
+          label="Dictation key"
           labelId="hotkey-label"
-          caption="Hold it to talk, release to paste. It works as soon as you record it."
-          below={<SaveStatus save={hotkey.save} />}
+          caption="Hold it to talk, release to paste."
+          below={
+            <>
+              <SaveStatus save={hotkey.save} />
+              {hotkeyNotice !== null && (
+                <p role="status" className="notice attention">
+                  {hotkeyNotice}
+                </p>
+              )}
+            </>
+          }
         >
           <HotkeyRecorder
             value={settings.hotkey}
             onChange={recordHotkey}
             onRecording={setHotkeyRecording}
+            compact
+            describedBy="hotkey-label"
           />
         </Row>
         <Row
@@ -154,9 +190,8 @@ export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props
               <>
                 The English model understands English only. For Hindi and other languages,{" "}
                 <button type="button" className="link" onClick={onOpenSpeech}>
-                  choose a multilingual engine in Speech
+                  choose a model with more languages in Speech.
                 </button>
-                .
               </>
             ) : (
               "Choose the language you speak, or let Vocet detect it."

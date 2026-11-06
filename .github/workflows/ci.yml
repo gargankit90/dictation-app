@@ -27,9 +27,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # The full gate runs on Linux: macOS minutes cost 10x and often queue for a
-  # runner. The `macos` job below covers the #[cfg(target_os = "macos")] code
-  # in crates/platform, which Linux compiles out. Windows comes with M-W.1.
+  # The full gate runs on Linux: the runners are fast and rarely queue (macOS
+  # runners are free for this public repository, but fewer, so they queue and
+  # every added check lengthens the job). The `macos` job below covers the
+  # #[cfg(target_os = "macos")] code in crates/platform, which Linux compiles
+  # out, and runs the Rust workspace's tests on a Mac. Windows comes with M-W.1.
   gate:
     name: Quality gate (Linux)
     runs-on: ubuntu-24.04
@@ -53,12 +55,52 @@ jobs:
 
       # Libraries src-tauri links on Linux (wry/tao): webkit2gtk, javascriptcore,
       # libsoup and GTK 3. Tray (appindicator) is loaded at runtime, not linked.
+      # An Ubuntu mirror download has stalled for 15-30 minutes here, so nothing
+      # may wait that long: apt gives up a silent connection after 30 s and
+      # retries a failed download 3 times; each of up to 3 attempts is killed
+      # after 4 minutes (+10 s grace). A killed apt can leave dpkg half-done, so
+      # before each retry `dpkg --configure -a` repairs it (limit 2 minutes,
+      # +10 s); the mirror switch is instant. Worst case: 3 x 250 s + 2 x 130 s
+      # + 3 x 5 s = 1025 s, under the step's 20 minutes (normally ~25 s).
       - name: Install Tauri system libraries
+        timeout-minutes: 20
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
-            libgtk-3-dev pkg-config
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=60)
+          for attempt in 1 2 3; do
+            if [ "$attempt" -gt 1 ]; then
+              echo "apt: repairing an interrupted dpkg before the retry"
+              sudo timeout -k 10 "${APT_RECOVER_SECS:-120}" dpkg --configure -a ||
+                echo "apt: dpkg --configure -a did not finish cleanly; retrying anyway" >&2
+              # The runner's sources use a mirror list (file:/etc/apt/apt-mirrors.txt,
+              # azure.archive.ubuntu.com for every pocket, security included). When
+              # that mirror is the one stalling, retrying it is pointless: put
+              # archive.ubuntu.com first, keeping the old entries as fallbacks.
+              mirrors=${APT_MIRRORS_FILE:-/etc/apt/apt-mirrors.txt}
+              if [ -f "$mirrors" ]; then
+                echo "apt: switching to archive.ubuntu.com for attempt $attempt (security updates are served there too)"
+                { printf 'http://archive.ubuntu.com/ubuntu/\tpriority:1\n'
+                  { grep -v '^http://archive.ubuntu.com/' "$mirrors" || true; } | sed -E 's/priority:[0-9]+/priority:2/'
+                } | sudo tee "$mirrors.new" >/dev/null && sudo mv "$mirrors.new" "$mirrors" ||
+                  echo "apt: could not switch mirror; retrying anyway" >&2
+              else
+                echo "apt: $mirrors not found; the mirror is not switched" >&2
+              fi
+            fi
+            echo "apt: attempt $attempt of 3 (each limited to ${APT_ATTEMPT_SECS:-240} s)"
+            if sudo timeout -k 10 "${APT_ATTEMPT_SECS:-240}" bash -c '
+              set -e
+              apt-get "$@" update
+              apt-get "$@" install -y --no-install-recommends \
+                libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
+                libgtk-3-dev pkg-config
+            ' _ "${apt_opts[@]}"; then
+              exit 0
+            fi
+            echo "apt: attempt $attempt failed or timed out" >&2
+            sleep 5
+          done
+          echo "apt: giving up after 3 attempts" >&2
+          exit 1
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install # reads rust-toolchain.toml
@@ -107,7 +149,8 @@ jobs:
 
   # The Mac-only code in dictation-platform (hotkey, Accessibility, Secure
   # Input): build, lint and test it on its own, with --all-features (#10), then
-  # lint and doctest it without feature `testing` (#48).
+  # lint and doctest it without feature `testing` (#48). Then the whole Rust
+  # workspace: clippy, nextest and doctests (G2), as the gate runs them.
   macos:
     name: Platform crate (macOS)
     # Apple Silicon (arm64) image; the next step checks it.
@@ -116,6 +159,8 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       NEXTEST_PROFILE: ci
+      # F1: no test launches a browser or Finder, or reads the real Keychain.
+      DICTATION_NO_LAUNCH: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -153,6 +198,15 @@ jobs:
       - run: cargo build -p dictation-transcribe --all-targets
       - run: cargo clippy -p dictation-transcribe --all-targets -- -D warnings
       - run: cargo nextest run -p dictation-transcribe --profile ci
+      # The whole workspace on a Mac (G2), as scripts/gate.sh runs it: core,
+      # ports, pipeline, telemetry and the Tauri shell had tests only on Linux.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Not criterion_u4_1_levels_are_published_while_recording_only (#292): its
+      # real-clock feeder thread reads silence on this runner every time (a
+      # test timing problem, it passes on Linux in the gate and on the owner's
+      # Mac). Everything else in the workspace runs.
+      - run: cargo nextest run --workspace --profile ci -E 'not test(criterion_u4_1_levels_are_published_while_recording_only)'
+      - run: cargo test --workspace --doc
 
       - name: Collect test evidence
         if: always()

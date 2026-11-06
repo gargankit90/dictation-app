@@ -31,7 +31,7 @@ use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, UndoFailed};
 use dictation_pipeline::launch::LoginSync;
 use dictation_platform::secrets::KeychainSecretStore;
-use dictation_ports::{LaunchAtLogin, SecretStore, TranscribeError};
+use dictation_ports::{LaunchAtLogin, Permission, SecretStore, SetupProblem, TranscribeError};
 use dictation_transcribe::check_key::check_key;
 use dictation_transcribe::openai_compat::{self, Preset};
 use serde::Serialize;
@@ -172,10 +172,14 @@ pub(crate) struct Saved {
 }
 
 impl Saved {
-    /// What to tell the user instead of a plain "saved", if anything.
+    /// What failed, to tell the user instead of a plain "saved". A hotkey
+    /// that's saved and only waiting to listen, such as for Accessibility,
+    /// isn't a failed save: Settings says so from [`get_hotkey_notice`] (U9).
     pub(crate) fn problem(&self) -> Option<String> {
-        let problems: Vec<String> = self.hotkey.problem().into_iter().collect();
-        (!problems.is_empty()).then(|| problems.join(" "))
+        match self.hotkey {
+            HotkeyChange::NotListening { .. } => None,
+            _ => self.hotkey.problem(),
+        }
     }
 }
 
@@ -451,6 +455,18 @@ pub fn set_hotkey_recording(
     Ok(())
 }
 
+/// What Settings says about the hotkey while it's saved but can't listen yet
+/// (U9); `None` while it listens. Off the event loop: a switch in progress
+/// holds the hotkey's lock while the old listener stops.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_hotkey_notice(hotkey: State<'_, ActiveHotkey>) -> Result<Option<String>, String> {
+    let control = hotkey.0.clone();
+    tauri::async_runtime::spawn_blocking(move || control.notice())
+        .await
+        .map_err(|_| "the hotkey task crashed".to_owned())
+}
+
 /// Turns sharing anonymous usage events on or off, and nothing else. Off
 /// stops sending at once, before the file is written: queued events and
 /// batches on their way are dropped and the install ID is deleted.
@@ -459,10 +475,35 @@ pub fn set_hotkey_recording(
 pub async fn set_share_usage_events(
     state: State<'_, AppConfig>,
     usage: State<'_, Usage>,
+    onboarding: State<'_, Arc<Onboarding>>,
     share: bool,
 ) -> Result<(), String> {
     let usage = usage.inner().clone();
-    on_config(&state, move |config| write_sharing(config, &usage, share)).await
+    let onboarding = Arc::clone(&onboarding);
+    on_config(&state, move |config| {
+        choose_sharing(config, &usage, &onboarding, share)
+    })
+    .await
+}
+
+/// The user's choice. Off reaches both adapters before any file is touched, so
+/// neither the settings lock nor a stalled disk can keep sending going. Whether
+/// the note about setup's caption is written doesn't change what is sent, so
+/// it comes last, and a failed save still counts as off for it.
+fn choose_sharing<S: SecretStore>(
+    config: &Config<S>,
+    usage: &Usage,
+    onboarding: &Onboarding,
+    share: bool,
+) -> Result<(), ConfigError> {
+    if !share {
+        usage.set_enabled(false);
+    }
+    let saved = write_sharing(config, usage, share);
+    if !share {
+        onboarding.note_sharing_off();
+    }
+    saved
 }
 
 fn write_sharing<S: SecretStore>(
@@ -728,11 +769,17 @@ pub(crate) async fn test_saved_key(
 pub async fn test_api_key(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
+    onboarding: State<'_, Arc<Onboarding>>,
+    usage: State<'_, Usage>,
     provider: Provider,
     key: Option<String>,
 ) -> Result<(), KeyTestError> {
     let base_url = engine.provider_base_url(provider);
-    key_test(&state.0, engine.inner(), provider, key, &base_url).await
+    let result = key_test(&state.0, engine.inner(), provider, key, &base_url).await;
+    if let Err(error) = &result {
+        usage::setup_problem(&usage, &onboarding, usage::key_test_problem(error.kind));
+    }
+    result
 }
 
 /// The view the settings window shows and, for onboarding (M5.2), the step
@@ -743,8 +790,11 @@ pub async fn get_onboarding(
     onboarding: State<'_, Arc<Onboarding>>,
     permissions: State<'_, OsPermissions>,
     diagnostics: State<'_, Diagnostics>,
+    usage: State<'_, Usage>,
 ) -> Result<OnboardingStatus, String> {
-    Ok(onboarding.status(&*permissions.0, diagnostics.hotkey_is_down()))
+    let status = onboarding.status(&*permissions.0, diagnostics.hotkey_is_down());
+    usage::setup_status_read(&usage, &onboarding, &status);
+    Ok(status)
 }
 
 /// Settings, Help, "Run setup again" (U5, U6): opens the first-run steps,
@@ -758,15 +808,17 @@ pub async fn open_setup(
     permissions: State<'_, OsPermissions>,
     config: State<'_, AppConfig>,
     live: State<'_, LiveEngine>,
+    usage: State<'_, Usage>,
 ) -> Result<(), String> {
     let (onboarding, os) = (Arc::clone(&onboarding), Arc::clone(&permissions.0));
     let (config, live) = (Arc::clone(&config.0), live.inner().clone());
+    let usage = usage.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let readiness = onboarding::readiness(&*os, onboarding.welcome_passed(), true, || {
             onboarding::key_saved(&config, &live)
         });
         onboarding.start_over_if_finished();
-        let step = onboarding.open(readiness);
+        let step = usage::setup_opened(&usage, &onboarding, readiness);
         tracing::info!(?step, "onboarding opened from Settings");
     })
     .await
@@ -785,25 +837,32 @@ pub async fn request_permission(
     onboarding: State<'_, Arc<Onboarding>>,
     permissions: State<'_, OsPermissions>,
     diagnostics: State<'_, Diagnostics>,
+    usage: State<'_, Usage>,
     permission: AppPermission,
 ) -> Result<OnboardingStatus, String> {
     let os = Arc::clone(&permissions.0);
+    let which = Permission::from(permission);
+    if which == Permission::Accessibility {
+        onboarding.note_accessibility_asked();
+    }
     tauri::async_runtime::spawn_blocking(move || {
         onboarding::request(
             &*os,
-            permission.into(),
+            which,
             dictation_platform::system_settings::open_privacy_settings,
         )
     })
     .await
-    .map_err(|_| "the permission task crashed".to_owned())??;
+    .map_err(|_| "the permission task crashed".to_owned())?
+    .inspect_err(|_| {
+        usage::setup_problem(&usage, &onboarding, usage::request_problem(which));
+    })?;
     Ok(onboarding.status(&*permissions.0, diagnostics.hotkey_is_down()))
 }
 
 /// Moves onboarding to `step`, if every step before it is done (the key is
-/// read from the keychain only to move past Speech). Moving past Welcome is
-/// the user's go-ahead for usage events (U8), if sharing is on. An error says
-/// which step comes first; the user stays where they were.
+/// read from the keychain only to move past Speech). An error says which step
+/// comes first; the user stays where they were.
 #[tauri::command]
 #[specta::specta]
 pub async fn set_onboarding_step(
@@ -816,12 +875,8 @@ pub async fn set_onboarding_step(
     step: Step,
 ) -> Result<OnboardingStatus, String> {
     if step > Step::Welcome && !onboarding.welcome_passed() {
-        let (config, onboarding, usage) = (
-            Arc::clone(&state.0),
-            Arc::clone(&onboarding),
-            usage.inner().clone(),
-        );
-        tauri::async_runtime::spawn_blocking(move || leave_welcome(&config, &onboarding, &usage))
+        let onboarding = Arc::clone(&onboarding);
+        tauri::async_runtime::spawn_blocking(move || onboarding.pass_welcome())
             .await
             .map_err(|_| "the onboarding task crashed".to_owned())?;
     }
@@ -843,22 +898,6 @@ pub async fn set_onboarding_step(
         .map_err(|not_yet| not_yet.to_string())?;
     usage::onboarding_step(&usage, step);
     Ok(onboarding.status(&*permissions.0, diagnostics.hotkey_is_down()))
-}
-
-/// The user continued past Welcome (U8). What decides is the saved sharing
-/// choice, read under the lock its writer holds, not what the adapters last
-/// heard: an opt-out still on its way can't be overtaken by this. A choice
-/// that can't be read counts as off. An opt-out that arrives later still stops
-/// everything first (`write_sharing`).
-fn leave_welcome<S: SecretStore>(config: &Config<S>, onboarding: &Onboarding, usage: &Usage) {
-    let _writing = settings_write();
-    let share = config
-        .settings()
-        .is_ok_and(|settings| settings.share_usage_events);
-    usage.set_enabled(share);
-    if onboarding.pass_welcome() {
-        usage.left_welcome();
-    }
 }
 
 /// Ready's History "Change": leaves the steps for Settings. Setup stays where
@@ -891,9 +930,26 @@ pub async fn set_speech_choice(
 #[specta::specta]
 pub async fn set_try_outcome(
     onboarding: State<'_, Arc<Onboarding>>,
+    usage: State<'_, Usage>,
     outcome: TryOutcome,
 ) -> Result<(), String> {
     onboarding.set_try_outcome(outcome);
+    if let Some(problem) = usage::skipped_practice(outcome) {
+        usage::setup_problem(&usage, &onboarding, problem);
+    }
+    Ok(())
+}
+
+/// Try it: the words of a practice dictation didn't reach the practice box.
+/// Only the window can see the box. It says only that this happened: the event
+/// is `paste_missed`, chosen here, with nothing from the window in it.
+#[tauri::command]
+#[specta::specta]
+pub async fn practice_paste_missed(
+    onboarding: State<'_, Arc<Onboarding>>,
+    usage: State<'_, Usage>,
+) -> Result<(), String> {
+    usage::setup_problem(&usage, &onboarding, SetupProblem::PasteMissed);
     Ok(())
 }
 
@@ -903,9 +959,13 @@ pub async fn set_try_outcome(
 #[specta::specta]
 pub async fn set_download_paused(
     onboarding: State<'_, Arc<Onboarding>>,
+    usage: State<'_, Usage>,
     paused: bool,
 ) -> Result<(), String> {
     onboarding.set_download_paused(paused);
+    if paused {
+        usage::setup_problem(&usage, &onboarding, SetupProblem::DownloadCancelled);
+    }
     Ok(())
 }
 
@@ -965,11 +1025,14 @@ pub async fn finish_onboarding(
 pub async fn relaunch_app(
     shell: State<'_, AppShell>,
     dirs: State<'_, ConfigDir>,
+    onboarding: State<'_, Arc<Onboarding>>,
+    usage: State<'_, Usage>,
 ) -> Result<(), String> {
     onboarding::leave_resume_marker(&dirs.0).map_err(|error| {
         tracing::warn!(%error, "couldn't leave the onboarding marker");
         "Couldn't prepare the relaunch. Quit Vocet from the menu bar and open it again.".to_owned()
     })?;
+    usage::setup_problem(&usage, &onboarding, SetupProblem::RelaunchNeeded);
     tracing::info!("relaunching for onboarding");
     shell.0.restart();
     Ok(())
@@ -1007,6 +1070,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         set_share_usage_events,
         set_hotkey,
         set_hotkey_recording,
+        get_hotkey_notice,
         set_launch_at_login,
         crate::diagnostics::run_checks,
         crate::diagnostics::test_connection,
@@ -1028,8 +1092,10 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::preferences::open_link,
         crate::preferences::get_app_info,
         crate::preferences::check_for_updates,
+        crate::preferences::set_window_page,
         crate::preferences::choose_local_model,
         set_try_outcome,
+        practice_paste_missed,
         set_download_paused,
         practice_words,
         copy_practice_words,
@@ -1138,6 +1204,7 @@ mod tests {
             "setShareUsageEvents",
             "setHotkey",
             "setHotkeyRecording",
+            "getHotkeyNotice",
             "setLaunchAtLogin",
             "runChecks",
             "testConnection",
@@ -1159,6 +1226,7 @@ mod tests {
             "openLink",
             "getAppInfo",
             "checkForUpdates",
+            "setWindowPage",
             "chooseLocalModel",
             "setTryOutcome",
             "setDownloadPaused",
@@ -1179,7 +1247,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 51,
+            commands, 54,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1394,81 +1462,330 @@ mod tests {
 
     /// K1: the dictation key has one writer, `set_hotkey`; the form's save
     /// keeps the stored key, so neither can undo the other.
-    /// U8 finding 1: the saved choice decides, even if the adapters haven't
-    /// heard of an opt-out yet. Fails if Welcome's exit trusts the gate's copy.
-    mod leaving_welcome {
-        use dictation_core::settings::Settings;
+    /// U10 criterion 5, through what the switch's command runs. The adapters
+    /// are real, with a made-up key and DSN, against a local server.
+    mod sharing_switch {
+        use std::path::{Path, PathBuf};
+
+        use dictation_core::error::DictationError;
         use dictation_platform::fakes::{FakeTelemetry, MemSecretStore};
+        use dictation_ports::{ErrorReporter, Event, OnboardingStep, Telemetry, Version};
+        use dictation_telemetry::{Config as Posthog, PostHogTelemetry, SentryReporter, errors};
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         use super::super::*;
 
-        fn config(tag: &str, share: bool) -> (Config<MemSecretStore>, std::path::PathBuf) {
+        const NOT_A_REAL_KEY: &str = "phc_test_not_a_real_key";
+
+        fn temp(tag: &str) -> PathBuf {
             let dir =
-                std::env::temp_dir().join(format!("dictation-leave-{tag}-{}", std::process::id()));
+                std::env::temp_dir().join(format!("dictation-u10-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
-            let config = Config::new(&dir, MemSecretStore::new());
+            std::fs::create_dir_all(&dir).unwrap();
+            dir
+        }
+
+        fn config(dir: &Path, share: bool) -> Config<MemSecretStore> {
+            let config = Config::new(dir, MemSecretStore::new());
             config
                 .save_settings(&Settings {
                     share_usage_events: share,
                     ..Settings::default()
                 })
                 .unwrap();
-            (config, dir)
+            config
         }
 
-        #[test]
-        fn a_saved_opt_out_the_adapters_have_not_heard_of_sends_nothing() {
-            let (config, dir) = config("off", false);
-            let fake = FakeTelemetry::new();
-            // The launch read "on"; the opt-out reached only the file so far.
-            let usage = Usage::at_welcome(Arc::new(fake.clone()));
-            let onboarding = Onboarding::new();
-            leave_welcome(&config, &onboarding, &usage);
-            assert!(onboarding.welcome_passed());
-            usage::onboarding_step(&usage, Step::Speech);
-            assert!(fake.events().is_empty());
+        async fn server() -> MockServer {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(200))
+                .mount(&server)
+                .await;
+            server
+        }
+
+        fn live(dir: &Path, server: &MockServer, share: bool) -> Usage {
+            let runtime = tokio::runtime::Handle::current();
+            let mut settings = Posthog::new(Some(NOT_A_REAL_KEY), dir);
+            settings.host = server.uri();
+            let posthog = PostHogTelemetry::start(settings, share, &runtime);
+            let dsn = format!(
+                "http://public@{}/7",
+                server.uri().trim_start_matches("http://")
+            );
+            let release = Version::new("0.0.1").unwrap();
+            let reports = errors::Config::new(Some(&dsn), &release, "development", 15, dir);
+            let reporter = SentryReporter::start(reports, share, &runtime);
+            Usage::of(posthog, reporter, share)
+        }
+
+        fn step() -> Event {
+            Event::OnboardingStepReached {
+                step: OnboardingStep::Welcome,
+            }
+        }
+
+        fn id_exists(dir: &Path) -> bool {
+            dir.join(dictation_telemetry::install_id::FILE).exists()
+        }
+
+        async fn requests(server: &MockServer) -> usize {
+            server.received_requests().await.unwrap_or_default().len()
+        }
+
+        /// U10 criterion 2: a fresh install makes its ID and sends right away.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn u10_a_fresh_install_makes_the_id_and_sends_from_the_first_screen() {
+            let dir = temp("fresh");
+            let server = server().await;
+            let settings = Config::new(&dir, MemSecretStore::new());
+            let usage = live(&dir, &server, usage::stored_choice(&settings));
+            assert!(id_exists(&dir));
+            usage.record(step());
+            assert_eq!(usage.0.queued(), 1);
+            usage.0.flush().await;
+            let sent = server.received_requests().await.unwrap();
+            assert_eq!(sent.len(), 1);
+            let body = String::from_utf8_lossy(&sent[0].body).into_owned();
+            assert!(body.contains("onboarding_step_reached"), "{body}");
             let _ = std::fs::remove_dir_all(&dir);
         }
 
-        /// Round 5: the writes the window's queue sends, in its order, leave
-        /// both the file and the event gate off.
+        /// U10 criterion 3 and 6: stored off, nothing at any step, no ID, no
+        /// report, and setup can't change that.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn u10_stored_off_sends_nothing_and_makes_no_id() {
+            let dir = temp("off");
+            let server = server().await;
+            let settings = config(&dir, false);
+            let usage = live(&dir, &server, usage::stored_choice(&settings));
+            assert!(!id_exists(&dir));
+            usage.record(step());
+            usage::onboarding_completed(&usage);
+            usage.1.report(&DictationError::SecureInput);
+            assert_eq!(usage.0.queued(), 0);
+            assert!(!usage.0.is_enabled());
+            assert!(!usage.1.is_enabled());
+            usage.0.flush().await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert_eq!(requests(&server).await, 0);
+            assert!(!id_exists(&dir));
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// U10 criterion 5: off right before Start dictating. The waiting events
+        /// and the ID go, the file says off, and finishing records nothing.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn u10_off_right_before_start_dictating_stops_and_deletes_everything() {
+            let dir = temp("ready");
+            let server = server().await;
+            let settings = config(&dir, true);
+            let usage = live(&dir, &server, usage::stored_choice(&settings));
+            usage.record(step());
+            assert_eq!(usage.0.queued(), 1);
+            assert!(id_exists(&dir));
+            assert!(usage.1.is_enabled());
+
+            write_sharing(&settings, &usage, false).unwrap();
+            assert_eq!(usage.0.queued(), 0, "what was waiting is deleted");
+            assert!(!id_exists(&dir), "the install ID is deleted");
+            assert!(!usage.0.is_enabled());
+            assert!(!usage.1.is_enabled(), "error reports follow the switch");
+            assert!(!settings.settings().unwrap().share_usage_events);
+
+            usage::onboarding_completed(&usage);
+            usage.1.report(&DictationError::SecureInput);
+            assert_eq!(usage.0.queued(), 0);
+            usage.0.flush().await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert_eq!(requests(&server).await, 0, "not even the finish");
+            assert!(!id_exists(&dir));
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// U10 criterion 5: a request under way is dropped, not waited for.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn u10_off_drops_a_request_under_way() {
+            let dir = temp("under-way");
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(5)),
+                )
+                .mount(&server)
+                .await;
+            let settings = config(&dir, true);
+            let usage = live(&dir, &server, true);
+            usage.record(step());
+            let posthog = usage.0.clone();
+            let sending = tokio::spawn(async move { posthog.flush().await });
+            for _ in 0..100 {
+                if requests(&server).await == 1 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            assert_eq!(requests(&server).await, 1, "the request started");
+
+            write_sharing(&settings, &usage, false).unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(2), sending)
+                .await
+                .expect("dropped, not waited for")
+                .unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// Round 3: Off is in force while the settings lock is held and while
+        /// the progress file's write is stalled (the temporary file is a FIFO
+        /// with no reader, so the real write blocks until the test reads it).
+        #[tokio::test(flavor = "multi_thread")]
+        async fn u10_off_takes_effect_while_the_files_are_stalled() {
+            let dir = temp("stalled");
+            let server = server().await;
+            let settings = Arc::new(config(&dir, true));
+            let usage = live(&dir, &server, true);
+            let onboarding = Arc::new(Onboarding::load(&dir));
+            onboarding.open(dictation_core::onboarding::Readiness::READY);
+            let temporary = dir
+                .join(crate::onboarding::PROGRESS_FILE)
+                .with_extension("json.tmp");
+            let made = std::process::Command::new("mkfifo")
+                .arg(&temporary)
+                .status()
+                .unwrap();
+            assert!(made.success());
+            usage.record(step());
+            assert_eq!(usage.0.queued(), 1);
+
+            // The settings write can't start yet.
+            let held = settings_write();
+            let choosing = {
+                let (settings, usage, onboarding) = (
+                    Arc::clone(&settings),
+                    usage.clone(),
+                    Arc::clone(&onboarding),
+                );
+                std::thread::spawn(move || {
+                    choose_sharing(&settings, &usage, &onboarding, false).unwrap();
+                })
+            };
+            for _ in 0..200 {
+                if !usage.1.is_enabled() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            let in_force = |why: &str| {
+                assert!(!usage.0.is_enabled(), "{why}: events");
+                assert!(!usage.1.is_enabled(), "{why}: reports");
+                assert_eq!(usage.0.queued(), 0, "{why}: what was waiting");
+                assert!(!id_exists(&dir), "{why}: the install ID");
+                usage.record(step());
+                assert_eq!(usage.0.queued(), 0, "{why}: a new event");
+            };
+            in_force("the settings lock held");
+            assert!(
+                settings.settings().unwrap().share_usage_events,
+                "not saved yet"
+            );
+            drop(held);
+
+            // Now the settings file is saved, and the note stalls on the FIFO.
+            for _ in 0..200 {
+                if !settings.settings().unwrap().share_usage_events {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(!settings.settings().unwrap().share_usage_events);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            assert!(!choosing.is_finished(), "the progress write is stalled");
+            in_force("the progress write stalled");
+
+            // A reader lets the write finish, and the note is kept.
+            let written = std::fs::read(&temporary).unwrap();
+            assert!(!written.is_empty());
+            choosing.join().unwrap();
+            let permissions = dictation_platform::fakes::FakePermissions::new();
+            assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// A save that fails still counts as off for the caption: sending
+        /// stopped.
+        #[test]
+        fn u10_a_failed_off_is_still_noted() {
+            let dir = temp("failed-off");
+            let settings = config(&dir, true);
+            std::fs::write(settings.path(), "{ not json").unwrap();
+            let onboarding = Onboarding::new();
+            onboarding.open(dictation_core::onboarding::Readiness::READY);
+            let fake = FakeTelemetry::new();
+            let usage = Usage::recording(Arc::new(fake.clone()), true);
+            assert!(choose_sharing(&settings, &usage, &onboarding, false).is_err());
+            usage.record(step());
+            assert_eq!(fake.events(), []);
+            let permissions = dictation_platform::fakes::FakePermissions::new();
+            assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// U10 criterion 6: on, an error is reported; off, it isn't.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn u10_error_reports_follow_the_same_switch() {
+            let dir = temp("reports");
+            let server = server().await;
+            let settings = config(&dir, true);
+            let usage = live(&dir, &server, true);
+            usage.1.report(&DictationError::SecureInput);
+            for _ in 0..100 {
+                if requests(&server).await == 1 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            assert_eq!(requests(&server).await, 1, "on: reported");
+
+            write_sharing(&settings, &usage, false).unwrap();
+            usage.1.report(&DictationError::SecureInput);
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert_eq!(requests(&server).await, 1, "off: not reported");
+
+            write_sharing(&settings, &usage, true).unwrap();
+            assert!(usage.1.is_enabled());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// U8 round 5, still so: the writes the window's queue sends, in order,
+        /// leave both the file and the event gate off.
         #[test]
         fn on_then_off_leaves_the_file_and_the_gate_off() {
-            let (config, dir) = config("queue", false);
+            let dir = temp("queue");
+            let settings = config(&dir, false);
             let fake = FakeTelemetry::new();
-            let usage = Usage::at_welcome(Arc::new(fake.clone()));
-            let onboarding = Onboarding::new();
-            leave_welcome(&config, &onboarding, &usage);
-            write_sharing(&config, &usage, true).unwrap();
-            write_sharing(&config, &usage, false).unwrap();
+            let usage = Usage::recording(Arc::new(fake.clone()), false);
+            write_sharing(&settings, &usage, true).unwrap();
+            write_sharing(&settings, &usage, false).unwrap();
             let before = fake.events().len();
-            usage::onboarding_step(&usage, Step::Speech);
+            usage.events().record(step());
             assert_eq!(fake.events().len(), before, "the gate is shut");
-            assert!(!config.settings().unwrap().share_usage_events);
+            assert!(!settings.settings().unwrap().share_usage_events);
             let _ = std::fs::remove_dir_all(&dir);
         }
 
+        /// Off stops events first, even when the file can't be written.
         #[test]
-        fn a_saved_opt_in_starts_sending() {
-            let (config, dir) = config("on", true);
+        fn off_stops_the_gate_even_if_the_file_cannot_be_read() {
+            let dir = temp("bad");
+            let settings = config(&dir, true);
+            std::fs::write(settings.path(), "{ not json").unwrap();
             let fake = FakeTelemetry::new();
-            let usage = Usage::at_welcome(Arc::new(fake.clone()));
-            let onboarding = Onboarding::new();
-            leave_welcome(&config, &onboarding, &usage);
-            usage::onboarding_step(&usage, Step::Speech);
-            assert_eq!(fake.events().len(), 1);
-            let _ = std::fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn settings_that_cannot_be_read_count_as_off() {
-            let (config, dir) = config("bad", true);
-            std::fs::write(config.path(), "{ not json").unwrap();
-            let fake = FakeTelemetry::new();
-            let usage = Usage::at_welcome(Arc::new(fake.clone()));
-            leave_welcome(&config, &Onboarding::new(), &usage);
-            usage::onboarding_step(&usage, Step::Speech);
-            assert!(fake.events().is_empty());
+            let usage = Usage::recording(Arc::new(fake.clone()), true);
+            assert!(write_sharing(&settings, &usage, false).is_err());
+            usage.record(step());
+            assert_eq!(fake.events(), []);
             let _ = std::fs::remove_dir_all(&dir);
         }
     }
@@ -2078,10 +2395,10 @@ mod tests {
                 save_with_login(&config, &LiveEngine::fixed(), &hotkey, with_hotkey("F6")).unwrap();
             let problem = saved.problem().expect("an error, not \"Settings saved.\"");
             assert!(
-                problem.contains("Couldn't switch the hotkey to F6"),
+                problem.contains("Couldn't switch the dictation key to F6"),
                 "{problem}"
             );
-            assert!(problem.contains("RightAlt still works"), "{problem}");
+            assert!(problem.contains("Right ⌥ still works"), "{problem}");
             // The other settings are saved; the hotkey in the file is the
             // one still listening.
             let stored = config.settings().unwrap();
@@ -2089,6 +2406,19 @@ mod tests {
             assert_eq!(stored.hotkey, "RightAlt");
             assert!(keys.listening("RightAlt"));
             let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// U9: a key saved while nothing can listen isn't a failed save; it
+        /// is what `get_hotkey_notice` is for.
+        #[test]
+        fn a_hotkey_saved_while_waiting_to_listen_is_no_failure() {
+            let saved = Saved {
+                hotkey: HotkeyChange::NotListening {
+                    wanted: "F6".parse().unwrap(),
+                    reason: Some(HotkeyError::PermissionDenied),
+                },
+            };
+            assert_eq!(saved.problem(), None);
         }
 
         #[test]
@@ -2099,7 +2429,10 @@ mod tests {
             let saved =
                 save_with_login(&config, &LiveEngine::fixed(), &hotkey, with_hotkey("F6")).unwrap();
             let problem = saved.problem().unwrap();
-            assert!(problem.contains("Couldn't switch the hotkey"), "{problem}");
+            assert!(
+                problem.contains("Couldn't switch the dictation key"),
+                "{problem}"
+            );
             let _ = std::fs::remove_dir_all(dir);
         }
 
@@ -2151,10 +2484,10 @@ mod tests {
                 message.starts_with("settings file prefs: disk full. Your settings weren't saved."),
                 "{message}"
             );
-            assert!(message.contains("back to RightAlt failed ("), "{message}");
+            assert!(message.contains("back to Right ⌥ failed ("), "{message}");
             assert!(message.contains("taken by another app"), "{message}");
             assert!(
-                message.contains("F6 is the hotkey that works now"),
+                message.contains("F6 is the dictation key that works now"),
                 "{message}"
             );
 
@@ -2864,6 +3197,11 @@ mod capability_tests {
     /// is made by the commands invoked below; the directory is removed when
     /// the fixture is dropped), and a window per label.
     fn app_with_windows(labels: &[&str]) -> AclApp {
+        app_with_usage(labels, crate::usage::Usage::disabled())
+    }
+
+    /// [`app_with_windows`], recording events through `usage`.
+    fn app_with_usage(labels: &[&str], usage: crate::usage::Usage) -> AclApp {
         let manifests = manifests();
         let resolved = resolved();
         assert!(resolved.has_app_acl, "build.rs declares the app manifest");
@@ -2898,7 +3236,7 @@ mod capability_tests {
         )));
         app.manage(super::ConfigDir(dir.clone()));
         app.manage(super::AppShell(std::sync::Arc::new(NoShell)));
-        app.manage(crate::usage::Usage::disabled());
+        app.manage(usage);
         app.manage(crate::diagnostics::Diagnostics::default());
         app.manage(crate::LogDir(dir.join("logs")));
         app.manage(super::LaunchNotice(None));
@@ -2918,6 +3256,9 @@ mod capability_tests {
             })),
         ));
         app.manage(crate::preferences::UpdateCheck(std::sync::Arc::new(|| {})));
+        app.manage(crate::preferences::WindowPages(std::sync::Arc::new(|_| {
+            Ok(())
+        })));
         let windows = labels
             .iter()
             .map(|label| {
@@ -2931,6 +3272,123 @@ mod capability_tests {
             _app: app,
             scratch,
             opener,
+        }
+    }
+
+    /// U10 criteria 2 to 4, through the real commands: what each one records
+    /// during setup, and that a stored off records none of it.
+    mod setup_events {
+        use std::sync::Arc;
+
+        use dictation_core::onboarding::Readiness;
+        use dictation_platform::fakes::FakeTelemetry;
+        use dictation_ports::{Event, OnboardingStep, SetupProblem};
+        use tauri::Manager;
+
+        use super::*;
+        use crate::onboarding::Onboarding;
+        use crate::usage::Usage;
+
+        fn walk(share: bool) -> Vec<Event> {
+            let fake = FakeTelemetry::new();
+            let fixture = app_with_usage(&[MAIN], Usage::recording(Arc::new(fake.clone()), share));
+            let main = &fixture.windows[0];
+            let onboarding = fixture._app.state::<Arc<Onboarding>>();
+            let usage = fixture._app.state::<Usage>();
+            crate::usage::setup_opened(&usage, &onboarding, Readiness::default());
+            for (command, args) in [
+                (
+                    "set_onboarding_step",
+                    serde_json::json!({ "step": "speech" }),
+                ),
+                ("test_api_key", serde_json::json!({ "provider": "groq" })),
+                ("set_download_paused", serde_json::json!({ "paused": true })),
+                (
+                    "set_try_outcome",
+                    serde_json::json!({ "outcome": "skipped" }),
+                ),
+                ("practice_paste_missed", serde_json::json!({})),
+                ("finish_onboarding", serde_json::json!({})),
+            ] {
+                let _ = invoke(main, command, args);
+            }
+            assert!(
+                onboarding.welcome_passed(),
+                "Welcome still counts as passed"
+            );
+            fake.events()
+        }
+
+        #[test]
+        fn u10_sharing_on_records_each_step_and_each_problem() {
+            let events = walk(true);
+            let problem = |reason| Event::SetupProblem { reason };
+            assert_eq!(
+                events[..2],
+                [
+                    Event::OnboardingStepReached {
+                        step: OnboardingStep::Welcome
+                    },
+                    Event::OnboardingStepReached {
+                        step: OnboardingStep::Speech
+                    },
+                ]
+            );
+            assert!(
+                matches!(
+                    events[2],
+                    Event::SetupProblem {
+                        reason: SetupProblem::KeyTestFailedNoKey
+                            | SetupProblem::KeyTestFailedKeychain
+                    }
+                ),
+                "{:?}",
+                events[2]
+            );
+            assert_eq!(
+                events[3..],
+                [
+                    problem(SetupProblem::DownloadCancelled),
+                    problem(SetupProblem::PracticeSkipped),
+                    problem(SetupProblem::PasteMissed),
+                    Event::OnboardingCompleted {
+                        step: OnboardingStep::Ready
+                    },
+                ]
+            );
+        }
+
+        /// Round 2: Off through the real command, on Ready or in Settings.
+        #[test]
+        fn u10_turning_it_off_is_noted_for_readys_caption() {
+            let fixture = app_with_usage(&[MAIN], Usage::disabled());
+            let main = &fixture.windows[0];
+            let onboarding = fixture._app.state::<Arc<Onboarding>>();
+            onboarding.open(Readiness::READY);
+            let on_throughout = || {
+                let permissions = dictation_platform::fakes::FakePermissions::new();
+                onboarding.status(&permissions, false).sharing_on_throughout
+            };
+            assert!(on_throughout());
+            invoke(
+                main,
+                "set_share_usage_events",
+                serde_json::json!({ "share": true }),
+            )
+            .unwrap();
+            assert!(on_throughout(), "on doesn't count");
+            invoke(
+                main,
+                "set_share_usage_events",
+                serde_json::json!({ "share": false }),
+            )
+            .unwrap();
+            assert!(!on_throughout());
+        }
+
+        #[test]
+        fn u10_sharing_stored_off_records_nothing() {
+            assert_eq!(walk(false), []);
         }
     }
 
@@ -3010,6 +3468,7 @@ mod capability_tests {
             "set_onboarding_step" => serde_json::json!({ "step": "welcome" }),
             "set_share_usage_events" => serde_json::json!({ "share": true }),
             "set_hotkey_recording" => serde_json::json!({ "recording": false }),
+            "set_window_page" => serde_json::json!({ "page": "settings" }),
             "copy_history_entry" | "delete_history_entry" => serde_json::json!({ "id": "1" }),
             "set_history_limit" => serde_json::json!({ "limit": 25 }),
             _ => serde_json::json!({}),
@@ -3106,7 +3565,8 @@ mod capability_tests {
                 | "read_microphone_test"
                 | "stop_microphone_test"
                 | "get_app_info"
-                | "check_for_updates" => invoke(main, command, args(command)).map(|_| ()),
+                | "check_for_updates"
+                | "set_window_page" => invoke(main, command, args(command)).map(|_| ()),
                 // U6: the fake microphone refuses; the command ran.
                 "start_microphone_test" => match invoke(main, command, args(command)) {
                     Err(error) if !error.to_string().contains("not allowed") => Ok(()),
@@ -3114,10 +3574,13 @@ mod capability_tests {
                 },
                 // No keychain, network or OS prompt: the onboarding ones
                 // run on fakes (granted permissions, no shell).
-                "get_settings" | "save_settings" | "get_onboarding" | "finish_onboarding"
-                | "relaunch_app" | "list_local_models" => {
-                    invoke(main, command, args(command)).map(|_| ())
-                }
+                "get_settings"
+                | "save_settings"
+                | "get_onboarding"
+                | "finish_onboarding"
+                | "relaunch_app"
+                | "list_local_models"
+                | "practice_paste_missed" => invoke(main, command, args(command)).map(|_| ()),
                 _ => match invoke(main, command, unusable_args()) {
                     Err(error) if error.to_string().contains("invalid args") => Ok(()),
                     other => other.map(|_| ()),
@@ -3132,7 +3595,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 51);
+        assert_eq!(COMMAND_NAMES.len(), 54);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

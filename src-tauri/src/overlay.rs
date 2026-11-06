@@ -1,5 +1,5 @@
 //! The overlay window (M5.1, U4): the recording pill, which shows
-//! Listening with a live level meter, "No sound", Transcribing, "Paste sent"
+//! Listening with a live level meter, "No sound", Transcribing, "Done"
 //! and errors without taking focus. [`start`] creates the window
 //! (`dictation_platform::overlay`) and runs `dictation_pipeline::overlay`
 //! against it; this module only connects the two and sends each view to the

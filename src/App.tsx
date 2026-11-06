@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BROKEN, messageOf } from "./keyTest";
 import { commands } from "./bindings";
-import type { View } from "./bindings";
+import type { View, WindowPage } from "./bindings";
 import { Onboarding } from "./Onboarding";
+import { Report } from "./Report";
 import { Settings } from "./Settings";
 import type { SectionId } from "./Settings";
 import { Troubleshoot } from "./Troubleshoot";
@@ -15,14 +16,31 @@ import { Troubleshoot } from "./Troubleshoot";
 export function App() {
   // `null` until the app answers.
   const [view, setView] = useState<View | null>(null);
-  // Settings, or Troubleshoot (E1), which the tray can ask for.
-  const [page, setPage] = useState<"settings" | "troubleshoot">("settings");
-  // The tray's "Report a problem…": Troubleshoot with the report built.
-  const [autoReport, setAutoReport] = useState(false);
-  // The tray's fix rows: Settings open at the section that fixes it
-  // (Speech, or Dictation for the shortcut), and its "History…" (U7). `id`
-  // makes a repeated ask count.
+  // Settings, Troubleshoot (E1) or Report a problem (U12).
+  const [page, setPage] = useState<WindowPage>("settings");
+  // Where Report's Back goes.
+  const [reportFrom, setReportFrom] = useState<"settings" | "troubleshoot">("settings");
+  // The tray's fix rows: Settings open at the section that fixes it (Speech,
+  // or Dictation for the dictation key), its "History…" (U7) and "Help…"
+  // (U12). `id` makes a repeated ask count; Settings' `onOpened` clears the
+  // ask, so a remount doesn't follow it again (#277).
   const [open, setOpen] = useState<{ section: SectionId; id: number } | null>(null);
+  const lastAsk = useRef(0);
+  const openSection = useCallback((section: SectionId) => {
+    lastAsk.current += 1;
+    setPage("settings");
+    setOpen({ section, id: lastAsk.current });
+  }, []);
+  const followed = useCallback(() => {
+    setOpen(null);
+  }, []);
+
+  // Each screen has its own window title (U12). The webview can't set it
+  // itself: it has no `core:` permissions.
+  useEffect(() => {
+    if (view !== "settings") return;
+    void commands.setWindowPage(page).catch(() => undefined);
+  }, [view, page]);
 
   // ⌘, opens Settings (U6), as in every Mac app, from Troubleshoot too.
   useEffect(() => {
@@ -59,14 +77,14 @@ export function App() {
       }
       if (state.cancelled) return;
       setView(next);
-      if (request === "troubleshoot" || request === "report") {
-        setAutoReport(request === "report");
+      if (request === "troubleshoot") {
         setPage("troubleshoot");
-      } else if (request === "speech" || request === "shortcut" || request === "history") {
+      } else if (request === "settings") {
         setPage("settings");
-        const section: SectionId =
-          request === "speech" ? "speech" : request === "history" ? "history" : "dictation";
-        setOpen((current) => ({ section, id: (current?.id ?? 0) + 1 }));
+      } else if (request === "shortcut") {
+        openSection("dictation");
+      } else if (request === "speech" || request === "history" || request === "help") {
+        openSection(request);
       }
     };
     void ask();
@@ -80,7 +98,7 @@ export function App() {
       window.removeEventListener("focus", onShow);
       document.removeEventListener("visibilitychange", onShow);
     };
-  }, []);
+  }, [openSection]);
 
   if (view === null) return null;
   if (view === "onboarding") {
@@ -91,8 +109,7 @@ export function App() {
         }}
         onOpenHistory={() => {
           setView("settings");
-          setPage("settings");
-          setOpen((current) => ({ section: "history", id: (current?.id ?? 0) + 1 }));
+          openSection("history");
         }}
       />
     );
@@ -100,13 +117,25 @@ export function App() {
   if (page === "troubleshoot") {
     return (
       <Troubleshoot
-        autoReport={autoReport}
         onBack={() => {
-          setAutoReport(false);
           setPage("settings");
         }}
         onOpenSettings={() => {
           setPage("settings");
+        }}
+        onReport={() => {
+          setReportFrom("troubleshoot");
+          setPage("report");
+        }}
+      />
+    );
+  }
+  if (page === "report") {
+    return (
+      <Report
+        backLabel={reportFrom === "troubleshoot" ? "Back to Troubleshoot" : "Back to Settings"}
+        onBack={() => {
+          setPage(reportFrom);
         }}
       />
     );
@@ -114,6 +143,7 @@ export function App() {
   return (
     <Settings
       open={open}
+      onOpened={followed}
       onSetup={() => {
         void (async () => {
           try {
@@ -129,8 +159,8 @@ export function App() {
         setPage("troubleshoot");
       }}
       onReport={() => {
-        setAutoReport(true);
-        setPage("troubleshoot");
+        setReportFrom("settings");
+        setPage("report");
       }}
       onShowLog={async () => {
         // The same command as Troubleshoot's, through the app's Opener.

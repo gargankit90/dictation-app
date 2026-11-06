@@ -3,9 +3,10 @@
 //! The report is built only from the typed fields of [`ReportInput`]. There
 //! is no free-text slot: a transcript, a clipboard, an app name, a path, a
 //! log line or a provider's answer has no way in, because nothing here takes
-//! one. The few fields that are text (versions, the hotkey, a model id) are
-//! checked against a narrow character set and a known-key filter
-//! ([`field`]), and show `unknown` if they fail it.
+//! one. The few fields that are text (versions, a model id) are checked
+//! against a narrow character set and a known-key filter ([`field`]), and show
+//! `unknown` if they fail it. The hotkey must parse as a key ([`hotkey_label`]),
+//! a closed grammar, and shows as the user knows it.
 //!
 //! The app never sends the report. The user sees [`render`]'s exact text,
 //! then saves it, copies it, or opens a pre-filled issue ([`issue_url`])
@@ -14,6 +15,7 @@
 use std::fmt::Write as _;
 
 use crate::diagnostics::LoggedError;
+use crate::hotkey_spec::{HotkeySpec, keycap_label};
 use crate::redact;
 use crate::settings::Provider;
 
@@ -70,7 +72,8 @@ pub struct ReportInput<'a> {
     pub microphone: Access,
     /// The Accessibility permission.
     pub accessibility: Access,
-    /// The dictation hotkey, as the settings write it.
+    /// The dictation hotkey, as the settings write it. The report shows its
+    /// keycap label.
     pub hotkey: &'a str,
     /// The engine.
     pub engine: EngineInfo<'a>,
@@ -97,6 +100,15 @@ pub fn field(text: &str) -> &str {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '+' | '-' | '_' | ':'))
         && redact::secrets(text) == text;
     if plain { text } else { "unknown" }
+}
+
+/// `hotkey`'s keycap label (`Right ⌥`), or `unknown` if it isn't a key: nothing
+/// but a key can come through. One label per key, so support loses nothing.
+fn hotkey_label(hotkey: &str) -> String {
+    hotkey.parse::<HotkeySpec>().map_or_else(
+        |_| "unknown".to_owned(),
+        |spec| keycap_label(&spec.to_string()),
+    )
 }
 
 /// `seconds` since the Unix epoch as `2026-11-03T10:11:12Z` (UTC).
@@ -139,7 +151,7 @@ pub fn render(input: &ReportInput<'_>) -> String {
     let _ = writeln!(out, "arch: {}", field(input.arch));
     let _ = writeln!(out, "microphone: {}", input.microphone.as_str());
     let _ = writeln!(out, "accessibility: {}", input.accessibility.as_str());
-    let _ = writeln!(out, "hotkey: {}", field(input.hotkey));
+    let _ = writeln!(out, "dictation_key: {}", hotkey_label(input.hotkey));
     let _ = match input.engine {
         EngineInfo::Cloud(provider) => writeln!(out, "engine: cloud ({provider})"),
         EngineInfo::Local(model) => writeln!(out, "engine: local ({})", field(model)),
@@ -211,6 +223,49 @@ mod tests {
         }
     }
 
+    /// U9: the user sees this report; it says the key as the rest of the app.
+    #[test]
+    fn the_hotkey_shows_as_its_keycap_label() {
+        for (stored, shown) in [
+            ("RightAlt", "Right ⌥"),
+            ("RightAlt+RightCmd", "Right ⌥ Right ⌘"),
+            ("Ctrl+Shift+Space", "⌃⇧Space"),
+            ("F6", "F6"),
+        ] {
+            let mut data = input(&[]);
+            data.hotkey = stored;
+            let text = render(&data);
+            assert!(
+                text.contains(&format!("dictation_key: {shown}\n")),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_hotkey_that_is_not_a_key_shows_as_unknown() {
+        for stored in ["/Users/alice/.ssh/id", "Ctrl+Banana", "my words", ""] {
+            let mut data = input(&[]);
+            data.hotkey = stored;
+            let text = render(&data);
+            assert!(
+                text.contains("dictation_key: unknown\n"),
+                "{stored}: {text}"
+            );
+            assert!(stored.is_empty() || !text.contains(stored), "{text}");
+        }
+    }
+
+    #[test]
+    fn the_keycap_label_survives_the_issue_link() {
+        let url = issue_url(&render(&input(&[])));
+        // "dictation_key: Right ⌥", percent-encoded as UTF-8.
+        assert!(
+            url.contains("dictation_key%3A%20Right%20%E2%8C%A5"),
+            "{url}"
+        );
+    }
+
     #[test]
     fn the_report_lists_exactly_the_allowlisted_fields() {
         let errors = [LoggedError {
@@ -232,7 +287,7 @@ mod tests {
                 "arch",
                 "microphone",
                 "accessibility",
-                "hotkey",
+                "dictation_key",
                 "engine",
                 "engine_ready",
                 "analytics",

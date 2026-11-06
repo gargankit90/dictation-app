@@ -103,7 +103,8 @@ tests (`tests/e2e/`) are not part of CI; the maintainer runs them locally,
 inside a VM on their own Mac, after each merge. Run the gate yourself with:
 
 ```sh
-scripts/gate.sh
+scripts/gate.sh          # skips itself if this exact input already passed; prose-only changes run fewer checks
+scripts/gate.sh --full   # everything, always (CI does this)
 ```
 
 | Check | Command |
