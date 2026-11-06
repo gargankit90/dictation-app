@@ -1235,6 +1235,10 @@ main.ob {
   text-align: left;
 }
 
+.ob-key-row .hotkey-recorder.compact p {
+  text-align: left;
+}
+
 .ob-key-row .recorder-line {
   flex-wrap: wrap;
   white-space: normal;

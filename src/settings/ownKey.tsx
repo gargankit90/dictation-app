@@ -59,8 +59,8 @@ interface Options {
   onConnected?: (which: Provider) => Promise<void>;
   /**
    * Settings' sheet (U12): the popup only picks whose key to work on, and a
-   * working engine stays until the chosen provider has a key. Without it,
-   * setup's Speech step, where the provider applies at once.
+   * working engine stays until the chosen provider has a key. Setup never
+   * switches here at all: it passes `onDevice` and switches on Continue (U11).
    */
   draftProvider?: boolean;
 }

@@ -21,7 +21,7 @@ interface Props {
   onRecording?: (recording: boolean) => void;
   /**
    * Settings' row (U12): the keycap and one "Change…" on one line, and only
-   * while recording "Use default" and "Cancel". Without it, setup's layout.
+   * while recording "Use default" and "Cancel".
    */
   compact?: boolean;
   /** What describes the compact row's button, by id. */
