@@ -55,12 +55,30 @@ jobs:
 
       # Libraries src-tauri links on Linux (wry/tao): webkit2gtk, javascriptcore,
       # libsoup and GTK 3. Tray (appindicator) is loaded at runtime, not linked.
+      # An Ubuntu mirror download has stalled for 15-30 minutes here, so nothing
+      # may wait that long: apt gives up a silent connection after 30 s and
+      # retries a failed download 3 times; each of up to 3 attempts is killed
+      # after 5 minutes; the step as a whole after 15.
       - name: Install Tauri system libraries
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
-            libgtk-3-dev pkg-config
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=60)
+          for attempt in 1 2 3; do
+            echo "apt: attempt $attempt of 3 (each limited to ${APT_ATTEMPT_SECS:-300} s)"
+            if sudo timeout -k 10 "${APT_ATTEMPT_SECS:-300}" bash -c '
+              set -e
+              apt-get "$@" update
+              apt-get "$@" install -y --no-install-recommends \
+                libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
+                libgtk-3-dev pkg-config
+            ' _ "${apt_opts[@]}"; then
+              exit 0
+            fi
+            echo "apt: attempt $attempt failed or timed out" >&2
+            sleep 5
+          done
+          echo "apt: giving up after 3 attempts" >&2
+          exit 1
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install # reads rust-toolchain.toml
