@@ -43,6 +43,7 @@ e2e_onboarding_five_steps() {
   fresh_app_state
   settings_reset
   vm "rm -rf $(q "$FIVE_MODELS")"
+  obs_appearance light
   expect "the stand-in model server starts" model_server_start
   five_launch
   expect "onboarding shows at launch, at Welcome" \
