@@ -2,10 +2,10 @@
 //! on, and what is kept across launches.
 //!
 //! The steps come in a fixed order: [`Welcome`](Step::Welcome) (what the app
-//! does, and the events switch), [`Speech`](Step::Speech) (language and
+//! does), [`Speech`](Step::Speech) (language and
 //! engine), [`Permissions`](Step::Permissions) (microphone and
 //! Accessibility), [`Try`](Step::Try) (a practice dictation) and
-//! [`Ready`](Step::Ready) (a summary). A step is done when its condition
+//! [`Ready`](Step::Ready) (a summary, and the events switch). A step is done when its condition
 //! holds ([`Readiness::is_met`]); the user may go to a step only when every
 //! step before it is done ([`Readiness::allows`]), and may always go back.
 //!
@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum Step {
-    /// What the app does, and the usage and error events switch.
+    /// What the app does.
     #[default]
     Welcome,
     /// The language, and the on-device model or the user's own key.
@@ -31,7 +31,8 @@ pub enum Step {
     Permissions,
     /// The dictation key, and a practice dictation in the onboarding window.
     Try,
-    /// A summary of the real states; closes onboarding.
+    /// A summary of the real states, and the usage and error events switch;
+    /// closes onboarding.
     Ready,
 }
 
@@ -166,13 +167,16 @@ pub enum SpeechChoice {
 
 /// What survives a quit: where the user is and what they chose that only the
 /// steps know. Holds no audio, text or key.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent facts kept in a file, each with its own meaning"
+)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SetupProgress {
     /// The step the user was on.
     pub step: Step,
-    /// The user has continued past Welcome. Usage and error events wait for
-    /// this.
+    /// The user has continued past Welcome.
     pub welcome_passed: bool,
     /// "Start dictating" was pressed.
     pub completed: bool,
@@ -183,6 +187,17 @@ pub struct SetupProgress {
     pub download_paused: bool,
     /// The engine selected on the Speech step, if the user selected one.
     pub speech_choice: Option<SpeechChoice>,
+    /// Sharing was off at some point of this walk through setup, so Ready
+    /// can't say it has been on since setup began (U10). A file written before
+    /// this field existed doesn't say, and unknown counts as off.
+    #[serde(default = "unknown_sharing_history")]
+    pub sharing_was_off: bool,
+}
+
+/// What [`SetupProgress::sharing_was_off`] is when nothing says: the claim
+/// "on since setup began" needs proof.
+fn unknown_sharing_history() -> bool {
+    true
 }
 
 impl SetupProgress {
@@ -195,6 +210,7 @@ impl SetupProgress {
         try_outcome: TryOutcome::NotTried,
         download_paused: false,
         speech_choice: None,
+        sharing_was_off: false,
     };
 
     /// Reads the file's text. `None` if it can't be understood.
@@ -311,6 +327,25 @@ mod tests {
     }
 
     #[test]
+    fn u10_a_file_from_before_the_sharing_history_counts_as_unknown() {
+        let old = SetupProgress::from_json(r#"{"step":"permissions","welcome_passed":true}"#);
+        let old = old.expect("an old file still reads");
+        assert_eq!(old.step, Step::Permissions);
+        assert!(old.sharing_was_off);
+        // A file written now says, either way.
+        for said in [false, true] {
+            let progress = SetupProgress {
+                sharing_was_off: said,
+                ..SetupProgress::default()
+            };
+            let read = SetupProgress::from_json(&progress.to_json()).expect("reads");
+            assert_eq!(read.sharing_was_off, said);
+        }
+        // A new walk with no file has nothing unknown.
+        assert!(!SetupProgress::default().sharing_was_off);
+    }
+
+    #[test]
     fn the_progress_round_trips_and_a_bad_file_is_refused() {
         let progress = SetupProgress {
             step: Step::Permissions,
@@ -319,6 +354,7 @@ mod tests {
             try_outcome: TryOutcome::Skipped,
             download_paused: true,
             speech_choice: Some(SpeechChoice::OwnKey),
+            sharing_was_off: true,
         };
         assert_eq!(
             SetupProgress::from_json(&progress.to_json()),
@@ -333,6 +369,8 @@ mod tests {
             SetupProgress::from_json(r#"{"step":"try"}"#),
             Some(SetupProgress {
                 step: Step::Try,
+                // The one field that says nothing is known, not "no".
+                sharing_was_off: true,
                 ..SetupProgress::default()
             })
         );
