@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use dictation_core::coordinator::Phase;
-use dictation_pipeline::overlay::{OverlayModel, OverlayView, no_sound_message};
+use dictation_pipeline::overlay::{OverlayModel, OverlayView};
 use dictation_pipeline::pipeline::UiEvent;
 
 fn silent_hold(model: &mut OverlayModel, device: Option<&str>) -> OverlayView {
@@ -20,10 +20,10 @@ fn silent_hold(model: &mut OverlayModel, device: Option<&str>) -> OverlayView {
 }
 
 fn message(view: &OverlayView) -> &str {
-    match view {
-        OverlayView::Error { message } => message,
-        other => panic!("expected the error look, got {other:?}"),
-    }
+    let OverlayView::Error { message } = view else {
+        unreachable!("expected the error look, got {view:?}");
+    };
+    message
 }
 
 #[test]
