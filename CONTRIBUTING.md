@@ -19,6 +19,11 @@ scripts/gate.sh            # the full quality gate; run it before you push
 TypeScript checks and the licence notice check. The tools it needs are listed
 in the README's steps. Add unit tests with your change.
 
+On a clean tree the gate skips itself when the same input already passed a
+full run in the last 4 hours, and a change that only touches plain prose docs
+runs just the format, spelling and link checks. `scripts/gate.sh --full` runs
+everything; CI always does.
+
 ## Pull requests
 
 - Branch from `main` and open a pull request to `main`. Do not push to `main`.
