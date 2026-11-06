@@ -150,7 +150,7 @@ mockIPC((command) => {
       return false;
     case "get_hotkey_notice":
       return view === "settings-language"
-        ? "The hotkey Right ⌥ is saved, but Vocet can't listen to the keyboard yet: allow it in System Settings → Privacy & Security → Accessibility, and Right ⌥ starts working by itself."
+        ? "The dictation key Right ⌥ is saved, but Vocet can't listen to the keyboard yet: allow it in System Settings → Privacy & Security → Accessibility, and Right ⌥ starts working by itself."
         : null;
     case "get_app_info":
       return { version: "0.1.0", last_update_check_ms: null };

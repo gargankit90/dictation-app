@@ -18,7 +18,7 @@
 #    signature message; the app keeps running as 0.1.0, still installed.
 # 3. The server is down: "Couldn't check for updates" (can't reach it).
 # 4. The manifest offers the good 0.1.1: a relaunch's launch check offers it
-#    by itself ("Later" keeps 0.1.0); the tray's check then installs it after
+#    by itself ("Later" keeps 0.1.0); Check now then installs it after
 #    "Install and restart": the app restarts as 0.1.1 by itself (one copy),
 #    the bundle on disk is 0.1.1 and signed `dictation-app Dev`.
 # 5. After the update Microphone and Accessibility still hold, checked as in
@@ -179,8 +179,13 @@ upd_dismiss_dialogs() {
   [ "$(upd_dialog_count "Vocet")" = 0 ] && [ "$(upd_dialog_count "update")" = 0 ]
 }
 
+# U12: the check moved from the tray to Settings, General.
 upd_tray_check() {
-  ax_ok tray-click "$APP_NAME" "Check for updates"
+  ax_ok tray-click "$APP_NAME" Settings &&
+    ax_ok wait-window "$APP_NAME" Settings 10 &&
+    ax_ok radio-press "$APP_NAME" Settings General &&
+    ax_ok wait-text "$APP_NAME" Settings "Check for updates" 10 &&
+    ax_ok press "$APP_NAME" Settings "Check now"
 }
 
 # --- Cleanup -----------------------------------------------------------------------
@@ -254,13 +259,13 @@ e2e_update_keeps_permissions() {
   expect "it checks for updates at launch" wait_for_log 'checking for updates at launch'
   expect "and finds none" wait_for_log "up to date current=\"$UPD_OLD\""
   expect "the launch check shows no dialog when up to date" upd_no_dialog 3
-  expect "the tray has Check for updates…" upd_tray_check
-  expect "the tray's check says You're up to date" upd_dialog "You're up to date" OK
+  expect "Settings, General has Check now" upd_tray_check
+  expect "Check now says You're up to date" upd_dialog "You're up to date" OK
 
   # 2. A bad signature.
   upd_serve badsig
   pid=$(app_pid)
-  expect "the tray's check finds the bad 0.1.1" upd_tray_check
+  expect "Check now finds the bad 0.1.1" upd_tray_check
   expect "it offers it" upd_dialog "$UPD_NEW is available; you have $UPD_OLD" "Install and restart"
   expect "the install is refused for its signature" upd_dialog "$UPD_SIGNATURE_TEXT" OK
   expect "the bundle was downloaded (and then refused)" \
@@ -271,7 +276,7 @@ e2e_update_keeps_permissions() {
 
   # 3. The server is down.
   expect "the update server stops" upd_server_stop
-  expect "the tray's check runs" upd_tray_check
+  expect "Check now runs" upd_tray_check
   expect "it says it couldn't check" upd_dialog "Couldn't reach the update server" OK
   expect "the app keeps running" test "$(app_pid)" = "$pid"
 
@@ -286,7 +291,7 @@ e2e_update_keeps_permissions() {
     upd_dialog "$UPD_NEW is available; you have $UPD_OLD" Later
   expect "Later keeps 0.1.0" wait_for_log 'update postponed'
   expect "still 0.1.0 on disk" test "$(upd_installed_version)" = "$UPD_OLD"
-  expect "the tray's check offers it again" upd_tray_check
+  expect "Check now offers it again" upd_tray_check
   expect "Install and restart" upd_dialog "$UPD_NEW is available; you have $UPD_OLD" "Install and restart"
   expect "the app restarts as $UPD_NEW by itself" wait_for_log "INFO .*starting version=\"$UPD_NEW\""
   expect "it logged the install before the restart" wait_for_log "update installed; restarting"

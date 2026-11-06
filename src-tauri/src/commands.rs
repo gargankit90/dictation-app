@@ -1092,6 +1092,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::preferences::open_link,
         crate::preferences::get_app_info,
         crate::preferences::check_for_updates,
+        crate::preferences::set_window_page,
         crate::preferences::choose_local_model,
         set_try_outcome,
         practice_paste_missed,
@@ -1225,6 +1226,7 @@ mod tests {
             "openLink",
             "getAppInfo",
             "checkForUpdates",
+            "setWindowPage",
             "chooseLocalModel",
             "setTryOutcome",
             "setDownloadPaused",
@@ -1245,7 +1247,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 53,
+            commands, 54,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -2393,7 +2395,7 @@ mod tests {
                 save_with_login(&config, &LiveEngine::fixed(), &hotkey, with_hotkey("F6")).unwrap();
             let problem = saved.problem().expect("an error, not \"Settings saved.\"");
             assert!(
-                problem.contains("Couldn't switch the hotkey to F6"),
+                problem.contains("Couldn't switch the dictation key to F6"),
                 "{problem}"
             );
             assert!(problem.contains("Right ⌥ still works"), "{problem}");
@@ -2427,7 +2429,10 @@ mod tests {
             let saved =
                 save_with_login(&config, &LiveEngine::fixed(), &hotkey, with_hotkey("F6")).unwrap();
             let problem = saved.problem().unwrap();
-            assert!(problem.contains("Couldn't switch the hotkey"), "{problem}");
+            assert!(
+                problem.contains("Couldn't switch the dictation key"),
+                "{problem}"
+            );
             let _ = std::fs::remove_dir_all(dir);
         }
 
@@ -2482,7 +2487,7 @@ mod tests {
             assert!(message.contains("back to Right ⌥ failed ("), "{message}");
             assert!(message.contains("taken by another app"), "{message}");
             assert!(
-                message.contains("F6 is the hotkey that works now"),
+                message.contains("F6 is the dictation key that works now"),
                 "{message}"
             );
 
@@ -3251,6 +3256,9 @@ mod capability_tests {
             })),
         ));
         app.manage(crate::preferences::UpdateCheck(std::sync::Arc::new(|| {})));
+        app.manage(crate::preferences::WindowPages(std::sync::Arc::new(|_| {
+            Ok(())
+        })));
         let windows = labels
             .iter()
             .map(|label| {
@@ -3460,6 +3468,7 @@ mod capability_tests {
             "set_onboarding_step" => serde_json::json!({ "step": "welcome" }),
             "set_share_usage_events" => serde_json::json!({ "share": true }),
             "set_hotkey_recording" => serde_json::json!({ "recording": false }),
+            "set_window_page" => serde_json::json!({ "page": "settings" }),
             "copy_history_entry" | "delete_history_entry" => serde_json::json!({ "id": "1" }),
             "set_history_limit" => serde_json::json!({ "limit": 25 }),
             _ => serde_json::json!({}),
@@ -3556,7 +3565,8 @@ mod capability_tests {
                 | "read_microphone_test"
                 | "stop_microphone_test"
                 | "get_app_info"
-                | "check_for_updates" => invoke(main, command, args(command)).map(|_| ()),
+                | "check_for_updates"
+                | "set_window_page" => invoke(main, command, args(command)).map(|_| ()),
                 // U6: the fake microphone refuses; the command ran.
                 "start_microphone_test" => match invoke(main, command, args(command)) {
                     Err(error) if !error.to_string().contains("not allowed") => Ok(()),
@@ -3585,7 +3595,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 53);
+        assert_eq!(COMMAND_NAMES.len(), 54);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

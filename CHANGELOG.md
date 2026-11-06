@@ -9,6 +9,18 @@ the release is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- Simpler menu bar: Help… replaces Troubleshoot and Report a problem, and Check for updates moved to Settings, General.
+- Speech is one list: select a row to choose the engine. Your own key has its own sheet.
+- Dictation key: Change… replaces the recorder's buttons, and "dictation key" is the one word for it.
+- Troubleshoot and Report a problem are separate screens, with error codes behind Details.
+- Calmer buttons and sidebar selection in dark mode.
+
+### Fixed
+
+- Back from Troubleshoot or Report a problem returns to Help.
+
 ### Added
 
 - New: Vocet now keeps your last 25 dictations on this Mac so you can get the words back. Text only, never sent. Change or turn it off in Settings → History.

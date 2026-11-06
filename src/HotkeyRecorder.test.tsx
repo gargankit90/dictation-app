@@ -95,7 +95,10 @@ describe("HotkeyRecorder", () => {
   });
 
   it("shows the app's message when it can't use the key", async () => {
-    const onChange = setup("RightAlt", "Couldn't switch the hotkey to F6. RightAlt still works.");
+    const onChange = setup(
+      "RightAlt",
+      "Couldn't switch the dictation key to F6. RightAlt still works.",
+    );
     record();
     down("F6");
     expect((await screen.findByRole("alert")).textContent).toContain("RightAlt still works");
@@ -195,5 +198,70 @@ describe("HotkeyRecorder pausing the real hotkey", () => {
     expect(recording).toHaveBeenCalledTimes(1);
     act(() => void vi.advanceTimersByTime(RENEW_MS * 2 + 1));
     expect(recording.mock.calls).toEqual([[true], [true], [true]]);
+  });
+});
+
+describe("u12_criterion_5 Settings' compact row", () => {
+  function compact(value = "RightCmd") {
+    const onChange = vi.fn<(spec: string) => Promise<string | null>>(() => Promise.resolve(null));
+    render(<HotkeyRecorder value={value} onChange={onChange} compact />);
+    return onChange;
+  }
+
+  it("shows the keycap and one Change… beside it, and no permanent reset", () => {
+    compact();
+    const line = screen.getByLabelText("Dictation key").parentElement;
+    expect(line?.className).toBe("recorder-line");
+    expect(line?.querySelectorAll("button")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Change…" }).parentElement).toBe(line);
+    expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Use default" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Record a different key" })).toBeNull();
+  });
+
+  it("recording says Press a key… with Use default and Cancel", async () => {
+    const onChange = compact();
+    fireEvent.click(screen.getByRole("button", { name: "Change…" }));
+    expect(screen.getByLabelText("Dictation key").textContent).toBe("Press a key…");
+    fireEvent.click(screen.getByRole("button", { name: "Use default" }));
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith("RightAlt");
+    });
+    expect(screen.getByRole("button", { name: "Change…" })).toBeTruthy();
+  });
+
+  it("Cancel keeps the key and gives the keyboard back to Change…", () => {
+    const onChange = compact();
+    fireEvent.click(screen.getByRole("button", { name: "Change…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Change…" }));
+  });
+
+  it("Use default is off when the key already is the default", () => {
+    compact("RightAlt");
+    fireEvent.click(screen.getByRole("button", { name: "Change…" }));
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Use default" }).disabled).toBe(
+      true,
+    );
+  });
+
+  it("a key pressed while recording still saves", async () => {
+    const onChange = compact();
+    fireEvent.click(screen.getByRole("button", { name: "Change…" }));
+    keyDown("F6");
+    keyUp("F6");
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith("F6");
+    });
+  });
+});
+
+describe("setup keeps its recorder (U11 changes it)", () => {
+  it("has Record a different key and Reset to default without the option", () => {
+    render(<HotkeyRecorder value="RightCmd" onChange={() => Promise.resolve(null)} />);
+    expect(screen.getByRole("button", { name: "Record a different key" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reset to default" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Change…" })).toBeNull();
   });
 });

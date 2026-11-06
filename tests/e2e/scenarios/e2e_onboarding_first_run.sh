@@ -112,7 +112,7 @@ e2e_onboarding_first_run() {
   expect "Help offers Run setup again" \
     ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Go through the first-run steps again" 10
   expect "Run setup again opens it" \
-    ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Run setup again"
+    ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Start…"
   expect "its window is on screen" ax_ok wait-window "$APP_NAME" "$ONBOARDING_WINDOW" 10
   expect "at Welcome" ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Talk instead of type" 10
   expect "closing it hides it" ax_ok close "$APP_NAME" "$ONBOARDING_WINDOW"
