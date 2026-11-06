@@ -15,11 +15,19 @@ srs_restore() {
   return "$ok"
 }
 
-# The window server's setting; the web view follows it.
+# Reduce Motion through System Settings, as a person sets it: `defaults` may not
+# write that domain over ssh. The web view follows it at once. Leaves System
+# Settings closed.
 srs_reduce_motion() {
-  vm "defaults write com.apple.universalaccess reduceMotion -bool $1; killall cfprefsd" >/dev/null 2>&1 || true
-  sleep 2
-  vm "defaults read com.apple.universalaccess reduceMotion" 2>/dev/null | grep -q "$([ "$1" = true ] && echo 1 || echo 0)"
+  local status=0 said
+  vm "open 'x-apple.systempreferences:com.apple.Accessibility-Settings.extension?Display'" || return 1
+  sleep 3
+  said=$(vm_terminal "osascript -l JavaScript $(q "$VM_FIXTURES/reduce-motion.js") $([ "$1" = true ] && echo on || echo off)") || status=1
+  log "  Reduce Motion: $said"
+  case $said in on | off) ;; *) status=1 ;; esac
+  vm "osascript -e 'tell application \"System Settings\" to quit'" >/dev/null 2>&1 || true
+  sleep 1
+  return "$status"
 }
 
 # srs_shot <name>: the window now, without waiting: the demo is meant to move.

@@ -1219,18 +1219,25 @@ main.ob {
   white-space: nowrap;
 }
 
-/* The key's row on Try it: all on one line, down to the smallest window. */
+/* The key's row on Try it: all on one line, down to the smallest window. What
+   the recorder says while recording wraps under the keycap. */
 .ob-key-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: fit-content(40%) minmax(0, 1fr);
   align-items: baseline;
-  gap: var(--vc-space-1) var(--vc-space-3);
+  gap: var(--vc-space-3);
 }
 
 .ob-key-row .hotkey-recorder {
   min-width: 0;
   align-items: flex-start;
   margin-bottom: 0;
+  text-align: left;
+}
+
+.ob-key-row .recorder-line {
+  flex-wrap: wrap;
+  white-space: normal;
 }
 
 .recorder-line button.link {
