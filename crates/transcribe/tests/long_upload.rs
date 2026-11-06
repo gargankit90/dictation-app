@@ -382,7 +382,17 @@ async fn a_five_minute_upload_held_back_for_32_seconds_succeeds_and_fails_under_
     tokio::time::timeout(fence, grown_server.stalled.notified())
         .await
         .unwrap();
-    tokio::time::sleep_until((start + Duration::from_secs(32)).into()).await;
+    while start.elapsed() < Duration::from_secs(32) {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        if grown_run.is_finished() {
+            let ended = grown_run.await;
+            panic!(
+                "diagnosis: grown run ended with {ended:?} at {:?}, server held {} of {wav_len}",
+                start.elapsed(),
+                grown_server.body_read.load(Ordering::SeqCst)
+            );
+        }
+    }
 
     // The control: past 30 s, timed out, with its upload far from complete.
     let result = tokio::time::timeout(fence, fixed_run)
