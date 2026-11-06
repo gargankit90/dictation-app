@@ -78,3 +78,20 @@ fn a_cancelled_or_tapped_recording_shows_nothing() {
     model.on_event(&UiEvent::StateChanged(Phase::Idle));
     assert_eq!(model.view(), &OverlayView::Hidden);
 }
+
+#[test]
+fn blank_names_have_no_brackets_and_a_stale_message_does_not_return() {
+    for name in ["", "   "] {
+        let mut model = OverlayModel::default();
+        let view = silent_hold(&mut model, Some(name));
+        assert_eq!(message(&view), "No sound · Check your microphone");
+    }
+    // Silent hold, then a tap (Recording → Idle) and then Esc: stays hidden.
+    let mut model = OverlayModel::default();
+    silent_hold(&mut model, Some("USB Mic"));
+    model.on_event(&UiEvent::StateChanged(Phase::Recording));
+    model.on_event(&UiEvent::StateChanged(Phase::Transcribing));
+    model.on_event(&UiEvent::StateChanged(Phase::Idle));
+    assert_eq!(model.view(), &OverlayView::Hidden);
+    assert_eq!(model.on_error_expired(), None);
+}
