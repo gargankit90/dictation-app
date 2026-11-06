@@ -46,7 +46,8 @@ pub const PASTE_SENT_VISIBLE_FOR: Duration = Duration::from_millis(800);
 /// hint of the recording view, in one sentence for the error look.
 #[must_use]
 pub fn no_sound_message(device: Option<&str>) -> String {
-    match device {
+    // A blank name is no name: never empty brackets.
+    match device.filter(|name| !name.trim().is_empty()) {
         Some(device) => format!("No sound · Check your microphone ({device})"),
         None => "No sound · Check your microphone".to_owned(),
     }
@@ -554,6 +555,18 @@ mod tests {
         // The Idle that follows keeps it, like an error.
         assert_eq!(model.on_event(&UiEvent::StateChanged(Phase::Idle)), None);
         assert_eq!(model.on_error_expired(), shown(OverlayView::Hidden));
+    }
+
+    /// H2 round 1 (#308): an empty or blank mic name shows no brackets.
+    #[test]
+    fn h2_a_blank_mic_name_shows_no_brackets() {
+        for name in ["", " ", "\t\n"] {
+            assert_eq!(
+                no_sound_message(Some(name)),
+                "No sound · Check your microphone",
+                "{name:?}"
+            );
+        }
     }
 
     #[test]

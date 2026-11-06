@@ -79,13 +79,23 @@ impl Queue {
         let newest_phase = newest(|event| matches!(event, UiEvent::StateChanged(_)));
         let newest_restored = newest(|event| matches!(event, UiEvent::HotkeyRestored));
         let newest_no_sound = newest(|event| matches!(event, UiEvent::NoSound));
+        // A recording after a notice clears it, even when coalescing drops
+        // that recording's own event (H2): never show a stale notice.
+        let newest_recording = newest(|event| {
+            matches!(
+                event,
+                UiEvent::StateChanged(dictation_core::coordinator::Phase::Recording)
+            )
+        });
         let mut index = 0;
         self.events.retain(|event| {
             let keep = match event {
                 UiEvent::Error(_) => true,
                 UiEvent::StateChanged(_) => Some(index) == newest_phase,
                 UiEvent::HotkeyRestored => Some(index) == newest_restored,
-                UiEvent::NoSound => Some(index) == newest_no_sound,
+                UiEvent::NoSound => {
+                    Some(index) == newest_no_sound && newest_recording.is_none_or(|r| r < index)
+                }
             };
             index += 1;
             keep
@@ -293,6 +303,48 @@ mod tests {
         }
         assert_eq!(drain(&mut rx), sent);
         assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+    }
+
+    /// H2 round 1: a notice queued before a later recording is dropped with
+    /// it, even when that recording's phase events are coalesced away, so a
+    /// short or cancelled clip can't bring the old "No sound" back.
+    #[test]
+    fn a_full_queue_drops_a_notice_that_a_later_recording_cleared() {
+        use crate::overlay::OverlayModel;
+
+        let (tx, mut rx) = ui_channel();
+        tx.send(UiEvent::NoSound);
+        tx.send(phase(Phase::Idle));
+        for _ in 0..UI_EVENTS_QUEUED / 2 {
+            tx.send(phase(Phase::Recording));
+            tx.send(phase(Phase::Idle));
+        }
+        // A later short or cancelled clip, ending Idle with no notice.
+        tx.send(phase(Phase::Recording));
+        tx.send(phase(Phase::Transcribing));
+        tx.send(phase(Phase::Idle));
+        let read = drain(&mut rx);
+        assert!(!read.contains(&UiEvent::NoSound), "{read:?}");
+        let mut model = OverlayModel::default();
+        for event in &read {
+            model.on_event(event);
+        }
+        assert_eq!(model.view(), &crate::overlay::OverlayView::Hidden);
+    }
+
+    /// A notice nothing came after is kept (the saturated queue still ends
+    /// on it).
+    #[test]
+    fn a_full_queue_keeps_the_newest_notice_when_nothing_followed() {
+        let (tx, mut rx) = ui_channel();
+        for _ in 0..UI_EVENTS_QUEUED {
+            tx.send(phase(Phase::Recording));
+            tx.send(UiEvent::NoSound);
+            tx.send(phase(Phase::Idle));
+        }
+        let read = drain(&mut rx);
+        assert_eq!(read.iter().filter(|e| **e == UiEvent::NoSound).count(), 1);
+        assert_eq!(read.last(), Some(&phase(Phase::Idle)));
     }
 
     #[test]
