@@ -1,7 +1,8 @@
 # U8 criterion 8 (M5.2 criterion 3 before it): a first run with no saved key,
 # down the own-key path. Onboarding shows at launch at Welcome, without the
-# events switch, which Ready has, on (U10). In Speech, Test & Save refuses a key the provider rejects, leaving
-# Continue locked, and accepts a made-up key the local provider (T4a,
+# events switch, which Ready has, on (U10). Selecting the own key on Speech opens
+# no form; Continue opens Connect your key (U11), where Test & Save refuses a key
+# the provider rejects, leaving Continue locked, and accepts a made-up key the local provider (T4a,
 # _provider_helpers.sh) takes. Permissions shows both allowed, Try it's
 # dictation pastes into the practice box, Ready shows the real states, and
 # Start dictating hides the window and takes "Resume setup…" off the tray.
@@ -31,13 +32,20 @@ e2e_onboarding_first_run() {
   expect "its window is on screen" ax_ok wait-window "$APP_NAME" "$ONBOARDING_WINDOW" 10
   expect "it says what the app does" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Talk instead of type" 10
-  expect "press Continue" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" Continue
+  expect "with no choice to make, only Get started" \
+    ax_ok wait-no-text "$APP_NAME" "$ONBOARDING_WINDOW" "Share usage" 2
+  expect "press Get started" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" "Get started"
   expect "Speech asks for the language" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Which language" 10
   expect "the local model is recommended" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Parakeet English" 10
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "English · 477 MB" 10
   expect "choose my own key" \
     ax_ok radio-press "$APP_NAME" "$ONBOARDING_WINDOW" "Use my own Groq or OpenAI key"
+  expect "selecting it opens no form" \
+    ax_ok wait-no-text "$APP_NAME" "$ONBOARDING_WINDOW" "Test & Save" 2
+  expect "press Continue" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" Continue
+  expect "the next screen is Connect your key" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Connect your key" 10
   expect "Continue waits for Test & Save, and says so" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Continue unlocks after Test" 10
 
@@ -59,8 +67,8 @@ e2e_onboarding_first_run() {
   expect "type the key the provider takes" \
     ax_ok secret-set "$APP_NAME" "$ONBOARDING_WINDOW" api-key "$PROVIDER_GOOD_KEY"
   expect "press Test & Save" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" "Test & Save"
-  expect "the window says it is connected" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Connected" 15
+  expect "the window says the key is saved" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Key saved" 15
   expect "the test reached the provider with the typed key" provider_request_has 2 auth=good
   # Saved to the keychain; the cleanup removes it.
   GROQ_KEY_STORED=1

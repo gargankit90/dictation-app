@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { commands } from "../bindings";
 import type {
   LocalModelInfo_Serialize,
@@ -8,15 +8,27 @@ import type {
 } from "../bindings";
 import { BROKEN, messageOf, testKey } from "../keyTest";
 import { LanguagePicker } from "../LanguagePicker";
-import { cloudLanguages } from "../languages";
-import { megabytes } from "../settings/modelRow";
+import { cloudLanguages, englishName } from "../languages";
+import { modelLabel } from "../settings/modelRow";
 import { OwnKeyPanel, useOwnKey } from "../settings/ownKey";
-import { spokenName, recommendedModel } from "./logic";
+import type { OwnKey } from "../settings/ownKey";
+import { recommendedModel } from "./logic";
 import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";
 
 export const MODEL_COPY = "Runs on this Mac. Works offline after a one-time download.";
 export const KEY_REASON = "Continue unlocks after Test & Save succeeds";
+export const KEY_CARD_COPY =
+  "About 100 languages. Needs internet. Your speech is sent to the provider you choose.";
+export const KEY_SCREEN_COPY =
+  "Vocet sends your speech to this provider, using your own account with them.";
+export const KEY_SAVED = "✓ Key saved";
+export const KEY_SAVED_COPY = "In your macOS Keychain. It's never shown again.";
+
+/** The line for a language no on-device model covers. */
+export function uncoveredCopy(code: string): string {
+  return `${englishName(code)} needs your own key. Vocet's on-device models don't cover it yet.`;
+}
 
 /** How long to wait for a cancelled download to let go, before saying so. */
 const CANCEL_TRIES = 15;
@@ -92,21 +104,32 @@ function SpeechForm({
     }
   }
 
-  async function switchToCloud(which: Provider) {
-    await commands.useCloudEngine(which);
-    await reread();
-  }
-
+  // Setup changes the engine only on Continue, once the key has worked: changing
+  // the Provider row here never switches it, whichever engine is in use now.
   const ownKey = useOwnKey({
     settings,
-    onDevice: settings.transcription === "local",
-    switchToCloud,
+    onDevice: true,
+    switchToCloud: () => Promise.resolve(),
     refreshEngine,
   });
 
-  const choice: Choice =
-    picked ??
-    (settings.transcription === "cloud" && ownKey.keyStatus.state === "saved" ? "key" : "local");
+  const [keyScreen, setKeyScreen] = useState(false);
+
+  // The Continue running, as `keyRun` is for Test & Save in `ownKey.tsx`: anything
+  // that changes what it was for makes it the old one, and an old one neither
+  // switches the engine, nor moves on, nor reports. In the component: nothing can
+  // come back to a step that's gone, so going away just drops it.
+  const continueRun = useRef(0);
+  useEffect(
+    () => () => {
+      continueRun.current += 1;
+    },
+    [],
+  );
+  function dropContinue() {
+    continueRun.current += 1;
+    setWorking(false);
+  }
 
   const supported = useMemo(() => {
     const codes = new Set<string>(cloudLanguages(settings.provider));
@@ -117,6 +140,12 @@ function SpeechForm({
   }, [models, settings.provider]);
 
   const model = models === null ? null : recommendedModel(models, language);
+  // Known, not just not loaded yet: the key is then the only choice.
+  const uncovered = models !== null && model === null;
+  const choice: Choice = uncovered
+    ? "key"
+    : (picked ??
+      (settings.transcription === "cloud" && ownKey.keyStatus.state === "saved" ? "key" : "local"));
 
   async function chooseLanguage(code: string) {
     setLanguage(code);
@@ -162,13 +191,16 @@ function SpeechForm({
     return null;
   }
 
-  async function continueWithKey() {
+  async function continueWithKey(dropped: () => boolean) {
     // A key saved earlier hasn't been through Test & Save here: test it now.
     if (!ownKey.connected) {
       const outcome = await testKey(ownKey.provider, null);
+      if (dropped()) return null;
       if (outcome.kind === "error") return outcome.text;
     }
+    if (dropped()) return null;
     const used = await commands.useCloudEngine(ownKey.provider);
+    if (dropped()) return null;
     if (used.status === "error") return messageOf(used.error);
     await makeRoomFor(null);
     await reread();
@@ -177,6 +209,9 @@ function SpeechForm({
   }
 
   async function go() {
+    continueRun.current += 1;
+    const run = continueRun.current;
+    const dropped = () => run !== continueRun.current;
     setWorking(true);
     setProblem(null);
     let failed: string | null;
@@ -186,11 +221,13 @@ function SpeechForm({
       if ((settings.language ?? "") !== language) {
         await commands.setLanguage(language === "" ? null : language);
       }
-      if (choice === "key") failed = await continueWithKey();
+      if (choice === "key") failed = await continueWithKey(dropped);
       else failed = model === null ? null : await continueLocal(model);
     } catch {
       failed = BROKEN;
     }
+    // The screen it was for has moved on: whatever came back no longer counts.
+    if (dropped()) return;
     setWorking(false);
     if (failed !== null) {
       setProblem(failed);
@@ -199,19 +236,48 @@ function SpeechForm({
     onContinue();
   }
 
-  const saved = ownKey.keyStatus.state === "saved";
   const blockedBecause = working
     ? "One moment…"
     : choice === "key"
-      ? ownKey.connected || saved
-        ? null
-        : KEY_REASON
+      ? null
       : model === null
-        ? models === null
-          ? "Loading the models…"
-          : "No on-device model speaks this language yet. Use your own key."
+        ? "Loading the models…"
         : null;
   const needsDownload = choice === "local" && model !== null && model.state !== "ready";
+
+  function backFromKey() {
+    dropContinue();
+    ownKey.abandon();
+    setProblem(null);
+    setKeyScreen(false);
+  }
+
+  if (keyScreen) {
+    return (
+      <KeyScreen
+        parts={parts}
+        ownKey={{
+          ...ownKey,
+          changeProvider: (next) => {
+            dropContinue();
+            ownKey.changeProvider(next);
+          },
+          editKey: (value) => {
+            dropContinue();
+            ownKey.editKey(value);
+          },
+          testAndSave: () => {
+            dropContinue();
+            return ownKey.testAndSave();
+          },
+        }}
+        problem={problem}
+        working={working}
+        onBack={backFromKey}
+        onContinue={() => void go()}
+      />
+    );
+  }
 
   return (
     <StepFrame
@@ -219,7 +285,16 @@ function SpeechForm({
       title="Which language will you mostly speak?"
       primary={{
         label: needsDownload ? "Download and continue" : "Continue",
-        onClick: () => void go(),
+        onClick: () => {
+          if (choice === "key") {
+            // The key itself isn't part of this: only which engine is selected.
+            void commands.setSpeechChoice("own_key").catch(() => undefined);
+            setProblem(null);
+            setKeyScreen(true);
+          } else {
+            void go();
+          }
+        },
         blockedBecause,
       }}
     >
@@ -266,39 +341,41 @@ function SpeechForm({
         />
       )}
 
-      <label className={`ob-card ob-option${choice === "local" ? " selected" : ""}`}>
-        <input
-          type="radio"
-          name="ob-engine"
-          aria-label="Recommended for your language"
-          checked={choice === "local"}
-          disabled={model === null}
-          onChange={() => {
-            pick("local");
-          }}
-        />
-        <span className="ob-option-text">
-          <span className="ob-eyebrow">Recommended for your language</span>
-          {model === null ? (
-            modelsError === null ? (
-              <span className="ob-card-title">
-                {models === null ? "Loading the models…" : "No on-device model for this language"}
-              </span>
+      {uncovered ? (
+        <p role="status" className="ob-sub">
+          {uncoveredCopy(language)}
+        </p>
+      ) : (
+        <label className={`ob-card ob-option${choice === "local" ? " selected" : ""}`}>
+          <input
+            type="radio"
+            name="ob-engine"
+            aria-label="Recommended for your language"
+            checked={choice === "local"}
+            disabled={model === null}
+            onChange={() => {
+              pick("local");
+            }}
+          />
+          <span className="ob-option-text">
+            <span className="ob-eyebrow">Recommended for your language</span>
+            {model === null ? (
+              modelsError === null ? (
+                <span className="ob-card-title">Loading the models…</span>
+              ) : (
+                <span role="alert" className="error">
+                  Couldn&apos;t list the models: {modelsError}
+                </span>
+              )
             ) : (
-              <span role="alert" className="error">
-                Couldn&apos;t list the models: {modelsError}
-              </span>
-            )
-          ) : (
-            <>
-              <span className="ob-card-title">
-                {spokenName(model)} · {megabytes(model.size_bytes ?? 0)}
-              </span>
-              <span className="ob-caption">{MODEL_COPY}</span>
-            </>
-          )}
-        </span>
-      </label>
+              <>
+                <span className="ob-card-title">{modelLabel(model)}</span>
+                <span className="ob-caption">{MODEL_COPY}</span>
+              </>
+            )}
+          </span>
+        </label>
+      )}
 
       <label className={`ob-card ob-option${choice === "key" ? " selected" : ""}`}>
         <input
@@ -312,13 +389,98 @@ function SpeechForm({
         />
         <span className="ob-option-text">
           <span className="ob-card-title">Use my own Groq or OpenAI key</span>
-          <span className="ob-caption">
-            Needs internet. Your speech is sent to the provider you choose.
-          </span>
+          <span className="ob-caption">{KEY_CARD_COPY}</span>
         </span>
       </label>
-      {choice === "key" && <OwnKeyPanel ownKey={ownKey} />}
 
+      {problem !== null && (
+        <p role="alert" className="notice error">
+          {problem}
+        </p>
+      )}
+    </StepFrame>
+  );
+}
+
+/**
+ * Connect your key: its own screen under Speech, so the rail doesn't move (U11).
+ * The form is Settings' own (`ownKey.tsx`), in a page and without Remove key. A
+ * saved key shows no field until Replace. Whichever key Continue would use has
+ * either just passed Test & Save or is tested first, and a failure stays here.
+ */
+function KeyScreen({
+  parts,
+  ownKey,
+  problem,
+  working,
+  onBack,
+  onContinue,
+}: {
+  parts: FrameParts;
+  ownKey: OwnKey;
+  problem: string | null;
+  working: boolean;
+  onBack: () => void;
+  onContinue: () => void;
+}) {
+  const { provider, keyInput, keyStatus, keyBusy, connected } = ownKey;
+  // For one provider: another one starts from what it has saved.
+  const [replacing, setReplacing] = useState<Provider | null>(null);
+  const saved = keyStatus.state === "saved";
+  // A Test & Save that worked is the end of replacing.
+  const showField = !saved || (replacing === provider && !connected);
+  const panel = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (keyStatus.state === "checking" || !showField) return;
+    panel.current?.querySelector<HTMLInputElement>("#api-key")?.focus();
+  }, [keyStatus.state, showField, provider]);
+
+  const checking = keyStatus.state === "checking";
+  // What's typed isn't saved: Continue would quietly use the old key.
+  const blockedBecause = working
+    ? "One moment…"
+    : checking
+      ? "Checking for a saved key…"
+      : saved && keyInput.trim() === ""
+        ? null
+        : KEY_REASON;
+
+  return (
+    <StepFrame
+      parts={{
+        ...parts,
+        back: onBack,
+        // Once the key is being written nothing leaves, as in Settings' sheet.
+        exitBlock: parts.exitBlock ?? (keyBusy === "saving" ? "Saving your key…" : null),
+      }}
+      title="Connect your key"
+      primary={{ label: "Continue", onClick: onContinue, blockedBecause }}
+    >
+      <p className="ob-sub">{KEY_SCREEN_COPY}</p>
+      <div className="ob-key-panel" ref={panel}>
+        <OwnKeyPanel ownKey={ownKey} canRemove={false} providerOnly={checking || !showField} />
+      </div>
+      {saved && !showField && (
+        <div className="ob-key-saved">
+          <div className="ob-card-text">
+            <span role="status" className="ob-key-saved-title">
+              {KEY_SAVED}
+            </span>
+            <span className="ob-caption">{KEY_SAVED_COPY}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              // Clears the last result, which is what ended the replacing before.
+              ownKey.editKey("");
+              setReplacing(provider);
+            }}
+          >
+            Replace
+          </button>
+        </div>
+      )}
       {problem !== null && (
         <p role="alert" className="notice error">
           {problem}

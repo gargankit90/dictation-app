@@ -160,6 +160,12 @@ describe("criterion_u4_3 the meter", () => {
     expect(levels[0]).toBe(FLOOR_DBFS);
   });
 
+  // Welcome's demo imports this into the main window (U11): a rule for the page
+  // here would make the whole window transparent.
+  it("styles only the pill, never the page it's on", () => {
+    expect(overlayCss).not.toMatch(/(^|\n|,\s*)(html|body|#root)\b/);
+  });
+
   // jsdom doesn't apply media queries, so this reads the stylesheet.
   it("has no transitions on the bars with Reduce Motion", () => {
     const reduced = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(overlayCss);

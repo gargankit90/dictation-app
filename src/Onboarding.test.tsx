@@ -52,11 +52,18 @@ const PARAKEET: LocalModelInfo_Serialize = {
   restarted: false,
 };
 
+/** As in the catalogue (`crates/core/src/local_models.rs`), so the count is real. */
+const THIRTY_LANGUAGES = [
+  ..."zh en yue ar de fr es pt id it ko ru th vi ja tr hi ms nl sv da fi pl cs fil fa el ro hu mk".split(
+    " ",
+  ),
+];
+
 const QWEN: LocalModelInfo_Serialize = {
   id: "qwen3-asr-0.6b-q4_k_m",
   name: "Qwen3-ASR 0.6B",
   languages: "30 languages",
-  language_codes: ["en", "hi", "de"],
+  language_codes: THIRTY_LANGUAGES,
   size_bytes: 590_000_000,
   downloaded_bytes: 0,
   state: "missing",
@@ -305,8 +312,6 @@ function primary(name: string | RegExp): HTMLButtonElement {
   return screen.getByRole("button", { name });
 }
 
-const LONG = "ह".repeat(300);
-
 const SAVING_REASON = "Saving your choice…";
 
 describe("the frame", () => {
@@ -376,11 +381,11 @@ describe("the frame", () => {
   it("criterion 1: pseudo-long labels stay inside their elements", async () => {
     backend.step = "speech";
     backend.welcomePassed = true;
-    backend.models = [{ ...PARAKEET, name: `${LONG} x` }];
+    backend.settings = { ...backend.settings, language: "gu" };
     show();
-    // The long name is rendered as text in the wrapping column.
-    const title = await screen.findByText(new RegExp(LONG));
-    expect(title.closest(".ob-content")).not.toBeNull();
+    // A long sentence is rendered as text in the wrapping column.
+    const line = await screen.findByText(/needs your own key/);
+    expect(line.closest(".ob-content")).not.toBeNull();
   });
 });
 
@@ -391,20 +396,70 @@ describe("Welcome", () => {
     show();
     await screen.findByText("Talk instead of type");
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(false);
+      expect(primary("Get started").disabled).toBe(false);
     });
     expect(screen.queryByRole("switch")).toBeNull();
     expect(screen.queryByText(/usage|error events|anonymous/i)).toBeNull();
     expect(screen.queryByText("What's sent")).toBeNull();
   });
 
-  it("Continue moves on", async () => {
+  it("U11 criterion 1: only the title, the line, the demo and Get started", async () => {
+    show();
+    await screen.findByText("Talk instead of type");
+    await screen.findByText("Vocet turns what you say into text, in any app.");
+    await waitFor(() => {
+      expect(primary("Get started").disabled).toBe(false);
+    });
+    const content = document.querySelector<HTMLElement>(".ob-content");
+    expect(content?.querySelector("input, select, textarea, button, a")).toBeNull();
+    expect(content?.textContent).not.toMatch(
+      /usage|error events|anonymous|sharing|share|analytics/i,
+    );
+    expect(document.querySelectorAll(".ob-footer button")).toHaveLength(1);
+    expect(document.querySelector(".ob-demo")?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("U11: gives the screen one sentence for screen readers, with the stored key", async () => {
+    backend.settings = { ...backend.settings, hotkey: "RightCmd" };
+    show();
+    await screen.findByText(
+      "Hold Right Command, say what you mean, and let go. The words land at your cursor.",
+    );
+  });
+
+  it("U11 criterion 3: the keycap has the long form of the stored key", async () => {
+    show();
+    await screen.findByText("Right Option (⌥)");
+    cleanup();
+    backend.settings = { ...backend.settings, hotkey: "RightCmd" };
+    show();
+    await screen.findByText("Right Command (⌘)");
+    expect(document.body.textContent).not.toContain("RightCmd");
+  });
+
+  it("U11 criterion 3: keycap and caption stand on one baseline", () => {
+    const beat = /\.ob-beat \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(beat).toContain("align-items: baseline");
+  });
+
+  it("round 2: a caption keeps its bold width, so the keycap beside it doesn't move", async () => {
+    show();
+    const caption = (await screen.findByText("Hold the key")).parentElement;
+    expect(caption?.className).toBe("ob-beat-caption");
+    expect(caption?.getAttribute("data-text")).toBe("Hold the key");
+    const copy = /\.ob-beat-caption::after \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(copy).toContain("content: attr(data-text)");
+    expect(copy).toContain("font-weight: 600");
+    expect(/\.ob-beat\.lit \{([^}]*)\}/.exec(css)?.[1]).toContain("font-weight: 600");
+  });
+
+  it("Get started moves on", async () => {
     show();
     await screen.findByText("Talk instead of type");
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(false);
+      expect(primary("Get started").disabled).toBe(false);
     });
-    fireEvent.click(primary("Continue"));
+    fireEvent.click(primary("Get started"));
     await screen.findByText("Which language will you mostly speak?");
     expect(backend.step).toBe("speech");
   });
@@ -579,9 +634,9 @@ describe("the sharing switch across setup (U10)", () => {
     show();
     await screen.findByText("Talk instead of type");
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(false);
+      expect(primary("Get started").disabled).toBe(false);
     });
-    fireEvent.click(primary("Continue"));
+    fireEvent.click(primary("Get started"));
     await screen.findByText("Which language will you mostly speak?");
   });
 });
@@ -650,7 +705,7 @@ describe("one queue for the whole window (round 5)", () => {
     ]);
   });
 
-  it("a write from Settings holds onboarding's Continue when it comes back", async () => {
+  it("a write from Settings holds onboarding's Get started when it comes back", async () => {
     const pending = holdWrites();
     const settings = render(<Privacy settings={backend.settings} onStored={noop} />);
     fireEvent.click(screen.getByRole("switch", { name: "Share usage and error events" }));
@@ -660,14 +715,14 @@ describe("one queue for the whole window (round 5)", () => {
     show();
     await screen.findByText("Talk instead of type");
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(true);
+      expect(primary("Get started").disabled).toBe(true);
     });
-    fireEvent.click(primary("Continue"));
+    fireEvent.click(primary("Get started"));
     expect(backend.named("set_onboarding_step")).toEqual([]);
 
     await releaseOne(pending);
     await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(false);
+      expect(primary("Get started").disabled).toBe(false);
     });
     expect(backend.settings.share_usage_events).toBe(false);
   });
@@ -853,18 +908,21 @@ describe("Speech", () => {
 
   it("finding 3: the own key choice survives a quit, with no key saved and none kept", async () => {
     const { unmount } = show();
-    await screen.findByText("Parakeet English · 477 MB");
+    await screen.findByText("English · 477 MB");
     fireEvent.click(screen.getByRole("radio", { name: /Use my own Groq or OpenAI key/ }));
     await waitFor(() => {
       expect(backend.speechChoice).toBe("own_key");
     });
+    fireEvent.click(primary("Continue"));
     fireEvent.change(await screen.findByLabelText("Groq API key"), { target: { value: KEY } });
     unmount();
 
     // The relaunch: the app's status has the choice, and the typed key is gone.
     show();
-    const field = await screen.findByLabelText<HTMLInputElement>("Groq API key");
+    await screen.findByText("English · 477 MB");
     expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
+    fireEvent.click(primary("Continue"));
+    const field = await screen.findByLabelText<HTMLInputElement>("Groq API key");
     expect(field.value).toBe("");
     expect(JSON.stringify(backend.named("set_speech_choice"))).not.toContain(KEY);
   });
@@ -881,7 +939,7 @@ describe("Speech", () => {
     });
     unmount();
     show();
-    await screen.findByText("Parakeet English · 477 MB");
+    await screen.findByText("English · 477 MB");
     await waitFor(() => {
       expect(backend.named("has_api_key").length).toBeGreaterThan(1);
     });
@@ -893,7 +951,7 @@ describe("Speech", () => {
 
   it("criterion 3: English preselects Parakeet English, with its real size", async () => {
     show();
-    const name = await screen.findByText("Parakeet English · 477 MB");
+    const name = await screen.findByText("English · 477 MB");
     expect(name).toBeTruthy();
     expect(screen.getByText("Recommended for your language")).toBeTruthy();
     expect(screen.getByText(MODEL_COPY)).toBeTruthy();
@@ -902,9 +960,9 @@ describe("Speech", () => {
 
   it("criterion 3: Hindi recommends the multilingual model, with its real size", async () => {
     show();
-    await screen.findByText("Parakeet English · 477 MB");
+    await screen.findByText("English · 477 MB");
     fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
-    await screen.findByText("Qwen3-ASR Multilingual · 590 MB");
+    await screen.findByText("30 languages · 590 MB");
     await waitFor(() => {
       expect(backend.settings.language).toBe("hi");
     });
@@ -912,7 +970,7 @@ describe("Speech", () => {
 
   it("criterion 3: More… offers the searchable picker", async () => {
     show();
-    await screen.findByText("Parakeet English · 477 MB");
+    await screen.findByText("English · 477 MB");
     expect(screen.queryByRole("combobox")).toBeNull();
     fireEvent.click(screen.getByRole("radio", { name: "More…" }));
     expect(screen.getByRole("combobox")).toBeTruthy();
@@ -920,7 +978,7 @@ describe("Speech", () => {
 
   it("criterion 3: Download and continue chooses, starts the download and moves on", async () => {
     show();
-    await screen.findByText("Parakeet English · 477 MB");
+    await screen.findByText("English · 477 MB");
     fireEvent.click(primary("Download and continue"));
     await screen.findByText("Two permissions");
     expect(backend.named("choose_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
@@ -932,7 +990,7 @@ describe("Speech", () => {
   it("criterion 3: a model already here says Continue and downloads nothing", async () => {
     backend.model(PARAKEET.id).state = "ready";
     show();
-    await screen.findByText("Parakeet English · 477 MB");
+    await screen.findByText("English · 477 MB");
     fireEvent.click(primary("Continue"));
     await screen.findByText("Two permissions");
     expect(backend.named("download_local_model")).toEqual([]);
@@ -949,25 +1007,214 @@ describe("Speech", () => {
     })(backend.handle);
     mockIPC(backend.handle);
     show();
-    await screen.findByText("Parakeet English · 477 MB");
+    await screen.findByText("English · 477 MB");
     fireEvent.click(primary("Download and continue"));
     await screen.findByText("The disk is full.");
     expect(backend.step).toBe("speech");
   });
 
-  async function chooseOwnKey() {
+  /** Selects the own key on the two choices, and nothing else happens. */
+  async function selectOwnKey() {
     show();
-    await screen.findByText("Parakeet English · 477 MB");
+    await screen.findByText("English · 477 MB");
     fireEvent.click(screen.getByRole("radio", { name: /Use my own Groq or OpenAI key/ }));
+  }
+
+  async function chooseOwnKey() {
+    await selectOwnKey();
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Connect your key");
     return await screen.findByLabelText("Groq API key");
   }
 
-  it("criterion 3: the own key path opens U6's panel, and Continue waits for Test & Save", async () => {
+  /** The screen with a key already saved: no field. */
+  async function chooseSavedKey() {
+    backend.keys.groq = true;
+    await selectOwnKey();
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("✓ Key saved");
+  }
+
+  it("U11 criterion 4: selecting the own key shows no form, only Continue", async () => {
+    await selectOwnKey();
+    await waitFor(() => {
+      expect(backend.speechChoice).toBe("own_key");
+    });
+    expect(screen.queryByLabelText("Groq API key")).toBeNull();
+    expect(screen.queryByText("Test & Save")).toBeNull();
+    expect(primary("Continue").disabled).toBe(false);
+    expect(document.querySelector(".ob-reason")?.textContent).toBe("");
+    expect(backend.step).toBe("speech");
+  });
+
+  it("U11 criterion 4: Continue opens the screen, Back returns with all as it was", async () => {
+    show();
+    await screen.findByText("English · 477 MB");
+    fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
+    await screen.findByText("30 languages · 590 MB");
+    fireEvent.click(screen.getByRole("radio", { name: /Use my own Groq or OpenAI key/ }));
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Connect your key");
+    screen.getByText("Vocet sends your speech to this provider, using your own account with them.");
+    const current = () => document.querySelector('[aria-current="step"]')?.textContent;
+    expect(current()).toContain("Speech");
+    expect(backend.step).toBe("speech");
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await screen.findByText("Which language will you mostly speak?");
+    expect(current()).toContain("Speech");
+    expect(backend.step).toBe("speech");
+    expect(backend.named("set_onboarding_step")).toEqual([]);
+    expect(screen.getByRole("radio", { name: "Hindi" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
+  });
+
+  it("U11: Back drops what was typed and a test still running", async () => {
+    let resolve: (value: null) => void = () => undefined;
+    const promise = new Promise<null>((settled) => {
+      resolve = settled;
+    });
+    const original = backend.handle;
+    mockIPC((command, payload) =>
+      command === "test_api_key" ? promise : original(command, payload),
+    );
+    const field = await chooseOwnKey();
+    fireEvent.change(field, { target: { value: KEY } });
+    fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
+    await screen.findByText("Testing…");
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await screen.findByText("Which language will you mostly speak?");
+    await act(async () => {
+      resolve(null);
+      await promise;
+    });
+    expect(backend.named("set_api_key")).toEqual([]);
+    fireEvent.click(primary("Continue"));
+    expect((await screen.findByLabelText<HTMLInputElement>("Groq API key")).value).toBe("");
+  });
+
+  it("U11 criterion 6: no key: the field, and Continue waits for Test & Save", async () => {
     const field = await chooseOwnKey();
     await screen.findByText("No key saved yet.", { exact: false });
     expect(primary("Continue").disabled).toBe(true);
     expect(screen.getByText(KEY_REASON)).toBeTruthy();
     expect(field.getAttribute("type")).toBe("password");
+    expect(screen.getByRole("combobox", { name: "Provider" })).toBeTruthy();
+    expect(screen.getByText("console.groq.com")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
+  });
+
+  it("U11 criterion 6: a saved key shows Key saved and Replace, with no field", async () => {
+    await chooseSavedKey();
+    screen.getByText("In your macOS Keychain. It's never shown again.");
+    expect(screen.queryByLabelText("Groq API key")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Test & Save" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
+    expect(primary("Continue").disabled).toBe(false);
+  });
+
+  it("U11 criterion 6: Replace reveals the field, still with no Remove key", async () => {
+    await chooseSavedKey();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    const field = await screen.findByLabelText("Groq API key");
+    expect(document.activeElement).toBe(field);
+    expect(screen.getByRole("button", { name: "Test & Save" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
+    expect(screen.queryByText("✓ Key saved")).toBeNull();
+  });
+
+  it("U11: a typed replacement has to be saved before Continue", async () => {
+    await chooseSavedKey();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    fireEvent.change(await screen.findByLabelText("Groq API key"), { target: { value: KEY } });
+    expect(primary("Continue").disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
+    await screen.findByText("✓ Key saved");
+    expect(primary("Continue").disabled).toBe(false);
+    expect(backend.named("set_api_key")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    await screen.findByLabelText("Groq API key");
+  });
+
+  it("U11: changing Provider re-reads its key and doesn't touch the engine", async () => {
+    await chooseSavedKey();
+    fireEvent.change(screen.getByRole("combobox", { name: "Provider" }), {
+      target: { value: "openai" },
+    });
+    await screen.findByLabelText("OpenAI API key");
+    expect(screen.queryByText("✓ Key saved")).toBeNull();
+    expect(primary("Continue").disabled).toBe(true);
+    expect(screen.getByText(KEY_REASON)).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "Provider" }), {
+      target: { value: "groq" },
+    });
+    await screen.findByText("✓ Key saved");
+    expect(backend.named("use_cloud_engine")).toEqual([]);
+  });
+
+  it("U11: with the cloud engine in use, Provider still doesn't switch it", async () => {
+    backend.settings = { ...backend.settings, transcription: "cloud", provider: "groq" };
+    await chooseSavedKey();
+    fireEvent.change(screen.getByRole("combobox", { name: "Provider" }), {
+      target: { value: "openai" },
+    });
+    await screen.findByLabelText("OpenAI API key");
+    expect(backend.named("use_cloud_engine")).toEqual([]);
+    expect(backend.settings.provider).toBe("groq");
+  });
+
+  describe("U11 criterion 5: the cards' exact wording", () => {
+    it("English", async () => {
+      show();
+      await screen.findByText("English · 477 MB");
+      screen.getByText("Runs on this Mac. Works offline after a one-time download.");
+      screen.getByText("Use my own Groq or OpenAI key");
+      screen.getByText(
+        "About 100 languages. Needs internet. Your speech is sent to the provider you choose.",
+      );
+    });
+
+    it("Hindi, with the count from the model's language codes", async () => {
+      show();
+      await screen.findByText("English · 477 MB");
+      fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
+      await screen.findByText(`${String(THIRTY_LANGUAGES.length)} languages · 590 MB`);
+      expect(THIRTY_LANGUAGES).toHaveLength(30);
+      screen.getByText("Runs on this Mac. Works offline after a one-time download.");
+    });
+
+    it("a language no on-device model covers: the key is the selected choice", async () => {
+      backend.settings = { ...backend.settings, language: "gu" };
+      show();
+      await screen.findByText(
+        "Gujarati needs your own key. Vocet's on-device models don't cover it yet.",
+      );
+      expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
+      expect(screen.queryByRole("radio", { name: "Recommended for your language" })).toBeNull();
+      expect(primary("Continue").disabled).toBe(false);
+      fireEvent.click(primary("Continue"));
+      await screen.findByText("Connect your key");
+      expect(backend.speechChoice).toBe("own_key");
+    });
+
+    it("no catalogue name and no refused wording, on any of the screens", async () => {
+      show();
+      await screen.findByText("English · 477 MB");
+      const shown = () => document.querySelector(".ob-main")?.textContent ?? "";
+      const clean = () => {
+        for (const gone of [PARAKEET.name, QWEN.name, "Parakeet", "Qwen", "Multilingual"]) {
+          expect(shown()).not.toContain(gone);
+        }
+        expect(shown()).not.toMatch(/All languages|100\+/);
+      };
+      clean();
+      fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
+      await screen.findByText("30 languages · 590 MB");
+      clean();
+      fireEvent.click(primary("Download and continue"));
+      await screen.findByText("Downloading 30 languages · 0 of 590 MB");
+      clean();
+    });
   });
 
   it("criterion 3: a bad key keeps Continue locked, and saves nothing", async () => {
@@ -984,26 +1231,150 @@ describe("Speech", () => {
     const field = await chooseOwnKey();
     fireEvent.change(field, { target: { value: KEY } });
     fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
-    await screen.findByText("✓ Connected · saved in Keychain");
+    await screen.findByText("✓ Key saved");
     expect(primary("Continue").disabled).toBe(false);
     fireEvent.click(primary("Continue"));
     await screen.findByText("Two permissions");
+    // It has just passed: not tested a second time.
+    expect(backend.named("test_api_key")).toHaveLength(1);
     expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "groq" });
     expect(backend.named("download_local_model")).toEqual([]);
     expect(document.body.textContent).not.toContain(KEY);
   });
 
+  describe("Continue with a saved key, while its test is out (round 2)", () => {
+    /** A saved key, Continue pressed, the provider not answering yet. */
+    async function continuePending() {
+      let answer: (result: KeyTestError | null) => void = () => undefined;
+      const pending = new Promise<KeyTestError | null>((resolve) => {
+        answer = resolve;
+      });
+      const original = backend.handle;
+      mockIPC((command, payload) => {
+        if (command !== "test_api_key") return original(command, payload);
+        return pending.then((result) => {
+          if (result === null) return null;
+          // eslint-disable-next-line @typescript-eslint/only-throw-error
+          throw result;
+        });
+      });
+      await chooseSavedKey();
+      await waitFor(() => {
+        expect(primary("Continue").disabled).toBe(false);
+      });
+      fireEvent.click(primary("Continue"));
+      await screen.findByText("One moment…");
+      return async (result: KeyTestError | null) => {
+        await act(async () => {
+          answer(result);
+          await pending;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+      };
+    }
+
+    const REJECTED: KeyTestError = { kind: "invalid_key", message: "Groq rejected this API key." };
+
+    it("Back drops it: no engine switch and no moving on, however late it answers", async () => {
+      const answer = await continuePending();
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      await screen.findByText("Which language will you mostly speak?");
+      await answer(null);
+      expect(backend.named("use_cloud_engine")).toEqual([]);
+      expect(backend.step).toBe("speech");
+      screen.getByText("Which language will you mostly speak?");
+      expect(document.querySelector(".ob-reason")?.textContent).toBe("");
+    });
+
+    it("Back drops a failure too: it isn't shown on the choices", async () => {
+      const answer = await continuePending();
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      await screen.findByText("Which language will you mostly speak?");
+      await answer(REJECTED);
+      expect(screen.queryByText("Groq rejected this API key.")).toBeNull();
+    });
+
+    it("a Provider change drops it: the old provider isn't selected", async () => {
+      const answer = await continuePending();
+      fireEvent.change(screen.getByRole("combobox", { name: "Provider" }), {
+        target: { value: "openai" },
+      });
+      await screen.findByLabelText("OpenAI API key");
+      await answer(null);
+      expect(backend.named("use_cloud_engine")).toEqual([]);
+      expect(backend.step).toBe("speech");
+      screen.getByText("Connect your key");
+    });
+
+    it("a Provider change drops a failure: it isn't blamed on the new provider", async () => {
+      const answer = await continuePending();
+      fireEvent.change(screen.getByRole("combobox", { name: "Provider" }), {
+        target: { value: "openai" },
+      });
+      await screen.findByLabelText("OpenAI API key");
+      await answer(REJECTED);
+      expect(screen.queryByText("Groq rejected this API key.")).toBeNull();
+    });
+
+    it("Replace drops it: the screen stays for the new key", async () => {
+      const answer = await continuePending();
+      fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+      await screen.findByLabelText("Groq API key");
+      await answer(null);
+      expect(backend.named("use_cloud_engine")).toEqual([]);
+      expect(backend.step).toBe("speech");
+    });
+
+    it("leaving the step drops it", async () => {
+      const answer = await continuePending();
+      cleanup();
+      await answer(null);
+      expect(backend.named("use_cloud_engine")).toEqual([]);
+      expect(backend.step).toBe("speech");
+    });
+
+    it("left alone, it still goes through", async () => {
+      const answer = await continuePending();
+      await answer(null);
+      await screen.findByText("Two permissions");
+      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "groq" });
+    });
+  });
+
   it("criterion 3: a key saved earlier is tested before moving on", async () => {
     backend.keys.groq = true;
     backend.testResult = { kind: "invalid_key", message: "Groq rejected this API key." };
-    await chooseOwnKey();
+    await chooseSavedKey();
     await waitFor(() => {
       expect(primary("Continue").disabled).toBe(false);
     });
     fireEvent.click(primary("Continue"));
     await screen.findByText("Groq rejected this API key.");
+    // The failure stays on this screen.
+    screen.getByText("Connect your key");
+    screen.getByText("✓ Key saved");
     expect(backend.step).toBe("speech");
     expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "groq", key: null });
+  });
+});
+
+describe("the form's and the chip's looks (round 2)", () => {
+  it("Test & Save is regular height inside the form", () => {
+    const form = /\.ob-key-panel button\.primary \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(form).toContain("min-height: var(--vc-control-h);");
+    // After the onboarding rule of the same weight, so it wins.
+    expect(css.indexOf(".ob-key-panel button.primary")).toBeGreaterThan(
+      css.indexOf(".onboarding button.primary"),
+    );
+  });
+
+  it("the selected chip has the primary colours in every state", () => {
+    const rules = [...css.matchAll(/button\.ob-chip\[aria-checked="true"\][^{]*\{([^}]*)\}/g)];
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, body = ""] of rules) {
+      expect(body).toContain("--vc-primary-");
+      expect(body).not.toContain("--vc-accent");
+    }
   });
 });
 
@@ -1038,7 +1409,7 @@ describe("the download strip", () => {
       backend.microphone = "granted";
       backend.accessibility = "granted";
       const { unmount } = show();
-      await screen.findByText("Downloading Parakeet English · 212 of 477 MB");
+      await screen.findByText("Downloading English · 212 of 477 MB");
       expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
       expect(screen.getByText("Download running")).toBeTruthy();
       unmount();
@@ -1048,12 +1419,12 @@ describe("the download strip", () => {
   it("Cancel stops it, keeps that it was the user's choice, and offers Resume", async () => {
     downloading();
     show();
-    await screen.findByText("Downloading Parakeet English · 212 of 477 MB");
+    await screen.findByText("Downloading English · 212 of 477 MB");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await screen.findByText("Download paused · 212 of 477 MB");
     expect(backend.downloadPaused).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
-    await screen.findByText("Downloading Parakeet English · 212 of 477 MB");
+    await screen.findByText("Downloading English · 212 of 477 MB");
     expect(backend.downloadPaused).toBe(false);
   });
 
@@ -1090,7 +1461,7 @@ describe("the download strip", () => {
     await screen.findByText(said);
     model.downloaded_bytes = 400_000_000;
     refocus();
-    await screen.findByText("Downloading Parakeet English · 400 of 477 MB", undefined, {
+    await screen.findByText("Downloading English · 400 of 477 MB", undefined, {
       timeout: 2000,
     });
     expect(screen.getByText(said)).toBeTruthy();
@@ -1464,12 +1835,27 @@ describe("Try it", () => {
     expect(screen.getByText(NOT_TESTED)).toBeTruthy();
   });
 
+  it("U11 criterion 7: no Reset to default, a small Change key, and the instruction", async () => {
+    backend.settings = { ...backend.settings, hotkey: "RightCmd" };
+    await stepOpen();
+    expect(screen.queryByRole("button", { name: /Reset to default|Use default/ })).toBeNull();
+    const change = screen.getByRole("button", { name: "Change key" });
+    expect(change.className).toBe("link");
+    expect(screen.getByText("Hold the key, say a sentence, let go.")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("Click the box");
+    fireEvent.click(change);
+    await screen.findByText("Press a key…");
+    expect(screen.queryByRole("button", { name: /Reset to default|Use default/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await screen.findByRole("button", { name: "Change key" });
+  });
+
   it("shows the dictation key and records a different one", async () => {
     await stepOpen();
     await waitFor(() => {
       expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌥");
     });
-    fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change key" }));
     keyDown("MetaRight");
     keyUp("MetaRight");
     await waitFor(() => {
@@ -1486,7 +1872,7 @@ describe("Try it", () => {
 
     it("gets it back after a new key is recorded, and stays empty", async () => {
       const box = await stepOpen();
-      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      fireEvent.click(screen.getByRole("button", { name: "Change key" }));
       box.blur();
       keyDown("MetaRight");
       keyUp("MetaRight");
@@ -1502,14 +1888,14 @@ describe("Try it", () => {
 
     it("gets it back after a cancelled recording, by Cancel and by Esc", async () => {
       const box = await stepOpen();
-      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      fireEvent.click(screen.getByRole("button", { name: "Change key" }));
       box.blur();
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
       await waitFor(() => {
         expect(document.activeElement).toBe(box);
       });
 
-      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      fireEvent.click(screen.getByRole("button", { name: "Change key" }));
       box.blur();
       keyDown("Escape");
       keyUp("Escape");
@@ -1518,25 +1904,6 @@ describe("Try it", () => {
       });
       expect(box.value).toBe("");
       releaseAllKeys();
-    });
-
-    it("gets it back after Reset to default", async () => {
-      const box = await stepOpen();
-      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
-      keyDown("MetaRight");
-      keyUp("MetaRight");
-      await waitFor(() => {
-        expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌘");
-      });
-      releaseAllKeys();
-      box.blur();
-      fireEvent.click(screen.getByRole("button", { name: "Reset to default" }));
-      await waitFor(() => {
-        expect(backend.settings.hotkey).toBe("RightAlt");
-      });
-      await waitFor(() => {
-        expect(document.activeElement).toBe(box);
-      });
     });
 
     it("gets it back when the window becomes active again", async () => {
@@ -1549,7 +1916,7 @@ describe("Try it", () => {
 
     it("isn't taken during a recording, not even by the window returning", async () => {
       const box = await stepOpen();
-      fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+      fireEvent.click(screen.getByRole("button", { name: "Change key" }));
       await screen.findByText("Press a key…");
       box.blur();
       const button = screen.getByRole("button", { name: "Cancel" });
@@ -1595,7 +1962,7 @@ describe("Ready", () => {
     show();
     await screen.findByText("You're set");
     await screen.findByText("Right ⌥ (hold)");
-    await screen.findByText("On this Mac · Parakeet English · ✓ Ready");
+    await screen.findByText("On this Mac · English · ✓ Ready");
     expect(screen.getByText("Find Vocet in the menu bar", { exact: false })).toBeTruthy();
     expect(screen.queryByText(NOT_TESTED)).toBeNull();
     expect(
@@ -1608,7 +1975,14 @@ describe("Ready", () => {
     model.state = "downloading";
     model.downloaded_bytes = 477_000_000 / 2;
     show();
-    await screen.findByText("On this Mac · Parakeet English · Getting the model ready: 50%");
+    await screen.findByText("On this Mac · English · Getting the model ready: 50%");
+  });
+
+  it("round 2: a multilingual model has Speech's name, with the count from its codes", async () => {
+    backend.settings = { ...backend.settings, local_model: QWEN.id };
+    backend.model(QWEN.id).state = "ready";
+    show();
+    await screen.findByText("On this Mac · 30 languages · ✓ Ready");
   });
 
   it("criterion 6: the own key says Connected only with a key saved", async () => {

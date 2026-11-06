@@ -714,6 +714,26 @@ function run(argv) {
       }
       return want ? "checked" : "unchecked";
     }
+    // A switch with no name of its own (System Settings): the first after its text.
+    case "switch-after": {
+      if (rest[2] !== "on" && rest[2] !== "off")
+        fail("switch-after wants on or off, not " + rest[2]);
+      const want = rest[2] === "on";
+      let label = false;
+      const box = walk(findWindow(appEl, rest[0]), (element) => {
+        const role = text(element, "AXRole");
+        if (label) return role === "AXCheckBox" || role === "AXSwitch";
+        if (role === "AXStaticText" && text(element, "AXValue") === rest[1]) label = true;
+        return false;
+      });
+      if (box === undefined) fail("no switch after " + JSON.stringify(rest[1]));
+      if (isChecked(box) !== want) {
+        const err = press(box, 5.0);
+        if (err !== 0) fail("pressing the switch failed (AX error " + err + ")");
+        waitFor(5, rest[1] + " " + rest[2], () => isChecked(box) === want);
+      }
+      return want ? "on" : "off";
+    }
     case "wait-text": {
       const window = findWindow(appEl, rest[0]);
       waitFor(Number(rest[2] || 10), JSON.stringify(rest[1]), () => showsText(window, rest[1]));

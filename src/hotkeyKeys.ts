@@ -221,3 +221,41 @@ export function keycapLabel(spec: string): string {
   }
   return labels.map((l) => l.text).join("");
 }
+
+/** Each modifier's name in words, on the Mac. */
+const LONG_NAMES: Record<Mod, string> = {
+  Ctrl: "Control",
+  Alt: "Option",
+  Shift: "Shift",
+  Cmd: "Command",
+};
+
+/** A spec's parts in words, with or without the modifier's symbol. */
+function longParts(spec: string, symbols: boolean): string[] {
+  return spec
+    .split("+")
+    .map((part) => part.trim())
+    .filter((part) => part !== "")
+    .map((part) => {
+      const lower = part.toLowerCase();
+      const side = lower.startsWith("left") ? "Left" : lower.startsWith("right") ? "Right" : null;
+      const mod = ALIASES[side === null ? lower : lower.slice(side.length)];
+      if (mod === undefined) return part;
+      const name = side === null ? LONG_NAMES[mod] : `${side} ${LONG_NAMES[mod]}`;
+      return symbols ? `${name} (${SYMBOLS[mod]})` : name;
+    });
+}
+
+/**
+ * The key in full, for where there is room (U11): `RightAlt` → `Right Option
+ * (⌥)`, `Ctrl+Shift+Space` → `Control (⌃) + Shift (⇧) + Space`. A key that isn't
+ * a modifier is shown as written, as on the keycap.
+ */
+export function keyLongLabel(spec: string): string {
+  return longParts(spec, true).join(" + ");
+}
+
+/** The same in words only, for a sentence read aloud: `Right Option`. */
+export function keySpokenName(spec: string): string {
+  return longParts(spec, false).join(" + ");
+}

@@ -37,14 +37,17 @@ e2e_setup_own_key_no_permissions() {
     wait_for_log 'onboarding shown at launch step=Welcome' 30
   expect "its window is on screen" ax_ok wait-window "$APP_NAME" "$OWNKEY_WINDOW" 10
   expect "the hotkey is off" wait_for_log 'PermissionMissing' 15
-  expect "press Continue" ax_ok press "$APP_NAME" "$OWNKEY_WINDOW" Continue
+  expect "press Get started" ax_ok press "$APP_NAME" "$OWNKEY_WINDOW" "Get started"
   expect "choose my own key" \
     ax_ok radio-press "$APP_NAME" "$OWNKEY_WINDOW" "Use my own Groq or OpenAI key"
+  expect "press Continue" ax_ok press "$APP_NAME" "$OWNKEY_WINDOW" Continue
+  expect "the next screen is Connect your key" \
+    ax_ok wait-text "$APP_NAME" "$OWNKEY_WINDOW" "Connect your key" 10
   expect "type the key the provider takes" \
     ax_ok secret-set "$APP_NAME" "$OWNKEY_WINDOW" api-key "$PROVIDER_GOOD_KEY"
   expect "press Test & Save" ax_ok press "$APP_NAME" "$OWNKEY_WINDOW" "Test & Save"
-  expect "the window says it is connected" \
-    ax_ok wait-text "$APP_NAME" "$OWNKEY_WINDOW" "Connected" 15
+  expect "the window says the key is saved" \
+    ax_ok wait-text "$APP_NAME" "$OWNKEY_WINDOW" "Key saved" 15
   GROQ_KEY_STORED=1
   expect "step 2 doesn't mention the hotkey" ownkey_message_absent
   expect "press Continue" ax_ok press "$APP_NAME" "$OWNKEY_WINDOW" Continue

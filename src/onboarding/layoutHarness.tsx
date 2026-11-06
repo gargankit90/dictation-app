@@ -7,7 +7,10 @@
 // paste panel and the text box's focus on Try it, and the language search box.
 // The page "ready-strip" is Ready at the usual 740×560 with its real text and the
 // download strip showing: the sharing switch's row must be in view without
-// scrolling (U10).
+// scrolling (U10). U11: Welcome's demo at the minimum and usual size (the real pill
+// on one line and unclipped, the keycap and its caption on one baseline), Speech
+// with the key selected, Connect your key in both states, and the key's row on Try
+// it on one line.
 
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { createRoot } from "react-dom/client";
@@ -35,9 +38,16 @@ const SETTLE_MS = 1800;
 // Which step: a page per step, since macOS's `open` drops a file URL's query.
 const view = document.body.dataset.step ?? "welcome";
 const isMore = view === "speech-more" || view === "speech-more-plain";
-const usualSize = view === "ready-strip";
+const isReadyName = view === "ready-english" || view === "ready-30";
+const isWelcomePlain = view === "welcome-plain" || view === "welcome-default";
+const isKeyScreen = view === "key-none" || view === "key-saved";
+const usualSize = view === "ready-strip" || view === "welcome-default";
 const steps: Record<string, Step> = {
   welcome: "welcome",
+  "welcome-plain": "welcome",
+  "welcome-default": "welcome",
+  "key-none": "speech",
+  "key-saved": "speech",
   speech: "speech",
   "speech-key": "speech",
   permissions: "permissions",
@@ -48,6 +58,8 @@ const steps: Record<string, Step> = {
   "try-default": "try",
   ready: "ready",
   "ready-strip": "ready",
+  "ready-english": "ready",
+  "ready-30": "ready",
 };
 const size = view === "try-default" || usualSize ? DEFAULT : MIN;
 const isTry = steps[view] === "try";
@@ -59,7 +71,13 @@ const plain =
   view === "try-default" ||
   view === "speech-more-plain" ||
   view === "settings-language" ||
+  isWelcomePlain ||
+  isReadyName ||
+  isKeyScreen ||
   usualSize;
+
+/** Ready's page is there for the strip: its model is still coming. */
+const downloaded = plain && view !== "ready-strip";
 
 const model: LocalModelInfo_Serialize = {
   id: "parakeet",
@@ -67,10 +85,10 @@ const model: LocalModelInfo_Serialize = {
   languages: "English only",
   language_codes: ["en"],
   size_bytes: 477_000_000,
-  downloaded_bytes: plain ? 477_000_000 : 212_000_000,
+  downloaded_bytes: downloaded ? 477_000_000 : 212_000_000,
   // The owner's Try it has its model: practice is open and the box can be focused.
-  state: plain ? "ready" : "downloading",
-  resumed_from_bytes: plain ? null : 100_000_000,
+  state: downloaded ? "ready" : "downloading",
+  resumed_from_bytes: downloaded ? null : 100_000_000,
   restarted: false,
   error: null,
   default: true,
@@ -82,10 +100,14 @@ const multilingual: LocalModelInfo_Serialize = {
   id: "qwen",
   name: "Qwen3 ASR 0.6B",
   languages: "30 languages, including English and Hindi",
-  language_codes: ["en", "hi", "fr"],
-  size_bytes: 589_000_000,
-  downloaded_bytes: 0,
-  state: "missing",
+  language_codes: [
+    ..."zh en yue ar de fr es pt id it ko ru th vi ja tr hi ms nl sv da fi pl cs fil fa el ro hu mk".split(
+      " ",
+    ),
+  ],
+  size_bytes: 589_560_480,
+  downloaded_bytes: view === "ready-30" ? 589_560_480 : 0,
+  state: view === "ready-30" ? "ready" : "missing",
   resumed_from_bytes: null,
   default: false,
 };
@@ -96,10 +118,10 @@ const settings: Settings_Serialize = {
   model: "whisper-large-v3-turbo",
   language: isMore ? "fr" : "hi",
   // The owner's state on Try it: a recorded two-key shortcut.
-  hotkey: isTry ? "RightAlt+RightCmd" : "RightAlt",
+  hotkey: isTry || view === "welcome-plain" ? "RightAlt+RightCmd" : "RightAlt",
   launch_at_login: false,
   transcription: view === "speech-key" ? "cloud" : "local",
-  local_model: "parakeet",
+  local_model: view === "ready-30" ? "qwen" : "parakeet",
   share_usage_events: true,
   history_limit: 25,
 };
@@ -112,7 +134,7 @@ const status: OnboardingStatus = {
   needs_relaunch: false,
   try_outcome: "not_tried",
   download_paused: false,
-  speech_choice: view === "speech-key" ? "own_key" : null,
+  speech_choice: view === "speech-key" || isKeyScreen ? "own_key" : null,
   sharing_on_throughout: true,
 };
 
@@ -159,7 +181,7 @@ mockIPC((command) => {
     case "get_engine_status":
       return { state: "ready", message: null };
     case "has_api_key":
-      return false;
+      return view === "key-saved";
     case "dictation_progress":
       progressCalls += 1;
       return progressCalls === 1 ? quiet : missed;
@@ -177,6 +199,8 @@ function makePseudoLong(root: HTMLElement) {
   const expand = (node: Text) => {
     const text = node.nodeValue ?? "";
     if (text.trim().length < 2 || text.includes(PSEUDO)) return;
+    // The pill keeps its real words: they're what's measured.
+    if (node.parentElement?.closest(".overlay") != null) return;
     node.nodeValue = `${text} ${text.slice(0, Math.ceil(text.length / 3))} ${PSEUDO}`;
   };
   const sweep = () => {
@@ -384,7 +408,7 @@ async function chipProblems(root: HTMLElement): Promise<string[]> {
   const chip = root.querySelector('.ob-chip[aria-checked="true"]');
   if (chip === null) return ["no language button is selected"];
   return withStatesAsClasses(() => {
-    const filled = [colour("var(--vc-accent)"), colour("var(--vc-accent-hover)")];
+    const filled = [colour("var(--vc-primary-bg)"), colour("var(--vc-primary-hover)")];
     const found: string[] = [];
     const states: string[][] = [
       [],
@@ -555,9 +579,147 @@ async function languageProblems(root: HTMLElement): Promise<string[]> {
   return found;
 }
 
-/** Everything U9 measures for this page, on top of the frame's own checks. */
+/** Where the baseline of the text in `element` is: an empty inline-block sits on it. */
+function baselineOf(element: Element): number {
+  const probe = document.createElement("span");
+  probe.style.cssText = "display:inline-block;width:0;height:0";
+  element.append(probe);
+  const y = probe.getBoundingClientRect().bottom;
+  probe.remove();
+  return y;
+}
+
+/** U11: the demo's real pill at its real size, and the keycap's line. */
+async function welcomeProblems(root: HTMLElement): Promise<string[]> {
+  const found: string[] = [];
+  const demo = root.querySelector(".ob-demo");
+  if (demo === null) return ["the demo is missing"];
+  // Up to a second into the loop it says Listening, with the hint: its widest state.
+  const pill = root.querySelector<HTMLElement>(".ob-demo-pill .overlay");
+  if (view !== "welcome") {
+    const label = pill?.querySelector(".overlay-label");
+    const hint = pill?.querySelector(".overlay-hint");
+    if (pill === null || label == null || hint == null) {
+      found.push("the pill isn't showing Listening with its hint");
+    } else {
+      const box = pill.getBoundingClientRect();
+      if (Math.abs(box.height - 40) > 1) {
+        found.push(`the pill is ${String(box.height)} px tall, so it wrapped or was scaled`);
+      }
+      if (hint.scrollWidth > hint.clientWidth) found.push("the pill's hint is cut off");
+      const line = label.getBoundingClientRect();
+      const small = hint.getBoundingClientRect();
+      if (Math.abs(line.top + line.height / 2 - (small.top + small.height / 2)) > 2) {
+        found.push("the pill's label and hint aren't on one line");
+      }
+      const card = demo.getBoundingClientRect();
+      if (box.left < card.left || box.right > card.right) found.push("the pill leaves the card");
+      const words = root.querySelector(".ob-demo-box")?.getBoundingClientRect();
+      if (words !== undefined && box.top < words.bottom) found.push("the pill covers the box");
+      const beats = root.querySelector(".ob-beats")?.getBoundingClientRect();
+      if (beats !== undefined && box.bottom > beats.top) found.push("the pill covers a caption");
+    }
+    const beat = root.querySelector(".ob-beat");
+    const caption = beat?.querySelector(".ob-beat-caption > span");
+    const keycap = beat?.querySelector("kbd");
+    if (beat == null || caption == null || keycap == null) {
+      found.push("the keycap's line is missing");
+    } else {
+      // Lit or not, the keycap stays where it is, on a looping demo.
+      const wasLit = beat.classList.contains("lit");
+      beat.classList.remove("lit");
+      const plainLeft = keycap.getBoundingClientRect().left;
+      beat.classList.add("lit");
+      const litLeft = keycap.getBoundingClientRect().left;
+      beat.classList.toggle("lit", wasLit);
+      if (Math.abs(plainLeft - litLeft) > 0.5) {
+        found.push(`the keycap moves ${String(litLeft - plainLeft)} px as its caption lights`);
+      }
+      const gap = Math.abs(baselineOf(caption) - baselineOf(keycap));
+      if (gap > 1) found.push(`the keycap's baseline is ${String(gap)} px from its caption's`);
+    }
+  }
+  await settle(0);
+  return found;
+}
+
+/** U11: Connect your key's two states, each as the spec has it. */
+function keyScreenProblems(root: HTMLElement): string[] {
+  const found: string[] = [];
+  const text = root.textContent;
+  if (!text.includes("Connect your key")) found.push("not on Connect your key");
+  const field = root.querySelector("#api-key");
+  if (view === "key-saved") {
+    if (field !== null) found.push("a saved key shows the field");
+    if (!text.includes("✓ Key saved")) found.push("a saved key doesn't say Key saved");
+    if (root.querySelector(".ob-key-saved button") === null) found.push("no Replace");
+  } else if (field === null) {
+    found.push("no key saved, and no field");
+  }
+  if (text.includes("Remove key")) found.push("setup offers Remove key");
+  // Regular height in the form: the footer's Continue is the main action.
+  const save = root.querySelector(".ob-key-panel button.primary");
+  const next = root.querySelector(".ob-footer .primary");
+  if (
+    save !== null &&
+    next !== null &&
+    save.getBoundingClientRect().height >= next.getBoundingClientRect().height
+  ) {
+    found.push("Test & Save is as big as Continue");
+  }
+  return found;
+}
+
+/** U11: label, keycap and Change key on one line, at this size. */
+function keyRowProblems(root: HTMLElement): string[] {
+  const row = root.querySelector(".ob-key-row");
+  const parts = [
+    row?.querySelector(".ob-label"),
+    row?.querySelector("kbd"),
+    row?.querySelector("button"),
+  ];
+  const rects = parts.map((part) => part?.getBoundingClientRect());
+  const [label, keycap, button] = rects;
+  if (label === undefined || keycap === undefined || button === undefined) {
+    return ["the key's row is incomplete"];
+  }
+  const found: string[] = [];
+  if (keycap.left < label.right || button.left < keycap.right) {
+    found.push("the key's row isn't left to right");
+  }
+  const middle = (rect: DOMRect) => rect.top + rect.height / 2;
+  if (
+    Math.abs(middle(label) - middle(keycap)) > 8 ||
+    Math.abs(middle(button) - middle(keycap)) > 8
+  ) {
+    found.push("the key's row isn't on one line");
+  }
+  const [labelPart, keycapPart, buttonPart] = parts;
+  if (labelPart != null && keycapPart != null && buttonPart != null) {
+    const line = baselineOf(labelPart);
+    for (const [name, part] of [
+      ["keycap", keycapPart],
+      ["Change key", buttonPart],
+    ] as const) {
+      const gap = Math.abs(baselineOf(part) - line);
+      if (gap > 1) found.push(`the ${name}'s baseline is ${String(gap)} px from its row's`);
+    }
+  }
+  return found;
+}
+
+/** Everything measured for this page, on top of the frame's own checks. */
 async function viewProblems(root: HTMLElement): Promise<string[]> {
   const found: string[] = [];
+  if (steps[view] === "welcome") found.push(...(await welcomeProblems(root)));
+  if (isKeyScreen) found.push(...keyScreenProblems(root));
+  if (isReadyName) {
+    const name = view === "ready-30" ? "30 languages" : "English";
+    if (!root.textContent.includes(`On this Mac · ${name} · ✓ Ready`)) {
+      found.push(`Ready doesn't say On this Mac · ${name} · ✓ Ready`);
+    }
+  }
+  if (view === "try-plain" || view === "try-default") found.push(...keyRowProblems(root));
   if (view === "speech" || isMore) found.push(...(await chipProblems(root)));
   if (isTry) found.push(...(await tryProblems(root)));
   if (isLanguage) found.push(...(await languageProblems(root)));
@@ -594,18 +756,37 @@ async function measure(root: HTMLElement, out: HTMLElement) {
   }
 }
 
+/** On the two choices the own key is selected: Continue opens its screen. */
+function openKeyScreen(root: HTMLElement): boolean {
+  if (root.querySelector(".ob-key-panel") !== null) return true;
+  const next = root.querySelector<HTMLButtonElement>(".ob-footer .primary");
+  const selected = root.querySelector<HTMLInputElement>('input[name="ob-engine"]:checked');
+  if (next !== null && !next.disabled && selected?.getAttribute("aria-label")?.includes("key")) {
+    next.click();
+  }
+  return false;
+}
+
 /** Measures once the step is on screen and the text has settled. */
 function measureWhenReady() {
   if (page === null || verdict === null) return;
   const ready =
-    view === "settings-language" ? openDictation(page) : page.querySelector(".ob-footer") !== null;
+    view === "settings-language"
+      ? openDictation(page)
+      : isKeyScreen
+        ? openKeyScreen(page)
+        : page.querySelector(".ob-footer") !== null;
   if (!ready) {
     window.setTimeout(measureWhenReady, 200);
     return;
   }
-  window.setTimeout(() => {
-    void measure(page, verdict);
-  }, SETTLE_MS);
+  // The demo's loop leaves Listening: its widest state is measured at its start.
+  window.setTimeout(
+    () => {
+      void measure(page, verdict);
+    },
+    steps[view] === "welcome" ? 300 : SETTLE_MS,
+  );
 }
 
 measureWhenReady();

@@ -3,6 +3,7 @@
 // (Migrated from the M3.4/K1/S1/A1 form tests.) The keys here are made up.
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { modelLabel } from "./settings/modelRow";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -573,6 +574,18 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     backend.models = [ready(ENGLISH), ready(MULTI)];
     await open("speech");
     expect(checked().map((row) => row.id)).toEqual(["engine-own-key"]);
+  });
+
+  it("U11 criterion 5: its names and sizes are setup's, from one function", async () => {
+    await open("speech");
+    expect(backend.models.length).toBeGreaterThan(1);
+    for (const model of backend.models) {
+      const [name, size] = modelLabel(model).split(" · ");
+      expect(radio(new RegExp(`^${name ?? "?"}`))).toBeTruthy();
+      expect(screen.getByRole("button", { name: `Download · ${size ?? "?"}` })).toBeTruthy();
+      // Setup's card shows this label, and the catalogue's name appears in neither.
+      expect(modelLabel(model)).not.toContain(model.name);
+    }
   });
 
   it("a row not downloaded shows Download and its size, and can't be selected", async () => {

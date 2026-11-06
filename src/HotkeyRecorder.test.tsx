@@ -265,3 +265,35 @@ describe("setup keeps its recorder (U11 changes it)", () => {
     expect(screen.queryByRole("button", { name: "Change…" })).toBeNull();
   });
 });
+
+describe("setup's option (U11)", () => {
+  it("has a plain Change key, without Use default, also while recording", () => {
+    render(<HotkeyRecorder setup value="RightCmd" onChange={() => Promise.resolve(null)} />);
+    const change = screen.getByRole("button", { name: "Change key" });
+    expect(change.className).toBe("link");
+    expect(screen.queryByRole("button", { name: /default/i })).toBeNull();
+    fireEvent.click(change);
+    screen.getByText("Press a key…");
+    expect(screen.queryByRole("button", { name: /default/i })).toBeNull();
+    screen.getByRole("button", { name: "Cancel" });
+  });
+
+  it("leaves the focus where the step puts it", () => {
+    const box = document.createElement("textarea");
+    document.body.append(box);
+    render(
+      <HotkeyRecorder
+        setup
+        value="RightAlt"
+        onChange={() => Promise.resolve(null)}
+        onRecording={(now) => {
+          if (!now) box.focus();
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Change key" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(document.activeElement).toBe(box);
+    box.remove();
+  });
+});

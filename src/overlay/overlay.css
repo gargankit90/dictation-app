@@ -1,22 +1,7 @@
-/* Colours, radii, spacing and type sizes come from ../styles/tokens.css (DS1). */
-
-/* The overlay window is transparent; only the pill is drawn. */
-html,
-body {
-  margin: 0;
-  height: 100%;
-  background: transparent;
-  overflow: hidden;
-  user-select: none;
-  cursor: default;
-}
-
-#root {
-  display: flex;
-  height: 100%;
-  align-items: flex-end;
-  justify-content: center;
-}
+/* Colours, radii, spacing and type sizes come from ../styles/tokens.css (DS1).
+   The pill alone: Welcome's demo draws it in the main window too (U11), so
+   nothing here may style the page. The overlay window's page is in
+   overlay-window.css. */
 
 /*
  * The recording pill (U4, design DS1): 40 px tall, 15 px label, 12 px hint.
