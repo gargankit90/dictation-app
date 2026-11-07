@@ -3,14 +3,14 @@
 #
 #   scripts/release.sh <version> [--notes <text>]             # dry run
 #   scripts/release.sh <version> [--notes <text>] --publish   # and upload
+#   (also --notarize, or --no-notarize for a dry test signing run)
 #
 # The release notes (the GitHub release's body and the "Update available"
 # text in latest.json) are the "## [<version>]" section of CHANGELOG.md, minus
 # its heading, unless --notes gives other text. A version with no section (or
 # an empty one) is refused before anything is built.
 #
-# Both build the signed release (`dictation-app Dev`, not notarised) and put
-# into target/release-out/v<version>/:
+# Both build the signed release and put into target/release-out/v<version>/:
 #
 #   Vocet_<version>_<arch>.dmg          the installer testers get
 #   Vocet_<version>_<arch>.app.tar.gz   the updater bundle
@@ -26,6 +26,23 @@
 # one command only: never exported, echoed, logged or written to a file. The
 # build's output is filtered so neither can reach the terminal even if a tool
 # printed one (scripts/test-release.sh proves it, also under `bash -x`).
+#
+# Which certificate signs (N1): RELEASE_IDENTITY in
+# scripts/release-signing.conf, or `dictation-app Dev` while that is empty. A
+# configured identity that is missing or expired stops the release: it never
+# falls back, because a release signed by another certificate costs every
+# tester their permissions. A "Developer ID Application:" identity is
+# notarised and stapled, with the Keychain profile RELEASE_NOTARY_PROFILE
+# names (`xcrun notarytool store-credentials`); this script never sees what is
+# in that profile, and notarytool's output never reaches the terminal, only
+# the status it reports and Apple's list of problems. The environment
+# variables RELEASE_IDENTITY and RELEASE_NOTARY_PROFILE override the file for
+# a dry run; --publish refuses them, so what is published is what was merged.
+#
+# Notarising changes the app (the ticket is stapled into it), so the updater
+# bundle and the DMG are made again from the stapled app. Both the updater
+# bundle and the DMG are then checked to hold an app with the same signature,
+# and the bundle's minisign signature is checked as before.
 #
 # Before anything is written, the script checks that <version> is the one in
 # src-tauri/tauri.conf.json, package.json and Cargo.toml. After the build it
@@ -53,7 +70,12 @@ PASSWORD_SERVICE=dictation-app-updater-password
 # sends nothing of that kind.
 POSTHOG_SERVICE=dictation-app-posthog-key
 SENTRY_SERVICE=dictation-app-sentry-dsn
-IDENTITY="dictation-app Dev"
+# The certificate a release is signed with until release-signing.conf names
+# another.
+FALLBACK_IDENTITY="dictation-app Dev"
+SIGNING_CONF=scripts/release-signing.conf
+DEVELOPER_ID_PREFIX="Developer ID Application:"
+ENTITLEMENTS=src-tauri/Entitlements.plist
 APP=Vocet
 
 say() { printf 'release: %s\n' "$*"; }
@@ -70,9 +92,12 @@ usage() {
 version=""
 notes=""
 publish=0
+notarize_flag=""
 while [ $# -gt 0 ]; do
   case $1 in
     --publish) publish=1 ;;
+    --notarize) notarize_flag=yes ;;
+    --no-notarize) notarize_flag=no ;;
     --notes)
       [ $# -ge 2 ] || die "--notes needs a text"
       notes=$2
@@ -119,7 +144,7 @@ cd "$(git rev-parse --show-toplevel)"
 # --- Checks that need no secret -------------------------------------------
 
 conf=src-tauri/tauri.conf.json
-for tool in jq git npm security codesign shasum; do
+for tool in jq git npm security codesign shasum hdiutil; do
   command -v "$tool" >/dev/null || die "$tool is not installed"
 done
 [ "$(uname -s)" = Darwin ] || die "releases are built on macOS"
@@ -165,8 +190,76 @@ case $(uname -m) in
   *) die "unknown architecture $(uname -m)" ;;
 esac
 
-grep -q "\"$IDENTITY\"" <<<"$(security find-identity -p codesigning 2>/dev/null || true)" ||
-  die "no \"$IDENTITY\" certificate in the keychain (scripts/make-dev-cert.sh); a release is never ad hoc"
+# --- Which certificate, and whether to notarise (nothing secret) ---------------
+
+# conf_value <name>: the value of NAME=value in the signing configuration. The
+# file is read, not run.
+conf_value() {
+  [ -f "$SIGNING_CONF" ] || return 0
+  sed -n "s/^$1=//p" "$SIGNING_CONF" | tail -n 1 | sed -e 's/^"\(.*\)"$/\1/'
+}
+
+if [ "$publish" = 1 ] && { [ -n "${RELEASE_IDENTITY:-}" ] || [ -n "${RELEASE_NOTARY_PROFILE:-}" ]; }; then
+  die "--publish uses $SIGNING_CONF as merged: unset RELEASE_IDENTITY and RELEASE_NOTARY_PROFILE"
+fi
+identity=${RELEASE_IDENTITY:-$(conf_value RELEASE_IDENTITY)}
+notary_profile=${RELEASE_NOTARY_PROFILE:-$(conf_value RELEASE_NOTARY_PROFILE)}
+fallback=0
+if [ -z "$identity" ]; then
+  identity=$FALLBACK_IDENTITY
+  fallback=1
+fi
+is_developer_id=0
+case $identity in "$DEVELOPER_ID_PREFIX"*) is_developer_id=1 ;; esac
+
+notarize=$is_developer_id
+case $notarize_flag in
+  yes)
+    [ "$is_developer_id" = 1 ] ||
+      die "--notarize needs a Developer ID identity; Apple does not notarise \"$identity\" (docs/releasing.md, \"Developer ID\")"
+    ;;
+  no)
+    [ "$publish" = 0 ] || die "--no-notarize is for a dry test signing run, not for --publish"
+    notarize=0
+    ;;
+esac
+
+identities=$(security find-identity -p codesigning 2>/dev/null || true)
+grep -qF "\"$identity\"" <<<"$identities" || {
+  [ "$fallback" = 1 ] &&
+    die "no \"$identity\" certificate in the keychain (scripts/make-dev-cert.sh); a release is never ad hoc"
+  die "no \"$identity\" certificate in the keychain, and $SIGNING_CONF asks for it: not falling back to \"$FALLBACK_IDENTITY\" (docs/releasing.md, \"Developer ID\")"
+}
+if [ "$is_developer_id" = 1 ]; then
+  # -v lists only what can sign right now: an expired or revoked certificate
+  # is in the first list but not in this one.
+  valid_identities=$(security find-identity -v -p codesigning 2>/dev/null || true)
+  grep -qF "\"$identity\"" <<<"$valid_identities" ||
+    die "the certificate \"$identity\" is in the keychain but can't sign (expired or revoked?); see \"When the certificate expires\" in docs/releasing.md"
+fi
+if [ "$fallback" = 1 ]; then
+  say "signing with the fallback \"$identity\": not notarised, testers clear the quarantine flag"
+  if grep -qF "\"$DEVELOPER_ID_PREFIX" <<<"$identities"; then
+    say "NOTE: this keychain has a Developer ID certificate, but RELEASE_IDENTITY in $SIGNING_CONF is empty (docs/releasing.md, \"Developer ID\")"
+  fi
+else
+  say "signing with \"$identity\""
+fi
+[ "$is_developer_id" = 0 ] || [ "$notarize" = 1 ] ||
+  say "WARNING: --no-notarize: macOS will refuse this build on a tester's Mac until it is notarised"
+
+# Checked before the build, so a missing credential costs a second, not a
+# build. notarytool's output is dropped: only its exit status is used here.
+if [ "$notarize" = 1 ]; then
+  for tool in xcrun spctl ditto; do
+    command -v "$tool" >/dev/null || die "$tool is not installed"
+  done
+  [ -n "$notary_profile" ] ||
+    die "notarisation is needed for \"$identity\", but RELEASE_NOTARY_PROFILE in $SIGNING_CONF is empty (docs/releasing.md, \"The notarisation credential\")"
+  xcrun notarytool history --keychain-profile "$notary_profile" >/dev/null 2>&1 ||
+    die "notarisation is needed, but the Keychain profile \"$notary_profile\" doesn't work (missing, expired, or Apple can't be reached): check with \`xcrun notarytool history --keychain-profile $notary_profile\`, and see docs/releasing.md, \"The notarisation credential\""
+  say "the notarisation credential \"$notary_profile\" works"
+fi
 
 # An OpenSSL that can check a minisign signature (Ed25519 and BLAKE2b-512);
 # macOS's own LibreSSL can't.
@@ -309,24 +402,30 @@ out=target/release-out/v$version
 rm -rf "$bundle/macos" "$bundle/dmg" "$out"
 # Tauri styles the DMG window by scripting Finder, which times out without
 # Automation permission (an ssh session); CI=true skips that styling.
-say "building $APP $version (release, signed \"$IDENTITY\"); this takes a few minutes"
+say "building $APP $version (release, signed \"$identity\"); this takes a few minutes"
+build_config=$(jq -nc --arg identity "$identity" \
+  '{bundle: {createUpdaterArtifacts: true, macOS: {signingIdentity: $identity, hardenedRuntime: true}}}')
 build_status=0
 # A subshell, so the telemetry values reach only this build; whatever the
 # caller exported under these names is dropped first.
 (
   unset DICTATION_POSTHOG_KEY DICTATION_SENTRY_DSN
+  # Tauri signs and notarises by itself if it finds these. This script does
+  # that, with a Keychain profile; a password in the environment stays out.
+  unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH \
+    APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_PROVIDER_SHORT_NAME
   if [ -n "$posthog_key" ]; then export DICTATION_POSTHOG_KEY="$posthog_key"; fi
   if [ -n "$sentry_dsn" ]; then export DICTATION_SENTRY_DSN="$sentry_dsn"; fi
   CI=true TAURI_SIGNING_PRIVATE_KEY="$secret_key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$secret_password" \
-    npm run tauri build -- --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}'
+    npm run tauri build -- --bundles app,dmg --config "$build_config"
 ) </dev/null 2>&1 | redact || build_status=$?
-secret_key=""
-secret_password=""
 posthog_key=""
 sentry_dsn=""
-[ "$build_status" = 0 ] || die "the build failed (exit $build_status)"
-
-# --- Check what was built ----------------------------------------------------
+if [ "$build_status" != 0 ]; then
+  secret_key=""
+  secret_password=""
+  die "the build failed (exit $build_status)"
+fi
 
 app_dir="$bundle/macos/$APP.app"
 archive="$bundle/macos/$APP.app.tar.gz"
@@ -336,12 +435,168 @@ dmg=$(find "$bundle/dmg" -name '*.dmg' -print -quit 2>/dev/null || true)
 [ -s "$archive.sig" ] || die "no signature $archive.sig"
 [ -n "$dmg" ] || die "no DMG under $bundle/dmg"
 
-codesign --verify --deep --strict "$app_dir" || die "the app's signature does not verify"
-# Captured first: `grep -q` would end the pipe early and, with pipefail,
+# signature_details <path>: codesign's description of a signature, and only
+# that. Captured first: `grep -q` would end a pipe early and, with pipefail,
 # fail it.
-signature=$(codesign -dvv "$app_dir" 2>&1)
-grep -qx "Authority=$IDENTITY" <<<"$signature" || die "the app is not signed \"$IDENTITY\""
+signature_details() { codesign -dvvv "$1" 2>&1 || true; }
+
+# The one signature everything must carry: the identity, hardened runtime,
+# the entitlements in the repository and nothing else.
+check_app_signature() {
+  local app=$1 details want have
+  codesign --verify --deep --strict "$app" || die "$app's signature does not verify"
+  details=$(signature_details "$app")
+  grep -qxF "Authority=$identity" <<<"$details" || die "$app is not signed \"$identity\""
+  grep -q '^CodeDirectory .*flags=[^ ]*runtime' <<<"$details" ||
+    die "$app is not signed with the hardened runtime"
+  want=$(grep -o 'com\.apple\.[a-z.-]*' "$ENTITLEMENTS" | sort -u)
+  have=$(codesign -d --entitlements - "$app" 2>/dev/null | grep -o 'com\.apple\.[a-z.-]*' | sort -u || true)
+  [ "$have" = "$want" ] ||
+    die "$app's entitlements are [$(tr '\n' ' ' <<<"$have")], not the ones in $ENTITLEMENTS: [$(tr '\n' ' ' <<<"$want")]"
+  if [ "$is_developer_id" = 1 ]; then
+    # Apple refuses a signature with no secure timestamp.
+    grep -q '^Timestamp=' <<<"$details" || die "$app's signature has no secure timestamp; notarisation would refuse it"
+  fi
+}
+
+# same_signature <app> <what>: <app> is the same signed code as the built app.
+same_signature() {
+  check_app_signature "$1"
+  [ "$(sed -n 's/^CDHash=//p' <<<"$(signature_details "$1")")" = "$built_cdhash" ] ||
+    die "$2 holds different code from the app that was built and checked"
+}
+
+# archive_check <archive>: the app in the updater bundle is the checked one.
+archive_check() {
+  local dir=$work/archive-check
+  rm -rf "$dir"
+  mkdir -p "$dir"
+  tar -xzf "$1" -C "$dir"
+  [ -d "$dir/$APP.app" ] || die "the updater bundle has no $APP.app at its top"
+  same_signature "$dir/$APP.app" "the updater bundle"
+  if [ "$notarize" = 1 ]; then
+    xcrun stapler validate "$dir/$APP.app" >/dev/null 2>&1 || die "the app in the updater bundle has no valid ticket"
+  fi
+}
+
+# dmg_check <dmg>: the app in the DMG is the checked one.
+dmg_check() {
+  local mount=$work/dmg-check
+  mkdir -p "$mount"
+  hdiutil attach "$1" -nobrowse -readonly -noautoopen -mountpoint "$mount" -quiet || die "could not mount $1"
+  ( same_signature "$mount/$APP.app" "the DMG" ) || {
+    hdiutil detach "$mount" -quiet -force || true
+    exit 1
+  }
+  if [ "$notarize" = 1 ] && ! xcrun stapler validate "$mount/$APP.app" >/dev/null 2>&1; then
+    hdiutil detach "$mount" -quiet -force || true
+    die "the app in the DMG has no valid ticket"
+  fi
+  hdiutil detach "$mount" -quiet -force || die "could not unmount $1"
+}
+
+# notary_submit <file> <label>: sends <file> to Apple and waits for the answer.
+# Only the status and Apple's list of problems are shown, never notarytool's
+# raw output.
+notary_submit() {
+  local file=$1 label=$2 answer status id
+  answer=$work/notary-$label.json
+  say "notarising the $label with Apple; this usually takes a few minutes"
+  xcrun notarytool submit "$file" --keychain-profile "$notary_profile" --wait --timeout 1h \
+    --output-format json >"$answer" 2>/dev/null || true
+  status=$(jq -r '.status // empty' "$answer" 2>/dev/null || true)
+  id=$(jq -r '.id // empty' "$answer" 2>/dev/null || true)
+  [ -n "$status" ] ||
+    die "notarytool gave no answer for the $label (check \`xcrun notarytool history --keychain-profile $notary_profile\`); nothing was published"
+  if [ "$status" != Accepted ]; then
+    if [ -n "$id" ] && xcrun notarytool log "$id" --keychain-profile "$notary_profile" "$work/notary-$label-log.json" >/dev/null 2>&1; then
+      jq -r '.issues[]? | "release:   \(.path // "?"): \(.message // "?")"' "$work/notary-$label-log.json" >&2 || true
+    fi
+    die "Apple's answer for the $label is \"$status\", not Accepted (submission ${id:-unknown}); nothing was published"
+  fi
+  say "Apple accepted the $label (submission $id)"
+}
+
+# staple <path> <label>: attaches and checks the ticket, offline from then on.
+staple() {
+  xcrun stapler staple "$1" >/dev/null 2>&1 || die "could not staple the ticket to the $2"
+  xcrun stapler validate "$1" >/dev/null 2>&1 || die "the ticket stapled to the $2 doesn't validate"
+}
+
+# assessed_as_notarized <what> <spctl args...>: Gatekeeper accepts it, as
+# notarised: the check a tester's Mac makes.
+assessed_as_notarized() {
+  local what=$1 said
+  shift
+  said=$(spctl --assess --verbose=2 "$@" 2>&1) || die "Gatekeeper refuses the $what: $said"
+  grep -q 'source=Notarized Developer ID' <<<"$said" || die "Gatekeeper doesn't see the $what as notarised: $said"
+  say "Gatekeeper accepts the $what (Notarized Developer ID)"
+}
+
+# rebuild_archive <app> <archive>: the updater bundle, as Tauri lays it out,
+# from the stapled app, signed again with the update key. Its filtered output
+# keeps the key off the terminal as the build's does.
+rebuild_archive() {
+  local status=0
+  rm -f "$2" "$2.sig"
+  # No AppleDouble files: they would land in the installed bundle and break
+  # its signature.
+  COPYFILE_DISABLE=1 tar -C "$(dirname "$1")" -czf "$2" "$(basename "$1")"
+  (
+    TAURI_SIGNING_PRIVATE_KEY="$secret_key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$secret_password" \
+      npm run tauri -- signer sign --app-version "$version" "$2"
+  ) </dev/null 2>&1 | redact >/dev/null || status=$?
+  [ "$status" = 0 ] || die "could not sign the updater bundle again (exit $status)"
+  [ -s "$2.sig" ] || die "signing the updater bundle again left no $2.sig"
+}
+
+# rebuild_dmg <app> <dmg>: the same DMG with the stapled app inside, then
+# signed. Through a writable copy, so its layout and icon stay as Tauri made them.
+rebuild_dmg() {
+  local rw=$work/rw.dmg mount=$work/rw-mount done=$work/stapled.dmg
+  rm -f "$rw" "$done"
+  mkdir -p "$mount"
+  hdiutil convert "$2" -format UDRW -quiet -o "$rw" || die "could not open the DMG for the stapled app"
+  hdiutil attach "$rw" -nobrowse -noautoopen -mountpoint "$mount" -quiet || die "could not mount the DMG for the stapled app"
+  if ! { rm -rf "${mount:?}/$APP.app" && ditto "$1" "$mount/$APP.app"; }; then
+    hdiutil detach "$mount" -quiet -force || true
+    die "could not put the stapled app into the DMG"
+  fi
+  hdiutil detach "$mount" -quiet || hdiutil detach "$mount" -quiet -force || die "could not unmount the DMG"
+  hdiutil convert "$rw" -format UDZO -imagekey zlib-level=9 -quiet -o "$done" || die "could not compress the DMG"
+  mv "$done" "$2"
+  codesign --force --sign "$identity" --timestamp "$2" || die "could not sign the DMG"
+}
+
+# --- Check what was built, and notarise it -------------------------------------
+
+check_app_signature "$app_dir"
+built_cdhash=$(sed -n 's/^CDHash=//p' <<<"$(signature_details "$app_dir")")
+[ -n "$built_cdhash" ] || die "codesign reports no CDHash for the app"
 scripts/check-dmg.sh "$dmg"
+
+if [ "$notarize" = 1 ]; then
+  app_zip=$work/$APP.zip
+  ditto -c -k --keepParent "$app_dir" "$app_zip"
+  notary_submit "$app_zip" app
+  staple "$app_dir" app
+  assessed_as_notarized app --type execute "$app_dir"
+  rebuild_archive "$app_dir" "$archive"
+  rebuild_dmg "$app_dir" "$dmg"
+  notary_submit "$dmg" DMG
+  staple "$dmg" DMG
+  assessed_as_notarized DMG --type open --context context:primary-signature "$dmg"
+  scripts/check-dmg.sh "$dmg"
+fi
+secret_key=""
+secret_password=""
+archive_check "$archive"
+dmg_check "$dmg"
+if [ "$notarize" = 1 ]; then
+  say "the updater bundle and the DMG hold the same notarised app, signed \"$identity\""
+else
+  say "the updater bundle and the DMG hold the same app, signed \"$identity\""
+fi
 
 verify_update "$pubkey" "$archive" "$(cat "$archive.sig")" "$version" ||
   die "the updater bundle's signature does not verify against $conf's public key"
@@ -362,6 +617,11 @@ scripts/make-latest-json.sh "$version" "$notes" "$out/$base.app.tar.gz" "$out/$b
 verify_update "$pubkey" "$out/$base.app.tar.gz" "$(jq -r '.platforms[].signature' "$out/latest.json")" "$version" ||
   die "latest.json's signature does not verify"
 (cd "$out" && shasum -a 256 -- "$base.dmg" "$base.app.tar.gz" latest.json THIRD-PARTY-LICENSES.txt >SHA256SUMS)
+if [ "$notarize" = 1 ]; then
+  say "signed \"$identity\", notarised and stapled"
+else
+  say "signed \"$identity\", NOT notarised"
+fi
 say "built into $out:"
 ls -l "$out"
 

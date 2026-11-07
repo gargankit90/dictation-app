@@ -32,6 +32,21 @@ The licences of the open-source software inside the app are on the release
 page as `THIRD-PARTY-LICENSES.txt`, and inside the app at
 `Vocet.app/Contents/Resources/`.
 
+<!-- SWITCH AT THE FIRST NOTARIZED RELEASE (N1, docs/releasing.md): replace the
+section "2. Open it for the first time (clear the quarantine flag)" below with
+this one, in the same pull request that sets RELEASE_IDENTITY.
+
+## 2. Open it for the first time
+
+Open **Vocet** from Applications. macOS checks it, and asks once whether you
+want to open an app downloaded from the internet: click **Open**. Vocet is
+signed with an Apple Developer ID and notarized by Apple, so that is all.
+
+If you are updating from an older Vocet instead of installing it for the first
+time, you don't need to do anything here; see "How updates arrive".
+
+END OF THE NOTARIZED VERSION -->
+
 ## 2. Open it for the first time (clear the quarantine flag)
 
 Vocet is not yet signed with an Apple Developer ID, so macOS blocks
