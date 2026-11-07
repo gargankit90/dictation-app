@@ -13,7 +13,7 @@ const MIC_PATH = "System Settings → Privacy & Security → Microphone → turn
 const ACCESSIBILITY_PATH = "System Settings → Privacy & Security → Accessibility → turn on Vocet.";
 export const ASKED_AGAIN = "macOS is asking for these again";
 const ACCESSIBILITY_ALREADY_ON =
-  "If Vocet already looks on in System Settings → Privacy & Security → Accessibility, macOS means the old version. Select Vocet there and click − to remove it, then click Allow here and turn on the new Vocet row. If there is no new row, add Vocet from Applications with +.";
+  "If Vocet already looks on in System Settings → Privacy & Security → Accessibility, macOS means the old version. Select Vocet there and click − to remove it, then click Allow or Open System Settings here and turn on the new Vocet row. If there is no new row, add Vocet from Applications with +.";
 
 interface Props {
   parts: FrameParts;
@@ -202,7 +202,9 @@ export function PermissionsStep({
               </button>
             </div>
             <Relaunch busy={busy} onRelaunch={() => void relaunch()}>
-              Turned it on and nothing changed? A relaunch makes it take. Your choices are kept.
+              {askedAgain
+                ? "Turned on the new Vocet row and nothing changed? A relaunch makes it take. Turning the old row off and on won't help: remove it, as above. Your choices are kept."
+                : "Turned it on and nothing changed? A relaunch makes it take. Your choices are kept."}
             </Relaunch>
           </>
         )}

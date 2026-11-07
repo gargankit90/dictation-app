@@ -144,6 +144,9 @@ struct State {
     accessibility_asked: bool,
     /// Leaving was recorded, and setup hasn't been opened again since.
     left_told: bool,
+    /// How many reads in a row found a permission missing after setup was
+    /// finished. One read is no proof it has gone, and what it decides is kept.
+    lost_reads: u8,
 }
 
 impl Default for Onboarding {
@@ -184,6 +187,7 @@ impl Onboarding {
                 told: Vec::new(),
                 accessibility_asked: false,
                 left_told: false,
+                lost_reads: 0,
             }),
             file,
         }
@@ -243,6 +247,11 @@ impl Onboarding {
     pub fn open(&self, readiness: Readiness) -> Step {
         let mut state = self.lock();
         state.progress.step = readiness.resume_at(state.progress.step);
+        if state.progress.completed && !(readiness.microphone && readiness.accessibility) {
+            // This read counts, so the window that opens because of it says why
+            // from its first status, not a poll later.
+            state.lost_reads = state.lost_reads.max(1);
+        }
         state.view = View::Onboarding;
         state.opened = true;
         state.left_told = false;
@@ -408,9 +417,15 @@ impl Onboarding {
             accessibility: accessibility == PermissionStatus::Granted,
         };
         let step = readiness.resume_at(state.progress.step);
-        let lost = state.progress.completed
+        let missing = state.progress.completed
             && (microphone != PermissionStatus::Granted
                 || accessibility != PermissionStatus::Granted);
+        state.lost_reads = if missing {
+            state.lost_reads.saturating_add(1)
+        } else {
+            0
+        };
+        let lost = state.lost_reads >= 2;
         let moved = step != state.progress.step || (lost && !state.progress.asked_again);
         state.progress.step = step;
         state.progress.asked_again |= lost;
@@ -636,8 +651,28 @@ mod tests {
             "nothing has gone"
         );
 
-        let status = Onboarding::load(&dir).status(&lost, false);
-        assert!(status.asked_again);
+        let blip = Onboarding::load(&dir);
+        assert!(
+            !blip.status(&lost, false).asked_again,
+            "one read is no proof"
+        );
+        assert!(
+            !blip.status(&back, false).asked_again,
+            "and a good read forgets it"
+        );
+        assert!(
+            !blip.status(&lost, false).asked_again,
+            "so reads have to be in a row"
+        );
+        assert!(
+            !Onboarding::load(&dir).status(&back, false).asked_again,
+            "nothing was kept"
+        );
+
+        let polled = Onboarding::load(&dir);
+        polled.status(&lost, false);
+        let status = polled.status(&lost, false);
+        assert!(status.asked_again, "two in a row, as the window polls");
         assert_eq!(status.step, Step::Permissions, "its step comes back");
 
         let relaunched = Onboarding::load(&dir);
@@ -653,7 +688,14 @@ mod tests {
 
         std::fs::write(dir.join(PROGRESS_FILE), &finished).unwrap();
         let again = Onboarding::load(&dir);
-        assert!(again.status(&lost, false).asked_again);
+        again.open(Readiness {
+            microphone: false,
+            ..Readiness::READY
+        });
+        assert!(
+            again.status(&lost, false).asked_again,
+            "the read that opened the window counts, so it says why at once"
+        );
         again.start_over_if_finished();
         assert!(
             !again.status(&back, false).asked_again,

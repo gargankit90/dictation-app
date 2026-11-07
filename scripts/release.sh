@@ -235,7 +235,10 @@ if [ "$is_developer_id" = 1 ]; then
   # is in the first list but not in this one.
   valid_identities=$(security find-identity -v -p codesigning 2>/dev/null || true)
   grep -qF "\"$identity\"" <<<"$valid_identities" ||
-    die "the certificate \"$identity\" is in the keychain but can't sign (expired or revoked?); see \"When the certificate expires\" in docs/releasing.md"
+    die "the certificate \"$identity\" is in the keychain but can't sign (expired or revoked?). Developer ID certificates last about a year; see \"When the certificate expires\" in docs/releasing.md"
+  # A renewal keeps the name, and codesign refuses a name that means two certificates.
+  [ "$(grep -cF "\"$identity\"" <<<"$valid_identities")" = 1 ] ||
+    die "two valid certificates are named \"$identity\", so codesign can't choose; remove the older one from the keychain (docs/releasing.md, \"When the certificate expires\")"
 fi
 if [ "$fallback" = 1 ]; then
   say "signing with the fallback \"$identity\": not notarised, testers clear the quarantine flag"
@@ -570,6 +573,11 @@ rebuild_dmg() {
 
 # --- Check what was built, and notarise it -------------------------------------
 
+# The update key's signature first: nothing here unpacks or trusts a bundle that
+# doesn't verify.
+verify_update "$pubkey" "$archive" "$(cat "$archive.sig")" "$version" ||
+  die "the updater bundle's signature does not verify against $conf's public key"
+
 check_app_signature "$app_dir"
 built_cdhash=$(sed -n 's/^CDHash=//p' <<<"$(signature_details "$app_dir")")
 [ -n "$built_cdhash" ] || die "codesign reports no CDHash for the app"
@@ -582,6 +590,8 @@ if [ "$notarize" = 1 ]; then
   staple "$app_dir" app
   assessed_as_notarized app --type execute "$app_dir"
   rebuild_archive "$app_dir" "$archive"
+  verify_update "$pubkey" "$archive" "$(cat "$archive.sig")" "$version" ||
+    die "the updater bundle's new signature does not verify against $conf's public key"
   rebuild_dmg "$app_dir" "$dmg"
   notary_submit "$dmg" DMG
   staple "$dmg" DMG
@@ -598,8 +608,6 @@ else
   say "the updater bundle and the DMG hold the same app, signed \"$identity\""
 fi
 
-verify_update "$pubkey" "$archive" "$(cat "$archive.sig")" "$version" ||
-  die "the updater bundle's signature does not verify against $conf's public key"
 say "the updater bundle's signature verifies against the public key and names $version"
 
 # --- The release folder ------------------------------------------------------

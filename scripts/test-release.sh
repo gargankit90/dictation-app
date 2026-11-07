@@ -677,7 +677,16 @@ if (
 ); then fail "an expired certificate passed"; fi
 grep -q "is in the keychain but can't sign (expired or revoked?)" "$work/out.txt" || fail "no message for an expired certificate"
 no_build "an expired certificate"
-pass "a configured certificate that is missing or expired stops the release; it never falls back"
+if (
+  export FAKE_IDENTITIES="$devid_listed"
+  FAKE_VALID_IDENTITIES="$devid_listed
+  3) 0000111122223333 \"$DEVID\""
+  export FAKE_VALID_IDENTITIES
+  run_release "$VERSION"
+); then fail "two valid certificates with one name passed"; fi
+grep -q 'two valid certificates are named' "$work/out.txt" || fail "no message for two certificates with one name"
+no_build "two certificates with one name"
+pass "a configured certificate that is missing, expired or ambiguous stops the release; it never falls back"
 
 # 6e. What Apple and macOS say.
 run_devid_refused "Apple's answer for the app is \"Invalid\"" "the app refused" FAKE_APP_STATUS=Invalid

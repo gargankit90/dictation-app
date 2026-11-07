@@ -1499,7 +1499,9 @@ describe("Permissions", () => {
       screen.getByText(/Your settings, history and saved key are\s+all still here/),
     ).toBeTruthy();
     expect(
-      screen.getByText(/click − to remove it, then click Allow here and turn on the new Vocet row/),
+      screen.getByText(
+        /click − to remove it, then click Allow or Open System Settings here and turn on the new Vocet row/,
+      ),
     ).toBeTruthy();
     expect(primary("Done").disabled).toBe(true);
     expect(screen.getByText(BOTH_REASON_DONE)).toBeTruthy();
@@ -1514,6 +1516,16 @@ describe("Permissions", () => {
     await waitFor(() => {
       expect(backend.named("finish_onboarding").length).toBe(1);
     });
+  });
+
+  it("N1: the relaunch hint agrees with removing the old row", async () => {
+    backend.askedAgain = true;
+    backend.microphone = "granted";
+    backend.accessibility = "not_determined";
+    show();
+    fireEvent.click(await screen.findByRole("button", { name: "Allow Accessibility" }));
+    await screen.findByText(/Turning the old row off and on won't help/);
+    expect(screen.queryByText(/^Turned it on and nothing changed/)).toBeNull();
   });
 
   it("N1: Done still closes it after a relaunch, with both allowed by then", async () => {

@@ -171,7 +171,9 @@ then shows your membership and a Team ID, 10 letters and digits. Only the
    keychain. It never leaves your Mac unless you export it.
 2. At <https://developer.apple.com/account/resources/certificates/add>, choose
    **Developer ID Application** (not "Developer ID Installer", and not "Apple
-   Development"), choose the **G2 Sub-CA** profile if asked, and upload that file.
+   Development"). When asked for the intermediary, choose **G2 Sub-CA**: Apple warns
+   that another choice may issue a certificate that stops working on February 1,
+   2027. Upload that file.
 3. Download the `.cer` file and double-click it. It joins your login keychain.
 4. Check it. This lists names only, no secrets:
 
@@ -275,20 +277,47 @@ run before this.
 
 ### When the certificate expires
 
-A Developer ID certificate lasts 5 years. Apple emails you before it ends, and
-`scripts/release.sh` stops with a clear message once it has.
+**Plan on renewing every year.** Apple's
+[notice of October 1, 2026](https://developer.apple.com/news/?id=w4atic4c) says
+certificates from the current authority (G2) expire annually. The 2031 date you may
+see is the authority's own, not your certificate's. Put a reminder in your calendar
+for a month before the date on yours; `scripts/release.sh` only stops with a message
+once the certificate can no longer sign.
 
-- **Copies people already have keep working.** Notarised, timestamped apps go on
-  opening after the certificate ends. Only signing something new stops.
-- **Make a new one**: repeat step 1, set the new name in
-  `scripts/release-signing.conf` if it changed, and do a test signing run. Your
-  team ID is the same, and Developer ID permissions follow the team, so people
-  should not lose their permissions (check it with the steps in "Confirm #259").
+**To see the real date**, look at
+<https://developer.apple.com/account/resources/certificates/list>, or run this,
+which reads only the public certificate:
+
+```sh
+security find-certificate -c "Developer ID Application: Your Name (ABCDE12345)" -p |
+  openssl x509 -noout -enddate
+```
+
+- **Copies people already have keep working.** Apple says signed, notarised software
+  with a secure timestamp keeps working after the certificate ends. Only signing
+  something new stops.
+- **Renew while the old one is still valid**, so that you can test before you need
+  it: repeat step 1 (a new request, G2 again) and back up the new key. Apple allows
+  up to five Developer ID Application certificates. The new one usually has the same
+  name, and `scripts/release.sh` stops if two valid certificates share a name, so once
+  the new one is installed, delete the old one from **My Certificates** in Keychain
+  Access (its `.p12` backup stays). Change `scripts/release-signing.conf` only if the
+  name changed. Then do a test signing run.
+- **Check permissions before the first release under each new certificate, at least
+  the first time.** Developer ID permissions should follow the team ID, which a
+  renewal keeps, so people should not lose them, and this now comes up every year.
+  It hasn't been tried. In the VM, use the steps in "Confirm #259": the old build
+  signed by the old certificate, the update by the new one. If macOS asks again,
+  say so in that release's notes, as in "Moving testers to Developer ID".
 - **Don't revoke** the old certificate just because it is old. Revoke only if the
-  private key leaks: revoking can stop what you already signed from opening, so
-  talk to Apple first.
-- **If your membership lapses**, the same is true of existing copies, but you
-  can't sign or notarise until you renew.
+  private key leaks: Apple says an app signed with a revoked certificate can no longer
+  be installed, nor launch if it already is. Talk to Apple first.
+- **If your membership lapses**, people can still download, install and run what you
+  signed. A certificate that is still valid goes on existing, but once it expires you
+  must be a member again to get a new one
+  ([Apple](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/)).
+  Those are different things. Apple's page doesn't say whether notarisation goes on
+  working during a lapse, so don't count on releasing until you have renewed.
 - **The app-specific password** stops working if you change your Apple ID password
   or revoke it. Repeat step 2.
 
@@ -304,6 +333,9 @@ file copied over ssh has no quarantine flag:
 APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (ABCDE12345)" \
   HOST=127.0.0.1 PORT=18741 scripts/updater-test.sh build
 ```
+
+For a renewal, build the old version before you remove the old certificate, and
+the new one after, with `KEEP_OLD=1` (`scripts/updater-test.sh`).
 
 1. Start the VM (`lume run dictation-vm`, with its window), and copy
    `target/updater-test/old/Vocet.app` to `~/Applications` in it, and the
@@ -358,8 +390,8 @@ the "Update available" dialog as well as on the release page:
 The stand-in is a second self-signed certificate. What can't be seen until the
 real one exists:
 
-- **Later updates.** Developer ID permissions follow the team ID, not one
-  certificate, so they should survive updates and certificate renewals, and the
+- **Later updates.** Developer ID permissions should follow the team ID, not one
+  certificate, so they should survive updates and the yearly renewals, and the
   Keychain prompt on each update should stop (#259). A self-signed certificate
   can't show this.
 - **Gatekeeper.** Nothing in the VM test is notarised. A notarised DMG with the
