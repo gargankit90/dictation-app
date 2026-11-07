@@ -113,9 +113,10 @@ pub struct OnboardingStatus {
     pub speech_choice: Option<SpeechChoice>,
     /// Sharing has been on for the whole of this walk through setup.
     pub sharing_on_throughout: bool,
-    /// Setup was finished before, so a permission missing now was taken away:
-    /// by a person, or by an update signed differently (N1, #206).
-    pub setup_finished_before: bool,
+    /// Setup was finished, then a permission went missing: by a person's hand,
+    /// or through an update signed differently (N1, #206). Until setup is
+    /// finished again the window says so, and Done closes it.
+    pub asked_again: bool,
 }
 
 /// The OS's permissions, for the onboarding commands.
@@ -260,6 +261,7 @@ impl Onboarding {
             return;
         }
         state.progress.step = Step::Welcome;
+        state.progress.asked_again = false;
         // A new walk: whether sharing is off now is noted when it opens.
         state.progress.sharing_was_off = false;
         let progress = state.progress;
@@ -279,6 +281,7 @@ impl Onboarding {
         let mut state = self.lock();
         state.view = View::Settings;
         state.progress.completed = true;
+        state.progress.asked_again = false;
         let progress = state.progress;
         drop(state);
         self.keep(&progress);
@@ -405,8 +408,12 @@ impl Onboarding {
             accessibility: accessibility == PermissionStatus::Granted,
         };
         let step = readiness.resume_at(state.progress.step);
-        let moved = step != state.progress.step;
+        let lost = state.progress.completed
+            && (microphone != PermissionStatus::Granted
+                || accessibility != PermissionStatus::Granted);
+        let moved = step != state.progress.step || (lost && !state.progress.asked_again);
         state.progress.step = step;
+        state.progress.asked_again |= lost;
         let (status, progress) = (
             OnboardingStatus {
                 view: state.view,
@@ -418,7 +425,7 @@ impl Onboarding {
                 download_paused: state.progress.download_paused,
                 speech_choice: state.progress.speech_choice,
                 sharing_on_throughout: !state.progress.sharing_was_off,
-                setup_finished_before: state.progress.completed,
+                asked_again: state.progress.asked_again,
             },
             state.progress,
         );
@@ -613,26 +620,44 @@ mod tests {
     };
 
     #[test]
-    fn n1_status_says_whether_setup_was_finished_before() {
-        let permissions = granted(false, false);
-        let dir = temp("finished-before");
+    fn n1_a_permission_lost_after_finishing_is_said_until_setup_is_finished_again() {
+        let dir = temp("asked-again");
+        let (lost, back) = (granted(false, false), granted(true, true));
         assert!(
-            !Onboarding::load(&dir)
-                .status(&permissions, false)
-                .setup_finished_before
+            !Onboarding::load(&dir).status(&lost, false).asked_again,
+            "a first run hasn't lost anything"
         );
+
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join(PROGRESS_FILE),
-            SetupProgress::ALREADY_SET_UP.to_json(),
-        )
-        .unwrap();
-        let status = Onboarding::load(&dir).status(&permissions, false);
-        assert!(status.setup_finished_before, "kept across launches");
-        assert_eq!(
-            status.step,
-            Step::Permissions,
-            "and the lost permission's step comes back"
+        let finished = SetupProgress::ALREADY_SET_UP.to_json();
+        std::fs::write(dir.join(PROGRESS_FILE), &finished).unwrap();
+        assert!(
+            !Onboarding::load(&dir).status(&back, false).asked_again,
+            "nothing has gone"
+        );
+
+        let status = Onboarding::load(&dir).status(&lost, false);
+        assert!(status.asked_again);
+        assert_eq!(status.step, Step::Permissions, "its step comes back");
+
+        let relaunched = Onboarding::load(&dir);
+        assert!(
+            relaunched.status(&back, false).asked_again,
+            "still so after a relaunch, with both allowed by then"
+        );
+        relaunched.finish();
+        assert!(
+            !Onboarding::load(&dir).status(&back, false).asked_again,
+            "finishing ends it"
+        );
+
+        std::fs::write(dir.join(PROGRESS_FILE), &finished).unwrap();
+        let again = Onboarding::load(&dir);
+        assert!(again.status(&lost, false).asked_again);
+        again.start_over_if_finished();
+        assert!(
+            !again.status(&back, false).asked_again,
+            "Run setup again is a new walk"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

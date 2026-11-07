@@ -97,7 +97,7 @@ class Backend {
   microphone: PermissionState = "not_determined";
   accessibility: PermissionState = "not_determined";
   needsRelaunch = false;
-  setupFinishedBefore = false;
+  askedAgain = false;
   tryOutcome: TryOutcome = "not_tried";
   sharingOnThroughout = true;
   downloadPaused = false;
@@ -135,7 +135,7 @@ class Backend {
       microphone: this.microphone,
       accessibility: this.accessibility,
       needs_relaunch: this.needsRelaunch,
-      setup_finished_before: this.setupFinishedBefore,
+      asked_again: this.askedAgain,
       try_outcome: this.tryOutcome,
       sharing_on_throughout: this.sharingOnThroughout,
       download_paused: this.downloadPaused,
@@ -1489,7 +1489,7 @@ describe("Permissions", () => {
   });
 
   it("N1: someone who finished setup is told why macOS asks again, and Done ends it", async () => {
-    backend.setupFinishedBefore = true;
+    backend.askedAgain = true;
     backend.microphone = "not_determined";
     backend.accessibility = "not_determined";
     show();
@@ -1516,6 +1516,16 @@ describe("Permissions", () => {
     });
   });
 
+  it("N1: Done still closes it after a relaunch, with both allowed by then", async () => {
+    backend.askedAgain = true;
+    backend.microphone = "granted";
+    backend.accessibility = "granted";
+    show();
+    await screen.findByText(ASKED_AGAIN + ".");
+    expect(primary("Done").disabled).toBe(false);
+    expect(screen.queryByText(/click − to remove it/)).toBeNull();
+  });
+
   it("N1: first-time setup and a repeat with both allowed show no such notice", async () => {
     backend.microphone = "not_determined";
     backend.accessibility = "not_determined";
@@ -1525,7 +1535,6 @@ describe("Permissions", () => {
     primary("Continue");
     first.unmount();
 
-    backend.setupFinishedBefore = true;
     backend.microphone = "granted";
     backend.accessibility = "granted";
     show();

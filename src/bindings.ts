@@ -755,10 +755,11 @@ export type OnboardingStatus_Deserialize = {
 	/**  Sharing has been on for the whole of this walk through setup. */
 	sharing_on_throughout: boolean,
 	/**
-	 *  Setup was finished before, so a permission missing now was taken away:
-	 *  by a person, or by an update signed differently (N1, #206).
+	 *  Setup was finished, then a permission went missing: by a person's hand,
+	 *  or through an update signed differently (N1, #206). Until setup is
+	 *  finished again the window says so, and Done closes it.
 	 */
-	setup_finished_before: boolean,
+	asked_again: boolean,
 };
 
 /**  What the settings window needs to show onboarding. */
@@ -785,10 +786,11 @@ export type OnboardingStatus_Serialize = {
 	/**  Sharing has been on for the whole of this walk through setup. */
 	sharing_on_throughout: boolean,
 	/**
-	 *  Setup was finished before, so a permission missing now was taken away:
-	 *  by a person, or by an update signed differently (N1, #206).
+	 *  Setup was finished, then a permission went missing: by a person's hand,
+	 *  or through an update signed differently (N1, #206). Until setup is
+	 *  finished again the window says so, and Done closes it.
 	 */
-	setup_finished_before: boolean,
+	asked_again: boolean,
 };
 
 /**  A permission's state, for the onboarding steps. */

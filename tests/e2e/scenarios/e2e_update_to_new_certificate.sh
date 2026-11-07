@@ -17,6 +17,8 @@
 #    Vocet's old row in Accessibility is removed and turned on again when macOS
 #    lists it anew, as the notice says. Turning the old row off and on is not
 #    enough: tried, and macOS keeps saying no.
+#    The running app usually takes the grant by itself; if macOS doesn't hand it
+#    over, the card's Relaunch and resume brings the window back with Done unlocked.
 # 5. Dictation works with the real hotkey and the real paste, and a recording from
 #    the microphone meets no permission error. Settings, history and the key are
 #    as they were; the login item's state is recorded as evidence.
@@ -37,6 +39,9 @@ NC_KEYCHAIN_PASSWORD=standin
 NC_SETTINGS_VM="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/settings.json"
 NC_PROGRESS_VM="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/onboarding-progress.json"
 NC_NOTICE="macOS is asking for these again"
+NC_DONE_LOCKED="Done unlocks when both are allowed"
+# Set when the running app didn't take the grant and Relaunch was pressed.
+NC_RELAUNCHED=0
 NC_EVIDENCE=""
 
 nc_note() {
@@ -230,7 +235,15 @@ nc_allow_and_turn_on() {
   # running app taking Accessibility up is.
   ax_switch on || nc_note "ax_switch on didn't see the switch settle"
   quit_system_settings
-  nc_ax_granted
+  nc_ax_granted && return 0
+  # macOS doesn't always hand a grant to the running app. The card offers this for
+  # that, and a person would press it.
+  nc_note "the running app didn't see the grant in 20 s: Relaunch and resume"
+  NC_RELAUNCHED=1
+  ax_ok press "$APP_NAME" "Set up" "Relaunch and resume" || return 1
+  ax_ok wait-text "$APP_NAME" "Set up" "Two permissions" 25 || return 1
+  ax_ok wait-no-text "$APP_NAME" "Set up" "Allow Accessibility" 15 &&
+    ax_ok wait-no-text "$APP_NAME" "Set up" "$NC_DONE_LOCKED" 15
 }
 
 # Gives the regular build back what the scenario took from it. The golden image's
@@ -362,11 +375,14 @@ e2e_update_to_new_certificate() {
   # 4. Recovery. The microphone first: macOS has forgotten the answer, so it asks.
   expect "the microphone is given back through macOS's prompt" nc_recover_microphone
   expect "Accessibility is given back as the notice says" nc_recover_accessibility
-  expect "the window says both are allowed, with no Allow left" \
-    ax_ok wait-no-text "$APP_NAME" "Set up" "Allow Accessibility" 15
+  expect "both are allowed: Done is unlocked" ax_ok wait-no-text "$APP_NAME" "Set up" "$NC_DONE_LOCKED" 15
   close_terminal || true
   nc_window_shot both-allowed
-  expect "the same process recovered: no relaunch, no reinstall" test "$pid" = "$(app_pid)"
+  if [ "$NC_RELAUNCHED" = 0 ]; then
+    expect "the same process recovered: no relaunch, no reinstall" test "$pid" = "$(app_pid)"
+  else
+    expect "it recovered through Relaunch: no reinstall" test "$(upd_installed_version)" = "$UPD_NEW"
+  fi
   expect "Done closes the window: no second setup" ax_ok press "$APP_NAME" "Set up" Done
   expect "the log says setup finished" wait_for_log 'onboarding finished' 10
 

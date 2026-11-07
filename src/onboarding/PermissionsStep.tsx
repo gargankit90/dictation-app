@@ -99,10 +99,10 @@ export function PermissionsStep({
   }
 
   const allowed = micAllowed && status.accessibility === "granted";
-  // Setup was finished, and a permission has gone since (N1, #206): most likely
-  // an update signed differently. Kept for this visit, so that the notice's
-  // promise holds once both are allowed: the window closes, with no second setup.
-  const [askedAgain] = useState(status.setup_finished_before && !allowed);
+  // Setup was finished, and a permission has gone since (N1, #206): most likely an
+  // update signed differently. The notice's promise holds once both are allowed:
+  // the window closes, with no second setup.
+  const askedAgain = status.asked_again;
 
   function badge(state: PermissionState, which: AppPermission) {
     if (state === "granted") return <span className="ob-allowed">✓ Allowed</span>;
