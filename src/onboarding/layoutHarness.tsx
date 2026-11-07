@@ -132,6 +132,7 @@ const status: OnboardingStatus = {
   microphone: view === "permissions" ? "denied" : "granted",
   accessibility: view === "permissions" ? "not_determined" : "granted",
   needs_relaunch: false,
+  asked_again: false,
   try_outcome: "not_tried",
   download_paused: false,
   speech_choice: view === "speech-key" || isKeyScreen ? "own_key" : null,

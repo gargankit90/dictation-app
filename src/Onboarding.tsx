@@ -332,6 +332,7 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
           onStatus={setStatus}
           needsRelaunch={downPolls >= RELAUNCH_AFTER_POLLS}
           onContinue={forward}
+          onDone={() => void leave(finishNow)}
         />
       )}
       {status.step === "try" && (

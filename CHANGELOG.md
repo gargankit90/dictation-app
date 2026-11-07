@@ -20,6 +20,7 @@ the release is cut.
 ### Fixed
 
 - Back from Troubleshoot or Report a problem returns to Help.
+- If macOS takes a permission away, the setup window now says why, that your settings, history and key are still here, and closes once you have allowed it again.
 
 ### Added
 
