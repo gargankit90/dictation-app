@@ -137,6 +137,13 @@ adapter. Tauri is a thin layer on top.
   signature, so a fixed certificate keeps permissions across rebuilds and
   updates.
 - Gatekeeper still blocks the first launch until we sign with a Developer ID.
+  `scripts/release.sh` is ready for that (N1): it signs with the identity in
+  `scripts/release-signing.conf`, notarizes and staples. `docs/releasing.md` has
+  the owner's steps and the reason for each entitlement.
+- Every build has the hardened runtime. It has one entitlement, the microphone.
+- A build signed by another certificate loses both permissions (the update
+  itself and the settings, history and key survive). The app notices and asks
+  again, in the setup window (N1, `e2e_update_to_new_certificate`).
 
 ## OS behaviour rules
 

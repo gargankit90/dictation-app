@@ -149,7 +149,10 @@ You install from the DMG once. After that, Vocet updates itself:
   time.
 - The app restarts as the new version by itself. **Microphone and
   Accessibility stay granted**: every build is signed the same way, so macOS
-  knows it is the same app. You don't clear the quarantine flag again.
+  knows it is the same app. You don't clear the quarantine flag again. (The one
+  exception is an update whose notes say it is signed differently: Vocet then
+  opens its setup window and shows you how to allow both again. Your settings,
+  history and saved key stay.)
 - **The app was called dictation-app before.** If you installed that build,
   an update turns it into Vocet (name, menu, windows) but the file in
   Applications may keep its old name, `dictation-app.app`. Your settings, saved

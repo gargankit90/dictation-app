@@ -55,6 +55,8 @@
 //   check-set <app> <window> <box> <on|off>  presses the checkbox if it
 //                                    isn't already so, then waits (5 s) until
 //                                    it is; prints "checked" or "unchecked"
+//   row-select <app> <window> <text>  selects the table row that shows <text>
+//                                    (System Settings' lists), as a click would
 //   wait-text <app> <window> <text> <secs>  until some element shows <text>
 //   wait-no-text <app> <window> <text> <secs>  until no element shows <text>
 //   close <app> <window>             presses the window's close button
@@ -713,6 +715,16 @@ function run(argv) {
         waitFor(5, rest[1] + " " + rest[2], () => isChecked(box) === want);
       }
       return want ? "checked" : "unchecked";
+    }
+    case "row-select": {
+      const row = walk(findWindow(appEl, rest[0]), (element) => {
+        if (text(element, "AXRole") !== "AXRow") return false;
+        return walk(element, (kid) => text(kid, "AXValue").trim() === rest[1]) !== undefined;
+      });
+      if (row === undefined) fail("no row showing " + JSON.stringify(rest[1]));
+      const err = setAttr(row, "AXSelected", $.NSNumber.numberWithBool(true));
+      if (err !== 0) fail("selecting " + rest[1] + " failed (AX error " + err + ")");
+      return "selected " + rest[1];
     }
     // A switch with no name of its own (System Settings): the first after its text.
     case "switch-after": {

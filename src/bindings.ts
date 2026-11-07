@@ -754,6 +754,11 @@ export type OnboardingStatus_Deserialize = {
 	speech_choice?: SpeechChoice | null,
 	/**  Sharing has been on for the whole of this walk through setup. */
 	sharing_on_throughout: boolean,
+	/**
+	 *  Setup was finished before, so a permission missing now was taken away:
+	 *  by a person, or by an update signed differently (N1, #206).
+	 */
+	setup_finished_before: boolean,
 };
 
 /**  What the settings window needs to show onboarding. */
@@ -779,6 +784,11 @@ export type OnboardingStatus_Serialize = {
 	speech_choice: SpeechChoice | null,
 	/**  Sharing has been on for the whole of this walk through setup. */
 	sharing_on_throughout: boolean,
+	/**
+	 *  Setup was finished before, so a permission missing now was taken away:
+	 *  by a person, or by an update signed differently (N1, #206).
+	 */
+	setup_finished_before: boolean,
 };
 
 /**  A permission's state, for the onboarding steps. */

@@ -612,11 +612,11 @@ fn onboarding_at_launch(
         .spawn(move || {
             let onboarding = app.state::<Arc<onboarding::Onboarding>>();
             let welcome_passed = onboarding.welcome_passed();
+            let completed = onboarding.completed();
             let readiness =
                 onboarding::readiness(&SystemPermissions::new(), welcome_passed, true, || {
-                    onboarding::key_saved(&config, &live)
+                    onboarding::key_saved_or(&config, &live, completed)
                 });
-            let completed = onboarding.completed();
             if !onboarding::show_at_launch(readiness, completed, launch.resumed, launch.scripted) {
                 tracing::info!(?readiness, ?launch, "onboarding not shown at launch");
                 return;
@@ -647,9 +647,10 @@ fn show_onboarding(app: &AppHandle) {
         .spawn(move || {
             let onboarding = app.state::<Arc<onboarding::Onboarding>>();
             let welcome_passed = onboarding.welcome_passed();
+            let completed = onboarding.completed();
             let readiness =
                 onboarding::readiness(&SystemPermissions::new(), welcome_passed, true, || {
-                    onboarding::key_saved(&config, &live)
+                    onboarding::key_saved_or(&config, &live, completed)
                 });
             let step = usage::setup_opened(&app.state::<usage::Usage>(), &onboarding, readiness);
             tracing::info!(?step, "onboarding opened from the tray");

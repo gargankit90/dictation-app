@@ -113,6 +113,9 @@ pub struct OnboardingStatus {
     pub speech_choice: Option<SpeechChoice>,
     /// Sharing has been on for the whole of this walk through setup.
     pub sharing_on_throughout: bool,
+    /// Setup was finished before, so a permission missing now was taken away:
+    /// by a person, or by an update signed differently (N1, #206).
+    pub setup_finished_before: bool,
 }
 
 /// The OS's permissions, for the onboarding commands.
@@ -415,6 +418,7 @@ impl Onboarding {
                 download_paused: state.progress.download_paused,
                 speech_choice: state.progress.speech_choice,
                 sharing_on_throughout: !state.progress.sharing_was_off,
+                setup_finished_before: state.progress.completed,
             },
             state.progress,
         );
@@ -468,6 +472,18 @@ pub fn readiness(
 /// With the on-device engine (L1) no key is needed, so the step counts as
 /// done and the keychain isn't read.
 pub fn key_saved<S: SecretStore + 'static>(config: &Arc<Config<S>>, live: &LiveEngine) -> bool {
+    key_saved_or(config, live, false)
+}
+
+/// [`key_saved`], with `no_answer` as the result when the keychain can't answer.
+/// Opening the window after setup was finished passes true (N1, #206, #259): after
+/// an update signed differently, macOS's prompt holds the read back, and that
+/// isn't a reason to send the person to add a key that is still there.
+pub fn key_saved_or<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    live: &LiveEngine,
+    no_answer: bool,
+) -> bool {
     let settings = config.settings().unwrap_or_default();
     if settings.transcription == dictation_core::settings::Transcription::Local {
         return true;
@@ -477,7 +493,7 @@ pub fn key_saved<S: SecretStore + 'static>(config: &Arc<Config<S>>, live: &LiveE
         Ok(key) => key.is_some(),
         Err(error) => {
             tracing::warn!(%error, "onboarding: couldn't check for a saved key");
-            false
+            no_answer
         }
     }
 }
@@ -595,6 +611,31 @@ mod tests {
         microphone: false,
         accessibility: false,
     };
+
+    #[test]
+    fn n1_status_says_whether_setup_was_finished_before() {
+        let permissions = granted(false, false);
+        let dir = temp("finished-before");
+        assert!(
+            !Onboarding::load(&dir)
+                .status(&permissions, false)
+                .setup_finished_before
+        );
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(PROGRESS_FILE),
+            SetupProgress::ALREADY_SET_UP.to_json(),
+        )
+        .unwrap();
+        let status = Onboarding::load(&dir).status(&permissions, false);
+        assert!(status.setup_finished_before, "kept across launches");
+        assert_eq!(
+            status.step,
+            Step::Permissions,
+            "and the lost permission's step comes back"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn u10_unknown_sharing_history_never_claims_on_since_setup_began() {
