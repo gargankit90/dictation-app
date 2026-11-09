@@ -886,6 +886,8 @@ async fn show_ui_events(
                 diagnostics.record_error(error);
                 tracing::info!(%error, "shown to the user");
             }
+            // A one-off notice (H2): no error code, no report entry.
+            UiEvent::NoSound => tracing::info!("no sound in the last recording; shown to the user"),
             // This line's text is what the e2e scenario waits for.
             UiEvent::HotkeyRestored => {
                 diagnostics.hotkey_restored();

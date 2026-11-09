@@ -358,6 +358,8 @@ impl TrayStatus {
                 }
                 self.error = Some(code);
             }
+            // A one-off notice, not a problem to fix: no attention (H2).
+            UiEvent::NoSound => {}
             UiEvent::HotkeyRestored => {
                 // The listener runs again: every hotkey problem is over.
                 self.hotkey_down = false;

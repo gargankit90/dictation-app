@@ -6,6 +6,8 @@
 # What the mock transcriber answers (--mock-text on the first launch).
 MOCK_TEXT="hello world"
 VM_SILENCE="$VM_FIXTURES/silence-16k.wav"
+# H2: 0.5 s of zeros, a silent clip under the 1 s that is told.
+VM_SILENCE_SHORT="$VM_FIXTURES/silence-short-16k.wav"
 VM_RIGHT_OPTION="$VM_FIXTURES/right-option.js"
 VM_POST_KEY="$VM_FIXTURES/post-key.js"
 VM_AX="$VM_FIXTURES/ax.js"
@@ -400,6 +402,9 @@ OVERLAY_HIDDEN=hidden
 # U4: the recording pill's Listening label and hint (the meter has no text).
 OVERLAY_RECORDING="shown: Listening Release to paste · Esc to cancel"
 OVERLAY_NO_SOUND="shown: No sound Check your microphone"
+# H2: after a silent hold of 1 s or more, in the error look (no device name
+# from the file source).
+OVERLAY_NO_SOUND_RELEASED="shown: No sound · Check your microphone"
 OVERLAY_TRANSCRIBING="shown: Transcribing…"
 OVERLAY_PASTE_SENT="shown: Done"
 
