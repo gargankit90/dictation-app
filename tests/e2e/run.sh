@@ -56,7 +56,7 @@ ALL_SCENARIOS=(
 )
 # Scenarios that need something the VM may lack (a microphone, a Groq key):
 # they may SKIP. Any other scenario that SKIPs fails the run.
-OPTIONAL_SCENARIOS=(e2e_real_mic e2e_real_groq e2e_update_keychain_control e2e_tray_menu_screenshots e2e_onboarding_screenshots e2e_setup_redesign_screens e2e_release_build_smoke)
+OPTIONAL_SCENARIOS=(e2e_real_mic e2e_real_groq e2e_update_keychain_control e2e_tray_menu_screenshots e2e_onboarding_screenshots e2e_setup_redesign_screens e2e_release_build_smoke e2e_notarized_dmg_first_launch)
 APP_PATH=target/debug/bundle/macos/$APP_NAME.app
 build=1
 reset=1

@@ -318,6 +318,11 @@ chmod +x "$stubs"/*
 repo=$work/repo
 mkdir -p "$repo/scripts" "$repo/src-tauri" "$repo/docs"
 cp "$root/scripts/release.sh" "$root/scripts/make-latest-json.sh" "$root/scripts/release-signing.conf" "$repo/scripts/"
+# The repository's own configuration names the Developer ID (checked in
+# section 6). The throwaway repository starts with the identity empty, the
+# state of a checkout without the certificate, and sections 1 to 6a rely on it.
+cp "$root/scripts/release-signing.conf" "$work/conf.as-merged"
+sed 's/^RELEASE_IDENTITY=.*/RELEASE_IDENTITY=/' "$work/conf.as-merged" >"$repo/scripts/release-signing.conf"
 cp "$root/src-tauri/Entitlements.plist" "$repo/src-tauri/"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$repo/scripts/check-licences.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$repo/scripts/check-dmg.sh"
@@ -543,7 +548,6 @@ pass "a wrong version, an app not signed dictation-app Dev or a missing Keychain
 
 DEVID="Developer ID Application: Test Person (ABCDE12345)"
 CONF=$repo/scripts/release-signing.conf
-cp "$CONF" "$work/conf.as-merged"
 NOTARY_SECRET=app-specific-$RANDOM$RANDOM-throwaway
 devid_listed="  1) 0123456789ABCDEF \"dictation-app Dev\"
   2) FEDCBA9876543210 \"$DEVID\""
@@ -569,16 +573,28 @@ no_credential_shown() {
 [ "$(grep -o 'com\.apple\.[a-z.-]*' "$root/src-tauri/Entitlements.plist" | sort -u)" = "com.apple.security.device.audio-input" ] ||
   fail "Entitlements.plist has more than the microphone: write down why in docs/releasing.md, then change this test"
 pass "tauri.conf.json turns on the hardened runtime and Entitlements.plist has only the microphone"
-# Both first launches are in the tester guide until the first notarized release.
-grep -q '^## 2. Open it for the first time (clear the quarantine flag)$' "$root/docs/TESTERS.md" &&
-  grep -q '^xattr -dr com.apple.quarantine /Applications/Vocet.app$' "$root/docs/TESTERS.md" ||
-  fail "docs/TESTERS.md has lost the current quarantine steps"
+# Since N2 the tester guide has only the notarized first launch: no quarantine
+# or xattr step, and "Not notarised" is not a known limit.
 grep -q '^<!-- SWITCH AT THE FIRST NOTARIZED RELEASE' "$root/docs/TESTERS.md" &&
   grep -q '^## 2. Open it for the first time$' "$root/docs/TESTERS.md" ||
   fail "docs/TESTERS.md has lost the version for notarized builds"
-pass "the tester guide has the current first launch and the one for notarized builds"
+! grep -qi 'xattr\|clear the quarantine' "$root/docs/TESTERS.md" ||
+  fail "docs/TESTERS.md still has the quarantine steps for a build that isn't notarized"
+! grep -qi 'not notari' "$root/docs/TESTERS.md" ||
+  fail "docs/TESTERS.md still lists \"Not notarised\" as a known limit"
+pass "the tester guide has the notarized first launch and no quarantine steps"
 
-# 6a. Empty configuration: the fallback, no notarisation.
+# The file as merged (N2) names the owner's Developer ID certificate and the
+# notarytool profile; it is a name, not a secret.
+grep -qx 'RELEASE_IDENTITY=Developer ID Application: Ankit Garg (XF2G42MVHN)' "$work/conf.as-merged" ||
+  fail "scripts/release-signing.conf doesn't name the Developer ID certificate"
+grep -qx 'RELEASE_NOTARY_PROFILE=vocet-notary' "$work/conf.as-merged" ||
+  fail "scripts/release-signing.conf lost the notarytool profile name"
+pass "scripts/release-signing.conf names the Developer ID certificate and the vocet-notary profile"
+
+# 6a. Empty configuration (a checkout that emptied it): the fallback, no
+# notarisation.
+conf_for "" vocet-notary
 run_release "$VERSION" || fail "the fallback dry run failed"
 grep -q 'signing with the fallback "dictation-app Dev"' "$work/out.txt" || fail "no fallback line"
 grep -qF '"signingIdentity":"dictation-app Dev"' "$calls/npm" || fail "the build wasn't told the fallback identity"

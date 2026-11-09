@@ -32,40 +32,24 @@ The licences of the open-source software inside the app are on the release
 page as `THIRD-PARTY-LICENSES.txt`, and inside the app at
 `Vocet.app/Contents/Resources/`.
 
-<!-- SWITCH AT THE FIRST NOTARIZED RELEASE (N1, docs/releasing.md): replace the
-section "2. Open it for the first time (clear the quarantine flag)" below with
-this one, in the same pull request that sets RELEASE_IDENTITY.
+<!-- SWITCH AT THE FIRST NOTARIZED RELEASE (N2, docs/releasing.md): this is the
+notarized version of section 2. The old Terminal steps are gone; releases are
+Developer ID-signed and notarized from the first one. -->
 
 ## 2. Open it for the first time
 
 Open **Vocet** from Applications. macOS checks it, and asks once whether you
-want to open an app downloaded from the internet: click **Open**. Vocet is
-signed with an Apple Developer ID and notarized by Apple, so that is all.
+are sure you want to open an app you downloaded (_"Vocet is an app created by
+the app Safari. Are you sure you want to open it?"_, or "downloaded from the
+Internet", with "Apple checked it for malicious software and none was
+detected"): click **Open**. Vocet is signed with an Apple Developer ID and
+notarized by Apple, so that is all.
+
+If macOS still refuses to open it, tell us in a bug report (see "Report a bug" below) with the
+exact words it shows.
 
 If you are updating from an older Vocet instead of installing it for the first
 time, you don't need to do anything here; see "How updates arrive".
-
-END OF THE NOTARIZED VERSION -->
-
-## 2. Open it for the first time (clear the quarantine flag)
-
-Vocet is not yet signed with an Apple Developer ID, so macOS blocks
-the first launch of anything downloaded from a browser, chat or email with
-_"Vocet can't be opened because Apple cannot check it for malicious
-software"_. You tell macOS you trust it once. Open **Terminal** (Spotlight:
-`Terminal`) and paste this. It assumes you already dragged the app into
-**Applications** (section 1); if you opened it from the DMG window instead,
-do that first, or the command says "No such file":
-
-```sh
-xattr -dr com.apple.quarantine /Applications/Vocet.app
-```
-
-It prints nothing when it works. Then open **Vocet** from Applications.
-
-If you would rather not use Terminal: try to open the app, click **Done** on
-the warning, then go to **System Settings > Privacy & Security**, scroll down
-to _"Vocet was blocked…"_ and click **Open Anyway**.
 
 Vocet lives in the **menu bar** (top right of the screen, an icon
 without a Dock entry), not in the Dock. The first time it opens, a **Set up
@@ -149,7 +133,7 @@ You install from the DMG once. After that, Vocet updates itself:
   time.
 - The app restarts as the new version by itself. **Microphone and
   Accessibility stay granted**: every build is signed the same way, so macOS
-  knows it is the same app. You don't clear the quarantine flag again. (The one
+  knows it is the same app, and an update never asks whether to open it. (The one
   exception is an update whose notes say it is signed differently: Vocet then
   opens its setup window and shows you how to allow both again. Your settings,
   history and saved key stay.)
@@ -234,7 +218,6 @@ public issue; see [SECURITY.md](../SECURITY.md).
 The same list is in the [changelog](../CHANGELOG.md).
 
 - Apple Silicon Macs only, macOS 13 or newer. Windows comes later.
-- Not notarised, hence the step in section 2.
 - Fully offline use of **On this Mac** is not yet checked on a Mac with no
   network.
 - A crash inside the on-device engine is not reported (it could contain what

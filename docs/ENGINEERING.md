@@ -136,10 +136,13 @@ adapter. Tauri is a thin layer on top.
   FreeFlow Dev`. macOS ties Accessibility and Microphone permission to the
   signature, so a fixed certificate keeps permissions across rebuilds and
   updates.
-- Gatekeeper still blocks the first launch until we sign with a Developer ID.
-  `scripts/release.sh` is ready for that (N1): it signs with the identity in
-  `scripts/release-signing.conf`, notarizes and staples. `docs/releasing.md` has
-  the owner's steps and the reason for each entitlement.
+- Releases are signed with a Developer ID Application certificate and
+  notarized (N2). `scripts/release.sh` signs with the identity in
+  `scripts/release-signing.conf`, notarizes and staples the app and the DMG, and
+  stops rather than falls back if that certificate can't sign. The first test
+  signing run passed on 2026-11-09. Development and CI builds still use
+  `dictation-app Dev` (or ad hoc in CI). `docs/releasing.md` has the owner's
+  steps and the reason for each entitlement.
 - Every build has the hardened runtime. It has one entitlement, the microphone.
 - A build signed by another certificate loses both permissions (the update
   itself and the settings, history and key survive). The app notices and asks

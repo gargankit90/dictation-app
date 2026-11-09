@@ -89,10 +89,6 @@ typed into the app you are using.
 
 ### Known limitations
 
-- **Not yet notarized.** macOS blocks the first launch with "Apple cannot
-  check it for malicious software". Open it once with the steps in section 2
-  of the [tester guide](docs/TESTERS.md#2-open-it-for-the-first-time-clear-the-quarantine-flag).
-  Updates do not ask again.
 - **Fully offline use is not yet checked.** On-device transcription is built
   to need no network once the model is downloaded, but we have not yet
   verified it on a Mac that is offline.

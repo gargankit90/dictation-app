@@ -1,8 +1,8 @@
 # M5.4 criterion 3: install the way docs/TESTERS.md says, in a freshly
 # restored VM. The DMG goes into the VM as a browser download would leave it
 # (with the quarantine flag), is mounted, the app is copied out, and the
-# guide's own `xattr` command (read from docs/TESTERS.md, so the guide can't
-# drift from what is tested) clears the quarantine. A first dictation (mock
+# scenario's own `xattr` clears the quarantine (the debug build isn't
+# notarized; the guide has no such step). A first dictation (mock
 # transcriber, tone fixture) pastes into TextEdit. Then the guide's sections
 # 3 to 5: both permissions hold (permissions_hold), the made-up key is typed
 # into Settings, Test & Save works against the local provider (the
@@ -12,8 +12,6 @@
 # What it cannot check: the Gatekeeper dialog itself and the Microphone and
 # Accessibility prompts (the golden image has both granted to the app signed
 # `dictation-app Dev`, as a tester's Mac has once they allowed them).
-
-TESTERS_DOC=docs/TESTERS.md
 
 VM_DMG_DIR="/Users/$VM_USER/Downloads"
 VM_DMG_MOUNT="/Users/$VM_USER/e2e-dmg-mount"
@@ -67,20 +65,16 @@ e2e_dmg_install() {
   expect "the licence notice is inside the app" \
     vm "test -s $(q "$VM_APP/Contents/Resources/THIRD-PARTY-LICENSES.txt")"
 
-  # README step 2: macOS flags an app dragged out of a downloaded DMG; the
-  # README's xattr command clears it.
+  # README step 2: macOS flags an app dragged out of a downloaded DMG. The
+  # guide no longer has a Terminal step (releases are notarized, N2), but this
+  # debug build is signed `dictation-app Dev` and isn't, so the scenario clears
+  # the flag itself, to be able to start the app. That a notarized DMG opens
+  # with the flag set and no workaround is e2e_notarized_dmg_first_launch.
   vm "xattr -rw com.apple.quarantine '0083;$(printf '%x' "$(date +%s)");Safari;' $(q "$VM_APP")"
   expect "the app starts out quarantined" \
     vm "xattr -p com.apple.quarantine $(q "$VM_APP")"
-  # The guide's command, for /Applications; the VM's user installs into
-  # ~/Applications (see above), so only the path is swapped.
-  local doc_command vm_command
-  doc_command=$(grep -m 1 '^xattr -dr com.apple.quarantine /Applications/Vocet.app$' "$TESTERS_DOC" || true)
-  expect "docs/TESTERS.md has the quarantine command" test -n "$doc_command"
-  vm_command=${doc_command//\/Applications\/Vocet.app/$(q "$VM_APP")}
-  log "  running the guide's command: $vm_command"
-  [ -z "$vm_command" ] || vm "$vm_command"
-  expect "the guide's xattr command clears the quarantine" e2e_not_quarantined "$VM_APP"
+  vm "xattr -dr com.apple.quarantine $(q "$VM_APP")"
+  expect "the test's own xattr clears the quarantine (this build isn't notarized)" e2e_not_quarantined "$VM_APP"
 
   # README step 5: a first dictation.
   launch_full
