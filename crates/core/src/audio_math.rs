@@ -200,6 +200,18 @@ pub enum Verdict {
     NoSustainedSound,
 }
 
+/// A silent clip at least this long is worth telling the person about (H2):
+/// shorter is a tap or a key click, and stays silent.
+pub const SILENT_NOTICE_MIN: Duration = Duration::from_secs(1);
+
+/// Whether a clip with this `verdict` and `clip_duration` should show
+/// "No sound" after the release (H2): only [`Verdict::Silent`], and only
+/// from [`SILENT_NOTICE_MIN`] on. Taps, clicks and empty clips stay quiet.
+#[must_use]
+pub fn silent_clip_is_worth_telling(verdict: Verdict, clip_duration: Duration) -> bool {
+    verdict == Verdict::Silent && clip_duration >= SILENT_NOTICE_MIN
+}
+
 /// Decides whether a recording goes to the transcriber, checking emptiness,
 /// then length, then loudness frame by frame ([`is_silent_by_frame`]) against
 /// `silence_threshold` (normally [`DEFAULT_SILENCE_THRESHOLD`]), then, for a
@@ -227,6 +239,26 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+
+    /// H2 criteria 1 and 2: only a Silent clip of at least 1 s is told.
+    #[test]
+    fn h2_only_a_silent_clip_of_a_second_or_more_is_worth_telling() {
+        let ms = Duration::from_millis;
+        assert!(!silent_clip_is_worth_telling(Verdict::Silent, ms(999)));
+        assert!(silent_clip_is_worth_telling(Verdict::Silent, ms(1_000)));
+        assert!(silent_clip_is_worth_telling(Verdict::Silent, ms(30_000)));
+        for verdict in [
+            Verdict::Transcribe,
+            Verdict::Empty,
+            Verdict::TooShort,
+            Verdict::NoSustainedSound,
+        ] {
+            assert!(
+                !silent_clip_is_worth_telling(verdict, ms(5_000)),
+                "{verdict:?}"
+            );
+        }
+    }
 
     const RATE: u32 = 16_000;
 

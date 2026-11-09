@@ -134,6 +134,8 @@ fn transition(state: State, event: Event) -> (State, Vec<Command>) {
         (State::Transcribing, Event::TranscriptDropped) | (State::Inserting, Event::InsertDone) => {
             (State::Idle, Vec::new())
         }
+        // A silent clip worth a word: back to Idle, and say so (H2).
+        (State::Transcribing, Event::TranscriptSilent) => (State::Idle, vec![Command::ShowNoSound]),
         (State::Inserting, Event::SecureInputBlocked) => fail(DictationError::SecureInput),
         // The recording just stopped never started: the app layer learnt
         // only then that the permission was missing (M2.3, #81).
@@ -174,6 +176,39 @@ mod tests {
         State::Recording {
             started_at: ms(millis),
         }
+    }
+
+    /// H2 criterion 1/3/4: a silent clip goes Transcribing → Idle with
+    /// `ShowNoSound` only: no error, nothing to insert.
+    #[test]
+    fn h2_a_silent_clip_returns_to_idle_and_says_so() {
+        let (state, commands) = step(State::Transcribing, Event::TranscriptSilent);
+        assert_eq!(state, State::Idle);
+        assert_eq!(
+            commands,
+            [Command::ShowNoSound, Command::StateChanged(Phase::Idle)]
+        );
+        // The next press records normally.
+        let (state, commands) = step(state, Event::HotkeyPressed(ms(5_000)));
+        assert_eq!(state, recording_since(5_000));
+        assert_eq!(commands[0], Command::StartRecording);
+    }
+
+    /// H2: only Transcribing takes it; anywhere else it is a late result.
+    #[test]
+    fn h2_a_late_silent_result_is_ignored() {
+        for state in [State::Idle, recording_since(0), State::Inserting] {
+            assert_eq!(step(state, Event::TranscriptSilent), (state, Vec::new()));
+        }
+    }
+
+    /// H2 criterion 4: a cancelled recording never reaches Transcribing, so
+    /// it says nothing.
+    #[test]
+    fn h2_a_cancelled_recording_shows_nothing() {
+        let (state, commands) = step(recording_since(0), Event::CancelPressed);
+        assert_eq!(state, State::Idle);
+        assert!(!commands.contains(&Command::ShowNoSound));
     }
 
     #[test]

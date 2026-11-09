@@ -2,6 +2,8 @@
 # is 1.5 s of zeros; the pipeline doesn't send it to the transcriber (#69,
 # #72), so no text is pasted and the clipboard isn't touched. The dictation is
 # dropped (M4.2's TranscriptDropped): straight back to Idle, no error shown.
+# H2: the pill says "No sound" after the release, as a one-off notice (the
+# menu bar's attention state is untouched).
 
 e2e_silence() {
   local sentinel="e2e-silence-sentinel-$$"
@@ -16,6 +18,8 @@ e2e_silence() {
   phases=$(logged_phases | paste -sd ' ' -)
   log "  phases logged: $phases"
   expect "the pipeline never inserts" test "$phases" = "Recording Transcribing Idle"
+  expect "the pill says there was no sound after the release" \
+    overlay_shows "$OVERLAY_NO_SOUND_RELEASED"
   expect "the log says why nothing was transcribed" wait_for_log 'not transcribing.*Silent'
   expect "no error is shown for it" \
     sh -c "! printf '%s' \"\$1\" | grep -q 'dictation failed'" _ "$(app_log)"

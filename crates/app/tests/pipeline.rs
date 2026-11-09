@@ -411,20 +411,27 @@ async fn a_tap_is_discarded_without_transcribing() {
 /// transcriber: no request, no paste, no error, straight back to Idle
 /// (issues #69 and #72; M4.2's `TranscriptDropped`).
 async fn assert_not_transcribed(samples: &[i16]) {
+    assert_skipped(samples, false).await;
+}
+
+/// [`assert_not_transcribed`], and `notice` says whether the pipeline tells
+/// the person there was no sound (H2): a silent clip of 1 s or more.
+async fn assert_skipped(samples: &[i16], notice: bool) {
     let wav = TempWav::new(samples);
     let mut harness = Harness::with(Setup {
         audio_path: Some(wav.0.clone()),
         ..Setup::default()
     });
     harness.dictate();
-    assert_eq!(
-        harness.until_idle().await,
-        [
-            UiEvent::StateChanged(Recording),
-            UiEvent::StateChanged(Transcribing),
-            UiEvent::StateChanged(Idle),
-        ]
-    );
+    let mut expected = vec![
+        UiEvent::StateChanged(Recording),
+        UiEvent::StateChanged(Transcribing),
+    ];
+    if notice {
+        expected.push(UiEvent::NoSound);
+    }
+    expected.push(UiEvent::StateChanged(Idle));
+    assert_eq!(harness.until_idle().await, expected);
     let (inserter, transcriber) = harness.finish().await;
     assert!(transcriber.calls().is_empty(), "the transcriber was called");
     assert!(inserter.inserted().is_empty());
@@ -443,7 +450,8 @@ async fn issue_69_audio_under_200_ms_is_not_transcribed() {
 
 #[tokio::test]
 async fn issue_72_silent_audio_is_not_transcribed() {
-    assert_not_transcribed(&[0; 16_000]).await;
+    // 1 s of silence is told (H2); the 0.3 s of noise is a tap, not.
+    assert_skipped(&[0; 16_000], true).await;
     // Room noise at about -60 dBFS.
     let noise: Vec<i16> = tone().into_iter().map(|s| s / 500).collect();
     assert_not_transcribed(&noise).await;
@@ -888,4 +896,19 @@ async fn a_zero_tick_interval_still_runs() {
         states(&[Recording, Transcribing, Inserting, Idle])
     );
     harness.finish().await;
+}
+
+/// H2 criteria 1 and 2: the 1 s boundary, and the other verdicts stay quiet.
+#[tokio::test]
+async fn h2_a_silent_clip_is_told_from_one_second_and_never_before() {
+    assert_skipped(&[0; 15_999], false).await;
+    assert_skipped(&[0; 16_000], true).await;
+    assert_skipped(&[0; 48_000], true).await;
+    assert_skipped(&[], false).await;
+    // Loud 20 ms frames that never run together are clicks, not a word
+    // (#172): the transcriber is skipped and nothing is said.
+    let clicks: Vec<i16> = (0..24_000)
+        .map(|n| if (n / 320) % 3 == 0 { 16_000 } else { 0 })
+        .collect();
+    assert_skipped(&clicks, false).await;
 }
