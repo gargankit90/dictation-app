@@ -113,6 +113,10 @@ pub struct OnboardingStatus {
     pub speech_choice: Option<SpeechChoice>,
     /// Sharing has been on for the whole of this walk through setup.
     pub sharing_on_throughout: bool,
+    /// Setup was finished, then a permission went missing: by a person's hand,
+    /// or through an update signed differently (N1, #206). Until setup is
+    /// finished again the window says so, and Done closes it.
+    pub asked_again: bool,
 }
 
 /// The OS's permissions, for the onboarding commands.
@@ -140,6 +144,9 @@ struct State {
     accessibility_asked: bool,
     /// Leaving was recorded, and setup hasn't been opened again since.
     left_told: bool,
+    /// How many reads in a row found a permission missing after setup was
+    /// finished. One read is no proof it has gone, and what it decides is kept.
+    lost_reads: u8,
 }
 
 impl Default for Onboarding {
@@ -180,6 +187,7 @@ impl Onboarding {
                 told: Vec::new(),
                 accessibility_asked: false,
                 left_told: false,
+                lost_reads: 0,
             }),
             file,
         }
@@ -239,6 +247,11 @@ impl Onboarding {
     pub fn open(&self, readiness: Readiness) -> Step {
         let mut state = self.lock();
         state.progress.step = readiness.resume_at(state.progress.step);
+        if state.progress.completed && !(readiness.microphone && readiness.accessibility) {
+            // This read counts, so the window that opens because of it says why
+            // from its first status, not a poll later.
+            state.lost_reads = state.lost_reads.max(1);
+        }
         state.view = View::Onboarding;
         state.opened = true;
         state.left_told = false;
@@ -257,6 +270,7 @@ impl Onboarding {
             return;
         }
         state.progress.step = Step::Welcome;
+        state.progress.asked_again = false;
         // A new walk: whether sharing is off now is noted when it opens.
         state.progress.sharing_was_off = false;
         let progress = state.progress;
@@ -276,6 +290,7 @@ impl Onboarding {
         let mut state = self.lock();
         state.view = View::Settings;
         state.progress.completed = true;
+        state.progress.asked_again = false;
         let progress = state.progress;
         drop(state);
         self.keep(&progress);
@@ -402,8 +417,18 @@ impl Onboarding {
             accessibility: accessibility == PermissionStatus::Granted,
         };
         let step = readiness.resume_at(state.progress.step);
-        let moved = step != state.progress.step;
+        let missing = state.progress.completed
+            && (microphone != PermissionStatus::Granted
+                || accessibility != PermissionStatus::Granted);
+        state.lost_reads = if missing {
+            state.lost_reads.saturating_add(1)
+        } else {
+            0
+        };
+        let lost = state.lost_reads >= 2;
+        let moved = step != state.progress.step || (lost && !state.progress.asked_again);
         state.progress.step = step;
+        state.progress.asked_again |= lost;
         let (status, progress) = (
             OnboardingStatus {
                 view: state.view,
@@ -415,6 +440,7 @@ impl Onboarding {
                 download_paused: state.progress.download_paused,
                 speech_choice: state.progress.speech_choice,
                 sharing_on_throughout: !state.progress.sharing_was_off,
+                asked_again: state.progress.asked_again,
             },
             state.progress,
         );
@@ -468,6 +494,18 @@ pub fn readiness(
 /// With the on-device engine (L1) no key is needed, so the step counts as
 /// done and the keychain isn't read.
 pub fn key_saved<S: SecretStore + 'static>(config: &Arc<Config<S>>, live: &LiveEngine) -> bool {
+    key_saved_or(config, live, false)
+}
+
+/// [`key_saved`], with `no_answer` as the result when the keychain can't answer.
+/// Opening the window after setup was finished passes true (N1, #206, #259): after
+/// an update signed differently, macOS's prompt holds the read back, and that
+/// isn't a reason to send the person to add a key that is still there.
+pub fn key_saved_or<S: SecretStore + 'static>(
+    config: &Arc<Config<S>>,
+    live: &LiveEngine,
+    no_answer: bool,
+) -> bool {
     let settings = config.settings().unwrap_or_default();
     if settings.transcription == dictation_core::settings::Transcription::Local {
         return true;
@@ -477,7 +515,7 @@ pub fn key_saved<S: SecretStore + 'static>(config: &Arc<Config<S>>, live: &LiveE
         Ok(key) => key.is_some(),
         Err(error) => {
             tracing::warn!(%error, "onboarding: couldn't check for a saved key");
-            false
+            no_answer
         }
     }
 }
@@ -595,6 +633,76 @@ mod tests {
         microphone: false,
         accessibility: false,
     };
+
+    #[test]
+    fn n1_a_permission_lost_after_finishing_is_said_until_setup_is_finished_again() {
+        let dir = temp("asked-again");
+        let (lost, back) = (granted(false, false), granted(true, true));
+        assert!(
+            !Onboarding::load(&dir).status(&lost, false).asked_again,
+            "a first run hasn't lost anything"
+        );
+
+        std::fs::create_dir_all(&dir).unwrap();
+        let finished = SetupProgress::ALREADY_SET_UP.to_json();
+        std::fs::write(dir.join(PROGRESS_FILE), &finished).unwrap();
+        assert!(
+            !Onboarding::load(&dir).status(&back, false).asked_again,
+            "nothing has gone"
+        );
+
+        let blip = Onboarding::load(&dir);
+        assert!(
+            !blip.status(&lost, false).asked_again,
+            "one read is no proof"
+        );
+        assert!(
+            !blip.status(&back, false).asked_again,
+            "and a good read forgets it"
+        );
+        assert!(
+            !blip.status(&lost, false).asked_again,
+            "so reads have to be in a row"
+        );
+        assert!(
+            !Onboarding::load(&dir).status(&back, false).asked_again,
+            "nothing was kept"
+        );
+
+        let polled = Onboarding::load(&dir);
+        polled.status(&lost, false);
+        let status = polled.status(&lost, false);
+        assert!(status.asked_again, "two in a row, as the window polls");
+        assert_eq!(status.step, Step::Permissions, "its step comes back");
+
+        let relaunched = Onboarding::load(&dir);
+        assert!(
+            relaunched.status(&back, false).asked_again,
+            "still so after a relaunch, with both allowed by then"
+        );
+        relaunched.finish();
+        assert!(
+            !Onboarding::load(&dir).status(&back, false).asked_again,
+            "finishing ends it"
+        );
+
+        std::fs::write(dir.join(PROGRESS_FILE), &finished).unwrap();
+        let again = Onboarding::load(&dir);
+        again.open(Readiness {
+            microphone: false,
+            ..Readiness::READY
+        });
+        assert!(
+            again.status(&lost, false).asked_again,
+            "the read that opened the window counts, so it says why at once"
+        );
+        again.start_over_if_finished();
+        assert!(
+            !again.status(&back, false).asked_again,
+            "Run setup again is a new walk"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn u10_unknown_sharing_history_never_claims_on_since_setup_began() {

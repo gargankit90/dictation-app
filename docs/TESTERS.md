@@ -32,6 +32,21 @@ The licences of the open-source software inside the app are on the release
 page as `THIRD-PARTY-LICENSES.txt`, and inside the app at
 `Vocet.app/Contents/Resources/`.
 
+<!-- SWITCH AT THE FIRST NOTARIZED RELEASE (N1, docs/releasing.md): replace the
+section "2. Open it for the first time (clear the quarantine flag)" below with
+this one, in the same pull request that sets RELEASE_IDENTITY.
+
+## 2. Open it for the first time
+
+Open **Vocet** from Applications. macOS checks it, and asks once whether you
+want to open an app downloaded from the internet: click **Open**. Vocet is
+signed with an Apple Developer ID and notarized by Apple, so that is all.
+
+If you are updating from an older Vocet instead of installing it for the first
+time, you don't need to do anything here; see "How updates arrive".
+
+END OF THE NOTARIZED VERSION -->
+
 ## 2. Open it for the first time (clear the quarantine flag)
 
 Vocet is not yet signed with an Apple Developer ID, so macOS blocks
@@ -134,7 +149,10 @@ You install from the DMG once. After that, Vocet updates itself:
   time.
 - The app restarts as the new version by itself. **Microphone and
   Accessibility stay granted**: every build is signed the same way, so macOS
-  knows it is the same app. You don't clear the quarantine flag again.
+  knows it is the same app. You don't clear the quarantine flag again. (The one
+  exception is an update whose notes say it is signed differently: Vocet then
+  opens its setup window and shows you how to allow both again. Your settings,
+  history and saved key stay.)
 - **The app was called dictation-app before.** If you installed that build,
   an update turns it into Vocet (name, menu, windows) but the file in
   Applications may keep its old name, `dictation-app.app`. Your settings, saved

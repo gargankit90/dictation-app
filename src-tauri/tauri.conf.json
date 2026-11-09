@@ -42,6 +42,7 @@
     "macOS": {
       "minimumSystemVersion": "13.0",
       "signingIdentity": "dictation-app Dev",
+      "hardenedRuntime": true,
       "entitlements": "./Entitlements.plist"
     },
     "resources": {

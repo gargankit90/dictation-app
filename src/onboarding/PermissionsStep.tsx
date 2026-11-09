@@ -8,8 +8,17 @@ import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";
 
 export const BOTH_REASON = "Continue unlocks when both are allowed";
+export const BOTH_REASON_DONE = "Done unlocks when both are allowed";
 const MIC_PATH = "System Settings → Privacy & Security → Microphone → turn on Vocet.";
 const ACCESSIBILITY_PATH = "System Settings → Privacy & Security → Accessibility → turn on Vocet.";
+export const ASKED_AGAIN = "macOS is asking for these again";
+/** The Accessibility fix after an update signed differently (Design Lead, #309). */
+export const OLD_ROW_LEAD = "If Vocet already looks on there, that row belongs to the old version:";
+export const OLD_ROW_STEPS = [
+  "In System Settings → Privacy & Security → Accessibility, select Vocet and click −.",
+  "Click Allow here, then turn on the new Vocet row.",
+  "No new row? Click + and add Vocet from Applications.",
+];
 
 interface Props {
   parts: FrameParts;
@@ -18,6 +27,8 @@ interface Props {
   /** Accessibility has looked allowed-but-not-applied for a while. */
   needsRelaunch: boolean;
   onContinue: () => void;
+  /** Ends setup at once, for someone who had already finished it. */
+  onDone: () => void;
 }
 
 function Relaunch({
@@ -47,7 +58,14 @@ function Relaunch({
  * app can't pick up gets "Relaunch and resume"; setup comes back at this step
  * with the choices kept.
  */
-export function PermissionsStep({ parts, status, onStatus, needsRelaunch, onContinue }: Props) {
+export function PermissionsStep({
+  parts,
+  status,
+  onStatus,
+  needsRelaunch,
+  onContinue,
+  onDone,
+}: Props) {
   const [asked, setAsked] = useState<Partial<Record<AppPermission, boolean>>>({});
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -86,6 +104,10 @@ export function PermissionsStep({ parts, status, onStatus, needsRelaunch, onCont
   }
 
   const allowed = micAllowed && status.accessibility === "granted";
+  // Setup was finished, and a permission has gone since (N1, #206): most likely an
+  // update signed differently. The notice's promise holds once both are allowed:
+  // the window closes, with no second setup.
+  const askedAgain = status.asked_again;
 
   function badge(state: PermissionState, which: AppPermission) {
     if (state === "granted") return <span className="ob-allowed">✓ Allowed</span>;
@@ -109,11 +131,20 @@ export function PermissionsStep({ parts, status, onStatus, needsRelaunch, onCont
       parts={parts}
       title="Two permissions"
       primary={{
-        label: "Continue",
-        onClick: onContinue,
-        blockedBecause: allowed ? null : BOTH_REASON,
+        label: askedAgain ? "Done" : "Continue",
+        onClick: askedAgain ? onDone : onContinue,
+        blockedBecause: allowed ? null : askedAgain ? BOTH_REASON_DONE : BOTH_REASON,
       }}
     >
+      {askedAgain && (
+        <section className="notice" aria-label={ASKED_AGAIN}>
+          <p>
+            <strong>{ASKED_AGAIN}.</strong> This happens after an update that changes how Vocet is
+            signed, or if a permission was turned off. Your settings, history and saved key are all
+            still here.
+          </p>
+        </section>
+      )}
       <p>macOS asks you to confirm each one. This screen updates on its own.</p>
 
       <section className="ob-card" aria-label="Microphone">
@@ -166,6 +197,16 @@ export function PermissionsStep({ parts, status, onStatus, needsRelaunch, onCont
           </span>
           {badge(status.accessibility, "accessibility")}
         </div>
+        {askedAgain && status.accessibility !== "granted" && (
+          <div className="ob-old-row" aria-label="Replace the old Accessibility row">
+            <p className="ob-caption">{OLD_ROW_LEAD}</p>
+            <ol className="ob-steps">
+              {OLD_ROW_STEPS.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+          </div>
+        )}
         {status.accessibility !== "granted" && asked.accessibility === true && (
           <>
             <p className="ob-caption">{ACCESSIBILITY_PATH}</p>
@@ -175,7 +216,9 @@ export function PermissionsStep({ parts, status, onStatus, needsRelaunch, onCont
               </button>
             </div>
             <Relaunch busy={busy} onRelaunch={() => void relaunch()}>
-              Turned it on and nothing changed? A relaunch makes it take. Your choices are kept.
+              {askedAgain
+                ? "Turned on the new Vocet row and nothing changed? A relaunch makes it take. Turning the old row off and on won't help: remove it, as above. Your choices are kept."
+                : "Turned it on and nothing changed? A relaunch makes it take. Your choices are kept."}
             </Relaunch>
           </>
         )}

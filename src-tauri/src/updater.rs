@@ -60,8 +60,7 @@ impl Outcome {
             } => {
                 let mut text = format!(
                     "Vocet {version} is available; you have {current}.\n\nInstall it \
-                     now? The app restarts, and your Microphone and Accessibility permissions \
-                     stay."
+                     now? The app restarts."
                 );
                 if let Some(notes) = notes.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
                     text.push_str("\n\nWhat's new:\n");
@@ -507,7 +506,9 @@ mod tests {
             text.contains("0.2.0 is available; you have 0.1.0"),
             "{text}"
         );
-        assert!(text.contains("permissions"), "{text}");
+        // No promise about permissions: an update signed differently loses them
+        // (N1), and its notes are shown right below this and say so.
+        assert!(!text.contains("permissions"), "{text}");
         assert!(text.ends_with("What's new:\nFixes the overlay."), "{text}");
     }
 

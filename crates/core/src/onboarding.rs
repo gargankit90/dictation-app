@@ -192,6 +192,11 @@ pub struct SetupProgress {
     /// this field existed doesn't say, and unknown counts as off.
     #[serde(default = "unknown_sharing_history")]
     pub sharing_was_off: bool,
+    /// Setup was finished, then a permission went missing (N1, #206): most
+    /// likely an update signed differently. The window says so and closes when
+    /// both are back, and that holds across a relaunch, until setup is finished
+    /// again.
+    pub asked_again: bool,
 }
 
 /// What [`SetupProgress::sharing_was_off`] is when nothing says: the claim
@@ -211,6 +216,7 @@ impl SetupProgress {
         download_paused: false,
         speech_choice: None,
         sharing_was_off: false,
+        asked_again: false,
     };
 
     /// Reads the file's text. `None` if it can't be understood.
@@ -355,6 +361,7 @@ mod tests {
             download_paused: true,
             speech_choice: Some(SpeechChoice::OwnKey),
             sharing_was_off: true,
+            asked_again: true,
         };
         assert_eq!(
             SetupProgress::from_json(&progress.to_json()),
