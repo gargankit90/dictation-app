@@ -12,8 +12,13 @@ export const BOTH_REASON_DONE = "Done unlocks when both are allowed";
 const MIC_PATH = "System Settings → Privacy & Security → Microphone → turn on Vocet.";
 const ACCESSIBILITY_PATH = "System Settings → Privacy & Security → Accessibility → turn on Vocet.";
 export const ASKED_AGAIN = "macOS is asking for these again";
-const ACCESSIBILITY_ALREADY_ON =
-  "If Vocet already looks on in System Settings → Privacy & Security → Accessibility, macOS means the old version. Select Vocet there and click − to remove it, then click Allow or Open System Settings here and turn on the new Vocet row. If there is no new row, add Vocet from Applications with +.";
+/** The Accessibility fix after an update signed differently (Design Lead, #309). */
+export const OLD_ROW_LEAD = "If Vocet already looks on there, that row belongs to the old version:";
+export const OLD_ROW_STEPS = [
+  "In System Settings → Privacy & Security → Accessibility, select Vocet and click −.",
+  "Click Allow here, then turn on the new Vocet row.",
+  "No new row? Click + and add Vocet from Applications.",
+];
 
 interface Props {
   parts: FrameParts;
@@ -134,11 +139,10 @@ export function PermissionsStep({
       {askedAgain && (
         <section className="notice" aria-label={ASKED_AGAIN}>
           <p>
-            <strong>{ASKED_AGAIN}.</strong> That happens after an update that changes how Vocet is
-            signed, or when a permission was turned off. Your settings, history and saved key are
-            all still here, so there&apos;s nothing else to set up.
+            <strong>{ASKED_AGAIN}.</strong> This happens after an update that changes how Vocet is
+            signed, or if a permission was turned off. Your settings, history and saved key are all
+            still here.
           </p>
-          {!allowed && <p className="ob-caption">{ACCESSIBILITY_ALREADY_ON}</p>}
         </section>
       )}
       <p>macOS asks you to confirm each one. This screen updates on its own.</p>
@@ -193,6 +197,16 @@ export function PermissionsStep({
           </span>
           {badge(status.accessibility, "accessibility")}
         </div>
+        {askedAgain && status.accessibility !== "granted" && (
+          <div className="ob-old-row" aria-label="Replace the old Accessibility row">
+            <p className="ob-caption">{OLD_ROW_LEAD}</p>
+            <ol className="ob-steps">
+              {OLD_ROW_STEPS.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+          </div>
+        )}
         {status.accessibility !== "granted" && asked.accessibility === true && (
           <>
             <p className="ob-caption">{ACCESSIBILITY_PATH}</p>

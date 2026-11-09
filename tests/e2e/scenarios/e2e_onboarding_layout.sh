@@ -22,7 +22,7 @@
 # Pictures of each step, light and dark, go to the run's output.
 
 LAYOUT_DIR="/Users/$VM_USER/onboarding-layout"
-LAYOUT_STEPS="ready-english ready-30 welcome welcome-plain welcome-default key-none key-saved speech speech-more speech-more-plain speech-key permissions try try-plain try-default ready ready-strip settings-language"
+LAYOUT_STEPS="ready-english ready-30 welcome welcome-plain welcome-default key-none key-saved speech speech-more speech-more-plain speech-key permissions permissions-again try try-plain try-default ready ready-strip settings-language"
 
 layout_build() {
   local out=target/onboarding-layout

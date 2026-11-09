@@ -1333,6 +1333,21 @@ main.ob {
   font-size: var(--vc-text-sm);
 }
 
+/* N1: the steps for a stale Accessibility row, inside its card. */
+.ob-old-row .ob-caption {
+  margin: 0;
+}
+
+.ob-steps {
+  margin: var(--vc-space-1) 0 0;
+  padding-left: var(--vc-space-5);
+  font-size: var(--vc-text-sm);
+}
+
+.ob-steps li + li {
+  margin-top: var(--vc-space-1);
+}
+
 .ob-label {
   color: var(--vc-ink-2);
 }

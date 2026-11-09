@@ -29,7 +29,13 @@ import {
   NOT_TESTED,
 } from "./onboarding/ReadyStep";
 import { KEY_REASON, MODEL_COPY } from "./onboarding/SpeechStep";
-import { ASKED_AGAIN, BOTH_REASON, BOTH_REASON_DONE } from "./onboarding/PermissionsStep";
+import {
+  ASKED_AGAIN,
+  BOTH_REASON,
+  BOTH_REASON_DONE,
+  OLD_ROW_LEAD,
+  OLD_ROW_STEPS,
+} from "./onboarding/PermissionsStep";
 import { CONTINUE_REASON } from "./onboarding/TryStep";
 import { Privacy } from "./settings/Privacy";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
@@ -1493,16 +1499,27 @@ describe("Permissions", () => {
     backend.microphone = "not_determined";
     backend.accessibility = "not_determined";
     show();
-    await screen.findByText(/That happens after an update that changes how Vocet is signed/);
+    await screen.findByText(/This happens after an update that changes how Vocet is signed/);
     expect(screen.getByText(ASKED_AGAIN + ".")).toBeTruthy();
     expect(
-      screen.getByText(/Your settings, history and saved key are\s+all still here/),
+      screen.getByText(/Your settings, history and saved key are all\s+still here\.$/),
     ).toBeTruthy();
+    expect(screen.queryByText(/nothing else to set up/)).toBeNull();
+    expect(screen.queryByText(/means the old version/)).toBeNull();
+    expect(screen.queryByText(/Allow or Open System Settings/)).toBeNull();
+    // The fix is numbered steps inside the Accessibility card, in the Design Lead's words.
+    const card = within(screen.getByRole("region", { name: "Accessibility" }));
+    expect(card.getByText(OLD_ROW_LEAD)).toBeTruthy();
+    const steps = card.getAllByRole("listitem").map((item) => item.textContent);
+    expect(steps).toEqual(OLD_ROW_STEPS);
+    expect(OLD_ROW_STEPS).toEqual([
+      "In System Settings → Privacy & Security → Accessibility, select Vocet and click −.",
+      "Click Allow here, then turn on the new Vocet row.",
+      "No new row? Click + and add Vocet from Applications.",
+    ]);
     expect(
-      screen.getByText(
-        /click − to remove it, then click Allow or Open System Settings here and turn on the new Vocet row/,
-      ),
-    ).toBeTruthy();
+      within(screen.getByRole("region", { name: "Microphone" })).queryByText(OLD_ROW_LEAD),
+    ).toBeNull();
     expect(primary("Done").disabled).toBe(true);
     expect(screen.getByText(BOTH_REASON_DONE)).toBeTruthy();
     backend.microphone = "granted";
@@ -1511,7 +1528,7 @@ describe("Permissions", () => {
     await waitFor(() => {
       expect(primary("Done").disabled).toBe(false);
     });
-    expect(screen.queryByText(/click − to remove it/)).toBeNull();
+    expect(screen.queryByText(OLD_ROW_LEAD)).toBeNull();
     fireEvent.click(primary("Done"));
     await waitFor(() => {
       expect(backend.named("finish_onboarding").length).toBe(1);
@@ -1526,6 +1543,16 @@ describe("Permissions", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Allow Accessibility" }));
     await screen.findByText(/Turning the old row off and on won't help/);
     expect(screen.queryByText(/^Turned it on and nothing changed/)).toBeNull();
+    expect(screen.getByText(OLD_ROW_LEAD)).toBeTruthy();
+  });
+
+  it("N1: the steps go once Accessibility is allowed, even with the microphone still to do", async () => {
+    backend.askedAgain = true;
+    backend.microphone = "not_determined";
+    backend.accessibility = "granted";
+    show();
+    await screen.findByText(ASKED_AGAIN + ".");
+    expect(screen.queryByText(OLD_ROW_LEAD)).toBeNull();
   });
 
   it("N1: Done still closes it after a relaunch, with both allowed by then", async () => {
@@ -1535,7 +1562,7 @@ describe("Permissions", () => {
     show();
     await screen.findByText(ASKED_AGAIN + ".");
     expect(primary("Done").disabled).toBe(false);
-    expect(screen.queryByText(/click − to remove it/)).toBeNull();
+    expect(screen.queryByText(OLD_ROW_LEAD)).toBeNull();
   });
 
   it("N1: first-time setup and a repeat with both allowed show no such notice", async () => {

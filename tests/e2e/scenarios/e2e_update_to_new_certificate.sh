@@ -39,6 +39,8 @@ NC_KEYCHAIN_PASSWORD=standin
 NC_SETTINGS_VM="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/settings.json"
 NC_PROGRESS_VM="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/onboarding-progress.json"
 NC_NOTICE="macOS is asking for these again"
+# One of the numbered steps in the Accessibility card (src/onboarding/PermissionsStep.tsx).
+NC_OLD_ROW_STEP="select Vocet and click −"
 NC_DONE_LOCKED="Done unlocks when both are allowed"
 # Set when the running app didn't take the grant and Relaunch was pressed.
 NC_RELAUNCHED=0
@@ -370,6 +372,15 @@ e2e_update_to_new_certificate() {
   textedit_close
   close_terminal || true
   nc_window_shot notice
+  expect "the Accessibility card has the steps for the old row" \
+    ax_ok wait-text "$APP_NAME" "Set up" "$NC_OLD_ROW_STEP" 10
+  # The window alone, in both appearances, for the Design Lead (onboarding-n1-*.png).
+  NC_DARK=$(vm "osascript -e 'tell application \"System Events\" to tell appearance preferences to get dark mode'" 2>/dev/null || echo false)
+  obs_appearance light
+  obs_shot n1-asked-again-light
+  obs_appearance dark
+  obs_shot n1-asked-again-dark
+  [ "$NC_DARK" = true ] || obs_appearance light
   pid=$(app_pid)
 
   # 4. Recovery. The microphone first: macOS has forgotten the answer, so it asks.
@@ -378,6 +389,8 @@ e2e_update_to_new_certificate() {
   expect "both are allowed: Done is unlocked" ax_ok wait-no-text "$APP_NAME" "Set up" "$NC_DONE_LOCKED" 15
   close_terminal || true
   nc_window_shot both-allowed
+  obs_shot n1-both-allowed
+  expect "the steps go once Accessibility is allowed" ax_ok wait-no-text "$APP_NAME" "Set up" "$NC_OLD_ROW_STEP" 10
   if [ "$NC_RELAUNCHED" = 0 ]; then
     expect "the same process recovered: no relaunch, no reinstall" test "$pid" = "$(app_pid)"
   else

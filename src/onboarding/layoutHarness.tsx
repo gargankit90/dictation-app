@@ -51,6 +51,8 @@ const steps: Record<string, Step> = {
   speech: "speech",
   "speech-key": "speech",
   permissions: "permissions",
+  // N1: someone who had finished setup, after an update signed differently.
+  "permissions-again": "permissions",
   "speech-more": "speech",
   "speech-more-plain": "speech",
   try: "try",
@@ -129,10 +131,12 @@ const settings: Settings_Serialize = {
 const status: OnboardingStatus = {
   view: "onboarding",
   step: steps[view] ?? "welcome",
-  microphone: view === "permissions" ? "denied" : "granted",
-  accessibility: view === "permissions" ? "not_determined" : "granted",
+  microphone:
+    view === "permissions" ? "denied" : view === "permissions-again" ? "not_determined" : "granted",
+  accessibility:
+    view === "permissions" || view === "permissions-again" ? "not_determined" : "granted",
   needs_relaunch: false,
-  asked_again: false,
+  asked_again: view === "permissions-again",
   try_outcome: "not_tried",
   download_paused: false,
   speech_choice: view === "speech-key" || isKeyScreen ? "own_key" : null,
