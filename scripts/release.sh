@@ -241,7 +241,7 @@ if [ "$is_developer_id" = 1 ]; then
     die "two valid certificates are named \"$identity\", so codesign can't choose; remove the older one from the keychain (docs/releasing.md, \"When the certificate expires\")"
 fi
 if [ "$fallback" = 1 ]; then
-  say "signing with the fallback \"$identity\": not notarised, testers clear the quarantine flag"
+  say "signing with the fallback \"$identity\": not notarised, so macOS blocks its first launch for a downloaded copy"
   if grep -qF "\"$DEVELOPER_ID_PREFIX" <<<"$identities"; then
     say "NOTE: this keychain has a Developer ID certificate, but RELEASE_IDENTITY in $SIGNING_CONF is empty (docs/releasing.md, \"Developer ID\")"
   fi

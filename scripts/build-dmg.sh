@@ -9,9 +9,9 @@
 # (scripts/make-dev-cert.sh) the app is signed with it, which is what keeps
 # a tester's Microphone and Accessibility permission across updates. Without
 # it (CI, a fresh Mac) the app is signed ad hoc: it runs, but macOS asks for
-# the permissions again after every update. Either way it is not notarised.
-# There is no Apple Developer account, so testers clear the quarantine flag
-# (docs/TESTERS.md).
+# the permissions again after every update. Either way it is not notarised:
+# this script is for development and CI. Releases (scripts/release.sh) are
+# signed with a Developer ID and notarised (docs/releasing.md).
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"

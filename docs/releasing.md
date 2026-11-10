@@ -30,11 +30,12 @@ Settings → General → **Check now**.
 ## Signing, in one place
 
 - **The app** is signed by the identity in `scripts/release-signing.conf`
-  (`RELEASE_IDENTITY`). While that is empty it is `dictation-app Dev`
-  (`scripts/make-dev-cert.sh`), not notarised: testers clear the quarantine flag
-  (see the tester guide). Once it names a Developer ID certificate, the app and
-  DMG are notarised and stapled too, and a release stops rather than falls back
-  if that certificate can't sign. See "Developer ID" below.
+  (`RELEASE_IDENTITY`). Since N2 that is the Developer ID Application
+  certificate, so releases are signed, and the app and the DMG are notarised and
+  stapled; testers need no Terminal step. A release stops rather than falls back
+  if that certificate can't sign or can't notarise. Only a checkout where
+  `RELEASE_IDENTITY` is emptied would use `dictation-app Dev`
+  (`scripts/make-dev-cert.sh`), not notarised. See "Developer ID" below.
 - **Every build uses the hardened runtime** (`hardenedRuntime` in
   `src-tauri/tauri.conf.json`, which debug builds and the e2e suite use too), and
   `scripts/release.sh` refuses an app without it.
@@ -255,25 +256,35 @@ download it, or send it to yourself, on a Mac (or Mac user account) that hasn't
 run Vocet. Drag it to Applications and open it. macOS should ask only whether to
 open an app from the internet.
 
-### 5. Switch to it
+### 5. Switch to it (done in N2)
 
-In one pull request (**the first notarised release, not before**):
+The first test signing run passed on **2026-11-09**: the app and the DMG were
+accepted by Apple, stapled, and passed Gatekeeper ("Notarized Developer ID"); the
+updater bundle and the DMG hold the same notarised app, and the minisign signature
+verified. The same day N2 switched the repository over, in one pull request:
 
-- Set `RELEASE_IDENTITY=Developer ID Application: Your Name (ABCDE12345)` in
+- `RELEASE_IDENTITY=Developer ID Application: Ankit Garg (XF2G42MVHN)` in
   `scripts/release-signing.conf`.
-- In `docs/TESTERS.md`, replace section 2 with the version in the comment marked
-  `SWITCH AT THE FIRST NOTARIZED RELEASE`, take "Not notarised" out of "Known
-  limits", and update "How updates arrive" (below).
-- In `CHANGELOG.md`, tell people about the permissions; see "Moving testers to
-  Developer ID".
-- Tell `docs/ENGINEERING.md`, "Signing".
+- `docs/TESTERS.md`: section 2 is the notarised version, "Not notarised" is out of
+  "Known limits", and "How updates arrive" no longer mentions the quarantine flag.
+- `docs/ENGINEERING.md` "Signing" and the README say releases are Developer
+  ID-signed and notarised.
+- **No "Moving testers" changelog step for 0.1.0.** Nothing was ever
+  released, so no tester has a dev-signed build to move from. The section of that
+  name below is kept for a later change of certificate or team, not for 0.1.0.
 
 From then on, a release that can't sign or can't notarise stops: it never ships a
 build under the old certificate.
 
-Also close the last box of #206 with a VM run: the DMG with the quarantine flag
-set, opened with no `xattr` step. That needs a real notarised build, so it can't
-run before this.
+The last box of #206, a quarantined notarised DMG opening with no `xattr` step, is
+checked in the VM by `tests/e2e/scenarios/e2e_notarized_dmg_first_launch.sh`:
+
+```sh
+E2E_NOTARIZED_DMG=/path/to/Vocet_0.1.0_aarch64.dmg tests/e2e/run.sh e2e_notarized_dmg_first_launch
+```
+
+It reads only that DMG, is optional (skipped without the path) and never runs in CI.
+Run it again on each release's DMG before publishing.
 
 ### When the certificate expires
 
@@ -308,7 +319,7 @@ security find-certificate -c "Developer ID Application: Your Name (ABCDE12345)" 
   renewal keeps, so people should not lose them, and this now comes up every year.
   It hasn't been tried. In the VM, use the steps in "Confirm #259": the old build
   signed by the old certificate, the update by the new one. If macOS asks again,
-  say so in that release's notes, as in "Moving testers to Developer ID".
+  say so in that release's notes, as in "Moving testers to a new certificate".
 - **Don't revoke** the old certificate just because it is old. Revoke only if the
   private key leaks: Apple says an app signed with a revoked certificate can no longer
   be installed, nor launch if it already is. Talk to Apple first.
@@ -352,10 +363,13 @@ the new one after, with `KEEP_OLD=1` (`scripts/updater-test.sh`).
 Also check that both permissions stayed, with `codesign -dr - ~/Applications/Vocet.app`
 showing a requirement with your team ID rather than one certificate.
 
-## Moving testers to Developer ID
+## Moving testers to a new certificate
 
-The first Developer ID release is signed by a different certificate from the
-builds testers have, and macOS treats it as a different app for permissions. It is
+(Not needed for 0.1.0: it is the first release, so nobody moves from a dev-signed
+build. This is what a change of certificate or team would involve.)
+
+A release signed by a different certificate from the builds testers have is, to
+macOS, a different app for permissions. It is
 a one-time step for each tester. This was tried in the VM with a stand-in
 certificate (`tests/e2e/scenarios/e2e_update_to_new_certificate.sh`):
 
@@ -376,7 +390,7 @@ certificate (`tests/e2e/scenarios/e2e_update_to_new_certificate.sh`):
 6. Settings and history were byte for byte the same in that test, the key read
    correctly, and launch at login stayed on.
 
-Put this in the first Developer ID release's `CHANGELOG.md` section. It appears in
+Put this in the `CHANGELOG.md` section of a release that changes the certificate. It appears in
 the "Update available" dialog as well as on the release page:
 
 > Vocet is now signed with an Apple Developer ID, so a new install opens without
@@ -394,9 +408,9 @@ real one exists:
   certificate, so they should survive updates and the yearly renewals, and the
   Keychain prompt on each update should stop (#259). A self-signed certificate
   can't show this.
-- **Gatekeeper.** Nothing in the VM test is notarised. A notarised DMG with the
-  quarantine flag gets the "downloaded from the internet" question; that needs the
-  run in step 4 above. Updates arrive with no quarantine flag either way.
+- **Gatekeeper.** The stand-in is not notarised. The real notarised DMG is checked
+  in the VM by `e2e_notarized_dmg_first_launch` (step 5). Updates arrive with no
+  quarantine flag either way.
 - **Login Items.** macOS tracks these partly by team, and a self-signed build has
   none. It may show Vocet as a new item under your developer name, or ask people
   to approve it again. Check it on the first real update.
