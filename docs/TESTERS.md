@@ -4,20 +4,18 @@ Hold a key, speak, let go, and your words are typed into whatever app is in
 front. Thank you for trying it. This page takes you from the DMG to your first
 dictation, and says what to send us when something goes wrong.
 
-What is new in each version is in the [changelog](../CHANGELOG.md).
-
-New: Vocet now keeps your last 25 dictations on this Mac so you can get the words back. Text only, never sent. Change or turn it off in Settings → History.
+What is in each version is in the [changelog](../CHANGELOG.md).
 
 You need an **Apple Silicon Mac (M1 or newer; Intel Macs are not supported)**
 with **macOS 13 (Ventura) or newer**, and one of two ways to turn speech into
 text:
 
-- **Your own key** (this guide's steps): an internet connection and an API key
-  for Groq or OpenAI. Your speech goes to that provider. Groq has a free tier
-  and is the one this guide uses; OpenAI works the same way.
-- **On this Mac**: in Settings, pick **On this Mac** under Transcription and
-  download a model once (Parakeet for English, about 480 MB; Qwen3-ASR for
-  Hindi and other languages, about 590 MB). Your speech then stays on the Mac.
+- **On this Mac**: you download a model once (Parakeet for English, about
+  480 MB; Qwen3-ASR for about 30 languages, including Hindi, about 590 MB).
+  Your speech then stays on the Mac. It is the recommended choice in setup.
+- **Your own key**: an internet connection and an API key for Groq or OpenAI.
+  Your speech goes to that provider. Groq has a free tier; OpenAI works the
+  same way.
 
 ## 1. Install
 
@@ -48,62 +46,71 @@ notarized by Apple, so that is all.
 If macOS still refuses to open it, tell us in a bug report (see "Report a bug" below) with the
 exact words it shows.
 
-If you are updating from an older Vocet instead of installing it for the first
-time, you don't need to do anything here; see "How updates arrive".
-
 Vocet lives in the **menu bar** (top right of the screen, an icon
-without a Dock entry), not in the Dock. The first time it opens, a **Set up
-dictation** window walks you through four steps. If you don't see it, click
-the menu-bar icon.
+without a Dock entry), not in the Dock. The first time it opens, a setup window walks you through five steps. If you
+don't see it, click the menu-bar icon.
 
-## 3. First run: the Set up dictation window
+## 3. First run: the setup window
 
-The window shows "Step 1 of 4" and so on, and has **Back** and **Continue**
+The window has a list of steps on the side and **Continue** and **Back**
 buttons. A permission step moves on by itself once you have allowed it.
 
-1. **Allow the microphone.** Click **Allow microphone**; macOS asks once, so
-   choose **Allow**. Vocet records only while you hold the hotkey. If
-   you chose "Don't Allow" earlier, the step says the microphone is turned off:
-   click **Open System Settings** and switch **Vocet** on under
-   **Privacy & Security > Microphone**.
-2. **Allow Accessibility.** The hotkey and pasting need it. Click **Open
-   System Settings** and switch **Vocet** on under **Privacy &
-   Security > Accessibility**. If it is not in the list, click **+**, choose
-   `/Applications/Vocet.app` and switch it on. If the step doesn't move
-   on after that, click **Relaunch**; the app opens again at this step.
-3. **Add your API key.** Pick the **Provider** (**Groq** is the recommended
-   one; **OpenAI** is the alternative), then paste your key into the key box.
-   - Groq: go to <https://console.groq.com/keys>, sign up (free; Google
-     sign-in works), click **Create API Key**, give it any name and copy it.
-     It starts with `gsk_`. You see it only once.
-   - OpenAI: create a key at <https://platform.openai.com/api-keys>
-     (needs a billing-enabled account).
-
-   Click **Test and continue**. The key is tested first; a wrong one shows
-   the reason and nothing is saved. A good one is kept in your macOS keychain
-   and never shown again. The key is the only secret: it stays on your Mac and
-   is sent only to the provider you chose.
-
-4. **Try it.** Hold **the right Option key** (right of the space bar), say a
-   few words and let go. The text appears in the box in the window. When it
-   does, the window says "It works." Click **Done**.
-
-Both permissions are kept when you update to a newer build that we sign the
-same way. If a new build ever asks again, grant it again and report it (see "Report a bug").
+1. **Welcome.** Click **Get started**.
+2. **Speech.** Pick the language you will mostly speak (English, Hindi, or
+   **More…**). Then choose how to turn speech into text:
+   - **Recommended for your language** (on this Mac): click **Download and
+     continue**. The model downloads once; it can keep going while you do
+     the next steps. A language the on-device models don't cover needs your
+     own key.
+   - **Use my own Groq or OpenAI key**: click **Continue**, pick the provider,
+     paste your key and click **Test & Save**. Groq: go to
+     <https://console.groq.com/keys>, sign up (free), click **Create API
+     Key** and copy it (it starts with `gsk_`; you see it only once).
+     OpenAI: create a key at <https://platform.openai.com/api-keys> (needs a
+     billing-enabled account). A wrong key shows the reason and nothing is
+     saved. A good one is kept in your macOS Keychain and never shown again.
+     It is sent only to the provider you chose.
+3. **Permissions.** Click **Allow** for the **Microphone** (macOS asks once;
+   choose **Allow**) and for **Accessibility** (the dictation key and typing
+   into other apps need it). For Accessibility, switch **Vocet** on under
+   **System Settings > Privacy & Security > Accessibility**; if it isn't in
+   the list, click **+** and choose `/Applications/Vocet.app`. If the step
+   doesn't move on afterwards, click **Relaunch and resume**. A "Turned off"
+   badge means you refused it earlier: switch it on in System Settings.
+4. **Try it.** Your dictation key is shown (the right Option key, right of the
+   space bar; **Change…** picks another). Hold it, say a sentence and let go.
+   The words appear in the box. Click **Continue**, or **Skip for now**.
+5. **You're set.** A summary of your key, speech and history. Here you can
+   choose **Open Vocet when I log in** and the **Share usage and error
+   events** switch (see "Privacy" below). Click **Start dictating**.
 
 ### Changing things later: Settings
 
-Menu-bar icon > **Settings…** is also where you go to fix things, and to
-change anything you set above:
+Menu-bar icon > **Settings…** has these sections:
 
-- **Provider** and **Groq/OpenAI API key**: paste a new key, click **Test
-  key** (it says _"The key works. Groq accepted it."_; a wrong key says _"The
-  provider rejected your API key"_), then **Save**. The box then says **Key
-  saved**.
-- **Hotkey**, **Language** and **Launch at login**.
-- A permission turned off by mistake: switch it back on in **System Settings >
-  Privacy & Security** (Microphone or Accessibility), then quit Vocet
-  from its menu-bar icon and open it again.
+- **General**: open Vocet at login, and **Check for updates** (**Check now**).
+- **Dictation**: the **dictation key** (hold it to talk, release to paste),
+  **Language**, and a **Test microphone** check.
+- **Speech**: the list of engines. Select a row to use it: a model on this
+  Mac (download it first), or **Your own key** (its own sheet: pick the
+  provider, paste a key, **Test** it, **Save** it).
+- **Privacy**: the **Share usage and error events** switch.
+- **History**: your recent dictations, with **Copy** and **Delete** on each,
+  how many to **Keep** (10, 25, 50 or 100, or off) and **Clear history…**.
+  Text only, kept on this Mac, never sent.
+- **Help**: **Troubleshoot**, **Report a problem**, **Log file** and **Run
+  setup again**.
+- **About**: the version, the licence, the source code and credits.
+
+A permission turned off by mistake: switch it back on in **System Settings >
+Privacy & Security** (Microphone or Accessibility). Vocet tells you in the
+setup window when macOS has taken one away.
+
+### The menu-bar icon
+
+Copy last dictation, **History…**, **Settings…**, **Help…** and **Quit
+Vocet**. If something is wrong (a missing permission, a rejected key), the
+menu offers the fix (for example **Open Microphone settings…**).
 
 ## 4. Dictate
 
@@ -113,8 +120,10 @@ change anything you set above:
 3. A moment later, the text is typed into whichever app has focus when it is
    pasted.
 
-Change the key with the **Hotkey** box in Settings. Password fields are
-skipped on purpose: nothing is pasted there.
+Change the key with **Settings > Dictation**. Password fields are skipped on
+purpose: nothing is pasted there. If a dictation didn't get pasted, find it in
+**History…** and copy it. Don't press other keys while you hold the key (see
+"Known limits").
 
 If nothing happens, see "Something went wrong" below.
 
@@ -125,38 +134,42 @@ You install from the DMG once. After that, Vocet updates itself:
 - **When it starts**, it quietly asks the release page whether there is a
   newer build. If there is, it shows **Update available** with what is new;
   if not, or if you are offline, it shows nothing.
-- **Any time**, click the menu-bar icon > **Settings…** > General > **Check now**. It says
-  _"You're up to date"_, offers the update, or says plainly that it couldn't
-  check (_"Couldn't check for updates"_, for example when you are offline).
+- **Any time**, click the menu-bar icon > **Settings…** > General > **Check
+  now**. It says _"You're up to date"_, offers the update, or says plainly
+  that it couldn't check (for example when you are offline).
 - Nothing is downloaded or installed until you click **Install and
   restart**. **Later** keeps the build you have; you are asked again next
   time.
 - The app restarts as the new version by itself. **Microphone and
   Accessibility stay granted**: every build is signed the same way, so macOS
-  knows it is the same app, and an update never asks whether to open it. (The one
-  exception is an update whose notes say it is signed differently: Vocet then
-  opens its setup window and shows you how to allow both again. Your settings,
-  history and saved key stay.)
-- **The app was called dictation-app before.** If you installed that build,
-  an update turns it into Vocet (name, menu, windows) but the file in
-  Applications may keep its old name, `dictation-app.app`. Your settings, saved
-  key and permissions carry over. To get the new file name, install
-  `Vocet.app` from the DMG and drag `dictation-app.app` to the Trash; it is
-  the same app to macOS, so permissions stay.
-- **After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to your speech provider (Groq or OpenAI).** The prompt reads "Vocet wants to access key
-  com.dictationapp.desktop"; enter your Mac password. Until you answer,
-  Vocet can't read the key and says so. It can come back after any update
-  of this build, not only this one.
-- **Login Items may still say `dictation-app`.** If you had the old build
-  with Launch at login on, the entry in System Settings → General → Login
-  Items keeps the name macOS stored when it was added. It is the same item
-  and opens Vocet; the name is cosmetic.
+  knows it is the same app, and an update never asks whether to open it. (The
+  one exception is an update whose notes say it is signed differently: Vocet
+  then opens its setup window and shows you how to allow both again. Your
+  settings, history and saved key stay.)
+- **macOS may ask once whether Vocet can use the key saved in your Keychain.
+  Choose Always Allow.** Your key stays in your Keychain and is sent only to
+  your speech provider (Groq or OpenAI). The prompt reads "Vocet wants to
+  access key com.dictationapp.desktop"; enter your Mac password. Until you
+  answer, Vocet can't read the key and says so. It can come back after any
+  update.
 - Every update is signed with our update key, and the app refuses one whose
   signature doesn't match (_"The update's signature didn't match this app's
-  update key, so it was not installed."_). If you see that, report it (see "Report a bug").
+  update key, so it was not installed."_). If you see that, report it (see
+  "Report a bug").
 
 If an update ever goes wrong, download the newest DMG from the release page
 and install it over the old app, as in section 1.
+
+## Privacy
+
+- **Your words.** With **On this Mac**, your speech is turned into text on the
+  Mac and not sent anywhere. With **Your own key**, it goes to Groq or OpenAI.
+  Your history stays on this Mac. Audio stays in memory.
+- **Anonymous usage and error events are on by default.** Turn them off with
+  **Share usage and error events** in Settings > Privacy (or on the last setup
+  screen). Off takes effect at once and deletes what was waiting. Events carry
+  no audio, no text you dictated, no API keys, no app names and no file
+  paths. Everything that can be sent is listed in [privacy.md](privacy.md).
 
 ## Something went wrong: the log
 
@@ -165,7 +178,8 @@ Vocet writes a log that you can send us. It holds what the app did
 keys are removed from the log before it is written, and the words you dictate
 are not written at all.
 
-- **See it:** menu-bar icon > **Help…** > Log file > **Show in Finder** opens the folder.
+- **See it:** menu-bar icon > **Help…** > Log file > **Show in Finder** opens the folder
+  (or Settings > Help).
   It is `~/Library/Logs/com.dictationapp.desktop/`.
 - **Send it:** in that folder, select all the files, right-click > **Compress**,
   and attach the zip to a bug report (see "Report a bug" below; the files are
@@ -218,6 +232,13 @@ public issue; see [SECURITY.md](../SECURITY.md).
 The same list is in the [changelog](../CHANGELOG.md).
 
 - Apple Silicon Macs only, macOS 13 or newer. Windows comes later.
+- **Don't press other keys while you hold the dictation key.** If you do, the
+  recording is dropped without a message
+  ([#315](https://github.com/gargankit90/dictation-app/issues/315); fixed
+  after 0.1.0).
+- A long dictation on an on-device model can take a while, and has no time
+  limit yet ([#316](https://github.com/gargankit90/dictation-app/issues/316)).
+- Recordings stop after 5 minutes.
 - Fully offline use of **On this Mac** is not yet checked on a Mac with no
   network.
 - A crash inside the on-device engine is not reported (it could contain what
@@ -227,4 +248,3 @@ The same list is in the [changelog](../CHANGELOG.md).
   or OpenAI). Don't dictate anything you would not send to a cloud service.
 - Anonymous usage and error events are on by default; turn them off in
   Settings > Privacy. What is sent: [privacy.md](privacy.md).
-- Recordings stop after 5 minutes.

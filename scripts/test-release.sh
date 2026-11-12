@@ -88,8 +88,8 @@ case $1 in
     case $service in
       dictation-app-updater-key) [ -n "${FAKE_KEY_MISSING:-}" ] && exit 44; printf '%s\n' "$FAKE_KEY" ;;
       dictation-app-updater-password) printf '%s\n' "$FAKE_PASSWORD" ;;
-      dictation-app-posthog-key) [ -n "${FAKE_NO_TELEMETRY:-}" ] && exit 44; printf '%s\n' "$FAKE_POSTHOG" ;;
-      dictation-app-sentry-dsn) [ -n "${FAKE_NO_TELEMETRY:-}" ] && exit 44; printf '%s\n' "$FAKE_SENTRY" ;;
+      dictation-app-posthog-key) [ -n "${FAKE_NO_TELEMETRY:-}${FAKE_POSTHOG_MISSING:-}" ] && exit 44; printf '%s\n' "$FAKE_POSTHOG" ;;
+      dictation-app-sentry-dsn) [ -n "${FAKE_NO_TELEMETRY:-}${FAKE_SENTRY_MISSING:-}" ] && exit 44; printf '%s\n' "$FAKE_SENTRY" ;;
       *) exit 44 ;;
     esac
     ;;
@@ -464,16 +464,43 @@ run_release "$VERSION" || fail "the dry run failed"
 if grep -rqF -- "$POSTHOG" "$repo" || grep -rqF -- "$SENTRY" "$repo"; then
   fail "a telemetry value was written to a file in the repository"
 fi
-# One from the caller's environment is dropped, not passed on.
+no_secret_in_output "both telemetry items present"
+# A missing item stops the release before it builds, naming the item and
+# pointing to docs/releasing.md; the other item is no excuse.
+for missing in POSTHOG SENTRY; do
+  case $missing in
+    POSTHOG) item=dictation-app-posthog-key ;;
+    SENTRY) item=dictation-app-sentry-dsn ;;
+  esac
+  rm -rf "$repo/target/release-out"
+  if [ "$missing" = POSTHOG ]; then
+    FAKE_POSTHOG_MISSING=1 run_release "$VERSION" && fail "a release without $item passed"
+  else
+    FAKE_SENTRY_MISSING=1 run_release "$VERSION" && fail "a release without $item passed"
+  fi
+  grep -q "ERROR: no Keychain item $item" "$work/out.txt" || fail "no message naming $item"
+  grep -q 'The telemetry keys' "$work/out.txt" || fail "no pointer to docs/releasing.md for $item"
+  [ ! -e "$calls/npm-posthog" ] || fail "the build started without $item"
+  [ ! -e "$repo/target/release-out/v$VERSION/latest.json" ] || fail "a release was made without $item"
+  no_secret_in_output "missing $item"
+done
+FAKE_NO_TELEMETRY=1 run_release "$VERSION" && fail "a release with neither telemetry item passed"
+# --no-telemetry builds without them on purpose, with a warning, and drops
+# values from the caller's environment instead of passing them on.
 FAKE_NO_TELEMETRY=1 DICTATION_POSTHOG_KEY=from-caller DICTATION_SENTRY_DSN=from-caller \
-  run_release "$VERSION" || fail "a release without the telemetry items failed"
-grep -q 'WARNING: no Keychain item dictation-app-posthog-key' "$work/out.txt" || fail "no PostHog warning"
-grep -q 'WARNING: no Keychain item dictation-app-sentry-dsn' "$work/out.txt" || fail "no Sentry warning"
+  run_release "$VERSION" --no-telemetry || fail "a --no-telemetry release failed"
+grep -q 'WARNING: --no-telemetry' "$work/out.txt" || fail "no --no-telemetry warning"
 [ "$(cat "$calls/npm-posthog")" = unset ] && [ "$(cat "$calls/npm-sentry")" = unset ] ||
-  fail "a build without the Keychain items still got telemetry values"
-[ -s "$out/latest.json" ] || fail "the release wasn't built without the telemetry items"
-no_secret_in_output "no telemetry items"
-pass "the telemetry keys reach only the build, a missing one warns and builds without it, and none is printed"
+  fail "a --no-telemetry build still got telemetry values"
+[ -s "$out/latest.json" ] || fail "the release wasn't built with --no-telemetry"
+! grep -q 'security find-generic-password -s dictation-app-\(posthog\|sentry\)' "$calls/security" ||
+  fail "--no-telemetry still read a telemetry item"
+no_secret_in_output "--no-telemetry"
+# --no-telemetry with --publish is refused before the Keychain is read.
+run_release "$VERSION" --no-telemetry --publish && fail "--no-telemetry --publish passed"
+grep -q -- '--no-telemetry is for a dry run' "$work/out.txt" || fail "no --no-telemetry --publish message"
+[ ! -e "$calls/security" ] || fail "--no-telemetry --publish read the Keychain before refusing"
+pass "the telemetry keys reach only the build; a missing item stops the release before it builds; --no-telemetry builds without them; with --publish it is refused; none is printed"
 
 # 3. A wrong signature is refused.
 FAKE_OTHER_KEY=$(cat "$work/other.key") run_release "$VERSION" && fail "a bundle signed with another key passed"

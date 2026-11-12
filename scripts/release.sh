@@ -3,7 +3,8 @@
 #
 #   scripts/release.sh <version> [--notes <text>]             # dry run
 #   scripts/release.sh <version> [--notes <text>] --publish   # and upload
-#   (also --notarize, or --no-notarize for a dry test signing run)
+#   (also --notarize, or --no-notarize for a dry test signing run, or
+#   --no-telemetry to build without the PostHog key and Sentry DSN on purpose)
 #
 # The release notes (the GitHub release's body and the "Update available"
 # text in latest.json) are the "## [<version>]" section of CHANGELOG.md, minus
@@ -65,9 +66,10 @@ set +x
 RELEASES_REPO=gargankit90/dictation-app
 KEY_SERVICE=dictation-app-updater-key
 PASSWORD_SERVICE=dictation-app-updater-password
-# Optional telemetry (A1, A2): the PostHog project key and the Sentry DSN, also
-# generic passwords in the login Keychain. A missing one only means the build
-# sends nothing of that kind.
+# Telemetry (A1, A2): the PostHog project key and the Sentry DSN, also generic
+# passwords in the login Keychain. A release stops without them, because a
+# build without a key sends nothing of that kind; --no-telemetry builds
+# without them on purpose (a dry run only).
 POSTHOG_SERVICE=dictation-app-posthog-key
 SENTRY_SERVICE=dictation-app-sentry-dsn
 # The certificate a release is signed with until release-signing.conf names
@@ -93,11 +95,13 @@ version=""
 notes=""
 publish=0
 notarize_flag=""
+telemetry=1
 while [ $# -gt 0 ]; do
   case $1 in
     --publish) publish=1 ;;
     --notarize) notarize_flag=yes ;;
     --no-notarize) notarize_flag=no ;;
+    --no-telemetry) telemetry=0 ;;
     --notes)
       [ $# -ge 2 ] || die "--notes needs a text"
       notes=$2
@@ -113,6 +117,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -n "$version" ] || usage
+[ "$telemetry" = 1 ] || [ "$publish" = 0 ] ||
+  die "--no-telemetry is for a dry run, not for --publish: a release carries the telemetry keys (docs/releasing.md, \"The telemetry keys\")"
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] ||
   die "version must look like 1.2.3 or 1.2.3-alpha.1, not '$version'"
 
@@ -384,19 +390,22 @@ secret_password=$(security find-generic-password -s "$PASSWORD_SERVICE" -w 2>/de
   die "no Keychain item with service $PASSWORD_SERVICE"
 [ -n "$secret_key" ] || die "the Keychain item $KEY_SERVICE is empty"
 
-# The telemetry items are optional: a missing one is a loud warning, not a
-# failure. The values are never printed, only whether they were found.
-posthog_key=$(security find-generic-password -s "$POSTHOG_SERVICE" -w 2>/dev/null) || posthog_key=""
-sentry_dsn=$(security find-generic-password -s "$SENTRY_SERVICE" -w 2>/dev/null) || sentry_dsn=""
-if [ -n "$posthog_key" ]; then
+# The telemetry items are required unless --no-telemetry: a build without a
+# key sends nothing of that kind, and a release should not do that by
+# accident. Only whether each was found is printed, never a value.
+posthog_key=""
+sentry_dsn=""
+if [ "$telemetry" = 1 ]; then
+  posthog_key=$(security find-generic-password -s "$POSTHOG_SERVICE" -w 2>/dev/null) || posthog_key=""
+  sentry_dsn=$(security find-generic-password -s "$SENTRY_SERVICE" -w 2>/dev/null) || sentry_dsn=""
+  [ -n "$posthog_key" ] ||
+    die "no Keychain item $POSTHOG_SERVICE (or it is empty), so this build would send NO usage analytics; add it (docs/releasing.md, \"The telemetry keys\") or pass --no-telemetry for a dry run"
+  [ -n "$sentry_dsn" ] ||
+    die "no Keychain item $SENTRY_SERVICE (or it is empty), so this build would send NO error reports; add it (docs/releasing.md, \"The telemetry keys\") or pass --no-telemetry for a dry run"
   say "usage analytics: found $POSTHOG_SERVICE in the Keychain"
-else
-  say "WARNING: no Keychain item $POSTHOG_SERVICE, so this build sends NO usage analytics (docs/releasing.md says how to add it)"
-fi
-if [ -n "$sentry_dsn" ]; then
   say "error reports: found $SENTRY_SERVICE in the Keychain"
 else
-  say "WARNING: no Keychain item $SENTRY_SERVICE, so this build sends NO error reports (docs/releasing.md says how to add it)"
+  say "WARNING: --no-telemetry: this build sends NO usage analytics and NO error reports"
 fi
 
 bundle=target/release/bundle

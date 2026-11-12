@@ -93,9 +93,11 @@ security add-generic-password -s dictation-app-posthog-key -a "$USER" -w
 security add-generic-password -s dictation-app-sentry-dsn -a "$USER" -w
 ```
 
-If an item is missing, the script prints a warning saying so and builds
-without it: that build sends no analytics (PostHog) or no error reports
-(Sentry), and the release still succeeds. The values are never printed, logged
+If an item is missing (or empty), the script stops before it builds, names
+the item and points here: a build without it would send no analytics (PostHog)
+or no error reports (Sentry). `--no-telemetry` builds without both on purpose,
+with a warning; it is for a dry run, and `--no-telemetry` with `--publish` is
+refused. The values are never printed, logged
 or written to a file. See `docs/privacy.md` for the project settings to turn on.
 
 ## Making a release

@@ -3,9 +3,10 @@
 Hold a hotkey, speak, release, and the text is pasted into the app that has
 focus.
 
-**Status: alpha.** macOS 13 or newer on Apple Silicon only (the DMG is
-`aarch64`; no Intel build). Speech is transcribed in the cloud with your own
-Groq or OpenAI API key. Windows and local (on-device) models are planned.
+**Status: alpha, first release for testers (0.1.0).** macOS 13 or newer on
+Apple Silicon only (the DMG is `aarch64`; no Intel build). Speech is
+transcribed on your Mac with a downloaded model, or in the cloud with your own
+Groq or OpenAI API key. Windows is planned.
 
 ![Holding Right Option in TextEdit: the overlay shows Recording, then Transcribing, then the spoken sentence appears.](docs/media/demo.gif)
 
@@ -13,13 +14,15 @@ _Recorded in a macOS VM: a real Right Option hold, speech by macOS `say` fed to 
 
 ## Try it
 
-1. Download the latest DMG from
-   [Releases](https://github.com/gargankit90/dictation-app/releases/latest).
-2. Follow the [tester guide](docs/TESTERS.md): install, first run, API key
-   (or an on-device model), first dictation, and how to report a bug.
+1. Download the DMG from the
+   [latest GitHub release](https://github.com/gargankit90/dictation-app/releases/latest).
+2. Follow the [tester guide](docs/TESTERS.md): install, first run, speech
+   (an on-device model or your own key), first dictation, updates and how to
+   report a bug.
 
-You need an Apple Silicon Mac (M1 or newer) with macOS 13 or newer. Releases are signed with an
-Apple Developer ID and notarized, so the first launch needs no extra step. What is in each release, and what is not yet checked, is in the
+You need an Apple Silicon Mac (M1 or newer) with macOS 13 or newer. Releases
+are signed with an Apple Developer ID and notarized, so the first launch needs
+no extra step. What is in each release, and its known limits, is in the
 [changelog](CHANGELOG.md). Anonymous usage and error events are on by default
 and can be turned off in Settings; see [what is sent](docs/privacy.md).
 
