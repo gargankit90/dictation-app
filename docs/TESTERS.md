@@ -209,8 +209,8 @@ public issue; see [SECURITY.md](../SECURITY.md).
 
 - **Quit:** menu-bar icon > **Quit Vocet**. (Closing the Settings
   window only hides it; the app keeps running in the menu bar.)
-- **Stop it starting at login:** untick **Launch at login** in Settings and
-  **Save**, or remove it in System Settings > General > Login Items.
+- **Stop it starting at login:** switch off **Open Vocet at login** in Settings >
+  General (it applies at once), or remove it in System Settings > General > Login Items.
 - **Uninstall:**
   1. Quit the app as above.
   2. Drag `/Applications/Vocet.app` to the Trash.
