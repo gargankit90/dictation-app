@@ -8,7 +8,7 @@ testers: short lines, no HTML).
 
 ## [Unreleased]
 
-## [0.1.0] — 2026-11-12
+## [0.1.0] — 2026-11-18
 
 Vocet is a dictation app for the Mac. Hold a key, speak, let go, and your
 words are typed into the app you are using. This is the first release, for
