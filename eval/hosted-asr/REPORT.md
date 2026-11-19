@@ -40,8 +40,8 @@ Two Nemotron number errors changed meaning. In dict_0228 a $150 budget became $8
 | [Voxtral Small](https://openrouter.ai/mistralai/voxtral-small-24b-2507-stt/providers) | 7.44 | 0.180 | 1.13 |
 | [Parakeet Ultra](https://openrouter.ai/moondream/parakeet-ultra/providers) | unranked | 0.060 | 0.38 |
 | [Whisper Turbo](https://openrouter.ai/openai/whisper-large-v3-turbo/providers) | 8.75 | 0.040 | 0.10 |
-| [Whisper large v3](https://openrouter.ai/openai/whisper-large-v3/providers) | 8.24 | 0.111 | pending |
-| [Voxtral Mini](https://openrouter.ai/mistralai/voxtral-mini-3b-2507/providers) | 8.32 | 0.060 | pending |
+| [Whisper large v3](https://openrouter.ai/openai/whisper-large-v3/providers) | 8.24 | 0.111 | 0.24 |
+| [Voxtral Mini](https://openrouter.ai/mistralai/voxtral-mini-3b-2507/providers) | 8.32 | 0.060 | 0.38 |
 
 The Open ASR WER column is the external leaderboard used for candidate selection. Parakeet Ultra was included as an exploratory candidate. Whisper Turbo controls for changes in hosting and upload path. [Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard) · [OpenRouter speech-to-text API](https://openrouter.ai/docs/guides/overview/multimodal/speech-to-text)
 
@@ -55,17 +55,28 @@ Voxtral Small had the lowest raw Codex AMEND (1.00%) and higher check-half ZER (
 
 Qwen3-ASR 0.6B ranked fourth of seven hosted first-round models by Codex ZER both overall and on the held-out check half. It scored 53.6% overall (81/151 zero-edit drafts, 4.00% AMEND), 58.7% on check (44/75, 1.29% AMEND) and 48.7% on tune (37/76, 6.81% AMEND). Direct Groq scored 57.0% overall and tied Qwen on check. All 151 distinct scored clip IDs matched the manifest and the saved transcripts.
 
-The resumed GPT-6 Astra/max judge used 71 new calls and reused verdicts for 80 clips by exact prompt match. Cumulative Codex use reached 869 of 900 calls, comprising 718 judge calls and 151 GPT-6.2 Sol/low cleanup calls.
+The resumed GPT-6 Astra/max judge used 71 new calls and reused verdicts for 80 clips by exact prompt match. Through round one, cumulative Codex use reached 869 of 900 calls, comprising 718 judge calls and 151 GPT-6.2 Sol/low cleanup calls.
 
 Claude reported its five-hour cap. Full Claude scores remain pending for all seven raw candidates and cleaned Nemotron. Additional clip verdicts required after cache matching are 57 for Voxtral Small, 98 for Parakeet Ultra, 99 for cleaned Nemotron, 102 for raw Nemotron, 82 for Parakeet TDT, 109 for Whisper Turbo, 88 for Qwen 0.6B and 92 for Qwen 1.7B. Shared drafts may reduce the number of distinct new calls. Each score in the table covers the entire 151-clip public set.
 
 The first round cost about $0.41 in transcription charges. Claude and Codex CLI runs used subscription access.
 
-## Round 2 interim measurements
+## Round 2 results
 
-The owner started Whisper large v3 and Voxtral Mini. This snapshot uses each model's successful clips saved by 14:09 Pacific on November 19. Clip counts differ, so the first-round ranking excludes both models. WER uses the normalized spoken reference for the clips available. Cache coverage counts exact judge-prompt matches using the original judge identities and settings.
+Both owner-run transcriptions returned all 151 unique manifest clips. WER uses the normalized spoken reference. Latency measures each successful transcription request. Charges cover the uploaded audio, including the same silence padding as in round one.
 
-| Model | Clips of 151 | Spoken WER % | API s median / p90 | USD spent | USD/audio hour | Cached Claude / Codex verdicts |
-|---|---:|---:|---|---:|---:|---|
-| openai/whisper-large-v3 | 22 | 4.23 | 1.82 / 6.42 | 0.0057 | 0.037 | 5 / 7 |
-| mistralai/voxtral-mini-3b-2507 | 24 | 4.14 | 1.11 / 1.80 | 0.0096 | 0.060 | 11 / 13 |
+| Model | Spoken WER % | API s median / p90 | USD for 151 clips | USD/audio hour | USD/1,000 dictations |
+|---|---:|---:|---:|---:|---:|
+| Whisper large v3 | 4.66 | 1.84 / 4.75 | 0.0367 | 0.039 | 0.24 |
+| Voxtral Mini | 3.27 | 1.11 / 2.03 | 0.0568 | 0.060 | 0.38 |
+
+OpenRouter routed 119 Whisper large v3 requests to DeepInfra, 17 to Together and 10 to Groq. Five lacked provider attribution. DeepInfra served 144 Voxtral Mini requests, and seven lacked attribution. The two runs together cost $0.0935.
+
+| Model | Claude clips judged / 151 | Claude distinct prompts missing | Codex clips judged / 151 | Codex distinct prompts missing |
+|---|---:|---:|---:|---:|
+| Whisper large v3 | 38 | 113 | 68 | 83 |
+| Voxtral Mini | 88 | 63 | 122 | 29 |
+
+After deduplication across both sets of transcripts, **112 additional distinct Codex verdicts** and **174 distinct Claude verdicts** are needed to finish both models. These counts exclude exact prompt matches from historical caches. The per-clip coverage CSVs identify each prompt by hash and leave edit counts blank for missing verdicts.
+
+The final round spent 31 additional GPT-6 Astra/max calls, producing 31 new verdicts. Shared and repeated prompts took priority, then the remaining calls alternated between the models. Cumulative Codex usage is **900/900 calls**. Full-set ZER and AMEND remain pending for both models. The recommendation to keep Groq as the default stands.
