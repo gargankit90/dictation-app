@@ -1,6 +1,6 @@
 # Hosted open ASR on the Voice Arena public set
 
-Nemotron is the strongest fully Codex-judged challenger so far. It reduced spoken WER from 3.98% to 1.97%. Its 24 wins, 12 losses and 115 ties against Groq gave it a 7.9-point ZER advantage overall, but the advantage on the check half was only 1.3 points. Keep Groq as the default pending the cleanup comparison and second judge. AssemblyAI verbatim reached 70.9/68.2 Claude/Codex ZER and 2.48% WER.
+Nemotron is the strongest fully Codex-judged challenger so far. It reduced spoken WER from 3.98% to 1.97%. Its 24 wins, 12 losses and 115 ties against Groq gave it a 7.9-point ZER advantage overall, but the advantage on the check half was only 1.3 points. Keep Groq as the default because the cleanup gain did not carry over to the check half and the second judge is pending. AssemblyAI verbatim reached 70.9/68.2 Claude/Codex ZER and 2.48% WER.
 
 | Run | ZER Claude tune / check / **all** (95% CI) | ZER Codex tune / check / **all** | AMEND C / X | vs Groq W/L (Claude; Codex) | WER spoken % | WER intended % | API s median / p90 | thank-you / short / long / numbers / empty |
 |---|---|---|---|---|---:|---:|---|---|
@@ -25,7 +25,7 @@ OpenRouter received every clip and routed audio to its inference providers. A qu
 
 Groq had 11 unmatched “thank you” endings. Nemotron had zero, two digit mismatches and one short draft. The short-draft flag means fewer than 80% of the spoken reference's normalized words. These are screens, not adjudicated error counts. Parakeet v3 won 7, lost 18 and tied 126 clips against Groq on zero-edit status.
 
-The judge uses amend-va 0.2.1 prompt v1. Claude Opus 5.5 judgments are incomplete after repeated CLI failures. Dashes denote missing scores. Groq with GPT-6.2 Sol v4 cleanup scored 82.1/80.8 ZER. The hosted challenger's combined score is pending.
+The judge uses amend-va 0.2.1 prompt v1. Claude Opus 5.5 judgments are incomplete after repeated CLI failures. Dashes denote missing scores. Groq with GPT-6.2 Sol v4 cleanup scored 82.1/80.8 ZER. Nemotron with the same cleanup scored **84.8 Codex ZER and 0.39% AMEND**, versus 80.8 and 0.44% for cleaned Groq. Nemotron gained six zero-edit clips (12 wins, 6 losses, 133 ties). On tune it scored 89.5 versus 80.3, but on check it scored 80.0 versus 81.3. The guard accepted 147 cleanups and kept four raw drafts after detecting dropped names. Cleanup CLI time was 4.75 s median and 13.03 s p90, in addition to ASR. The Claude CLI confirmed a five-hour usage cap with a scheduled 15:10 Pacific reset.
 
 Two Nemotron number errors changed meaning. In dict_0228 a $150 budget became $850. In dict_0721 it dropped one of three consecutive fives from a clinic fax number. Its only short-draft flag, dict_0578, removed a repeated “I'm so” while preserving the message.
 
