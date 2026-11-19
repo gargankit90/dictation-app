@@ -205,3 +205,5 @@ Claude cached verdicts cover 49 raw drafts and 50 pasted drafts. Only matched pa
 Dropped-name fallbacks: dict_0346, dict_0351, dict_0498, dict_0559.
 
 [Paired fixes and regressions](paired-results/nemotron_sol_v4/changes.md).
+
+One already imperfect clip, dict_0399, worsened from 11 to 25 edits under GPT-6 Astra. It falls outside the zero-edit regression count.
