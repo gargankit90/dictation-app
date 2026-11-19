@@ -1,5 +1,11 @@
 # How is Vocet doing? Voice Arena Dictation Bench, public set
 
+> **Update, 2026-11-19:** the same 151 clips through the experimental
+> **Vocet Cloud (AssemblyAI)** engine score **ZER 86.8%, AMEND 0.26%**, against
+> 60.3% / 1.43% for Groq: first on the public set by both measures, within
+> noise of Aqua Voice and Wispr Flow. See
+> [Groq vs Vocet Cloud (AssemblyAI)](#groq-vs-vocet-cloud-assemblyai) at the end.
+
 **Unofficial: single judge (Claude Opus 5.5 via Claude Code), public set
 only.** Run on 2026-11-18 with Vocet built from `cfe583a` (the 0.1.0 release
 commit, debug build, dev certificate), engine **Groq `whisper-large-v3-turbo`**,
@@ -281,6 +287,142 @@ drift further from what was said).
   dictations sent no analytics.
 - **Judge:** 151 drafts, each judged once by Claude Opus 5.5 at max effort
   through `claude -p`. Every answer is in `results/vocet_groq/scored.judge.jsonl`.
+
+## Groq vs Vocet Cloud (AssemblyAI)
+
+Run on 2026-11-18/19, 23:47 to 00:58 local time. Vocet was built from
+`exp/assemblyai` at `6a652ca` (PR #322, round 2), debug build, dev
+certificate. The engine is AssemblyAI's Dictation API with **Smart** rewrite
+mode, the cleanup instruction adapted from Blurt, and the rewrite guard (falls
+back to the verbatim text if the rewrite is empty or echoes the instruction).
+The token sat in the VM's keychain and was never read by us (setup: README).
+Everything else matched the Groq run: same clips, VM, harness commit and
+timing, judge, prompt and scoring.
+
+### Overall
+
+| | Vocet + Groq | Vocet Cloud (AssemblyAI) |
+| --- | ---: | ---: |
+| **ZER** | 60.3% (52.2–68.5) | **86.8%** (80.3–92.7) |
+| **AMEND** | 1.43% (1.11–1.76) | **0.26%** (0.13–0.43) |
+| Drafts needing an edit | 60 | 20 |
+| Empty drafts | 0 | 0 |
+| Clips captured, first try | 151 / 151 | 151 / 151 |
+| Latency median / p90 / max | **0.63 / 1.12 / 1.87 s** | 1.15 / 2.80 / 5.22 s |
+| Rewrite used / fell back to verbatim | (no rewrite) | **151 / 0** (0% fallback) |
+
+On the public set, Vocet Cloud would rank **1st by ZER** (Aqua Voice 83.4,
+Wispr Flow 80.8, Blurt 79.5) and **1st by AMEND** (Wispr Flow 0.34, Aqua Voice
+0.37). Its interval (80.3–92.7%) takes in Aqua Voice and Wispr Flow (Blurt is
+just below it), so "tied with the best tools" is the fair reading, not "the
+best". The same caveats as above apply:
+single judge, one run, public set only.
+
+**Judge noise:** 33 clips got exactly the same draft from both engines, and
+the judge gave a different verdict on one of them (dict_0726: zero edits for
+Groq, 19 for AssemblyAI). One judge flips a few percent of borderline
+verdicts, which is why the paper uses five. It doesn't change the picture:
+43 drafts that failed with Groq passed with AssemblyAI, and only 3 went the
+other way.
+
+### By category
+
+| Context | Clips | Groq ZER % | AssemblyAI ZER % | Groq AMEND % | AssemblyAI AMEND % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Personal messages | 25 | 72.0 | 92.0 | 1.33 | 0.17 |
+| Work chat | 24 | 66.7 | 87.5 | 1.33 | 0.78 |
+| Email | 22 | 68.2 | 95.5 | 0.74 | 0.04 |
+| Docs and notes | 22 | 68.2 | 90.9 | 1.88 | 0.11 |
+| Code | 26 | 69.2 | 80.8 | 1.57 | 0.53 |
+| AI prompts | 22 | 36.4 | **90.9** | 2.79 | 0.17 |
+| Long-form | 10 | 10.0 | **50.0** | 0.98 | 0.25 |
+
+| Length | Clips | Groq ZER % | AssemblyAI ZER % |
+| --- | ---: | ---: | ---: |
+| Short (15 words or fewer) | 20 | 80.0 | 90.0 |
+| Standard (16–80 words) | 121 | 61.2 | 89.3 |
+| Long (more than 80 words) | 10 | 10.0 | 50.0 |
+
+AI prompts gain the most (36% → 91%): they are full of the fillers and "Okay,
+so…" openers the rewrite removes. Apart from long-form, code is now the
+weakest context (81%), because what's left are technical words misheard ("Pindanic", "independent"
+for idempotent, "math" for map).
+
+### What changed in the failures
+
+| Problem | Groq drafts | AssemblyAI drafts |
+| --- | ---: | ---: |
+| Fillers and hedges kept | 28 | 3 |
+| Misheard words or numbers | 24 | 9 |
+| Invented "Thank you." | 11 | **0** |
+| Code names and casing | 8 | 1 |
+| Spoken symbols left as words | 7 | **0** |
+| Names spelt wrong | 5 | 4 |
+| **Rewrite dropped something that was said** | – | **2** |
+| Other (slang units, dropped URL path) | 3 | 1 |
+
+- The rewrite fixed what the app-side cleanup section above predicted:
+  fillers, spoken symbols ("priya.raman@northwind.io", "budget/2026") and the
+  "Thank you." hallucination (none at all). Most self-corrections were resolved
+  too: by the same check, the cue words survive in 14 of 25 clips, against 24
+  for Groq.
+- **What's left is mostly the speech itself:** 9 misheard words and 4 name
+  spellings (Thomas/Tomas, "Owens Park", "d.romarez@").
+- **New risk, the rewrite drops content.** In dict_0119 the rewrite removed a
+  spoken phone number: "…talk on the phone. My number's Thanks for considering
+  it." Groq had "My number is 312-555-0164." In dict_0621, "the green one"
+  lost the word "pot". The guard didn't catch either, because it only checks
+  for an empty or echoed rewrite. Silent loss of a phone number is the kind of
+  error a user may not notice before sending. A cheap guard: compare the
+  digits (and maybe the names) of the rewrite with the verbatim text, and fall
+  back when the rewrite loses some.
+- In dict_0279 the rewrite dropped a misheard start ("Just as like" for "Jest
+  is") instead of keeping it, so the draft starts "hanging after the auth
+  tests". It's tidier than Groq's, but the subject of the sentence is gone.
+
+### The worst AssemblyAI drafts, next to Groq's
+
+1. **dict_0726, work chat, 19 edits** (Groq: judged 0, same text): "We should
+   probably. Let's set up a quick retro…" A restart kept as a sentence; judge
+   noise on the Groq side.
+2. **dict_0119, long-form, 16 edits** (Groq: 2): the phone number dropped by
+   the rewrite (above).
+3. **dict_0279, code, 8 edits** (Groq: 7): "hanging after the auth tests. Find
+   the open handle." ("Jest is" lost; Groq: "Just as like hanging…").
+4. **dict_0229, AI prompt, 5 edits** (Groq: 14): "running like 15 miles a
+   week… without, wrecking my knees" (one "like" kept; Groq kept "like"
+   and "you know").
+5. **dict_0285, code, 5 edits** (Groq: 10): "Just make the button like full
+   width on the mobile."
+
+The other 15 drafts need 5 characters or fewer each.
+
+### Latency
+
+Smart mode costs time: median 1.15 s from key-up to text, against 0.63 s for
+Groq, and a long tail (p90 2.80 s, max 5.2 s on a 25 s clip). The rewrite runs
+after the transcription, on AssemblyAI's side. PR #322 offers a Fast mode
+(not measured here), and AssemblyAI's `/v1/transcribe/live` path could overlap
+the upload with the recording.
+
+### Is it worth it?
+
+On this benchmark the AssemblyAI engine moves Vocet from the bottom third to
+the top. Almost all of the gain comes from the cleanup that the Groq report
+said an app-side step would bring (fillers, symbols, the "Thank you."), plus
+fewer mishearings. The costs: about 0.5 s more median latency (2 s more at
+p90), audio sent to AssemblyAI, and the risk that a rewrite silently drops a
+number. That risk needs a guard before this ships.
+
+### Files for this run
+
+- `results/vocet_assemblyai/harness_results.csv`, `harness.log`, `scored.csv`,
+  `scored.judge.jsonl`, `summary.json`: as for Groq.
+- `results/vocet_assemblyai/vocet_cloud_sources.csv`: per clip, whether Vocet
+  pasted the rewrite or the verbatim text, the reason and the rewrite error
+  code, from Vocet's log (no text in it). `vocet_cloud_log_lines.txt` is the raw
+  log lines.
+- `results/vocet_assemblyai_check/`: the one-clip proof run.
 
 ## Files
 

@@ -1,0 +1,10 @@
+23:46:13 151 clips, 0 done, 1 to run
+23:46:13 audio -> BlackHole 2ch (2 ch, 48000 Hz)
+23:46:14 tool settings before first clip: vocet_provider=assemblyai, vocet_model=assemblyai-dictation, vocet_language=en, vocet_hotkey=RightAlt, vocet_transcription=cloud, default_input=BlackHole 2ch
+23:46:16 scratch document: window id 235
+23:46:19 TextEdit substitutions: Smart Quotes=already off, Smart Dashes=already off, Text Replacement=turned off, Smart Links=already off, Data Detectors=already off, Correct Spelling Automatically=already off, Check Spelling While Typing=turned off, Check Grammar With Spelling=already off
+23:46:19 Starting in 3s - don't touch the keyboard/mouse. Ctrl-C stops safely; rerun to resume.
+23:46:43 [1/1] dict_0007.flac [ok] 'Write a docstring for this function that explains what it returns and what happens when the input list is empty. Keep it short and use Google style.'
+23:46:43 tool settings in use: vocet_provider=assemblyai, vocet_model=assemblyai-dictation, vocet_language=en, vocet_hotkey=RightAlt, vocet_transcription=cloud, default_input=BlackHole 2ch
+23:46:43 --- batch check after 1/1 (1 ok in total): OK
+23:46:45 results: /Users/lume/va/results_vocet_assemblyai_check.csv - ok=1

@@ -1,0 +1,181 @@
+{
+ "engine": "vocet_assemblyai",
+ "n": 151,
+ "zer": 86.75496688741723,
+ "zer_ci95": [
+  80.26315789473684,
+  92.7010924735341
+ ],
+ "amend": 0.2639617996856185,
+ "amend_ci95": [
+  0.12641075699320617,
+  0.4324199041692305
+ ],
+ "judge": "claude-opus-5-5 effort=max via claude -p (Claude Code CLI)",
+ "prompt": "amend-va 0.2.1 prompt v1 fingerprint 8ed04caf4663",
+ "label": "unofficial: single judge (Claude Opus 5.5 via Claude Code), public set only",
+ "empty_drafts": 0,
+ "latency_s": {
+  "n": 151,
+  "median": 1.15,
+  "p90": 2.8,
+  "mean": 1.466092715231788,
+  "max": 5.22
+ },
+ "by_domain": {
+  "personal_messaging": {
+   "n": 25,
+   "zer": 92.0,
+   "amend": 0.17164435290078955
+  },
+  "work_chat": {
+   "n": 24,
+   "zer": 87.5,
+   "amend": 0.782083185211518
+  },
+  "email": {
+   "n": 22,
+   "zer": 95.45454545454545,
+   "amend": 0.03773584905660377
+  },
+  "ai_prompt": {
+   "n": 22,
+   "zer": 90.9090909090909,
+   "amend": 0.17252533965926245
+  },
+  "code": {
+   "n": 26,
+   "zer": 80.76923076923077,
+   "amend": 0.5266773528738264
+  },
+  "docs_notes": {
+   "n": 22,
+   "zer": 90.9090909090909,
+   "amend": 0.10573618821041501
+  },
+  "long_form": {
+   "n": 10,
+   "zer": 50.0,
+   "amend": 0.2524232633279483
+  }
+ },
+ "by_length": {
+  "short (<=15 words)": {
+   "n": 20,
+   "zer": 90.0,
+   "amend": 1.7127799736495388
+  },
+  "standard (16-80 words)": {
+   "n": 121,
+   "zer": 89.25619834710744,
+   "amend": 0.221219744946647
+  },
+  "long (>80 words)": {
+   "n": 10,
+   "zer": 50.0,
+   "amend": 0.2524232633279483
+  }
+ },
+ "worst": [
+  {
+   "clip_id": "dict_0726",
+   "domain": "work_chat",
+   "edits": "19",
+   "chars": "103",
+   "draft": "We should probably. Let's set up a quick retro after the release. Nothing formal, just want to talk about what slowed us down.",
+   "fixed": "Let's set up a quick retro after the release. Nothing formal, just want to talk about what slowed us down.",
+   "intended_text": "Let's set up a quick retro after the release. Nothing formal, just want to talk about what slowed us down.",
+   "spoken_text": "We should probably, let's set up a quick retro after the release. Nothing formal, just want to talk about what slowed us down."
+  },
+  {
+   "clip_id": "dict_0119",
+   "domain": "long_form",
+   "edits": "16",
+   "chars": "969",
+   "draft": "Hi, Mr. Castellano. I'm writing about the lease renewal notice you left for unit 4B at 2915 Linden Street. First off, thank you for getting the heater fixed so fast last winter. I really appreciated that. I'd like to stay another year, but I wanted to talk about the new rent. The notice has it going from $1,675 $1,900 a month, which is about a 13% jump. I looked at similar 2-bedrooms around here on Zillow, and most of them are listed somewhere between $1,700 and $1,750. I've paid on time every month for 3 years and never had a complaint, and honestly, I think a reliable tenant probably saves you more than the difference. Would you consider $1,750 a month on a 12-month lease? I'd be open to an 18-month lease too, if that makes it easier on your end. The notice says you need an answer by December 1st, so I wanted to get in touch early. I'm around most evenings after 6 if you'd rather just talk on the phone. My number's Thanks for considering it. Best, Alicia Moreno.",
+   "fixed": "Hi, Mr. Castellano. I'm writing about the lease renewal notice you left for unit 4B at 2915 Linden Street. First off, thank you for getting the heater fixed so fast last winter. I really appreciated that. I'd like to stay another year, but I wanted to talk about the new rent. The notice has it going from $1,675 to $1,900 a month, which is about a 13% jump. I looked at similar 2-bedrooms around here on Zillow, and most of them are listed somewhere between $1,700 and $1,750. I've paid on time every month for 3 years and never had a complaint, and honestly, I think a reliable tenant probably saves you more than the difference. Would you consider $1,750 a month on a 12-month lease? I'd be open to an 18-month lease too, if that makes it easier on your end. The notice says you need an answer by December 1st, so I wanted to get in touch early. I'm around most evenings after 6 if you'd rather just talk on the phone. My number's (312) 555-0164. Thanks for considering it. Best, Alicia Moreno.",
+   "intended_text": "Hi Mr. Castellano,\n\nI'm writing about the lease renewal notice you left for Unit 4B at 2915 Linden Street. And first off, thank you for getting the heater fixed so fast last winter, I really appreciated that.\n\nI'd like to stay another year, but I wanted to talk about the new rent. The notice has it going from $1,675 to $1,900 a month, which is about a 13% jump. I looked at similar two-bedrooms around here on Zillow and most of them are listed somewhere between $1,700 and $1,750. I've paid on time every month for three years and never had a complaint, and honestly I think a reliable tenant probably saves you more than the difference.\n\nWould you consider $1,750 a month on a 12-month lease? And I'd be open to an 18-month lease too if that makes it easier on your end.\n\nThe notice says you need an answer by December 1, so I wanted to get in touch early. I'm around most evenings after 6 if you'd rather just talk on the phone, my number's (312) 555-0164.\n\nThanks for considering it.\n\nBest,\nAlicia Moreno",
+   "spoken_text": "Hi Mr. Castellano, I'm writing about the lease renewal notice you left for unit four B at twenty nine fifteen Linden Street. And first off, thank you for getting the heater fixed so fast last winter, I really appreciated that. I'd like to stay another year, but I wanted to talk about the new rent. The notice has it going from sixteen seventy five to nineteen hundred a month, which is about a thirteen percent jump. I looked at similar two bedrooms around here on Zillow and most of them are listed somewhere between seventeen hundred and seventeen fifty. I've paid on time every month for three years and never had a complaint, and honestly I think a reliable tenant probably saves you more than the difference. Would you consider seventeen fifty a month on a twelve month lease? And I'd be open to an eighteen month lease too if that makes it easier on your end. The notice says you need an answer by December first, so I wanted to get in touch early. I'm around most evenings after six if you'd rather just talk on the phone, my number's three one two, five five five, zero one six four. Thanks for considering it. Best, Alicia Moreno"
+  },
+  {
+   "clip_id": "dict_0279",
+   "domain": "code",
+   "edits": "8",
+   "chars": "57",
+   "draft": "hanging after the auth tests. Find the open handle.",
+   "fixed": "Jest is hanging after the auth tests. Find the open handle.",
+   "intended_text": "Jest is hanging after the auth tests, find the open handle.",
+   "spoken_text": "Jest is, like, hanging after the auth tests, find the open handle."
+  },
+  {
+   "clip_id": "dict_0229",
+   "domain": "ai_prompt",
+   "edits": "5",
+   "chars": "239",
+   "draft": "I signed up for the Twin Cities Marathon on October 4th, and right now I'm running like 15 miles a week. Can you build me a 16-week plan that gets me there without, wrecking my knees? I can only run 4 days a week, and Sundays have to be the long run.",
+   "fixed": "I signed up for the Twin Cities Marathon on October 4th, and right now I'm running 15 miles a week. Can you build me a 16-week plan that gets me there without, wrecking my knees? I can only run 4 days a week, and Sundays have to be the long run.",
+   "intended_text": "I signed up for the Twin Cities Marathon on October 4th and right now I'm running 15 miles a week. Can you build me a 16-week plan that gets me there without wrecking my knees? I can only run four days a week and Sundays have to be the long run.",
+   "spoken_text": "I signed up for the Twin Cities Marathon on October fourth and right now I'm running like fifteen miles a week. Can you build me a sixteen week plan that gets me there without, you know, wrecking my knees? I can only run four days a week and Sundays have to be the long run."
+  },
+  {
+   "clip_id": "dict_0285",
+   "domain": "code",
+   "edits": "5",
+   "chars": "45",
+   "draft": "Just make the button like full width on the mobile.",
+   "fixed": "Just make the button full width on the mobile.",
+   "intended_text": "Just make the button full width on mobile.",
+   "spoken_text": "Just, just make the button, like, full width on mobile."
+  },
+  {
+   "clip_id": "dict_0356",
+   "domain": "code",
+   "edits": "5",
+   "chars": "355",
+   "draft": "A few things on the payment service. The Stripe webhook handler's timing out, so bump its timeout to 15 seconds. Actually, make it 20. Then add a retry with backoff when we call the Ledger API and write a test that sends the webhook twice so we know it's independent. And don't upgrade the Stripe library while you're in there. We're staying on version 12 for now.",
+   "fixed": "A few things on the payment service. The Stripe webhook handler's timing out, so bump its timeout to 15 seconds. Actually, make it 20. Then add a retry with backoff when we call the Ledger API and write a test that sends the webhook twice so we know it's idempotent. And don't upgrade the Stripe library while you're in there. We're staying on version 12 for now.",
+   "intended_text": "Okay so a few things on the payments service. The Stripe webhook handler's timing out, so bump its timeout to 20 seconds. Then add a retry with backoff when we call the ledger API, and write a test that sends the webhook twice so we know it's idempotent. Oh and don't upgrade the Stripe library while you're in there, we're staying on version 12 for now.",
+   "spoken_text": "Okay so a few things on the payments service. The Stripe webhook handler's timing out, so bump its timeout to fifteen seconds, actually make it twenty. Then add a retry with backoff when we call the ledger API, and write a test that sends the webhook twice so we know it's idempotent. Oh and don't upgrade the Stripe library while you're in there, we're staying on version twelve for now."
+  },
+  {
+   "clip_id": "dict_0108",
+   "domain": "long_form",
+   "edits": "3",
+   "chars": "1005",
+   "draft": "Hey everyone, I want to say something about the last couple of weeks before we go into planning tomorrow. I know a lot of you have been working late and picking up weekend stuff to get the launch out, and I see it and I'm really grateful. I think I've let it go on too long. When I look at the board, we're basically treating every request from sales like it's urgent, and that's on me for not pushing back. Here's what I want to try tomorrow. I'm going to bring the full list of open asks and we're going to sort them in together into what has to ship this month and what can wait. Anything that doesn't make the first bucket, I'll go have the conversation with sales myself. You don't have to. I also want people to actually take the comp days for the weekends you worked. Please don't just let them disappear. Put them on the calendar in the next 2 weeks and I'll make sure coverage is handled. If anyone wants to talk about workload one-on-one before tomorrow, my door's open, or just DM me. Thanks for everything. Seriously.",
+   "fixed": "Hey everyone, I want to say something about the last couple of weeks before we go into planning tomorrow. I know a lot of you have been working late and picking up weekend stuff to get the launch out, and I see it and I'm really grateful. I think I've let it go on too long. When I look at the board, we're basically treating every request from sales like it's urgent, and that's on me for not pushing back. Here's what I want to try tomorrow. I'm going to bring the full list of open asks and we're going to sort them together into what has to ship this month and what can wait. Anything that doesn't make the first bucket, I'll go have the conversation with sales myself. You don't have to. I also want people to actually take the comp days for the weekends you worked. Please don't just let them disappear. Put them on the calendar in the next 2 weeks and I'll make sure coverage is handled. If anyone wants to talk about workload one-on-one before tomorrow, my door's open, or just DM me. Thanks for everything. Seriously.",
+   "intended_text": "Hey everyone, I want to say something about the last couple of weeks before we go into planning tomorrow.\n\nI know a lot of you have been working late and picking up weekend stuff to get the launch out, and I see it, and I'm really grateful. But I also think I've let it go on too long. When I look at the board, we're basically treating every request from sales like it's urgent, and that's on me for not pushing back.\n\nSo here's what I want to try. Tomorrow I'm going to bring the full list of open asks and we're going to sort them together into what has to ship this month and what can wait. Anything that doesn't make the first bucket, I'll go have the conversation with sales myself, you don't have to.\n\nI also want people to actually take the comp days for the weekends you worked. Please don't just let them disappear. Put them on the calendar in the next two weeks and I'll make sure coverage is handled.\n\nIf anyone wants to talk about workload one-on-one before tomorrow, my door's open, or just DM me. Thanks for everything, seriously.",
+   "spoken_text": "Hey everyone, I want to say something about the last couple of weeks before we go into planning tomorrow. I know a lot of you have been working late and picking up weekend stuff to get the launch out, and I see it, and I'm really grateful. But I also think we've, I think I've let it go on too long. When I look at the board, we're basically treating every request from sales like it's urgent, and that's on me for not pushing back. So here's what I want to try. Tomorrow I'm going to bring the full list of open asks and we're going to sort them together into what has to ship this month and what can wait. Anything that doesn't make the first bucket, I'll go have the conversation with sales myself, you don't have to. I also want people to actually take the comp days for the weekends you worked. Like, please don't just let them disappear. Put them on the calendar in the next two weeks and I'll make sure coverage is handled. If anyone wants to talk about workload one on one before tomorrow, my door's open, or just DM me. Thanks for everything, seriously."
+  },
+  {
+   "clip_id": "dict_0232",
+   "domain": "ai_prompt",
+   "edits": "3",
+   "chars": "142",
+   "draft": "My Docker container keeps exiting with code 137 right after startup. The image is node:20-alpine and the memory limit is 512 megs. What's going on?",
+   "fixed": "My Docker container keeps exiting with code 137 right after startup. The image is node:20-alpine and the memory limit is 512 MB. What's going on?",
+   "intended_text": "My Docker container keeps exiting with code 137 right after startup. The image is node:20-alpine and the memory limit is 512 MB. What's going on?",
+   "spoken_text": "My Docker container keeps exiting with code one thirty seven right after startup. The image is node twenty alpine and the memory limit is five twelve megs. What's going on?"
+  },
+  {
+   "clip_id": "dict_0351",
+   "domain": "code",
+   "edits": "3",
+   "chars": "341",
+   "draft": "we're moving the FastAPI app settings over to Pindanic version 2. Can you swap the old config class for settings model that reads from env vars, same names, and have it blow up on startup if the database URL or the Redis URL is missing? Pool size defaults to 10, request timeout 30 seconds, and then fix anywhere that imports the old configuration.",
+   "fixed": "we're moving the FastAPI app settings over to Pydantic version 2. Can you swap the old config class for settings model that reads from env vars, same names, and have it blow up on startup if the database URL or the Redis URL is missing? Pool size defaults to 10, request timeout 30 seconds, and then fix anywhere that imports the old configuration.",
+   "intended_text": "OK, so we're moving the FastAPI app's settings over to Pydantic version 2. Can you swap the old config class for a settings model that reads from env vars, same names, and have it blow up on startup if the database URL or the Redis URL is missing? Pool size defaults to 10, request timeout 30 seconds. And then fix anywhere that imports the old config.",
+   "spoken_text": "Ok so we're moving the FastAPI app's settings over to Pydantic version two. Can you swap the old config class for a settings model that reads from env vars, same names, and have it blow up on startup if the database URL or the Redis URL is missing? Pool size defaults to ten, request timeout thirty seconds. And then fix anywhere that imports the old config."
+  },
+  {
+   "clip_id": "dict_0430",
+   "domain": "docs_notes",
+   "edits": "3",
+   "chars": "289",
+   "draft": "Launch sync. FieldBook app version 2.4 goes to App Store review November 3rd, because Monday's a freeze day. Pricing stays $4.99 a month and the annual plan is $49.99. Press embargo lifts on the 10th at 9 AM Pacific. Owens Park doing the release notes and the landing page is fieldbook.app/new.",
+   "fixed": "Launch sync. Fieldbook app version 2.4 goes to App Store review November 3rd, because Monday's a freeze day. Pricing stays $4.99 a month and the annual plan is $49.99. Press embargo lifts on the 10th at 9 AM Pacific. Owen Park's doing the release notes and the landing page is fieldbook.app/new.",
+   "intended_text": "Launch sync: Fieldbook app version 2.4 goes to App Store review November 3, because Monday's a freeze day. Pricing stays $4.99 a month and the annual plan is $49.99. Press embargo lifts on the 10th at 9 AM Pacific. Owen Park's doing the release notes, and the landing page is fieldbook.app/new.",
+   "spoken_text": "Launch sync. Fieldbook app version two point four goes to App Store review November second, sorry, November third, because Monday's a freeze day. Pricing stays four ninety nine a month and the annual plan is forty nine ninety nine. Press embargo lifts on the tenth at nine AM Pacific. Owen Park's doing the release notes, and the landing page is fieldbook dot app slash new."
+  }
+ ]
+}

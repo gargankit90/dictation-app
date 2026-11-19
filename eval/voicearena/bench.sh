@@ -9,6 +9,7 @@
 #   eval/voicearena/bench.sh run <engine> [harness args...]   # VM: run the harness in Terminal, wait, copy results back
 #   eval/voicearena/bench.sh score <engine>           # host: judge + score -> results/<engine>/scored.csv
 #   eval/voicearena/bench.sh report <engine>...       # host: summary.json + tables for REPORT.md
+#   eval/voicearena/bench.sh cloud-sources <engine>   # Vocet Cloud only: rewrite vs verbatim per clip
 #
 # <engine> is a label such as vocet_groq or vocet_assemblyai. Everything else (clips, harness timing,
 # judge, prompt version) is fixed, so two engines' results are directly comparable.
@@ -119,6 +120,14 @@ case "$cmd" in
     vm_terminal "cd $VM_DIR/harness && /Users/lume/.local/bin/uv run run_vocet_dictation.py ../clips --check $*" "$log"
     for _ in $(seq 1 60); do vm "test -f $log.status" && break; sleep 5; done
     vm "tail -n 30 $log; echo exit=\$(cat $log.status)"
+    ;;
+  cloud-sources)
+    # Vocet Cloud (AssemblyAI) only: rewrite vs verbatim fallback per clip, from Vocet's log
+    # (those lines carry no text).
+    engine=${1:?engine label}
+    out=$HERE/results/$engine
+    vm "grep -h 'assemblyai text' ~/Library/Logs/com.dictationapp.desktop/dictation-app.log*" >"$out/vocet_cloud_log_lines.txt"
+    python3 -I "$HERE/vocet_cloud_sources.py" "$out/vocet_cloud_log_lines.txt" "$out/results.csv" "$out/vocet_cloud_sources.csv"
     ;;
   ssh)
     vm "$@"

@@ -1,6 +1,6 @@
-"""Failure categories for the Groq run's 60 drafts that needed edits: assigned by hand from the
+"""Failure categories for the drafts that needed edits, per engine: assigned by hand from the
 judge's corrections (diff of draft vs fixed), recorded here so the counts in REPORT.md can be
-rechecked.  python3 -I categorise.py results/vocet_groq/scored.csv
+rechecked.  python3 -I categorise.py results/<engine>/scored.csv
 Categories:
   thankyou  - a "Thank you." the speaker never said, added at the end (Whisper hallucination)
   filler    - kept fillers, hedges, discourse words or a stutter ("like", "you know", "Okay, so",
@@ -10,13 +10,14 @@ Categories:
               "date-fns", "Dockerfile", "react-query")
   name      - a person or place name spelled wrong ("Rahman" for "Raman", "Thomas" for "Tomas")
   misheard  - a wrong word or number from the speech engine ("get" for "git", "$850" for "$150")
+  rewrite   - the engine's rewrite dropped content that was said (a phone number, the word "pot")
   other     - slang unit ("89 bucks", "megs"), a dropped URL path
 """
 import collections
 import csv
 import sys
 
-CATS = {
+GROQ = {
     "dict_0008": "name symbols", "dict_0014": "misheard", "dict_0023": "thankyou",
     "dict_0024": "code thankyou", "dict_0053": "misheard", "dict_0077": "symbols thankyou",
     "dict_0087": "misheard", "dict_0097": "filler", "dict_0103": "filler", "dict_0108": "filler thankyou",
@@ -35,8 +36,17 @@ CATS = {
     "dict_0614": "misheard", "dict_0616": "misheard", "dict_0620": "misheard", "dict_0641": "filler",
     "dict_0663": "filler", "dict_0696": "misheard", "dict_0711": "name", "dict_0728": "code",
 }
+ASSEMBLYAI = {
+    "dict_0108": "misheard", "dict_0119": "rewrite", "dict_0177": "misheard", "dict_0229": "filler",
+    "dict_0232": "other", "dict_0279": "misheard", "dict_0285": "filler", "dict_0335": "misheard",
+    "dict_0351": "misheard", "dict_0356": "misheard", "dict_0389": "misheard", "dict_0430": "name",
+    "dict_0496": "name", "dict_0533": "name", "dict_0536": "misheard", "dict_0544": "name",
+    "dict_0620": "misheard", "dict_0621": "rewrite", "dict_0726": "filler", "dict_0728": "code",
+}
+BY_ENGINE = {"vocet_groq": GROQ, "vocet_assemblyai": ASSEMBLYAI}
 
 rows = [r for r in csv.DictReader(open(sys.argv[1], encoding="utf-8")) if int(r["edits"]) > 0]
+CATS = BY_ENGINE[rows[0]["engine"]]
 missing = {r["clip_id"] for r in rows} - set(CATS)
 assert not missing, f"uncategorised: {missing}"
 n_all = sum(1 for _ in csv.DictReader(open(sys.argv[1], encoding="utf-8")))
