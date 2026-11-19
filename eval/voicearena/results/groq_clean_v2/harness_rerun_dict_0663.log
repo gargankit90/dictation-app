@@ -1,0 +1,10 @@
+12:08:00 151 clips, 150 done, 1 to run
+12:08:00 audio -> BlackHole 2ch (2 ch, 48000 Hz)
+12:08:00 tool settings before first clip: vocet_provider=groq, vocet_model=whisper-large-v3-turbo, vocet_language=en, vocet_hotkey=RightAlt, vocet_transcription=cloud, vocet_local_model=qwen3-asr-0.6b-q4_k_m, default_input=BlackHole 2ch
+12:08:02 scratch document: window id 127
+12:08:07 TextEdit substitutions: Smart Quotes=already off, Smart Dashes=already off, Text Replacement=turned off, Smart Links=already off, Data Detectors=already off, Correct Spelling Automatically=already off, Check Spelling While Typing=turned off, Check Grammar With Spelling=already off
+12:08:07 Starting in 3s - don't touch the keyboard/mouse. Ctrl-C stops safely; rerun to resume.
+12:08:53 [1/1] dict_0663.flac [ok] "for when your sister gets in Friday, her flight lands at 440 at O'Hare, Terminal 3. Can you, actually, I'll pick her up. You just get the guest room ready. Couple things. The air mattress is in the hall closet. We need extra towels. she's vegetarian now, maybe grab stuff for that veggie lasagna. her number changed. It's 312-555-0147."
+12:08:53 tool settings in use: vocet_provider=groq, vocet_model=whisper-large-v3-turbo, vocet_language=en, vocet_hotkey=RightAlt, vocet_transcription=cloud, vocet_local_model=qwen3-asr-0.6b-q4_k_m, default_input=BlackHole 2ch
+12:08:53 --- batch check after 1/1 (151 ok in total): OK
+12:08:55 results: /Users/lume/va/results_groq_clean_v2.csv - ok=151

@@ -1,0 +1,88 @@
+{
+ "engine": "groq_clean_v2_raw",
+ "halves": {
+  "tune": {
+   "n": 76,
+   "zer": 51.31578947368421,
+   "zer_ci95": [
+    39.743589743589745,
+    62.5
+   ],
+   "amend": 1.7832810000592452,
+   "amend_ci95": [
+    1.2706169822846671,
+    2.3581059893383505
+   ],
+   "latency_median_s": null,
+   "latency_p90_s": null,
+   "cleanup_median_ms": null,
+   "cleanup_p90_ms": null,
+   "cleaned": 0,
+   "fallbacks": 0,
+   "reasons": {}
+  },
+  "check": {
+   "n": 75,
+   "zer": 57.333333333333336,
+   "zer_ci95": [
+    46.3768115942029,
+    67.12328767123287
+   ],
+   "amend": 1.5243025596778832,
+   "amend_ci95": [
+    1.1035604344543184,
+    1.9787556904400607
+   ],
+   "latency_median_s": null,
+   "latency_p90_s": null,
+   "cleanup_median_ms": null,
+   "cleanup_p90_ms": null,
+   "cleaned": 0,
+   "fallbacks": 0,
+   "reasons": {}
+  },
+  "all": {
+   "n": 151,
+   "zer": 54.3046357615894,
+   "zer_ci95": [
+    46.15384615384615,
+    62.06896551724138
+   ],
+   "amend": 1.6518795236983423,
+   "amend_ci95": [
+    1.3223397635345364,
+    2.0022676905633148
+   ],
+   "latency_median_s": null,
+   "latency_p90_s": null,
+   "cleanup_median_ms": null,
+   "cleanup_p90_ms": null,
+   "cleaned": 0,
+   "fallbacks": 0,
+   "reasons": {}
+  }
+ },
+ "codex": {
+  "tune": {
+   "n": 76,
+   "zer": 52.63157894736842,
+   "amend": 1.6267376515823722,
+   "n_both": 76,
+   "both_zer": 51.31578947368421
+  },
+  "check": {
+   "n": 75,
+   "zer": 54.666666666666664,
+   "amend": 1.566820276497696,
+   "n_both": 75,
+   "both_zer": 53.333333333333336
+  },
+  "all": {
+   "n": 151,
+   "zer": 53.64238410596027,
+   "amend": 1.5963811469429448,
+   "n_both": 151,
+   "both_zer": 52.317880794701985
+  }
+ }
+}
