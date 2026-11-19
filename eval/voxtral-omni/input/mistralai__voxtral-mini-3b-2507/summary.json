@@ -1,0 +1,42 @@
+{
+  "label": "mistralai__voxtral-mini-3b-2507",
+  "model": "mistralai/voxtral-mini-3b-2507",
+  "ok": 151,
+  "errors": {},
+  "wer_vs_spoken": 3.267024829388703,
+  "wer_vs_intended": 6.337498118320036,
+  "latency_median_s": 1.108,
+  "latency_p90_s": 2.029,
+  "providers": {
+    "DeepInfra": 144,
+    "?": 7
+  },
+  "cost_usd": 0.056772946879,
+  "audio_hours": 0.9462349999999999,
+  "usd_per_audio_hour": 0.05999878135875338,
+  "flags": {
+    "numbers": 16,
+    "short": 1
+  },
+  "flagged_clips": {
+    "dict_0023": ["numbers"],
+    "dict_0060": ["short"],
+    "dict_0077": ["numbers"],
+    "dict_0119": ["numbers"],
+    "dict_0257": ["numbers"],
+    "dict_0430": ["numbers"],
+    "dict_0496": ["numbers"],
+    "dict_0506": ["numbers"],
+    "dict_0533": ["numbers"],
+    "dict_0534": ["numbers"],
+    "dict_0544": ["numbers"],
+    "dict_0579": ["numbers"],
+    "dict_0616": ["numbers"],
+    "dict_0620": ["numbers"],
+    "dict_0663": ["numbers"],
+    "dict_0721": ["numbers"],
+    "dict_0743": ["numbers"]
+  },
+  "claude": null,
+  "codex": null
+}

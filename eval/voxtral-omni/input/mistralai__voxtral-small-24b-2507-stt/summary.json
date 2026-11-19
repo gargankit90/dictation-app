@@ -1,0 +1,62 @@
+{
+  "label": "mistralai__voxtral-small-24b-2507-stt",
+  "model": "mistralai/voxtral-small-24b-2507-stt",
+  "ok": 151,
+  "errors": {},
+  "wer_vs_spoken": 3.1363438362131553,
+  "wer_vs_intended": 6.337498118320036,
+  "latency_median_s": 2.2,
+  "latency_p90_s": 4.705,
+  "providers": {
+    "DeepInfra": 94,
+    "?": 57
+  },
+  "cost_usd": 0.1703185,
+  "audio_hours": 0.9462349999999999,
+  "usd_per_audio_hour": 0.179995984084292,
+  "flags": {
+    "numbers": 15,
+    "short": 1
+  },
+  "flagged_clips": {
+    "dict_0023": ["numbers"],
+    "dict_0060": ["short"],
+    "dict_0077": ["numbers"],
+    "dict_0119": ["numbers"],
+    "dict_0228": ["numbers"],
+    "dict_0255": ["numbers"],
+    "dict_0430": ["numbers"],
+    "dict_0496": ["numbers"],
+    "dict_0506": ["numbers"],
+    "dict_0533": ["numbers"],
+    "dict_0534": ["numbers"],
+    "dict_0544": ["numbers"],
+    "dict_0579": ["numbers"],
+    "dict_0616": ["numbers"],
+    "dict_0663": ["numbers"],
+    "dict_0721": ["numbers"]
+  },
+  "claude": null,
+  "codex": {
+    "tune": {
+      "zer": 59.21052631578947,
+      "amend": 1.093574510847077
+    },
+    "check": {
+      "zer": 65.33333333333333,
+      "amend": 0.9143185738930419
+    },
+    "all": {
+      "n": 151,
+      "zer": 62.25165562913907,
+      "amend": 1.0027108170344246,
+      "zer_ci95": [54.67625899280576, 70.19867549668874]
+    },
+    "vs_groq": {
+      "wins": 11,
+      "losses": 3,
+      "ties_both_zero": 83,
+      "ties_both_edit": 54
+    }
+  }
+}
