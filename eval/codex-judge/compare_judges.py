@@ -18,6 +18,11 @@ import random
 HERE = pathlib.Path(__file__).resolve().parent
 VA = HERE.parent / "voicearena"
 ENGINES = ["vocet_assemblyai", "vocet_groq", "vocet_parakeet", "vocet_qwen3"]
+# Extra runs: in the per-engine tables, not in "pooled" (pooled stays the four engines' first full runs).
+EXTRA = ["vocet_assemblyai_run2", "vocet_assemblyai_run2_verbatim"]
+# (label, before, after): the same clips under two conditions, compared per judge.
+PAIRS = [("AssemblyAI run 1 vs run 2 (repeat)", "vocet_assemblyai", "vocet_assemblyai_run2"),
+         ("AssemblyAI run 2: verbatim vs cleaned", "vocet_assemblyai_run2_verbatim", "vocet_assemblyai_run2")]
 
 
 def load(engine: str) -> list[dict]:
@@ -105,10 +110,13 @@ def main() -> None:
     allrows, summary = [], {}
     print("engine            n  ZER cl  ZER cx  gap (95% CI)        AMEND cl AMEND cx  same%  kappa  ident%  "
           "rho   strict lenient")
-    for e in ENGINES + ["pooled"]:
+    loaded = {}
+    for e in ENGINES + ["pooled"] + EXTRA:
         rows = allrows if e == "pooled" else load(e)
-        if e != "pooled":
+        if e in ENGINES:
             allrows += rows
+        if e != "pooled":
+            loaded[e] = rows
         s = stats(rows)
         lo, hi = gap_interval(rows)
         s["zer_gap"], s["zer_gap_ci"] = s["zer_codex"] - s["zer_claude"], [lo, hi]
@@ -118,6 +126,23 @@ def main() -> None:
               f"{s['same_verdict']:5.1f}  {s['kappa']:.3f}  {s['identical_edits']:5.1f}  {s['edit_rho']:.3f}  "
               f"{s['zer_strict']:5.1f}  {s['zer_lenient']:5.1f}   (only Claude ok {s['only_claude_ok']}, "
               f"only Codex ok {s['only_codex_ok']}, identical text {s['identical_text']:.1f}%)")
+    print()
+    print("pair                                    judge   ZER before  ZER after  change  verdict flips "
+          "(ok->edit / edit->ok)  identical drafts")
+    for label, b, c in PAIRS:
+        before = {r["clip_id"]: r for r in loaded[b]}
+        after = {r["clip_id"]: r for r in loaded[c]}
+        same_draft = sum(before[k]["draft"] == after[k]["draft"] for k in after)
+        summary.setdefault("pairs", {})[label] = {"before": b, "after": c, "identical_drafts": same_draft}
+        for j in ("claude", "codex"):
+            zb = {k: before[k][f"e_{j}"] == 0 for k in after}
+            za = {k: after[k][f"e_{j}"] == 0 for k in after}
+            lost = sum(zb[k] and not za[k] for k in after)
+            won = sum(za[k] and not zb[k] for k in after)
+            pb, pa = 100 * sum(zb.values()) / len(after), 100 * sum(za.values()) / len(after)
+            summary["pairs"][label][j] = {"zer_before": pb, "zer_after": pa, "ok_to_edit": lost, "edit_to_ok": won}
+            print(f"{label:39} {j:6}  {pb:6.1f}     {pa:6.1f}   {pa - pb:+5.1f}   {lost + won:3} ({lost} / {won})"
+                  f"                  {same_draft}")
     dis = [r for r in allrows if (r["e_claude"] == 0) != (r["e_codex"] == 0)]
     with (HERE / "disagreements.csv").open("w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, ["engine", "clip_id", "domain", "e_claude", "e_codex", "draft",
@@ -125,7 +150,7 @@ def main() -> None:
         w.writeheader()
         for r in sorted(dis, key=lambda r: (r["clip_id"], r["engine"])):
             w.writerow({k: r[k] for k in w.fieldnames})
-    print(f"{len(dis)} verdict disagreements -> {HERE / 'disagreements.csv'}")
+    print(f"{len(dis)} verdict disagreements in the four first runs -> {HERE / 'disagreements.csv'}")
     if a.json:
         a.json.write_text(json.dumps(summary, indent=2) + "\n")
 

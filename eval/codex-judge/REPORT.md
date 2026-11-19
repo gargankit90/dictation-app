@@ -2,7 +2,8 @@
 
 An experiment on branch `eval/codex-judge` (from `eval/voicearena`, PR #323),
 not for `main`. It adds a second AMEND judge next to Claude Opus 5.5 and
-rescores Vocet's four finished runs of the 151-clip public set with it.
+rescores Vocet's four finished runs of the 151-clip public set with it, plus
+AssemblyAI run 2 and its verbatim text.
 
 **Unofficial: two judges (Claude Opus 5.5 via Claude Code, GPT-6 Astra via
 Codex), public set only.** Run on 2026-11-19.
@@ -24,6 +25,10 @@ Codex), public set only.** Run on 2026-11-19.
   missing unit ("350" → "350°F") and leftover false starts. Asked again, Codex
   gives the same verdict on 18 of those 20 drafts: a steady difference in how
   the two judges read the rules, not random noise.
+- **Repeat-run noise and the cleanup gain look the same under both judges.**
+  AssemblyAI run 1 → run 2: +1.3 ZER points under each judge, with 10 (Claude)
+  and 8 (Codex) drafts flipping verdict. Verbatim → cleaned (run 2): +17.2
+  (Claude) and +18.5 (Codex). Neither judge finds a draft that cleanup broke.
 
 ## Second judge (Codex)
 
@@ -58,9 +63,9 @@ answer is cached, the script checks Codex's run header for `gpt-6-astra` /
 report which model the server actually used.
 
 **Calls:** 599 judge calls for the four runs (5 smoke test, then 145 + 151 +
-149 + 149, one per unique prompt), 40 for the stability check below, and 3
-setup probes: about 640 in all, under the ~1,000 budget (later raised to
-~2,000). No failures, retries or usage-limit messages. 151 drafts take about
+149 + 149, one per unique prompt), 296 for AssemblyAI run 2 and its verbatim
+text (148 + 148), 40 for the stability check below, and 3 setup probes: about
+940 in all, under the ~2,000 budget (first ~1,000). No failures, retries or usage-limit messages. 151 drafts take about
 4 minutes with 8 workers.
 
 **Smoke test:** on the first 5 Groq clips the answers parsed with amend-va's
@@ -75,6 +80,11 @@ own parsing, and every edit count matched Claude's (0, 6, 1, 10, 17).
 | Parakeet (on-device) | 53.0% | 49.7% | −3.3 (−6.2 to −0.7) | 1.38% | 1.36% |
 | Qwen3 (on-device) | 49.0% | 46.4% | −2.6 (−5.9 to +0.0) | 1.70% | 1.72% |
 | All 604 drafts | 62.3% | 59.6% | −2.6 (−5.0 to −0.8) | 1.20% | 1.21% |
+| AssemblyAI run 2 | 88.1% | 86.8% | −1.3 (−3.4 to +0.0) | 0.26% | 0.28% |
+| AssemblyAI run 2, verbatim text | 70.9% | 68.2% | −2.6 (−5.5 to −0.6) | 0.99% | 1.01% |
+
+"All 604 drafts" pools the four engines' first full runs. Run 2 and the
+verbatim text are listed separately.
 
 The intervals resample speakers (`compare_judges.py`). Mean edits per draft:
 Claude 2.71, Codex 2.75.
@@ -103,6 +113,8 @@ could land in.
 | Groq only | 96.7% | 0.932 | 93.4% | 0.966 |
 | Parakeet only | 96.7% | 0.934 | 90.1% | 0.962 |
 | Qwen3 only | 96.0% | 0.920 | 90.7% | 0.962 |
+| AssemblyAI run 2 | 98.7% | 0.940 | 96.0% | 0.949 |
+| AssemblyAI run 2, verbatim | 97.4% | 0.938 | 95.4% | 0.959 |
 
 The two judges also return the same corrected text, character for character,
 on 88.7% of drafts. AssemblyAI's κ is lower only because 87% of its drafts
@@ -115,8 +127,8 @@ In the paper, Astra's ZER is only 0.3 points below Opus's (67.2% against
 67.5%, all drafts). Here Codex is 2.6 points below Claude. Possible causes,
 which this run can't separate: the Codex route (its tool definitions and
 role note), a different served model version, and the draft mix. The paper's
-drafts average a ZER near 67%, and Vocet's weaker engines
-produce more borderline drafts, which is where judges differ. The gap is
+drafts average a ZER near 67%, and Vocet's weaker engines produce more
+borderline drafts, which is where judges differ. The gap is
 smallest for the strongest engine (AssemblyAI, −1.3), which fits the
 draft-mix explanation.
 
@@ -151,6 +163,47 @@ controls. The two that flipped were "Watch → Watched" for Groq and the flight
 number for Parakeet. So Codex is consistent with itself, and the two judges
 differ steadily in strictness: the disagreements aren't sampling noise.
 
+### AssemblyAI run 2 and the verbatim text, under both judges
+
+The verbatim folder has no harness CSV: its drafts come from the reply dump
+(`aai_split.py join`). So both run-2 folders were Codex-scored from a
+harness-style CSV built from their Claude `scored.csv` (`clip_id`, `status`,
+`finalize_s`, `transcript` = `draft`). That makes the drafts, and so the
+prompts, identical for both judges, and `compare_judges.py` checks it.
+
+**Run 1 against run 2** (the same engine on the same 151 clips, run twice;
+122 drafts came out identical):
+
+| Judge | ZER run 1 | ZER run 2 | Change | Drafts that flip verdict (ok → edit / edit → ok) |
+| --- | ---: | ---: | ---: | --- |
+| Claude | 86.8% | 88.1% | +1.3 | 10 (4 / 6) |
+| Codex | 85.4% | 86.8% | +1.3 | 8 (3 / 5) |
+
+Both judges see the same run-to-run change. Run 2 was judged with its own
+cache, so each judge answered the 122 unchanged drafts a second time, which
+doubles as a self-consistency check. Each judge gave the same verdict and the
+same edit count on 121 of the 122. The one flip is the same clip, dict_0726,
+for both judges: a borderline draft rather than a flaky judge. The other
+flips (9 under Claude, 7 under Codex) are among the 29 drafts whose text
+changed. For AssemblyAI, the run-to-run noise (+1.3 points, 8 to 10 drafts
+flipping) is as large as the gap between the judges (1.3 points, 2 to 4 drafts
+per run). So a second run and a second judge each add about the same
+uncertainty to a single-run, single-judge ZER.
+
+**Verbatim against cleaned** (run 2: the transcript before and after
+AssemblyAI's cleanup, judged as if each had been pasted; 87 drafts are the same
+text in both):
+
+| Judge | ZER verbatim | ZER cleaned | Gain | Fixed by cleanup / broken by cleanup |
+| --- | ---: | ---: | ---: | --- |
+| Claude | 70.9% | 88.1% | +17.2 | 26 / 0 |
+| Codex | 68.2% | 86.8% | +18.5 | 28 / 0 |
+
+The main report's finding holds under the second judge: cleanup lifts ZER by
+about 17 to 18 points and breaks no draft. Codex credits cleanup with two more
+fixes, because it is stricter about the fillers and false starts that cleanup
+removes.
+
 ### Rankings
 
 Placed in Voice Arena's public-set column (whitepaper 10.6; 14 tools, the
@@ -159,6 +212,7 @@ paper's ZER is a five-judge vote, its AMEND is Opus alone):
 | Engine | ZER rank, Claude | ZER rank, Codex | ZER rank, both judges | AMEND rank, Claude | AMEND rank, Codex |
 | --- | --- | --- | --- | --- | --- |
 | Vocet Cloud (AssemblyAI) | 1st (86.8, Aqua 83.4) | 1st (85.4) | 1st (84.8) | 1st (0.26, Wispr 0.34) | 1st (0.31) |
+| AssemblyAI run 2 | 1st (88.1) | 1st (86.8) | 1st (86.8) | 1st (0.26) | 1st (0.28) |
 | Groq | ≈13th (Superwhisper 61.6 > 60.3 > Perplexity 53.0) | ≈13th (57.0) | ≈13th (57.0) | 12th (1.43) | 12th (1.46) |
 | Parakeet | ≈13–14th (53.0, ties Perplexity) | ≈14th (49.7) | ≈14th (49.7) | ≈11–12th (1.38, ties Kivi) | ≈11th (1.36) |
 | Qwen3 | ≈14th (49.0) | ≈14th (46.4) | ≈14th (45.7) | 12th (1.70, Perplexity 1.80) | 12th (1.72) |
@@ -174,15 +228,13 @@ Claude column remains the closest to like for like (see the main
 
 **Conclusions from the main report that still hold:** AssemblyAI is first on
 the public set by both measures; the gap between AssemblyAI and Groq (26.5
-ZER points under Claude, 28.4 under Codex) is ten times the judges' gap; the on-device engines trail
-Groq; most remaining errors are fillers, misheard words and code names.
+ZER points under Claude, 28.4 under Codex) is ten times the judges' gap; the
+on-device engines trail Groq; most remaining errors are fillers, misheard
+words and code names; AssemblyAI's cleanup adds about 17 to 18 ZER points and
+breaks nothing.
 
 ### Not done
 
-- **AssemblyAI run 2 and the verbatim run** (`results/vocet_assemblyai_run2`,
-  `_verbatim`) weren't on `origin/eval/voicearena` when this was written.
-  `bench.sh score-codex <engine>` scores them in about 4 minutes each (about
-  300 calls for both). Then add them to `ENGINES` in `compare_judges.py`.
 - The `_check` (1 clip) and `_limit5` (5 clips) trial folders weren't
   rescored: their drafts are already in the full runs.
 - The other three panel judges (Gemini 4 Argon, Muse Wonder, Kimi K3.1 Pro)
@@ -197,7 +249,7 @@ Groq; most remaining errors are fillers, misheard words and code names.
 | `../voicearena/results/<engine>/scored_codex.judge.jsonl` | each Codex answer, keyed by prompt sha256 (corrected text, model, effort, tokens, route) |
 | `compare_judges.py` | the tables above; writes `disagreements.csv` and, with `--json`, `summary.json` |
 | `summary.json` | the numbers, per engine and pooled |
-| `disagreements.csv` | the 20 drafts with different verdicts, both corrected texts |
+| `disagreements.csv` | the 20 drafts with different verdicts in the four first runs, both corrected texts |
 | `rejudge_disagreements.py`, `rejudge.json` | the stability check |
 
 ```sh

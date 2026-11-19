@@ -98,5 +98,81 @@
     "only_codex_ok": 2,
     "zer_gap": -2.649006622516545,
     "zer_gap_ci": [-4.968944099378882, -0.8012820512820513]
+  },
+  "vocet_assemblyai_run2": {
+    "n": 151,
+    "zer_claude": 88.0794701986755,
+    "zer_codex": 86.75496688741721,
+    "amend_claude": 0.26111210017209663,
+    "amend_codex": 0.2818823808676043,
+    "mean_edits_claude": 0.5827814569536424,
+    "mean_edits_codex": 0.6291390728476821,
+    "same_verdict": 98.67549668874173,
+    "kappa": 0.9398166600239141,
+    "identical_edits": 96.02649006622516,
+    "identical_text": 94.03973509933775,
+    "edit_rho": 0.9485024802243817,
+    "zer_strict": 86.75496688741723,
+    "zer_lenient": 88.0794701986755,
+    "only_claude_ok": 2,
+    "only_codex_ok": 0,
+    "zer_gap": -1.3245033112582831,
+    "zer_gap_ci": [-3.4482758620689653, 0.0]
+  },
+  "vocet_assemblyai_run2_verbatim": {
+    "n": 151,
+    "zer_claude": 70.86092715231787,
+    "zer_codex": 68.21192052980133,
+    "amend_claude": 0.9938033438559569,
+    "amend_codex": 1.0113410499240032,
+    "mean_edits_claude": 2.251655629139073,
+    "mean_edits_codex": 2.2913907284768213,
+    "same_verdict": 97.35099337748345,
+    "kappa": 0.9375258585022754,
+    "identical_edits": 95.36423841059603,
+    "identical_text": 90.06622516556291,
+    "edit_rho": 0.9594074085071885,
+    "zer_strict": 68.21192052980132,
+    "zer_lenient": 70.86092715231788,
+    "only_claude_ok": 4,
+    "only_codex_ok": 0,
+    "zer_gap": -2.649006622516538,
+    "zer_gap_ci": [-5.487804878048781, -0.6211180124223602]
+  },
+  "pairs": {
+    "AssemblyAI run 1 vs run 2 (repeat)": {
+      "before": "vocet_assemblyai",
+      "after": "vocet_assemblyai_run2",
+      "identical_drafts": 122,
+      "claude": {
+        "zer_before": 86.75496688741723,
+        "zer_after": 88.0794701986755,
+        "ok_to_edit": 4,
+        "edit_to_ok": 6
+      },
+      "codex": {
+        "zer_before": 85.43046357615894,
+        "zer_after": 86.75496688741723,
+        "ok_to_edit": 3,
+        "edit_to_ok": 5
+      }
+    },
+    "AssemblyAI run 2: verbatim vs cleaned": {
+      "before": "vocet_assemblyai_run2_verbatim",
+      "after": "vocet_assemblyai_run2",
+      "identical_drafts": 87,
+      "claude": {
+        "zer_before": 70.86092715231788,
+        "zer_after": 88.0794701986755,
+        "ok_to_edit": 0,
+        "edit_to_ok": 26
+      },
+      "codex": {
+        "zer_before": 68.21192052980132,
+        "zer_after": 86.75496688741723,
+        "ok_to_edit": 0,
+        "edit_to_ok": 28
+      }
+    }
   }
 }
