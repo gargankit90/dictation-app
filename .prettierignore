@@ -16,3 +16,5 @@ src/bindings.ts
 about.hbs
 # Design source: generated and exploratory HTML.
 docs/design/
+# Benchmark output written by eval/voicearena scripts.
+eval/voicearena/results/
