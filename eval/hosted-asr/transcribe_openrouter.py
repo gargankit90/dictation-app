@@ -69,6 +69,8 @@ MAX_PRICE_PER_S = {
     "moondream/parakeet-ultra": 0.0000166667,         # Prime Intellect
     "mistralai/voxtral-small-24b-2507-stt": 0.00005,  # DeepInfra
     "openai/whisper-large-v3-turbo": 0.0000111111,    # Groq, Prime Intellect; DeepInfra 0.00000333
+    "openai/whisper-large-v3": 0.0000308333,          # Groq; Together 0.000025, DeepInfra 0.0000075
+    "mistralai/voxtral-mini-3b-2507": 0.0000166667,   # DeepInfra
 }
 FALLBACK_PRICE = 0.0001
 _print_lock = threading.Lock()
@@ -84,8 +86,16 @@ class Budget:
         self.cap, self.spent, self.lock = cap, 0.0, threading.Lock()
 
     def reserve(self, estimate: float) -> bool:
+        """Hold the estimate before a request, so parallel models can't overshoot together."""
         with self.lock:
-            return self.spent + estimate <= self.cap
+            if self.spent + estimate > self.cap:
+                return False
+            self.spent += estimate
+            return True
+
+    def settle(self, estimate: float, cost: float) -> None:
+        with self.lock:
+            self.spent += cost - estimate
 
     def add(self, cost: float) -> None:
         with self.lock:
@@ -284,7 +294,8 @@ def run_model(model: str, clips: list[dict], args, key: str, stop: threading.Eve
         if stop.is_set():
             break
         wav, sent_s = wav_bytes(args.clips / c["file"], args.lead_s, args.tail_s)
-        if not budget.reserve(estimate(model, sent_s)):
+        held = estimate(model, sent_s)
+        if not budget.reserve(held):
             say(f"{model}: stopping, the next clip would pass the ${args.max_usd:.2f} budget "
                 f"(spent about ${budget.spent:.3f})")
             stop.set()
@@ -292,6 +303,7 @@ def run_model(model: str, clips: list[dict], args, key: str, stop: threading.Eve
         try:
             r = transcribe(args.base_url, key, model, wav, args)
         except Fatal:
+            budget.settle(held, 0.0)
             stop.set()
             raise
         r.update({"clip_id": c["clip_id"], "model": model, "sent_s": round(sent_s, 3),
@@ -303,7 +315,7 @@ def run_model(model: str, clips: list[dict], args, key: str, stop: threading.Eve
             r.pop("generation_id", None)
         with open(cache, "a") as f:
             f.write(json.dumps(r) + "\n")
-        budget.add(cost_of(r, model))
+        budget.settle(held, cost_of(r, model))
         if r["status"] == "ok":
             done[c["clip_id"]] = r
             errors.pop(c["clip_id"], None)
@@ -329,7 +341,7 @@ def main() -> int:
     ap.add_argument("--backoff", type=float, default=2.0, help="first retry delay (s), doubling")
     ap.add_argument("--timeout", type=float, default=90.0, help="per request (s)")
     ap.add_argument("--max-usd", type=float, default=2.0,
-                    help="stop before total spend (all models, cached runs included) passes this")
+                    help="stop before total spend (every run in --out, cached runs included) passes this")
     ap.add_argument("--no-provider-lookup", action="store_true")
     ap.add_argument("--gen-delay-scale", type=float, default=1.0, help=argparse.SUPPRESS)  # tests
     args = ap.parse_args()
@@ -351,12 +363,16 @@ def main() -> int:
     stop = threading.Event()
     budget = Budget(args.max_usd)
     seconds = sum(wav_seconds(args.clips / c["file"], args.lead_s, args.tail_s) for c in clips)
+    # Every model already run into --out counts against the budget (both rounds share one cap).
+    if args.out.exists():
+        for d in sorted(args.out.iterdir()):
+            recs = cached_records(d / "transcripts.jsonl")
+            budget.add(sum(cost_of(r, r.get("model", "")) for r in recs))
     for m in args.model:
         spent = sum(cost_of(r, m) for r in cached_records(args.out / label_for(m) / "transcripts.jsonl"))
-        budget.add(spent)
         say(f"{m}: {seconds / 60:.1f} min of audio, at most ${estimate(m, seconds):.3f} "
             f"at the dearest provider; already spent ${spent:.3f}")
-    say(f"budget ${args.max_usd:.2f}, already spent ${budget.spent:.3f}")
+    say(f"budget ${args.max_usd:.2f} across every run in {args.out}, already spent ${budget.spent:.3f}")
     failed = False
     # One thread per model; clips within a model go one at a time, so API latency is what a single
     # dictation would see.

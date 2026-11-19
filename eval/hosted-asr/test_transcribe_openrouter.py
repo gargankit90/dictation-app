@@ -250,6 +250,19 @@ class E2E(unittest.TestCase):
         self.assertEqual(len({m for m, _, _ in self.fake.requests}), 7)
         self.assertIn("spent about $0.007 in total", p.stdout)
         self.outputs_clean()
+        # Round 2: two more models; the first round's spend counts against the same cap.
+        p = subprocess.run([str(HERE / "run_openrouter.sh"), "round2", "--clips", str(self.clips), "--out",
+                            str(self.out), "--limit", "1", "--gen-delay-scale", "0.01", "--max-usd", "0.00725"],
+                           capture_output=True, text=True, env=env, timeout=300)
+        self.assert_clean(p.stdout + p.stderr)
+        self.assertIn("already spent $0.007", p.stdout)
+        models = [m for m, _, _ in self.fake.requests[7:]]
+        # $0.007 spent + ~$0.0002 held for the first request fits; holding ~$0.0001 more for the
+        # second model's request doesn't, whichever order the two threads get there in.
+        self.assertEqual(len(models), 1, p.stdout)
+        self.assertIn(models[0], ("openai/whisper-large-v3", "mistralai/voxtral-mini-3b-2507"))
+        self.assertIn("would pass the $0.01 budget", p.stdout)
+        self.outputs_clean()
 
 
 if __name__ == "__main__":

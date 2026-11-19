@@ -2,11 +2,12 @@
 # Transcribe the Voice Arena public set (151 clips) with every hosted open-weight candidate on OpenRouter.
 #
 #   OPENROUTER_API_KEY="$(security find-generic-password -s com.dictationapp.eval -a openrouter-api-key -w)" \
-#     eval/hosted-asr/run_openrouter.sh [extra transcribe_openrouter.py args, e.g. --limit 3]
+#     eval/hosted-asr/run_openrouter.sh [round2] [extra transcribe_openrouter.py args, e.g. --limit 3]
 #
 # The key comes only from the environment; it is never printed or written. The audio goes to
 # OpenRouter and the provider it routes each request to (see REPORT.md). Rerun the same command to
-# resume: clips already transcribed are skipped. Spend stops at $2.00 (--max-usd) across all models.
+# resume: clips already transcribed are skipped. Spend stops at $2.00 (--max-usd) across every run in
+# results/, both rounds together.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 CLIPS=$HERE/../voicearena/clips
@@ -29,6 +30,15 @@ MODELS=(
   moondream/parakeet-ultra              # not on the OAL; base of fluid-speech-pro (6.06)
   openai/whisper-large-v3-turbo         # control: Groq's model through the same route (OAL 8.75)
 )
+# Round 2 (owner, 2026-11-19: every open model that could beat Groq, whatever its size): the rest of
+# OpenRouter's open-weight transcription models that score better than 8.75.
+if [ "${1:-}" = round2 ]; then
+  shift
+  MODELS=(
+    openai/whisper-large-v3               # OAL 8.24
+    mistralai/voxtral-mini-3b-2507        # OAL 8.32
+  )
+fi
 args=()
 for m in "${MODELS[@]}"; do args+=(--model "$m"); done
 cd "$HERE"
