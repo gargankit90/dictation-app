@@ -1,0 +1,1629 @@
+{
+ "parakeet/raw": {
+  "meta": {
+   "name": "raw",
+   "source": "parakeet",
+   "note": "the engine draft, no cleanup; finalize_s is the VM key-up-to-text time from PR #323"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 51.31578947368421,
+    "amend": 1.457087010602381
+   },
+   "check": {
+    "n": 75,
+    "zer": 54.666666666666664,
+    "amend": 1.2989252255876775
+   },
+   "all": {
+    "n": 151,
+    "zer": 52.980132450331126,
+    "amend": 1.376815821714019,
+    "zer_ci95": [
+     44.57015655577299,
+     62.0
+    ],
+    "amend_ci95": [
+     1.0505825884935003,
+     1.7492989818281819
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 48.68421052631579,
+    "amend": 1.2829608608253518
+   },
+   "check": {
+    "n": 75,
+    "zer": 52.0,
+    "amend": 1.4252873563218391
+   },
+   "all": {
+    "n": 151,
+    "zer": 50.33112582781457,
+    "amend": 1.3551320160867284,
+    "zer_ci95": [
+     42.07306560134567,
+     59.42028985507246
+    ],
+    "amend_ci95": [
+     1.0267560671555678,
+     1.7311741666683949
+    ]
+   }
+  },
+  "both": {
+   "tune": 48.68421052631579,
+   "check": 50.666666666666664,
+   "all": 49.66887417218543
+  }
+ },
+ "parakeet/gemma4-e2b__v1": {
+  "meta": {
+   "name": "gemma4-e2b",
+   "source": "parakeet",
+   "prompt": "v1",
+   "half": "all",
+   "n": 151,
+   "model_file": "gemma-4-E2B-it-Q4_K_M.gguf",
+   "model_bytes": 3106738272,
+   "model_sha256": "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 2.08,
+   "peak_memory_bytes": 603246192,
+   "max_rss_bytes": 3719151616,
+   "latency_s": {
+    "median": 0.392,
+    "p90": 0.955,
+    "mean": 0.6082847682119206,
+    "max": 2.879
+   },
+   "fallbacks": {
+    "number": 6,
+    "name": 3
+   },
+   "fallback_total": 9,
+   "unchanged": 77,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 64.47368421052632,
+    "amend": 0.7954545454545454
+   },
+   "check": {
+    "n": 75,
+    "zer": 60.0,
+    "amend": 1.0027822861117552
+   },
+   "all": {
+    "n": 151,
+    "zer": 62.25165562913907,
+    "amend": 0.9007417873542918,
+    "zer_ci95": [
+     54.13797555517301,
+     70.70330735451199
+    ],
+    "amend_ci95": [
+     0.605979646954642,
+     1.224447526475193
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 64.47368421052632,
+    "amend": 0.6632409177820268
+   },
+   "check": {
+    "n": 75,
+    "zer": 57.333333333333336,
+    "amend": 1.12502899559267
+   },
+   "all": {
+    "n": 151,
+    "zer": 60.9271523178808,
+    "amend": 0.8975868157739847,
+    "zer_ci95": [
+     53.04609038737446,
+     69.0801616036736
+    ],
+    "amend_ci95": [
+     0.6231218166742113,
+     1.199227171001974
+    ]
+   }
+  },
+  "both": {
+   "tune": 64.47368421052632,
+   "check": 54.666666666666664,
+   "all": 59.602649006622514
+  },
+  "harms": 4,
+  "broke": 3,
+  "fixed": 17
+ },
+ "parakeet/gemma4-e2b__v2": {
+  "meta": {
+   "name": "gemma4-e2b",
+   "source": "parakeet",
+   "prompt": "v2",
+   "half": "all",
+   "n": 151,
+   "model_file": "gemma-4-E2B-it-Q4_K_M.gguf",
+   "model_bytes": 3106738272,
+   "model_sha256": "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 2.65,
+   "peak_memory_bytes": 463654248,
+   "max_rss_bytes": 3370991616,
+   "latency_s": {
+    "median": 0.413,
+    "p90": 1.049,
+    "mean": 0.6493443708609271,
+    "max": 3.072
+   },
+   "fallbacks": {
+    "name": 3,
+    "number": 2
+   },
+   "fallback_total": 5,
+   "unchanged": 77,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 65.78947368421052,
+    "amend": 0.6965711883744671
+   },
+   "check": {
+    "n": 75,
+    "zer": 64.0,
+    "amend": 0.8824383164005806
+   },
+   "all": {
+    "n": 151,
+    "zer": 64.90066225165563,
+    "amend": 0.7910738532380897,
+    "zer_ci95": [
+     57.04024781600998,
+     72.34073842302878
+    ],
+    "amend_ci95": [
+     0.545956861209541,
+     1.0626575948676185
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 64.47368421052632,
+    "amend": 0.5936675461741425
+   },
+   "check": {
+    "n": 75,
+    "zer": 60.0,
+    "amend": 1.0105703333720526
+   },
+   "all": {
+    "n": 151,
+    "zer": 62.25165562913907,
+    "amend": 0.80545229244114,
+    "zer_ci95": [
+     54.360063021771154,
+     69.65572858731925
+    ],
+    "amend_ci95": [
+     0.5671926157830945,
+     1.072562517198885
+    ]
+   }
+  },
+  "both": {
+   "tune": 64.47368421052632,
+   "check": 58.666666666666664,
+   "all": 61.58940397350993
+  },
+  "harms": 8,
+  "broke": 4,
+  "fixed": 22
+ },
+ "parakeet/gemma4-e2b__v3": {
+  "meta": {
+   "name": "gemma4-e2b",
+   "source": "parakeet",
+   "prompt": "v3",
+   "half": "all",
+   "n": 151,
+   "model_file": "gemma-4-E2B-it-Q4_K_M.gguf",
+   "model_bytes": 3106738272,
+   "model_sha256": "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 2.54,
+   "peak_memory_bytes": 482397520,
+   "max_rss_bytes": 3118841856,
+   "latency_s": {
+    "median": 0.524,
+    "p90": 1.353,
+    "mean": 0.8474768211920529,
+    "max": 4.709
+   },
+   "fallbacks": {
+    "name": 3,
+    "number": 2
+   },
+   "fallback_total": 5,
+   "unchanged": 83,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 67.10526315789474,
+    "amend": 0.7177462766911896
+   },
+   "check": {
+    "n": 75,
+    "zer": 64.0,
+    "amend": 0.800742717883254
+   },
+   "all": {
+    "n": 151,
+    "zer": 65.56291390728477,
+    "amend": 0.7598739433923365,
+    "zer_ci95": [
+     57.82165039929015,
+     72.84940673289182
+    ],
+    "amend_ci95": [
+     0.5012706904503486,
+     1.0417018588159062
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 64.47368421052632,
+    "amend": 0.6452769313497042
+   },
+   "check": {
+    "n": 75,
+    "zer": 60.0,
+    "amend": 0.9287745980147443
+   },
+   "all": {
+    "n": 151,
+    "zer": 62.25165562913907,
+    "amend": 0.7890707808267577,
+    "zer_ci95": [
+     54.76110038610038,
+     69.65517241379311
+    ],
+    "amend_ci95": [
+     0.541680330669478,
+     1.0626699633810492
+    ]
+   }
+  },
+  "both": {
+   "tune": 64.47368421052632,
+   "check": 58.666666666666664,
+   "all": 61.58940397350993
+  },
+  "harms": 4,
+  "broke": 2,
+  "fixed": 21
+ },
+ "parakeet/gemma4-e4b__v1": {
+  "meta": {
+   "name": "gemma4-e4b",
+   "source": "parakeet",
+   "prompt": "v1",
+   "half": "all",
+   "n": 151,
+   "model_file": "gemma-4-E4B-it-Q4_K_M.gguf",
+   "model_bytes": 4977171584,
+   "model_sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 2.91,
+   "peak_memory_bytes": 1369347472,
+   "max_rss_bytes": 5294604288,
+   "latency_s": {
+    "median": 0.698,
+    "p90": 1.717,
+    "mean": 1.0798344370860926,
+    "max": 5.08
+   },
+   "fallbacks": {
+    "number": 3
+   },
+   "fallback_total": 3,
+   "unchanged": 81,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 63.1578947368421,
+    "amend": 1.0240747394897594
+   },
+   "check": {
+    "n": 75,
+    "zer": 60.0,
+    "amend": 0.8617199699265514
+   },
+   "all": {
+    "n": 151,
+    "zer": 61.58940397350993,
+    "amend": 0.9414810674041602,
+    "zer_ci95": [
+     53.64238410596027,
+     69.86323322795926
+    ],
+    "amend_ci95": [
+     0.5963902254261005,
+     1.327341277217396
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 61.8421052631579,
+    "amend": 0.9032721182030269
+   },
+   "check": {
+    "n": 75,
+    "zer": 58.666666666666664,
+    "amend": 0.9545296771954183
+   },
+   "all": {
+    "n": 151,
+    "zer": 60.264900662251655,
+    "amend": 0.9293297650207335,
+    "zer_ci95": [
+     52.44670846394984,
+     68.125
+    ],
+    "amend_ci95": [
+     0.6011681762075222,
+     1.3282194792417414
+    ]
+   }
+  },
+  "both": {
+   "tune": 61.8421052631579,
+   "check": 57.333333333333336,
+   "all": 59.602649006622514
+  },
+  "harms": 4,
+  "broke": 2,
+  "fixed": 15
+ },
+ "parakeet/gemma4-e4b__v2": {
+  "meta": {
+   "name": "gemma4-e4b",
+   "source": "parakeet",
+   "prompt": "v2",
+   "half": "all",
+   "n": 151,
+   "model_file": "gemma-4-E4B-it-Q4_K_M.gguf",
+   "model_bytes": 4977171584,
+   "model_sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 3.6,
+   "peak_memory_bytes": 591025024,
+   "max_rss_bytes": 4348035072,
+   "latency_s": {
+    "median": 0.799,
+    "p90": 2.057,
+    "mean": 1.2641986754966887,
+    "max": 6.674
+   },
+   "fallbacks": {
+    "name": 1,
+    "number": 2
+   },
+   "fallback_total": 3,
+   "unchanged": 79,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 67.10526315789474,
+    "amend": 0.6042838339116908
+   },
+   "check": {
+    "n": 75,
+    "zer": 61.333333333333336,
+    "amend": 0.7364026440913836
+   },
+   "all": {
+    "n": 151,
+    "zer": 64.23841059602648,
+    "amend": 0.6713780918727915,
+    "zer_ci95": [
+     56.21292106586225,
+     72.48364093959731
+    ],
+    "amend_ci95": [
+     0.4700838063668031,
+     0.9081568116408304
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 65.78947368421052,
+    "amend": 0.6039947374715943
+   },
+   "check": {
+    "n": 75,
+    "zer": 58.666666666666664,
+    "amend": 0.8411160740182145
+   },
+   "all": {
+    "n": 151,
+    "zer": 62.25165562913907,
+    "amend": 0.7243602956332263,
+    "zer_ci95": [
+     54.36138039605601,
+     70.2127659574468
+    ],
+    "amend_ci95": [
+     0.49364238100024876,
+     1.0043493787822069
+    ]
+   }
+  },
+  "both": {
+   "tune": 65.78947368421052,
+   "check": 58.666666666666664,
+   "all": 62.25165562913907
+  },
+  "harms": 2,
+  "broke": 2,
+  "fixed": 19
+ },
+ "parakeet/gemma4-e4b__v3": {
+  "meta": {
+   "name": "gemma4-e4b",
+   "source": "parakeet",
+   "prompt": "v3",
+   "half": "all",
+   "n": 151,
+   "model_file": "gemma-4-E4B-it-Q4_K_M.gguf",
+   "model_bytes": 4977171584,
+   "model_sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 4.28,
+   "peak_memory_bytes": 603558808,
+   "max_rss_bytes": 4121493504,
+   "latency_s": {
+    "median": 1.182,
+    "p90": 3.04,
+    "mean": 1.925973509933775,
+    "max": 11.732
+   },
+   "fallbacks": {
+    "number": 3,
+    "name": 2
+   },
+   "fallback_total": 5,
+   "unchanged": 68,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 67.10526315789474,
+    "amend": 0.604428485936565
+   },
+   "check": {
+    "n": 75,
+    "zer": 64.0,
+    "amend": 0.6705977569661232
+   },
+   "all": {
+    "n": 151,
+    "zer": 65.56291390728477,
+    "amend": 0.6380851564337803,
+    "zer_ci95": [
+     57.93103448275862,
+     72.94330495356036
+    ],
+    "amend_ci95": [
+     0.4596597151026539,
+     0.8497222359596096
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 65.78947368421052,
+    "amend": 0.6041392511065917
+   },
+   "check": {
+    "n": 75,
+    "zer": 61.333333333333336,
+    "amend": 0.8037004914715236
+   },
+   "all": {
+    "n": 151,
+    "zer": 63.57615894039735,
+    "amend": 0.7056125599035663,
+    "zer_ci95": [
+     56.05039074852058,
+     71.03596443965516
+    ],
+    "amend_ci95": [
+     0.4975244407903527,
+     0.9568718853839042
+    ]
+   }
+  },
+  "both": {
+   "tune": 65.78947368421052,
+   "check": 61.333333333333336,
+   "all": 63.57615894039735
+  },
+  "harms": 2,
+  "broke": 2,
+  "fixed": 21
+ },
+ "parakeet/phi4-mini__v1": {
+  "meta": {
+   "name": "phi4-mini",
+   "source": "parakeet",
+   "prompt": "v1",
+   "half": "all",
+   "n": 151,
+   "model_file": "Phi-4-mini-instruct-Q4_K_M.gguf",
+   "model_bytes": 2491874272,
+   "model_sha256": "88c00229914083cd112853aab84ed51b87bdf6b9ce42f532d8c85c7c63b1730a",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 1.61,
+   "peak_memory_bytes": 1258884744,
+   "max_rss_bytes": 3252142080,
+   "latency_s": {
+    "median": 0.526,
+    "p90": 1.283,
+    "mean": 0.8053576158940398,
+    "max": 3.752
+   },
+   "fallbacks": {
+    "number": 5
+   },
+   "fallback_total": 5,
+   "unchanged": 62,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 55.26315789473684,
+    "amend": 1.3757931566150745
+   },
+   "check": {
+    "n": 75,
+    "zer": 58.666666666666664,
+    "amend": 0.9733901624236839
+   },
+   "all": {
+    "n": 151,
+    "zer": 56.95364238410596,
+    "amend": 1.1716581446311176,
+    "zer_ci95": [
+     48.0,
+     65.4148861362038
+    ],
+    "amend_ci95": [
+     0.8267406607685662,
+     1.594045890488858
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 51.31578947368421,
+    "amend": 1.3529551388559222
+   },
+   "check": {
+    "n": 75,
+    "zer": 60.0,
+    "amend": 1.0308090987618774
+   },
+   "all": {
+    "n": 151,
+    "zer": 55.629139072847686,
+    "amend": 1.1894672238945554,
+    "zer_ci95": [
+     46.830097502565856,
+     64.42022364356261
+    ],
+    "amend_ci95": [
+     0.822964134491612,
+     1.6856778655172246
+    ]
+   }
+  },
+  "both": {
+   "tune": 51.31578947368421,
+   "check": 57.333333333333336,
+   "all": 54.3046357615894
+  },
+  "harms": 5,
+  "broke": 2,
+  "fixed": 8
+ },
+ "parakeet/phi4-mini__v2": {
+  "meta": {
+   "name": "phi4-mini",
+   "source": "parakeet",
+   "prompt": "v2",
+   "half": "all",
+   "n": 151,
+   "model_file": "Phi-4-mini-instruct-Q4_K_M.gguf",
+   "model_bytes": 2491874272,
+   "model_sha256": "88c00229914083cd112853aab84ed51b87bdf6b9ce42f532d8c85c7c63b1730a",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 2.06,
+   "peak_memory_bytes": 806866184,
+   "max_rss_bytes": 3120906240,
+   "latency_s": {
+    "median": 0.628,
+    "p90": 1.533,
+    "mean": 0.9719139072847682,
+    "max": 4.749
+   },
+   "fallbacks": {
+    "number": 4,
+    "name": 1
+   },
+   "fallback_total": 5,
+   "unchanged": 67,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 56.578947368421055,
+    "amend": 0.979635456866354
+   },
+   "check": {
+    "n": 75,
+    "zer": 60.0,
+    "amend": 0.9391023794434522
+   },
+   "all": {
+    "n": 151,
+    "zer": 58.27814569536424,
+    "amend": 0.9590643274853801,
+    "zer_ci95": [
+     50.0,
+     66.21621621621621
+    ],
+    "amend_ci95": [
+     0.6827412553579754,
+     1.3058232569601473
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 53.94736842105263,
+    "amend": 0.800616771438738
+   },
+   "check": {
+    "n": 75,
+    "zer": 60.0,
+    "amend": 1.0320571955719557
+   },
+   "all": {
+    "n": 151,
+    "zer": 56.95364238410596,
+    "amend": 0.9179676080219844,
+    "zer_ci95": [
+     48.7333552523426,
+     65.16188769414575
+    ],
+    "amend_ci95": [
+     0.6574460885419018,
+     1.2628515172577897
+    ]
+   }
+  },
+  "both": {
+   "tune": 53.94736842105263,
+   "check": 58.666666666666664,
+   "all": 56.29139072847682
+  },
+  "harms": 5,
+  "broke": 3,
+  "fixed": 11
+ },
+ "parakeet/gemma3-4b__v1": {
+  "meta": {
+   "name": "gemma3-4b",
+   "source": "parakeet",
+   "prompt": "v1",
+   "half": "all",
+   "n": 151,
+   "model_file": "gemma-3-4b-it-Q4_K_M.gguf",
+   "model_bytes": 2489894016,
+   "model_sha256": "04a43a22e8d2003deda5acc262f68ec1005fa76c735a9962a8c77042a74a7d19",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 1.48,
+   "peak_memory_bytes": 2774471576,
+   "max_rss_bytes": 3746906112,
+   "latency_s": {
+    "median": 0.895,
+    "p90": 1.766,
+    "mean": 1.2092649006622516,
+    "max": 4.552
+   },
+   "fallbacks": {
+    "number": 9,
+    "url_email": 1,
+    "name": 2
+   },
+   "fallback_total": 12,
+   "unchanged": 50,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 56.578947368421055,
+    "amend": 1.0349134598227563
+   },
+   "check": {
+    "n": 75,
+    "zer": 58.666666666666664,
+    "amend": 0.8957466481738326
+   },
+   "all": {
+    "n": 151,
+    "zer": 57.615894039735096,
+    "amend": 0.9643286338189172,
+    "zer_ci95": [
+     49.703869749882024,
+     65.4142249004865
+    ],
+    "amend_ci95": [
+     0.7412202319455972,
+     1.2388547741156561
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 55.26315789473684,
+    "amend": 1.042287075640262
+   },
+   "check": {
+    "n": 75,
+    "zer": 58.666666666666664,
+    "amend": 0.9889537909895322
+   },
+   "all": {
+    "n": 151,
+    "zer": 56.95364238410596,
+    "amend": 1.015228426395939,
+    "zer_ci95": [
+     49.35876623376623,
+     64.84603287337661
+    ],
+    "amend_ci95": [
+     0.7532484719611274,
+     1.334442980165969
+    ]
+   }
+  },
+  "both": {
+   "tune": 55.26315789473684,
+   "check": 56.0,
+   "all": 55.629139072847686
+  },
+  "harms": 11,
+  "broke": 6,
+  "fixed": 13
+ },
+ "parakeet/qwen3.5-4b__v1": {
+  "meta": {
+   "name": "qwen3.5-4b",
+   "source": "parakeet",
+   "prompt": "v1",
+   "half": "all",
+   "n": 151,
+   "model_file": "Qwen3.5-4B-Q4_K_M.gguf",
+   "model_bytes": 2740937888,
+   "model_sha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 1.88,
+   "peak_memory_bytes": 1931809160,
+   "max_rss_bytes": 3686268928,
+   "latency_s": {
+    "median": 0.743,
+    "p90": 1.821,
+    "mean": 1.1331986754966887,
+    "max": 5.123
+   },
+   "fallbacks": {
+    "number": 5
+   },
+   "fallback_total": 5,
+   "unchanged": 115,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 53.94736842105263,
+    "amend": 1.1221945137157108
+   },
+   "check": {
+    "n": 75,
+    "zer": 57.333333333333336,
+    "amend": 1.2352805356730547
+   },
+   "all": {
+    "n": 151,
+    "zer": 55.629139072847686,
+    "amend": 1.1795352104431307,
+    "zer_ci95": [
+     46.87401107594937,
+     64.3368617683686
+    ],
+    "amend_ci95": [
+     0.8619456292575977,
+     1.5571932199316925
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 53.94736842105263,
+    "amend": 1.002253587949235
+   },
+   "check": {
+    "n": 75,
+    "zer": 54.666666666666664,
+    "amend": 1.333718244803695
+   },
+   "all": {
+    "n": 151,
+    "zer": 54.3046357615894,
+    "amend": 1.1702065414545668,
+    "zer_ci95": [
+     45.80508117225385,
+     62.85768398268398
+    ],
+    "amend_ci95": [
+     0.8555978828463018,
+     1.566856373873214
+    ]
+   }
+  },
+  "both": {
+   "tune": 53.94736842105263,
+   "check": 53.333333333333336,
+   "all": 53.64238410596027
+  },
+  "harms": 4,
+  "broke": 2,
+  "fixed": 6
+ },
+ "parakeet/qwen3.5-2b__v1": {
+  "meta": {
+   "name": "qwen3.5-2b",
+   "source": "parakeet",
+   "prompt": "v1",
+   "half": "all",
+   "n": 151,
+   "model_file": "Qwen3.5-2B-Q4_K_M.gguf",
+   "model_bytes": 1280835840,
+   "model_sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 1.19,
+   "peak_memory_bytes": 879643192,
+   "max_rss_bytes": 2235252736,
+   "latency_s": {
+    "median": 0.363,
+    "p90": 0.883,
+    "mean": 0.556476821192053,
+    "max": 2.711
+   },
+   "fallbacks": {
+    "number": 2
+   },
+   "fallback_total": 2,
+   "unchanged": 133,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 52.63157894736842,
+    "amend": 1.3093192724687481
+   },
+   "check": {
+    "n": 75,
+    "zer": 58.666666666666664,
+    "amend": 1.1216566005176876
+   },
+   "all": {
+    "n": 151,
+    "zer": 55.629139072847686,
+    "amend": 1.2141022647676862,
+    "zer_ci95": [
+     47.220238095238095,
+     64.62687074829931
+    ],
+    "amend_ci95": [
+     0.9024720732456875,
+     1.5872418190596986
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 52.63157894736842,
+    "amend": 1.0996807378503015
+   },
+   "check": {
+    "n": 75,
+    "zer": 56.0,
+    "amend": 1.2481306798573566
+   },
+   "all": {
+    "n": 151,
+    "zer": 54.3046357615894,
+    "amend": 1.1749271137026238,
+    "zer_ci95": [
+     45.961463338411654,
+     63.013698630136986
+    ],
+    "amend_ci95": [
+     0.8709691567681823,
+     1.5437027514650985
+    ]
+   }
+  },
+  "both": {
+   "tune": 52.63157894736842,
+   "check": 54.666666666666664,
+   "all": 53.64238410596027
+  },
+  "harms": 1,
+  "broke": 1,
+  "fixed": 5
+ },
+ "parakeet/qwen3.5-2b__v3": {
+  "meta": {
+   "name": "qwen3.5-2b",
+   "source": "parakeet",
+   "prompt": "v3",
+   "half": "all",
+   "n": 151,
+   "model_file": "Qwen3.5-2B-Q4_K_M.gguf",
+   "model_bytes": 1280835840,
+   "model_sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 2.54,
+   "peak_memory_bytes": 443418760,
+   "max_rss_bytes": 1605730304,
+   "latency_s": {
+    "median": 0.509,
+    "p90": 1.727,
+    "mean": 0.7770794701986755,
+    "max": 5.425
+   },
+   "fallbacks": {
+    "number": 4
+   },
+   "fallback_total": 4,
+   "unchanged": 131,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 52.63157894736842,
+    "amend": 1.3394180050969005
+   },
+   "check": {
+    "n": 75,
+    "zer": 58.666666666666664,
+    "amend": 1.1683453237410073
+   },
+   "all": {
+    "n": 151,
+    "zer": 55.629139072847686,
+    "amend": 1.2526278906797477,
+    "zer_ci95": [
+     47.43518518518519,
+     63.81613941769317
+    ],
+    "amend_ci95": [
+     0.9555255579935539,
+     1.5996774256515696
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 51.31578947368421,
+    "amend": 1.1354899757525578
+   },
+   "check": {
+    "n": 75,
+    "zer": 56.0,
+    "amend": 1.294889502762431
+   },
+   "all": {
+    "n": 151,
+    "zer": 53.64238410596027,
+    "amend": 1.216275339069564,
+    "zer_ci95": [
+     45.29352146263911,
+     62.12175324675325
+    ],
+    "amend_ci95": [
+     0.930325476435691,
+     1.5655725210174314
+    ]
+   }
+  },
+  "both": {
+   "tune": 51.31578947368421,
+   "check": 54.666666666666664,
+   "all": 52.980132450331126
+  },
+  "harms": 2,
+  "broke": 1,
+  "fixed": 5
+ },
+ "parakeet/s1-mini__s1": {
+  "meta": {
+   "name": "s1-mini",
+   "source": "parakeet",
+   "prompt": "s1",
+   "half": "all",
+   "n": 151,
+   "model_file": "s1-mini-q4_k_m.gguf",
+   "model_bytes": 484219808,
+   "model_sha256": "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 1.2,
+   "peak_memory_bytes": 2469924104,
+   "max_rss_bytes": 1607106560,
+   "latency_s": {
+    "median": 0.207,
+    "p90": 0.716,
+    "mean": 0.3477814569536424,
+    "max": 1.991
+   },
+   "fallbacks": {
+    "number": 14,
+    "url_email": 2,
+    "name": 3
+   },
+   "fallback_total": 19,
+   "unchanged": 28,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 55.26315789473684,
+    "amend": 1.032579668862382
+   },
+   "check": {
+    "n": 75,
+    "zer": 58.666666666666664,
+    "amend": 0.9945645888747543
+   },
+   "all": {
+    "n": 151,
+    "zer": 56.95364238410596,
+    "amend": 1.013325523502709,
+    "zer_ci95": [
+     48.96551724137931,
+     64.44565217391303
+    ],
+    "amend_ci95": [
+     0.7493002359957875,
+     1.357924011493891
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 53.94736842105263,
+    "amend": 1.1167211167211166
+   },
+   "check": {
+    "n": 75,
+    "zer": 56.0,
+    "amend": 1.162320013878448
+   },
+   "all": {
+    "n": 151,
+    "zer": 54.966887417218544,
+    "amend": 1.1398265353961556,
+    "zer_ci95": [
+     46.85270425776755,
+     63.158808479532155
+    ],
+    "amend_ci95": [
+     0.8539162595215403,
+     1.5184642813002245
+    ]
+   }
+  },
+  "both": {
+   "tune": 53.94736842105263,
+   "check": 56.0,
+   "all": 54.966887417218544
+  },
+  "harms": 4,
+  "broke": 4,
+  "fixed": 10
+ },
+ "parakeet/bitvoice-0.6b__bv": {
+  "meta": {
+   "name": "bitvoice-0.6b",
+   "source": "parakeet",
+   "prompt": "bv",
+   "half": "all",
+   "n": 151,
+   "model_file": "bitvoice-qwen3-0.6b-ft.gguf",
+   "model_bytes": 396704480,
+   "model_sha256": "b14bfc4b67161a9b9951c4f8a9451258d70fc1b74551721c02414ea1f8027d7e",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 0.72,
+   "peak_memory_bytes": 2034305904,
+   "max_rss_bytes": 1780400128,
+   "latency_s": {
+    "median": 0.201,
+    "p90": 0.571,
+    "mean": 0.30940397350993376,
+    "max": 1.963
+   },
+   "fallbacks": {
+    "url_email": 1,
+    "name": 5,
+    "shorter": 1,
+    "number": 10,
+    "longer": 1
+   },
+   "fallback_total": 18,
+   "unchanged": 25,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 42.10526315789474,
+    "amend": 3.852107644677304
+   },
+   "check": {
+    "n": 75,
+    "zer": 46.666666666666664,
+    "amend": 6.590606358950599
+   },
+   "all": {
+    "n": 151,
+    "zer": 44.370860927152314,
+    "amend": 5.2402900507882455,
+    "zer_ci95": [
+     36.986301369863014,
+     52.6948130765496
+    ],
+    "amend_ci95": [
+     3.0028251427449932,
+     8.02082979730434
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 44.73684210526316,
+    "amend": 3.625341733032212
+   },
+   "check": {
+    "n": 75,
+    "zer": 49.333333333333336,
+    "amend": 6.476864200394294
+   },
+   "all": {
+    "n": 151,
+    "zer": 47.019867549668874,
+    "amend": 5.068678093449167,
+    "zer_ci95": [
+     39.3085988651244,
+     55.828619233527206
+    ],
+    "amend_ci95": [
+     2.8847273489890948,
+     7.7907330747370995
+    ]
+   }
+  },
+  "both": {
+   "tune": 42.10526315789474,
+   "check": 44.0,
+   "all": 43.04635761589404
+  },
+  "harms": 36,
+  "broke": 24,
+  "fixed": 11
+ },
+ "parakeet/minicpm5-2b__v2": {
+  "meta": {
+   "name": "minicpm5-2b",
+   "source": "parakeet",
+   "prompt": "v2",
+   "half": "all",
+   "n": 151,
+   "model_file": "MiniCPM5-2B-Q4_K_M.gguf",
+   "model_bytes": 1561318368,
+   "model_sha256": "ec2d5801640099e97d8d7e8003ad4d81f336e757811f03a26173dddf386602fd",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 1.67,
+   "peak_memory_bytes": 386877792,
+   "max_rss_bytes": 1831272448,
+   "latency_s": {
+    "median": 0.563,
+    "p90": 1.605,
+    "mean": 0.9150132450331125,
+    "max": 5.15
+   },
+   "fallbacks": {
+    "number": 2
+   },
+   "fallback_total": 2,
+   "unchanged": 146,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 51.31578947368421,
+    "amend": 1.6466267843392761
+   },
+   "check": {
+    "n": 75,
+    "zer": 56.0,
+    "amend": 1.2935494998275268
+   },
+   "all": {
+    "n": 151,
+    "zer": 53.64238410596027,
+    "amend": 1.4674563118125856,
+    "zer_ci95": [
+     45.03228476821192,
+     62.5
+    ],
+    "amend_ci95": [
+     1.0710509495167622,
+     1.9280153278828078
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 48.68421052631579,
+    "amend": 1.4721532458318554
+   },
+   "check": {
+    "n": 75,
+    "zer": 53.333333333333336,
+    "amend": 1.4199482609945386
+   },
+   "all": {
+    "n": 151,
+    "zer": 50.99337748344371,
+    "amend": 1.4456848057361043,
+    "zer_ci95": [
+     42.330698442661635,
+     60.0
+    ],
+    "amend_ci95": [
+     1.0706599555752625,
+     1.8826581377409866
+    ]
+   }
+  },
+  "both": {
+   "tune": 48.68421052631579,
+   "check": 52.0,
+   "all": 50.33112582781457
+  },
+  "harms": 1,
+  "broke": 0,
+  "fixed": 1
+ },
+ "parakeet/minicpm5-2b__v3": {
+  "meta": {
+   "name": "minicpm5-2b",
+   "source": "parakeet",
+   "prompt": "v3",
+   "half": "all",
+   "n": 151,
+   "model_file": "MiniCPM5-2B-Q4_K_M.gguf",
+   "model_bytes": 1561318368,
+   "model_sha256": "ec2d5801640099e97d8d7e8003ad4d81f336e757811f03a26173dddf386602fd",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 1.04,
+   "peak_memory_bytes": 378996944,
+   "max_rss_bytes": 1890680832,
+   "latency_s": {
+    "median": 0.365,
+    "p90": 0.897,
+    "mean": 0.5680198675496688,
+    "max": 2.534
+   },
+   "fallbacks": {
+    "number": 2
+   },
+   "fallback_total": 2,
+   "unchanged": 145,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 51.31578947368421,
+    "amend": 1.6466267843392761
+   },
+   "check": {
+    "n": 75,
+    "zer": 56.0,
+    "amend": 1.293400781788917
+   },
+   "all": {
+    "n": 151,
+    "zer": 53.64238410596027,
+    "amend": 1.4673706934274628,
+    "zer_ci95": [
+     45.03228476821192,
+     62.5
+    ],
+    "amend_ci95": [
+     1.0708905878085564,
+     1.9278921133522002
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 48.68421052631579,
+    "amend": 1.4721532458318554
+   },
+   "check": {
+    "n": 75,
+    "zer": 53.333333333333336,
+    "amend": 1.419785020405817
+   },
+   "all": {
+    "n": 151,
+    "zer": 50.99337748344371,
+    "amend": 1.4456005362711666,
+    "zer_ci95": [
+     42.330698442661635,
+     60.0
+    ],
+    "amend_ci95": [
+     1.0707453312256447,
+     1.8823747227337744
+    ]
+   }
+  },
+  "both": {
+   "tune": 48.68421052631579,
+   "check": 52.0,
+   "all": 50.33112582781457
+  },
+  "harms": 1,
+  "broke": 0,
+  "fixed": 1
+ },
+ "parakeet/lfm3-1.7b__v2": {
+  "meta": {
+   "name": "lfm3-1.7b",
+   "source": "parakeet",
+   "prompt": "v2",
+   "half": "all",
+   "n": 151,
+   "model_file": "LFM3-1.7B-Q4_K_M.gguf",
+   "model_bytes": 1099627808,
+   "model_sha256": "3793e1e6e2266919d6e015287221b41100175a98eddaba92e111aed3b05c93c4",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 1.25,
+   "peak_memory_bytes": 427083816,
+   "max_rss_bytes": 1327792128,
+   "latency_s": {
+    "median": 1.888,
+    "p90": 3.269,
+    "mean": 2.0196092715231786,
+    "max": 6.904
+   },
+   "fallbacks": {
+    "longer": 47,
+    "echo": 62
+   },
+   "fallback_total": 109,
+   "unchanged": 40,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 51.31578947368421,
+    "amend": 1.457345971563981
+   },
+   "check": {
+    "n": 75,
+    "zer": 54.666666666666664,
+    "amend": 1.3161675958388412
+   },
+   "all": {
+    "n": 151,
+    "zer": 52.980132450331126,
+    "amend": 1.3856880305726538,
+    "zer_ci95": [
+     44.57015655577299,
+     62.0
+    ],
+    "amend_ci95": [
+     1.0557147095510475,
+     1.7603065952230375
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 48.68421052631579,
+    "amend": 1.2831884572171959
+   },
+   "check": {
+    "n": 75,
+    "zer": 52.0,
+    "amend": 1.4255331378973386
+   },
+   "all": {
+    "n": 151,
+    "zer": 50.33112582781457,
+    "amend": 1.3553690101434068,
+    "zer_ci95": [
+     42.07306560134567,
+     59.42028985507246
+    ],
+    "amend_ci95": [
+     1.0268634882192293,
+     1.7319943709362478
+    ]
+   }
+  },
+  "both": {
+   "tune": 48.68421052631579,
+   "check": 50.666666666666664,
+   "all": 49.66887417218543
+  },
+  "harms": 1,
+  "broke": 0,
+  "fixed": 0
+ },
+ "parakeet/lfm3-1.7b__v3": {
+  "meta": {
+   "name": "lfm3-1.7b",
+   "source": "parakeet",
+   "prompt": "v3",
+   "half": "all",
+   "n": 151,
+   "model_file": "LFM3-1.7B-Q4_K_M.gguf",
+   "model_bytes": 1099627808,
+   "model_sha256": "3793e1e6e2266919d6e015287221b41100175a98eddaba92e111aed3b05c93c4",
+   "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+   "load_s": 0.82,
+   "peak_memory_bytes": 382945248,
+   "max_rss_bytes": 1413840896,
+   "latency_s": {
+    "median": 1.319,
+    "p90": 2.172,
+    "mean": 1.3150596026490067,
+    "max": 4.847
+   },
+   "fallbacks": {
+    "echo": 58,
+    "longer": 45,
+    "number": 1
+   },
+   "fallback_total": 104,
+   "unchanged": 44,
+   "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+  },
+  "claude": {
+   "tune": {
+    "n": 76,
+    "zer": 51.31578947368421,
+    "amend": 1.4576050245896783
+   },
+   "check": {
+    "n": 75,
+    "zer": 54.666666666666664,
+    "amend": 1.3161675958388412
+   },
+   "all": {
+    "n": 151,
+    "zer": 52.980132450331126,
+    "amend": 1.3858093126385809,
+    "zer_ci95": [
+     44.57015655577299,
+     62.0
+    ],
+    "amend_ci95": [
+     1.0558160399281102,
+     1.7603140788272547
+    ]
+   }
+  },
+  "codex": {
+   "tune": {
+    "n": 76,
+    "zer": 48.68421052631579,
+    "amend": 1.2834161343742607
+   },
+   "check": {
+    "n": 75,
+    "zer": 52.0,
+    "amend": 1.4255331378973386
+   },
+   "all": {
+    "n": 151,
+    "zer": 50.33112582781457,
+    "amend": 1.355487538259729,
+    "zer_ci95": [
+     42.07306560134567,
+     59.42028985507246
+    ],
+    "amend_ci95": [
+     1.0268656521703579,
+     1.7321454004987897
+    ]
+   }
+  },
+  "both": {
+   "tune": 48.68421052631579,
+   "check": 50.666666666666664,
+   "all": 49.66887417218543
+  },
+  "harms": 1,
+  "broke": 0,
+  "fixed": 0
+ }
+}

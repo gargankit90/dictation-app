@@ -1,0 +1,4 @@
+clip_id,half,raw_edits,edits,passed_raw,fallback,raw,cleaned,judge_fixed
+dict_0474,tune,0,8,1,,"Hi Carlos, we got invoice number 8841, but it's I think it's showing $2,400 instead of the $2,100 we agreed on. Can you send a corrected one?","Hi Carlos, we got invoice number 8841, but it's showing $2,400 instead of the $2,100 we agreed on. Can you send a corrected one?","Hi Carlos, we got invoice number 8841, but I think it's showing $2,400 instead of the $2,100 we agreed on. Can you send a corrected one?"
+dict_0621,check,0,3,1,,"Thanks for watering the plants while we're gone. Keys under the blue pot, sorry, the green one by the back steps",Thanks for watering the plants while we're gone. Keys under the green one by the back steps.,Thanks for watering the plants while we're gone. Keys under the green pot by the back steps.
+dict_0677,tune,0,4,1,,"Yes, let's no, let's wait on that","Yes, let's wait on that.",Let's wait on that.

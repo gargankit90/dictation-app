@@ -9,3 +9,20 @@ groq_gemma4-e2b__v3: ZER 73.5%  AMEND 0.81%  over 151 drafts (0 unjudged)  judge
 151 drafts, 96 judged already (cache), 55 to judge with claude-opus-5-5 effort=max via claude -p
   judged 10/55
   judged 20/55
+  judged 30/55
+  judged 40/55
+  judged 50/55
+qwen3_gemma4-e2b__v3: ZER 60.9%  AMEND 0.99%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/qwen3/gemma4-e2b__v3/scored.csv: 55 new judge answers
+151 drafts, 151 judged already (cache), 0 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_gemma4-e2b__v3__noguard: ZER 65.6%  AMEND 0.71%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma4-e2b__v3__noguard/scored.csv: 0 new judge answers
+151 drafts, 151 judged already (cache), 0 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_gemma4-e2b__v3__strict: ZER 65.6%  AMEND 0.76%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma4-e2b__v3__strict/scored.csv: 0 new judge answers
+151 drafts, 145 judged already (cache), 6 to judge with claude-opus-5-5 effort=max via claude -p
+groq_gemma4-e2b__v3__noguard: ZER 73.5%  AMEND 0.81%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/groq/gemma4-e2b__v3__noguard/scored.csv: 6 new judge answers
+151 drafts, 151 judged already (cache), 0 to judge with claude-opus-5-5 effort=max via claude -p
+groq_gemma4-e2b__v3__strict: ZER 73.5%  AMEND 0.81%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/groq/gemma4-e2b__v3__strict/scored.csv: 0 new judge answers

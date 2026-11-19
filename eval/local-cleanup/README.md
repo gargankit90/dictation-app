@@ -22,6 +22,7 @@ text out, and the drafts already exist in `../voicearena/results/`.
 | `judge.sh` | both judges over run folders, with one shared answer cache per judge (`judge_cache/`) |
 | `apply_guard.py` | re-applies a different guard (none, or stricter) to stored replies, without rerunning the model |
 | `audit.py` | lost negations, changed identifiers, invented text, per run (`audit.csv`) |
+| `screen_vs_judge.py` | how well each screen measure ranks runs the way the judges do (Spearman) |
 | `summarize.py` | the tables: both judges, both halves, intervals, fallbacks, latency, memory, fixed/harmed clips (`harms.csv`) |
 | `runs/<engine>/<model>__<prompt>[__guard]/` | `results.csv` (raw, reply, pasted text, fallback reason, seconds), `meta.json`, `server.log`, `scored.csv` (Claude), `scored_codex.csv` (Codex), `harms.csv`, `audit.csv` |
 

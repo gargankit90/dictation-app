@@ -1,4 +1,4 @@
 # Models live outside the repo (~/vocet-cleanup-models); never commit models, audio or large binaries.
 *.gguf
 models/
-runs/*/server.log
+__pycache__/

@@ -1,0 +1,1 @@
+runs/parakeet/minicpm5-2b__v2 runs/parakeet/lfm3-1.7b__v2 runs/parakeet/minicpm5-2b__v3 runs/parakeet/lfm3-1.7b__v3 runs/parakeet/qwen3.5-2b__v3

@@ -1,0 +1,241 @@
+{
+ "n_runs": 19,
+ "rows": [
+  {
+   "run": "bitvoice-0.6b__bv",
+   "match_ref": 19.87,
+   "match_fix": 35.1,
+   "cer": 8.98,
+   "wer": 13.03,
+   "broke": 36,
+   "claude_zer": 44.4,
+   "codex_zer": 47.0
+  },
+  {
+   "run": "gemma3-4b__v1",
+   "match_ref": 29.14,
+   "match_fix": 49.67,
+   "cer": 4.27,
+   "wer": 7.44,
+   "broke": 17,
+   "claude_zer": 57.6,
+   "codex_zer": 57.0
+  },
+  {
+   "run": "gemma4-e2b__v1",
+   "match_ref": 27.15,
+   "match_fix": 47.68,
+   "cer": 4.49,
+   "wer": 7.67,
+   "broke": 22,
+   "claude_zer": 62.3,
+   "codex_zer": 60.9
+  },
+  {
+   "run": "gemma4-e2b__v2",
+   "match_ref": 29.14,
+   "match_fix": 48.34,
+   "cer": 4.2,
+   "wer": 7.26,
+   "broke": 24,
+   "claude_zer": 64.9,
+   "codex_zer": 62.3
+  },
+  {
+   "run": "gemma4-e2b__v3",
+   "match_ref": 29.8,
+   "match_fix": 50.33,
+   "cer": 4.33,
+   "wer": 7.36,
+   "broke": 21,
+   "claude_zer": 65.6,
+   "codex_zer": 62.3
+  },
+  {
+   "run": "gemma4-e4b__v1",
+   "match_ref": 28.48,
+   "match_fix": 47.68,
+   "cer": 4.52,
+   "wer": 7.77,
+   "broke": 18,
+   "claude_zer": 61.6,
+   "codex_zer": 60.3
+  },
+  {
+   "run": "gemma4-e4b__v2",
+   "match_ref": 31.13,
+   "match_fix": 52.32,
+   "cer": 4.13,
+   "wer": 7.2,
+   "broke": 16,
+   "claude_zer": 64.2,
+   "codex_zer": 62.3
+  },
+  {
+   "run": "gemma4-e4b__v3",
+   "match_ref": 30.46,
+   "match_fix": 52.32,
+   "cer": 4.23,
+   "wer": 7.26,
+   "broke": 17,
+   "claude_zer": 65.6,
+   "codex_zer": 63.6
+  },
+  {
+   "run": "lfm3-1.7b__v2",
+   "match_ref": 27.15,
+   "match_fix": 52.98,
+   "cer": 4.81,
+   "wer": 8.14,
+   "broke": 0,
+   "claude_zer": 53.0,
+   "codex_zer": 50.3
+  },
+  {
+   "run": "lfm3-1.7b__v3",
+   "match_ref": 26.49,
+   "match_fix": 52.32,
+   "cer": 4.82,
+   "wer": 8.16,
+   "broke": 1,
+   "claude_zer": 53.0,
+   "codex_zer": 50.3
+  },
+  {
+   "run": "minicpm5-2b__v2",
+   "match_ref": 27.15,
+   "match_fix": 52.98,
+   "cer": 4.9,
+   "wer": 8.19,
+   "broke": 1,
+   "claude_zer": 53.6,
+   "codex_zer": 51.0
+  },
+  {
+   "run": "minicpm5-2b__v3",
+   "match_ref": 27.15,
+   "match_fix": 52.98,
+   "cer": 4.88,
+   "wer": 8.16,
+   "broke": 1,
+   "claude_zer": 53.6,
+   "codex_zer": 51.0
+  },
+  {
+   "run": "phi4-mini__v1",
+   "match_ref": 29.14,
+   "match_fix": 52.98,
+   "cer": 4.56,
+   "wer": 7.75,
+   "broke": 8,
+   "claude_zer": 57.0,
+   "codex_zer": 55.6
+  },
+  {
+   "run": "phi4-mini__v2",
+   "match_ref": 31.79,
+   "match_fix": 55.63,
+   "cer": 4.27,
+   "wer": 7.31,
+   "broke": 8,
+   "claude_zer": 58.3,
+   "codex_zer": 57.0
+  },
+  {
+   "run": "qwen3.5-2b__v1",
+   "match_ref": 29.14,
+   "match_fix": 54.97,
+   "cer": 4.56,
+   "wer": 7.77,
+   "broke": 3,
+   "claude_zer": 55.6,
+   "codex_zer": 54.3
+  },
+  {
+   "run": "qwen3.5-2b__v3",
+   "match_ref": 28.48,
+   "match_fix": 53.64,
+   "cer": 4.59,
+   "wer": 7.78,
+   "broke": 3,
+   "claude_zer": 55.6,
+   "codex_zer": 53.6
+  },
+  {
+   "run": "qwen3.5-4b__v1",
+   "match_ref": 29.14,
+   "match_fix": 52.32,
+   "cer": 4.42,
+   "wer": 7.66,
+   "broke": 8,
+   "claude_zer": 55.6,
+   "codex_zer": 54.3
+  },
+  {
+   "run": "raw",
+   "match_ref": 27.15,
+   "match_fix": 52.98,
+   "cer": 4.79,
+   "wer": 8.11,
+   "broke": 0,
+   "claude_zer": 53.0,
+   "codex_zer": 50.3
+  },
+  {
+   "run": "s1-mini__s1",
+   "match_ref": 31.13,
+   "match_fix": 50.99,
+   "cer": 3.98,
+   "wer": 6.99,
+   "broke": 12,
+   "claude_zer": 57.0,
+   "codex_zer": 55.0
+  }
+ ],
+ "spearman": {
+  "match_ref vs claude_zer": {
+   "rho": 0.73,
+   "p": 0.0004
+  },
+  "match_ref vs codex_zer": {
+   "rho": 0.73,
+   "p": 0.0004
+  },
+  "match_fix vs claude_zer": {
+   "rho": -0.3,
+   "p": 0.2067
+  },
+  "match_fix vs codex_zer": {
+   "rho": -0.31,
+   "p": 0.2025
+  },
+  "cer vs claude_zer": {
+   "rho": 0.82,
+   "p": 0.0
+  },
+  "cer vs codex_zer": {
+   "rho": 0.83,
+   "p": 0.0
+  },
+  "wer vs claude_zer": {
+   "rho": 0.82,
+   "p": 0.0
+  },
+  "wer vs codex_zer": {
+   "rho": 0.83,
+   "p": 0.0
+  },
+  "broke vs claude_zer": {
+   "rho": -0.63,
+   "p": 0.0036
+  },
+  "broke vs codex_zer": {
+   "rho": -0.63,
+   "p": 0.0039
+  },
+  "claude_zer vs codex_zer": {
+   "rho": 0.99,
+   "p": 0.0
+  }
+ }
+}

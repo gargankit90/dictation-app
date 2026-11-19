@@ -1,0 +1,28 @@
+{
+ "name": "lfm3-1.7b",
+ "source": "parakeet",
+ "prompt": "v3",
+ "half": "all",
+ "n": 151,
+ "model_file": "LFM3-1.7B-Q4_K_M.gguf",
+ "model_bytes": 1099627808,
+ "model_sha256": "3793e1e6e2266919d6e015287221b41100175a98eddaba92e111aed3b05c93c4",
+ "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+ "load_s": 0.82,
+ "peak_memory_bytes": 382945248,
+ "max_rss_bytes": 1413840896,
+ "latency_s": {
+  "median": 1.319,
+  "p90": 2.172,
+  "mean": 1.3150596026490067,
+  "max": 4.847
+ },
+ "fallbacks": {
+  "echo": 58,
+  "longer": 45,
+  "number": 1
+ },
+ "fallback_total": 104,
+ "unchanged": 44,
+ "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+}

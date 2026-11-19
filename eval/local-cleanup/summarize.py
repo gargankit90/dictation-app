@@ -9,8 +9,9 @@
 Per run: ZER and AMEND per judge (Claude Opus 5.5 = scored.csv, GPT-6 Astra = scored_codex.csv) on the tune
 half, the check half and all 151 clips, with a 95% speaker-bootstrap interval on all; "both" = the share of
 drafts both judges passed with zero edits; fallbacks; latency (median / p90 over clips, this Mac); load time;
-memory; model size. Also writes harms.csv per run: every clip that the Claude judge passed as raw (zero
-edits) but failed after cleanup, with both texts and the judge's correction.
+memory; model size. Also writes harms.csv per run: every clip where the cleanup made the draft worse by the
+Claude judge (more edits than the raw draft needed), with both texts and the judge's correction; "broke" =
+of those, the clips that passed as raw (zero edits) and failed after cleanup.
 """
 import argparse
 import csv
@@ -72,20 +73,23 @@ def main() -> None:
         if cl and raw and d.name != "raw":
             harms = []
             for k, r in cl.items():
-                if raw[k]["zero_edit"] == "1" and r["zero_edit"] == "0":
-                    harms.append({"clip_id": k, "half": SPLIT[k], "edits": r["edits"],
+                if int(r["edits"]) > int(raw[k]["edits"]):
+                    harms.append({"clip_id": k, "half": SPLIT[k], "raw_edits": raw[k]["edits"], "edits": r["edits"],
+                                  "passed_raw": raw[k]["zero_edit"],
                                   "fallback": res[k].get("fallback", ""), "raw": raw[k]["draft"],
                                   "cleaned": r["draft"], "judge_fixed": r["fixed"]})
             with (d / "harms.csv").open("w", newline="", encoding="utf-8") as fh:
-                w = csv.DictWriter(fh, ["clip_id", "half", "edits", "fallback", "raw", "cleaned", "judge_fixed"])
+                w = csv.DictWriter(fh, ["clip_id", "half", "raw_edits", "edits", "passed_raw", "fallback", "raw", "cleaned",
+                                    "judge_fixed"])
                 w.writeheader()
                 w.writerows(harms)
             s["harms"] = len(harms)
+            s["broke"] = sum(1 for h in harms if h["passed_raw"] == "1")
             s["fixed"] = sum(1 for k, r in cl.items() if raw[k]["zero_edit"] == "0" and r["zero_edit"] == "1")
         table[f"{d.parent.name}/{d.name}"] = s
 
     lines = ["| Run | Size | Load s | Peak RSS | Median / p90 s | Fallbacks | Claude ZER tune / check / all (95%) | "
-             "Claude AMEND all | Codex ZER tune / check / all | Codex AMEND all | Both ZER all | Fixed / harmed |",
+             "Claude AMEND all | Codex ZER tune / check / all | Codex AMEND all | Both ZER all | Fixed / worse (broke) |",
              "| --- | ---: | ---: | ---: | --- | ---: | --- | ---: | --- | ---: | ---: | --- |"]
     for name, s in table.items():
         m = s["meta"]
@@ -104,7 +108,7 @@ def main() -> None:
         both = f'{s["both"]["all"]:.1f}' if "both" in s else "–"
         fb = f'{m.get("fallback_total", 0)}' if m.get("latency_s") else "–"
         lt = f'{lat["median"]:.2f} / {lat["p90"]:.2f}' if lat else "–"
-        fh = f'{s["fixed"]} / {s["harms"]}' if "harms" in s else "–"
+        fh = f'{s["fixed"]} / {s["harms"]} ({s["broke"]})' if "harms" in s else "–"
         lines.append(f'| {name} | {size} | {m.get("load_s", "–")} | {rss} | {lt} | {fb} | {cz} | {ca} | {xz} | {xa} | '
                      f'{both} | {fh} |')
     md = "\n".join(lines)
