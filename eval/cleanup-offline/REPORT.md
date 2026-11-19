@@ -9,6 +9,11 @@ is **gpt-6.2-sol + v4: ZER 82.1 % (Claude judge) / 80.8 % (Codex judge)**, again
 the raw Whisper text and 64.9 / 64.2 for the VM run of gpt-oss-20b + v1. The cheapest OpenAI model,
 **gpt-6-luna + v4, gets 77.5 / 76.2 at about 1/20 of sol's price**.
 
+**Best pipeline so far:** Nemotron 3.5 transcripts cleaned by GPT-6.2-sol + v4 through the OpenRouter
+API, with the app's guard, score **84.8 % (Claude) / 84.1 % (Codex)** on all 151 clips and 81.3 / 78.7
+on the held-out check half. AssemblyAI Smart scores 88.1 / 86.8 (check half 86.7 / 84.0); the gap is
+within noise ([section below](#nemotron-with-openrouter-gpt-62-sol-and-v4)).
+
 ## Method
 
 - **Input:** the raw Whisper text (`whisper-large-v3-turbo` via Groq, Vocet's cloud path) saved by the
@@ -187,7 +192,7 @@ the input share by 50–90 %.
 - `results/<run>/`: `results.csv` (harness format, transcript = pasted text, plus raw, reply, reason,
   model_ms), `cleanup.jsonl` (model replies), `scored*.csv` and judge caches, `harms.md`.
 - `input/vm/`: the VM v1 run's scores and replies, copied from the Groq cleanup eval for the table.
-- Budget used: Codex 1,252 calls (1,060 cleanup incl. a 3-clip smoke test + 192 judging) (cleanup + judging), Claude judge 179 clips.
+- Budget used: Codex 1,252 calls (1,060 cleanup incl. a 3-clip smoke test + 192 judging) (cleanup + judging), Claude judge 179 clips, plus 155 Claude verdicts for the Nemotron + OpenRouter sol pairs.
 
 ## Nemotron with OpenRouter GPT-6.2-sol and v4
 
@@ -195,20 +200,28 @@ All 151 saved Nemotron transcripts received an API reply. The standard guard acc
 
 | Judge | Paired clips | Raw ZER % | Cleaned ZER % | Fixed / regressed | Raw / cleaned AMEND % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| GPT-6 Astra, all | 151 | 64.9 | 84.1 | 29 / 0 | 1.35 / 0.41 |
+| GPT-6 Astra, all | 151 | 64.9 | **84.1** | 29 / 0 | 1.35 / 0.41 |
 | GPT-6 Astra, tune | 76 | 69.7 | 89.5 | 15 / 0 | 1.05 / 0.37 |
-| GPT-6 Astra, check | 75 | 60.0 | 78.7 | 14 / 0 | 1.64 / 0.45 |
-| Claude Opus 5.5 (cache only), all | 44 | 86.4 | 95.5 | 4 / 0 | 0.97 / 0.20 |
-| Claude Opus 5.5 (cache only), tune | 19 | 89.5 | 94.7 | 1 / 0 | 0.71 / 0.23 |
-| Claude Opus 5.5 (cache only), check | 25 | 84.0 | 96.0 | 3 / 0 | 1.23 / 0.18 |
+| GPT-6 Astra, check | 75 | 60.0 | **78.7** | 14 / 0 | 1.64 / 0.45 |
+| Claude Opus 5.5, all | 151 | 66.2 | **84.8** | 28 / 0 | 1.16 / 0.34 |
+| Claude Opus 5.5, tune | 76 | 69.7 | 88.2 | 14 / 0 | 1.03 / 0.37 |
+| Claude Opus 5.5, check | 75 | 62.7 | **81.3** | 14 / 0 | 1.29 / 0.30 |
 
-Claude cached verdicts cover 49 raw drafts and 50 pasted drafts. Only matched pairs enter that judge’s rows. The session cap prevented fresh judgments. Cache matches favor previously seen wording, so this subset cannot estimate the full Claude effect. Fixes and regressions count transitions to and from zero edits.
+Both judges now cover all 151 pairs (Claude Opus 5.5 max, amend-va 0.2.1 prompt v1, the shared judge caches; 155 fresh Claude verdicts finished the 44 cached pairs). The judges agree: cleanup adds about 19 ZER points under each, fixes 28–29 drafts and makes no perfect draft imperfect. 27 of the fixes are common to both judges, and 126 pasted drafts are perfect under both. Fixes and regressions count transitions to and from zero edits. `paired_summary.py` regenerates this table and `changes.md`.
+
+| Pipeline (151 clips) | Claude ZER tune / check / **all** | Astra ZER tune / check / **all** | Claude / Astra AMEND % |
+| --- | --- | --- | --- |
+| AssemblyAI Smart (VM run 2, pasted) | 89.5 / 86.7 / **88.1** | 89.5 / 84.0 / **86.8** | 0.26 / – |
+| Nemotron 3.5 + OpenRouter GPT-6.2-sol v4, guarded | 88.2 / 81.3 / **84.8** | 89.5 / 78.7 / **84.1** | 0.34 / 0.41 |
+| Groq Whisper + GPT-6.2-sol v4 (Codex), guarded | 78.9 / 85.3 / **82.1** | 80.3 / 81.3 / **80.8** | 0.44 / 0.44 |
+
+Nemotron + sol trails AssemblyAI Smart by 3.3 (Claude) and 2.7 (Astra) points overall, and by 5.4 and 5.3 on the held-out check half. One clip is 0.66 points and the speaker-bootstrap interval is about ±8, so neither gap is significant. The check half is where it falls behind. AssemblyAI's row is a single VM run whose ZER moved 86.8 → 88.1 between runs under Claude, and its latency is key-up to text, which this offline pairing does not measure.
 
 Dropped-name fallbacks: dict_0346, dict_0351, dict_0498, dict_0559.
 
 [Paired fixes and regressions](paired-results/nemotron_sol_v4/changes.md).
 
-One already imperfect clip, dict_0399, worsened from 11 to 25 edits under GPT-6 Astra. It falls outside the zero-edit regression count.
+One already imperfect clip, dict_0399, worsened from 11 to 25 edits under both judges (the subject treated as a false start, as with Groq + sol). It falls outside the zero-edit regression count.
 
 ## Open-weight cleanup on the same Groq Whisper drafts
 
