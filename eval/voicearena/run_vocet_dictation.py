@@ -97,7 +97,7 @@ def vocet_pid() -> int | None:
 class Vocet(Driver):
     name = "vocet"
     extra_fields = ["vocet_provider", "vocet_model", "vocet_language", "vocet_hotkey", "vocet_transcription",
-                    "default_input"]
+                    "vocet_local_model", "default_input"]
     precise_timing = False
 
     def add_args(self, p) -> None:
@@ -110,10 +110,14 @@ class Vocet(Driver):
         p.add_argument("--provider", default="groq",
                        help="the cloud provider Vocet must be set to (settings.json 'provider'): groq, openai, "
                             "assemblyai")
+        p.add_argument("--local-model",
+                       help="expect Vocet's on-device engine with this model (settings.json 'transcription' "
+                            "local and 'local_model'), e.g. parakeet-unified-en-0.6b-q4_k_m; overrides --provider")
 
     def preflight(self, args) -> None:
         self.start_timeout, self.hide_timeout, self.no_pill = args.start_timeout, args.hide_timeout, args.no_pill
         self.provider = args.provider
+        self.local_model = args.local_model
         self.key_down = False
         if vocet_pid() is None:
             raise SystemExit("Vocet isn't running. Open it (past onboarding, Groq key saved) and rerun.")
@@ -131,10 +135,15 @@ class Vocet(Driver):
             mic = f"? ({e})"
         return {"vocet_provider": s.get("provider", ""), "vocet_model": s.get("model", ""),
                 "vocet_language": s.get("language") or "auto", "vocet_hotkey": s.get("hotkey", ""),
-                "vocet_transcription": s.get("transcription", "cloud"), "default_input": mic}
+                "vocet_transcription": s.get("transcription", "cloud"),
+                "vocet_local_model": s.get("local_model", ""), "default_input": mic}
 
     def env_problem(self, env: dict) -> str | None:
-        if env.get("vocet_transcription") != "cloud" or env.get("vocet_provider") != self.provider:
+        if self.local_model:
+            if env.get("vocet_transcription") != "local" or env.get("vocet_local_model") != self.local_model:
+                return (f"Vocet's engine is {env.get('vocet_transcription')}/{env.get('vocet_local_model')}, "
+                        f"not local/{self.local_model} (Settings > Speech)")
+        elif env.get("vocet_transcription") != "cloud" or env.get("vocet_provider") != self.provider:
             return (f"Vocet's engine is {env.get('vocet_transcription')}/{env.get('vocet_provider')}, "
                     f"not cloud/{self.provider} (Settings > Speech)")
         hotkey = env.get("vocet_hotkey", "").lower().replace(" ", "")
