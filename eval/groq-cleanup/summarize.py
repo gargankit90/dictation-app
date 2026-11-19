@@ -68,7 +68,8 @@ def summarise(d: pathlib.Path) -> dict:
         sub = [r for r in rows if half == "all" or SPLIT.get(r["clip_id"]) == half]
         z, a = zer_amend(sub)
         zer_ci, amend_ci = bootstrap(sub)
-        lat = [float(r["finalize_s"]) for r in sub if r.get("finalize_s")]
+        # A _raw folder re-scores the uncleaned drafts of a cleanup run: its timings include the cleanup.
+        lat = [] if d.name.endswith("_raw") else [float(r["finalize_s"]) for r in sub if r.get("finalize_s")]
         rep = [replies[r["clip_id"]] for r in sub if r["clip_id"] in replies and replies[r["clip_id"]].get("reason")]
         cms = [int(x["cleanup_ms"]) for x in rep if x.get("cleanup_ms") not in ("", None)]
         reasons = Counter(x["reason"] for x in rep)
@@ -79,6 +80,19 @@ def summarise(d: pathlib.Path) -> dict:
             "cleaned": reasons.get("cleaned", 0), "fallbacks": sum(v for k, v in reasons.items() if k != "cleaned"),
             "reasons": dict(reasons),
         }
+    codex_path = d / "scored_codex.csv"
+    if codex_path.exists():
+        codex = {r["clip_id"]: r for r in csv.DictReader(codex_path.open(newline="", encoding="utf-8"))
+                 if r.get("edits") not in ("", None)}
+        claude = {r["clip_id"]: r for r in rows}
+        out["codex"] = {}
+        for half in ("tune", "check", "all"):
+            sub = [r for cid, r in codex.items() if half == "all" or SPLIT.get(cid) == half]
+            z, a = zer_amend(sub)
+            both = [cid for cid in codex if cid in claude and (half == "all" or SPLIT.get(cid) == half)]
+            agree = [cid for cid in both if int(codex[cid]["edits"]) == 0 and int(claude[cid]["edits"]) == 0]
+            out["codex"][half] = {"n": len(sub), "zer": z, "amend": a, "n_both": len(both),
+                                  "both_zer": 100.0 * len(agree) / len(both) if both else None}
     (d / "halves.json").write_text(json.dumps(out, indent=1))
     return out
 
@@ -88,11 +102,11 @@ def f(x, digits=1):
 
 
 def main() -> None:
+    summaries = [summarise(pathlib.Path(arg)) for arg in sys.argv[1:]]
     print("| Run | Tune ZER % | Check ZER % | All ZER % (95% CI) | Tune AMEND % | Check AMEND % | All AMEND % "
           "| Latency median / p90 s | Cleanup median / p90 ms | Fallbacks (reasons) |")
     print("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |")
-    for arg in sys.argv[1:]:
-        s = summarise(pathlib.Path(arg))
+    for s in summaries:
         t, c, a = (s["halves"][h] for h in ("tune", "check", "all"))
         reasons = ", ".join(f"{k} {v}" for k, v in sorted(a["reasons"].items()) if k != "cleaned")
         fb = "-" if not a["reasons"] else f'{a["fallbacks"]}/{a["fallbacks"] + a["cleaned"]}' + (
@@ -101,6 +115,24 @@ def main() -> None:
               f'{f(a["zer_ci95"][1])}) | {f(t["amend"], 2)} | {f(c["amend"], 2)} | {f(a["amend"], 2)} | '
               f'{f(a["latency_median_s"], 2)} / {f(a["latency_p90_s"], 2)} | '
               f'{f(a["cleanup_median_ms"], 0)} / {f(a["cleanup_p90_ms"], 0)} | {fb} |')
+    judges_table(summaries)
+
+
+
+
+def judges_table(summaries) -> None:
+    print()
+    print("| Run | Claude ZER tune / check / all | Codex ZER tune / check / all | Both agree ZER tune / check / all "
+          "| Claude AMEND all | Codex AMEND all |")
+    print("| --- | ---: | ---: | ---: | ---: | ---: |")
+    for s in summaries:
+        if "codex" not in s:
+            continue
+        h, c = s["halves"], s["codex"]
+        print(f'| {s["engine"]} | {f(h["tune"]["zer"])} / {f(h["check"]["zer"])} / {f(h["all"]["zer"])} | '
+              f'{f(c["tune"]["zer"])} / {f(c["check"]["zer"])} / {f(c["all"]["zer"])} (n {c["all"]["n"]}) | '
+              f'{f(c["tune"]["both_zer"])} / {f(c["check"]["both_zer"])} / {f(c["all"]["both_zer"])} | '
+              f'{f(h["all"]["amend"], 2)} | {f(c["all"]["amend"], 2)} |')
 
 
 if __name__ == "__main__":

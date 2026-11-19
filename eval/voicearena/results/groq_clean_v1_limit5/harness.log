@@ -1,0 +1,14 @@
+09:22:05 151 clips, 0 done, 5 to run
+09:22:05 audio -> BlackHole 2ch (2 ch, 48000 Hz)
+09:22:05 tool settings before first clip: vocet_provider=groq, vocet_model=whisper-large-v3-turbo, vocet_language=en, vocet_hotkey=RightAlt, vocet_transcription=cloud, vocet_local_model=qwen3-asr-0.6b-q4_k_m, default_input=BlackHole 2ch
+09:22:07 scratch document: window id 78
+09:22:10 TextEdit substitutions: Smart Quotes=already off, Smart Dashes=already off, Text Replacement=turned off, Smart Links=already off, Data Detectors=already off, Correct Spelling Automatically=already off, Check Spelling While Typing=turned off, Check Grammar With Spelling=already off
+09:22:10 Starting in 3s - don't touch the keyboard/mouse. Ctrl-C stops safely; rerun to resume.
+09:22:34 [1/5] dict_0007.flac [ok] 'Write a docstring for this function that explains what it returns and what happens when the input list is empty. Keep it short and use Google style.'
+09:22:55 [2/5] dict_0008.flac [ok] "Write a short out of office message saying I'm away until January 6th and to contact Priya Rahman at priya.rahman at northwind.io for anything urgent."
+09:23:21 [3/5] dict_0014.flac [ok] "I'm on the checkout v2 feature branch. How do I undo my last get commit but keep the changes staged? Actually, no. The last three commits, not just one."
+09:23:58 [4/5] dict_0023.flac [ok] "I need a quick variance explanation for the October budget report. Marketing spent $62,000 against a budget of $55,000, so we're over by $7,000. Wait no, the budget was $58,000, so we're over by $4,000. Most of it was the trade show in Austin. Write two or three sentences I can drop into the report for the CFO and keep it neutral. Thank you."
+09:24:35 [5/5] dict_0024.flac [ok] "Okay, so in billing.tease the calculate prorated amount function returns NAN whenever a subscription starts on the 31st. And I'm pretty sure it's the date math on plan.startdate. Can you rewrite it with dateFNS and add a unit test that goes from January 31st to February 28th? Oh, and we're on dateFNS version 3, so don't use the old imports. Thank you."
+09:24:35 tool settings in use: vocet_provider=groq, vocet_model=whisper-large-v3-turbo, vocet_language=en, vocet_hotkey=RightAlt, vocet_transcription=cloud, vocet_local_model=qwen3-asr-0.6b-q4_k_m, default_input=BlackHole 2ch
+09:24:35 --- batch check after 5/5 (5 ok in total): OK
+09:24:37 results: /Users/lume/va/results_groq_clean_v1_limit5.csv - ok=5
