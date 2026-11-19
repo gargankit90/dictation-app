@@ -1,0 +1,7 @@
+engine,n,wer_vs_spoken,wer_vs_intended
+"Groq (pasted, no cleanup)",151,3.98,6.89
+"Parakeet (pasted, no cleanup)",151,3.79,7.05
+"Qwen3 (pasted, no cleanup)",151,4.12,8.63
+AssemblyAI verbatim (run 2),151,2.48,5.36
+"AssemblyAI cleaned (run 2, pasted)",151,5.1,4.15
+"AssemblyAI cleaned (run 1, pasted)",151,5.1,4.25

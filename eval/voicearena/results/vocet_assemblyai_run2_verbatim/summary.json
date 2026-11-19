@@ -1,0 +1,181 @@
+{
+ "engine": "vocet_assemblyai_run2_verbatim",
+ "n": 151,
+ "zer": 70.86092715231788,
+ "zer_ci95": [
+  63.634740259740255,
+  78.031600249066
+ ],
+ "amend": 0.9938033438559569,
+ "amend_ci95": [
+  0.7277707229728653,
+  1.2718380793718853
+ ],
+ "judge": "claude-opus-5-5 effort=max via claude -p (Claude Code CLI)",
+ "prompt": "amend-va 0.2.1 prompt v1 fingerprint 8ed04caf4663",
+ "label": "unofficial: single judge (Claude Opus 5.5 via Claude Code), public set only",
+ "empty_drafts": 0,
+ "latency_s": {
+  "n": 151,
+  "median": 1.19,
+  "p90": 2.27,
+  "mean": 1.4066225165562913,
+  "max": 6.57
+ },
+ "by_domain": {
+  "personal_messaging": {
+   "n": 25,
+   "zer": 72.0,
+   "amend": 1.6246684350132625
+  },
+  "work_chat": {
+   "n": 24,
+   "zer": 75.0,
+   "amend": 1.0115102895012207
+  },
+  "email": {
+   "n": 22,
+   "zer": 63.63636363636363,
+   "amend": 1.3392857142857142
+  },
+  "ai_prompt": {
+   "n": 22,
+   "zer": 72.72727272727273,
+   "amend": 1.1595447713120035
+  },
+  "code": {
+   "n": 26,
+   "zer": 84.61538461538461,
+   "amend": 0.5394470667565745
+  },
+  "docs_notes": {
+   "n": 22,
+   "zer": 77.27272727272727,
+   "amend": 0.8907518993974325
+  },
+  "long_form": {
+   "n": 10,
+   "zer": 20.0,
+   "amend": 0.7776669990029911
+  }
+ },
+ "by_length": {
+  "short (<=15 words)": {
+   "n": 20,
+   "zer": 70.0,
+   "amend": 5.806451612903226
+  },
+  "standard (16-80 words)": {
+   "n": 121,
+   "zer": 75.20661157024793,
+   "amend": 0.927073097791259
+  },
+  "long (>80 words)": {
+   "n": 10,
+   "zer": 20.0,
+   "amend": 0.7776669990029911
+  }
+ },
+ "worst": [
+  {
+   "clip_id": "dict_0461",
+   "domain": "email",
+   "edits": "20",
+   "chars": "137",
+   "draft": "Hey, for Mom and Dad's anniversary, I was going to— what if we split a dinner, some flowers, and like a framed photo from the old house? Let me know what you think.",
+   "fixed": "Hey, for Mom and Dad's anniversary, what if we split a dinner, some flowers, and a framed photo from the old house? Let me know what you think.",
+   "intended_text": "Hey,\n\nFor Mom and Dad's anniversary, what if we split a dinner, some flowers, and a framed photo from the old house? Let me know what you think.",
+   "spoken_text": "Hey, for Mom and Dad's anniversary, I was going to, what if we split a dinner, some flowers, and, like, a framed photo from the old house? Let me know what you think."
+  },
+  {
+   "clip_id": "dict_0103",
+   "domain": "email",
+   "edits": "18",
+   "chars": "328",
+   "draft": "Hi Owen, so the export feature we promised for this month is going to slip a bit. We found a problem with how large files get, you know, get handled, and we'd rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like, like a 2-week delay. I'll keep you posted as we get closer, and sorry for the change.",
+   "fixed": "Hi Owen, so the export feature we promised for this month is going to slip a bit. We found a problem with how large files get handled, and we'd rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like a 2-week delay. I'll keep you posted as we get closer, and sorry for the change.",
+   "intended_text": "Hi Owen,\n\nSo the export feature we promised for this month is going to slip a bit. We found a problem with how large files get handled, and we'd rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like a two-week delay. I'll keep you posted as we get closer, and sorry for the change.",
+   "spoken_text": "Hi Owen, so the export feature we promised for this month is going to slip a bit. We found a problem with how large files get, you know, get handled, and we'd rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like, like a two week delay. I'll keep you posted as we get closer, and sorry for the change."
+  },
+  {
+   "clip_id": "dict_0533",
+   "domain": "long_form",
+   "edits": "18",
+   "chars": "939",
+   "draft": "Okay, update on the Regional Sales Summit since we're about six weeks out now. Venue's locked in. We're at the Lakeshore Conference Center in Milwaukee, February 19th and 20th. Room block at the Harborview Hotel is 110 rooms at $169 a night, and the cutoff for that rate is January 23rd. Sorry, January 29th. I just double-checked the contract. We've got 94 people registered. So far out of about 130 invited, budget's $85,000 total, and we've committed about $61,000 so far, mostly venue, catering, and AV. Keynotes confirmed: Dana Whitlock from ClearPath Consulting is opening the first morning at 9:00 AM. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales. Registration link is summit.northwind. So please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements. Per diem is $75 a day. I'll send the full agenda draft next Tuesday for comment.",
+   "fixed": "Update on the Regional Sales Summit since we're about six weeks out now. Venue's locked in. We're at the Lakeshore Conference Center in Milwaukee, February 19th and 20th. Room block at the Harbor View Hotel is 110 rooms at $169 a night, and the cutoff for that rate is January 23rd. Sorry, January 29th. I just double-checked the contract. We've got 94 people registered. So far out of about 130 invited, budget's $85,000 total, and we've committed about $61,000 so far, mostly venue, catering, and AV. Keynotes confirmed: Dana Whitlock from Clearpath Consulting is opening the first morning at 9:00 AM. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales. Registration link is summit.northwind.io/register. So please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements. Per diem is $75 a day. I'll send the full agenda draft next Tuesday for comment.",
+   "intended_text": "Update on the regional sales summit, since we're about six weeks out now.\n\nVenue's locked in, we're at the Lakeshore Conference Center in Milwaukee, February 19 and 20. Room block at the Harbor View Hotel is 110 rooms at $169 a night, and the cutoff for that rate is January 29, I just double-checked the contract.\n\nWe've got 94 people registered so far out of about 130 invited. Budget's $85,000 total and we've committed about $61,000 so far, mostly venue, catering, and AV.\n\nKeynote's confirmed, Dana Whitlock from Clearpath Consulting is opening the first morning at 9 AM. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales.\n\nRegistration link is summit.northwind.io/register, so please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements, per diem is $75 a day.\n\nI'll send the full agenda draft next Tuesday for comments.",
+   "spoken_text": "Okay update on the regional sales summit, since we're about six weeks out now. Venue's locked in, we're at the Lakeshore Conference Center in Milwaukee, February nineteenth and twentieth. Room block at the Harbor View Hotel is a hundred and ten rooms at a hundred sixty nine a night, and the cutoff for that rate is January twenty third, sorry, January twenty ninth, I just double checked the contract. We've got ninety four people registered so far out of about a hundred and thirty invited. Budget's eighty five thousand total and we've committed about sixty one thousand so far, mostly venue, catering, and AV. Keynote's confirmed, Dana Whitlock from Clearpath Consulting is opening the first morning at nine a m. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales. Registration link is summit dot northwind dot io slash register, so please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements, per diem is seventy five dollars a day. I'll send the full agenda draft next Tuesday for comments."
+  },
+  {
+   "clip_id": "dict_0119",
+   "domain": "long_form",
+   "edits": "16",
+   "chars": "977",
+   "draft": "Hi, Mr. Castellano. I'm writing about the lease renewal notice you left for unit 4B at 2915 Linden Street. And first off, thank you for getting the heater fixed so fast last winter. I really appreciated that. I'd like to stay another year, but I wanted to talk about the new rent. The notice has it going from $1,675 $1,900 a month, which is about a 13% jump. I looked at similar 2-bedrooms around here on Zillow, and most of them are listed somewhere between $1,700 and $1,750. I've paid on time every month for 3 years and never had a complaint, and honestly, I think a reliable tenant probably saves you more than the difference. Would you consider $1,750 a month on a 12-month lease? And I'd be open to an 18-month lease too, if that makes it easier on your end. The notice says you need an answer by December 1st, so I wanted to get in touch early. I'm around most evenings after 6 if you'd rather just talk on the phone. My number's Thanks for considering it. Best, Alicia Moreno.",
+   "fixed": "Hi, Mr. Castellano. I'm writing about the lease renewal notice you left for unit 4B at 2915 Linden Street. And first off, thank you for getting the heater fixed so fast last winter. I really appreciated that. I'd like to stay another year, but I wanted to talk about the new rent. The notice has it going from $1,675 to $1,900 a month, which is about a 13% jump. I looked at similar 2-bedrooms around here on Zillow, and most of them are listed somewhere between $1,700 and $1,750. I've paid on time every month for 3 years and never had a complaint, and honestly, I think a reliable tenant probably saves you more than the difference. Would you consider $1,750 a month on a 12-month lease? And I'd be open to an 18-month lease too, if that makes it easier on your end. The notice says you need an answer by December 1st, so I wanted to get in touch early. I'm around most evenings after 6 if you'd rather just talk on the phone. My number's (312) 555-0164. Thanks for considering it. Best, Alicia Moreno.",
+   "intended_text": "Hi Mr. Castellano,\n\nI'm writing about the lease renewal notice you left for Unit 4B at 2915 Linden Street. And first off, thank you for getting the heater fixed so fast last winter, I really appreciated that.\n\nI'd like to stay another year, but I wanted to talk about the new rent. The notice has it going from $1,675 to $1,900 a month, which is about a 13% jump. I looked at similar two-bedrooms around here on Zillow and most of them are listed somewhere between $1,700 and $1,750. I've paid on time every month for three years and never had a complaint, and honestly I think a reliable tenant probably saves you more than the difference.\n\nWould you consider $1,750 a month on a 12-month lease? And I'd be open to an 18-month lease too if that makes it easier on your end.\n\nThe notice says you need an answer by December 1, so I wanted to get in touch early. I'm around most evenings after 6 if you'd rather just talk on the phone, my number's (312) 555-0164.\n\nThanks for considering it.\n\nBest,\nAlicia Moreno",
+   "spoken_text": "Hi Mr. Castellano, I'm writing about the lease renewal notice you left for unit four B at twenty nine fifteen Linden Street. And first off, thank you for getting the heater fixed so fast last winter, I really appreciated that. I'd like to stay another year, but I wanted to talk about the new rent. The notice has it going from sixteen seventy five to nineteen hundred a month, which is about a thirteen percent jump. I looked at similar two bedrooms around here on Zillow and most of them are listed somewhere between seventeen hundred and seventeen fifty. I've paid on time every month for three years and never had a complaint, and honestly I think a reliable tenant probably saves you more than the difference. Would you consider seventeen fifty a month on a twelve month lease? And I'd be open to an eighteen month lease too if that makes it easier on your end. The notice says you need an answer by December first, so I wanted to get in touch early. I'm around most evenings after six if you'd rather just talk on the phone, my number's three one two, five five five, zero one six four. Thanks for considering it. Best, Alicia Moreno"
+  },
+  {
+   "clip_id": "dict_0229",
+   "domain": "ai_prompt",
+   "edits": "14",
+   "chars": "239",
+   "draft": "I signed up for the Twin Cities Marathon on October 4th, and right now I'm running like 15 miles a week. Can you build me a 16-week plan that gets me there without, you know, wrecking my knees? I can only run 4 days a week, and Sundays have to be the long run.",
+   "fixed": "I signed up for the Twin Cities Marathon on October 4th, and right now I'm running 15 miles a week. Can you build me a 16-week plan that gets me there without wrecking my knees? I can only run 4 days a week, and Sundays have to be the long run.",
+   "intended_text": "I signed up for the Twin Cities Marathon on October 4th and right now I'm running 15 miles a week. Can you build me a 16-week plan that gets me there without wrecking my knees? I can only run four days a week and Sundays have to be the long run.",
+   "spoken_text": "I signed up for the Twin Cities Marathon on October fourth and right now I'm running like fifteen miles a week. Can you build me a sixteen week plan that gets me there without, you know, wrecking my knees? I can only run four days a week and Sundays have to be the long run."
+  },
+  {
+   "clip_id": "dict_0231",
+   "domain": "ai_prompt",
+   "edits": "14",
+   "chars": "239",
+   "draft": "I signed up for the Twin Cities Marathon on October 4th, and right now I'm running like 15 miles a week. Can you build me a 16-week plan that gets me there without, you know, wrecking my knees? I can only run 4 days a week, and Sundays have to be the long run.",
+   "fixed": "I signed up for the Twin Cities Marathon on October 4th, and right now I'm running 15 miles a week. Can you build me a 16-week plan that gets me there without wrecking my knees? I can only run 4 days a week, and Sundays have to be the long run.",
+   "intended_text": "I signed up for the Twin Cities Marathon on October 4th and right now I'm running 15 miles a week. Can you build me a 16-week plan that gets me there without wrecking my knees? I can only run four days a week and Sundays have to be the long run.",
+   "spoken_text": "I signed up for the Twin Cities Marathon on October fourth and right now I'm running like fifteen miles a week. Can you build me a sixteen week plan that gets me there without, you know, wrecking my knees? I can only run four days a week and Sundays have to be the long run."
+  },
+  {
+   "clip_id": "dict_0536",
+   "domain": "long_form",
+   "edits": "14",
+   "chars": "983",
+   "draft": "Hey Marcus, I've started this email probably 5 times, so I'm just going to say it. I'm sorry about how things went at Mom's birthday dinner. I said some things about your job that weren't fair, and I, you know, I think I was taking out a bad week on you, which isn't an excuse. You've always been the one who shows up for the family, and I made it sound like you didn't care, and that's just not true. I've been thinking about why I get so defensive around you, and I think part of it is that I always felt like this grew-up brother, and when you give advice, it sounds like judgment to me, even when you don't mean it that way. That's my thing to work on, not yours. I miss talking to you. We used to text every day about basketball and dumb stuff, and it's been almost 2 months now. I'd really like to get lunch or a beer sometime soon if you're up for it. Just the two of us. No pressure if you need more time. Either way, I love you and I'm proud of you, and I should say that more often. Talk soon, I hope. Your brother.",
+   "fixed": "Hey Marcus, I've started this email probably 5 times, so I'm just going to say it. I'm sorry about how things went at Mom's birthday dinner. I said some things about your job that weren't fair, and I think I was taking out a bad week on you, which isn't an excuse. You've always been the one who shows up for the family, and I made it sound like you didn't care, and that's just not true. I've been thinking about why I get so defensive around you, and I think part of it is that I always felt like this screwup brother, and when you give advice, it sounds like judgment to me, even when you don't mean it that way. That's my thing to work on, not yours. I miss talking to you. We used to text every day about basketball and dumb stuff, and it's been almost 2 months now. I'd really like to get lunch or a beer sometime soon if you're up for it. Just the two of us. No pressure if you need more time. Either way, I love you and I'm proud of you, and I should say that more often. Talk soon, I hope. Your brother.",
+   "intended_text": "Hey Marcus,\n\nI've started this email probably five times, so I'm just going to say it. I'm sorry about how things went at Mom's birthday dinner. I said some things about your job that weren't fair, and I think I was taking out a bad week on you, which isn't an excuse. You've always been the one who shows up for the family, and I made it sound like you didn't care, and that's just not true.\n\nI've been thinking about why I get so defensive around you, and I think part of it is that I always felt like the screwup brother, and when you give advice it sounds like judgment to me even when you don't mean it that way. That's my thing to work on, not yours.\n\nI miss talking to you. We used to text every day about basketball and dumb stuff and it's been almost two months now. I'd really like to get lunch or a beer sometime soon if you're up for it, just the two of us. No pressure if you need more time.\n\nEither way, I love you and I'm proud of you, and I should say that more often.\n\nTalk soon, I hope.\nYour brother",
+   "spoken_text": "Hey Marcus, I've started this email probably five times, so I'm just going to say it. I'm sorry about how things went at Mom's birthday dinner. I said some things about your job that weren't fair, and I, you know, I think I was taking out a bad week on you, which isn't an excuse. You've always been the one who shows up for the family, and I made it sound like you didn't care, and that's just not true. I've been thinking about why I get so defensive around you, and I think part of it is that I always felt like the screwup brother, and when you give advice it sounds like judgment to me even when you don't mean it that way. That's my thing to work on, not yours. I miss talking to you. We used to text every day about basketball and dumb stuff and it's been almost two months now. I'd really like to get lunch or a beer sometime soon if you're up for it, just the two of us. No pressure if you need more time. Either way, I love you and I'm proud of you, and I should say that more often. Talk soon, I hope. Your brother"
+  },
+  {
+   "clip_id": "dict_0138",
+   "domain": "personal_messaging",
+   "edits": "13",
+   "chars": "90",
+   "draft": "Did you, did you take the trash out already? It's like totally overflowing and pickup is tomorrow morning.",
+   "fixed": "Did you take the trash out already? It's totally overflowing and pickup is tomorrow morning.",
+   "intended_text": "Did you take the trash out already? It's totally overflowing and pickup is tomorrow morning.",
+   "spoken_text": "Did you, did you take the trash out already? It's like totally overflowing and pickup is tomorrow morning."
+  },
+  {
+   "clip_id": "dict_0179",
+   "domain": "work_chat",
+   "edits": "13",
+   "chars": "314",
+   "draft": "So I talked to the customer this morning, and honestly, they're, they're not upset about the delay. They just want to know what's going on. I think if we send them a short update every couple of days, like even just a quick note saying where things are, that'll go a long way. Can you set a reminder on your end too so we don't drop it?",
+   "fixed": "So I talked to the customer this morning, and honestly, they're not upset about the delay. They just want to know what's going on. I think if we send them a short update every couple of days, even just a quick note saying where things are, that'll go a long way. Can you set a reminder on your end too so we don't drop it?",
+   "intended_text": "So I talked to the customer this morning, and honestly they're not upset about the delay, they just want to know what's going on. I think if we send them a short update every couple of days, even just a quick note saying where things are, that'll go a long way. Can you set a reminder on your end too so we don't drop it?",
+   "spoken_text": "So I talked to the customer this morning, and honestly they're, they're not upset about the delay, they just want to know what's going on. I think if we send them a short update every couple of days, like even just a quick note saying where things are, that'll go a long way. Can you set a reminder on your end too so we don't drop it?"
+  },
+  {
+   "clip_id": "dict_0407",
+   "domain": "docs_notes",
+   "edits": "13",
+   "chars": "155",
+   "draft": "Stock check for the shop. We're down to— down to 8 bags of the house blend, like 3 tins of the Earl Grey, and maybe 2 cases of oat milk. Reorder from Ridgeline Coffee Supply.",
+   "fixed": "Stock check for the shop. We're down to 8 bags of the house blend, 3 tins of the Earl Grey, and maybe 2 cases of oat milk. Reorder from Ridgeline Coffee Supply.",
+   "intended_text": "Stock check for the shop. We're down to:\n- 8 bags of the house blend\n- 3 tins of the Earl Grey\n- Maybe 2 cases of oat milk\n\nReorder from Ridgeline Coffee Supply.",
+   "spoken_text": "Stock check for the shop. We're down to, down to eight bags of the house blend, like three tins of the Earl Grey, and maybe two cases of oat milk. Reorder from Ridgeline Coffee Supply."
+  }
+ ]
+}
