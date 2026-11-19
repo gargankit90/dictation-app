@@ -415,7 +415,11 @@ pub fn judge(raw: &str, reply: &str, prompt: &str) -> Reason {
         return Reason::TooLong;
     }
     let kept = numbers(reply);
-    if numbers(raw).iter().any(|n| !kept.contains(n)) {
+    let corrected = corrected_numbers(raw);
+    if numbers(raw)
+        .iter()
+        .any(|n| !kept.contains(n) && !corrected.contains(n))
+    {
         return Reason::DroppedNumber;
     }
     let lower = reply.to_lowercase();
@@ -487,6 +491,45 @@ fn numbers(text: &str) -> Vec<String> {
     }
     if !current.is_empty() {
         found.push(current);
+    }
+    found
+}
+
+/// Words that announce a spoken self-correction ("at 9, sorry, at 10").
+const CORRECTION_CUES: [&str; 9] = [
+    "no",
+    "sorry",
+    "actually",
+    "wait",
+    "mean",
+    "make",
+    "rather",
+    "scratch",
+    "correction",
+];
+
+/// Numbers the speaker corrects in `raw` itself: a number followed within
+/// six words by a correction cue and then, within ten words of the number,
+/// another number ("starting at 9, sorry, starting at 10": 9). A reply that
+/// resolves the correction may drop them; every other number must stay.
+fn corrected_numbers(raw: &str) -> Vec<String> {
+    let words: Vec<&str> = raw.split_whitespace().collect();
+    let mut found = Vec::new();
+    for (i, word) in words.iter().enumerate() {
+        let here = numbers(word);
+        if here.is_empty() {
+            continue;
+        }
+        let cue = (i + 1..words.len().min(i + 7)).find(|&k| {
+            let w = words[k]
+                .trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase();
+            CORRECTION_CUES.contains(&w.as_str())
+        });
+        let Some(cue) = cue else { continue };
+        if (cue + 1..words.len().min(i + 11)).any(|k| !numbers(words[k]).is_empty()) {
+            found.extend(here);
+        }
     }
     found
 }
@@ -621,9 +664,34 @@ mod tests {
             judge("It's $17.50.", "It's $1,750.", P),
             Reason::DroppedNumber
         );
-        // A self-correction resolved drops the first value: raw text.
+        // A self-correction resolved may drop the corrected value only.
         assert_eq!(
             judge("January 23rd. Sorry, January 29th.", "January 29th.", P),
+            Reason::Cleaned
+        );
+        assert_eq!(
+            judge(
+                "It started in build 4.2, wait, no, 4.3.",
+                "It started in build 4.3.",
+                P
+            ),
+            Reason::Cleaned
+        );
+        assert_eq!(
+            judge(
+                "Set it to 10 a minute, make that 5 per IP.",
+                "Set it to 5 per IP.",
+                P
+            ),
+            Reason::Cleaned
+        );
+        // ...but not the value it was corrected to, nor an unrelated number.
+        assert_eq!(
+            judge("January 23rd. Sorry, January 29th.", "January 23rd.", P),
+            Reason::DroppedNumber
+        );
+        assert_eq!(
+            judge("Call 555-0164. Thanks!", "Call me. Thanks!", P),
             Reason::DroppedNumber
         );
     }
@@ -676,6 +744,17 @@ mod tests {
             ),
             Reason::Cleaned
         );
+    }
+
+    #[test]
+    fn corrected_numbers_are_the_ones_a_cue_replaces() {
+        assert_eq!(
+            corrected_numbers("starting at 9, sorry, starting at 10 at the garden"),
+            ["9"]
+        );
+        assert_eq!(corrected_numbers("node 20, sorry, node 22"), ["20"]);
+        assert!(corrected_numbers("I have 2 kids. Sorry I'm late.").is_empty());
+        assert!(corrected_numbers("version 3 is out").is_empty());
     }
 
     #[test]
