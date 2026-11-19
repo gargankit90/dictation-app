@@ -616,6 +616,8 @@ export type Link =
 "groq_keys" | 
 /**  `OpenAI`'s page for creating an API key. */
 "openai_keys" | 
+/**  `AssemblyAI`'s data retention and model training policy. */
+"assemblyai_retention" | 
 /**  The privacy notice: what the app sends. */
 "privacy" | 
 /**  The source code. */
@@ -810,7 +812,9 @@ export type Provider =
 /**  Groq's `OpenAI`-compatible Whisper API. */
 "groq" | 
 /**  The `OpenAI` Whisper API. */
-"openai";
+"openai" | 
+/**  `AssemblyAI`'s Dictation API, as "Vocet Cloud". Experimental. */
+"assemblyai";
 
 /**  What the user can set. Never holds the API key. */
 export type Settings = Settings_Serialize | Settings_Deserialize;

@@ -18,7 +18,10 @@ export const SAVED_LINE = "A key is saved in your Keychain.";
 export const KEY_NOT_SAVED = "Key works, but couldn't be saved to your Keychain";
 
 /** Where each provider's keys are made, and the steps to get one. */
-const KEY_STEPS: Record<Provider, { link: "groq_keys" | "openai_keys"; site: string }> = {
+const KEY_STEPS: Record<
+  Exclude<Provider, "assemblyai">,
+  { link: "groq_keys" | "openai_keys"; site: string }
+> = {
   groq: { link: "groq_keys", site: "console.groq.com" },
   openai: { link: "openai_keys", site: "platform.openai.com" },
 };
@@ -279,7 +282,7 @@ export function OwnKeyPanel({
 }) {
   const { provider, keyInput, keyStatus, keyNotice, keyBusy } = ownKey;
   const info = providerInfo(provider);
-  const steps = KEY_STEPS[provider];
+  const steps = provider === "assemblyai" ? null : KEY_STEPS[provider];
   const providerRow = (
     <div className="panel-row provider-row">
       <label htmlFor="provider">Provider</label>
@@ -309,25 +312,44 @@ export function OwnKeyPanel({
   return (
     <div className="own-key-panel" id="own-key-panel">
       {providerRow}
-      <ol className="key-steps">
-        <li>
-          Open{" "}
+      {steps === null ? (
+        <p className="hint" id="vocet-cloud-note">
+          Experimental. Paste the Vocet Cloud token you were given and press Test &amp; Save. Your
+          recordings are sent to AssemblyAI, which keeps them under{" "}
           <button
             type="button"
             className="link"
             onClick={() => {
-              void commands.openLink(steps.link).catch(() => undefined);
+              void commands.openLink("assemblyai_retention").catch(() => undefined);
             }}
           >
-            {steps.site}
-          </button>{" "}
-          and sign in.
-        </li>
-        <li>Create an API key and copy it.</li>
-        <li>Paste it below and press Test &amp; Save.</li>
-      </ol>
+            its own retention policy
+          </button>
+          .
+        </p>
+      ) : (
+        <ol className="key-steps">
+          <li>
+            Open{" "}
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                void commands.openLink(steps.link).catch(() => undefined);
+              }}
+            >
+              {steps.site}
+            </button>{" "}
+            and sign in.
+          </li>
+          <li>Create an API key and copy it.</li>
+          <li>Paste it below and press Test &amp; Save.</li>
+        </ol>
+      )}
       <div className="panel-row">
-        <label htmlFor="api-key">{info.name} API key</label>
+        <label htmlFor="api-key">
+          {provider === "assemblyai" ? "Vocet Cloud token" : `${info.name} API key`}
+        </label>
         <input
           id="api-key"
           type="password"

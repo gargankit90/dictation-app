@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod assemblyai;
 pub mod check_key;
 pub mod engine;
 mod http;

@@ -19,6 +19,9 @@
 //!   app. They run in their own process, never in a running app, so a
 //!   forwarded second launch ignores them.
 //!
+//!   `--debug-key-provider=assemblyai` makes them act on the experimental
+//!   Vocet Cloud token instead.
+//!
 //! - `--debug-launch-at-login-on`, `-off` and `-status` set or print the
 //!   login item (M5.3) through the same code as the Settings window, then
 //!   exit, again in a process of their own.

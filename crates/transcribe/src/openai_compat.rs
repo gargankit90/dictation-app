@@ -59,6 +59,15 @@ pub const GROQ: Preset = Preset {
     model: "whisper-large-v3-turbo",
 };
 
+/// `AssemblyAI` Dictation API (experimental), through its own request shape
+/// (`crate::assemblyai`), not the OpenAI one; the preset only carries the
+/// endpoint and a label for the model (the API has no model parameter).
+pub const ASSEMBLYAI: Preset = Preset {
+    name: "assemblyai",
+    base_url: "https://dictation.assemblyai.com",
+    model: "assemblyai-dictation",
+};
+
 /// OpenAI: `whisper-1`, its model that supports `verbose_json`.
 pub const OPENAI: Preset = Preset {
     name: "openai",
@@ -73,6 +82,7 @@ impl Preset {
         match provider {
             Provider::Groq => GROQ,
             Provider::OpenAi => OPENAI,
+            Provider::AssemblyAi => ASSEMBLYAI,
         }
     }
 }
@@ -351,7 +361,7 @@ impl<W> std::fmt::Debug for OpenAiCompat<W> {
 }
 
 /// How long `audio` plays.
-fn audio_duration(audio: &Audio) -> Duration {
+pub(crate) fn audio_duration(audio: &Audio) -> Duration {
     if audio.sample_rate == 0 {
         return Duration::ZERO;
     }
@@ -363,14 +373,14 @@ fn audio_duration(audio: &Audio) -> Duration {
 
 /// A failed attempt and whether to retry it.
 #[derive(Debug)]
-struct Failure {
-    error: TranscribeError,
-    retryable: bool,
-    retry_after: Option<Duration>,
+pub(crate) struct Failure {
+    pub(crate) error: TranscribeError,
+    pub(crate) retryable: bool,
+    pub(crate) retry_after: Option<Duration>,
 }
 
 impl Failure {
-    fn fatal(error: TranscribeError) -> Self {
+    pub(crate) fn fatal(error: TranscribeError) -> Self {
         Self {
             error,
             retryable: false,
@@ -378,7 +388,7 @@ impl Failure {
         }
     }
 
-    fn retry(error: TranscribeError, retry_after: Option<Duration>) -> Self {
+    pub(crate) fn retry(error: TranscribeError, retry_after: Option<Duration>) -> Self {
         Self {
             error,
             retryable: true,
@@ -386,7 +396,7 @@ impl Failure {
         }
     }
 
-    fn from_status(status: StatusCode, headers: &HeaderMap) -> Self {
+    pub(crate) fn from_status(status: StatusCode, headers: &HeaderMap) -> Self {
         // The body isn't used: a 401 from OpenAI echoes part of the key.
         let retry_after = headers
             .get(RETRY_AFTER)
@@ -411,7 +421,7 @@ impl Failure {
         }
     }
 
-    fn from_reqwest(error: reqwest::Error) -> Self {
+    pub(crate) fn from_reqwest(error: reqwest::Error) -> Self {
         if error.is_timeout() {
             Self::retry(TranscribeError::Timeout, None)
         } else if error.is_decode() || error.is_body() {

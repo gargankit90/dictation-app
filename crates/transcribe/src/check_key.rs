@@ -18,6 +18,9 @@ use std::time::Duration;
 use dictation_core::retry::RetryPolicy;
 use dictation_ports::{Audio, Secret, TranscribeError};
 
+use dictation_core::settings::Provider;
+
+use crate::assemblyai::AssemblyAi;
 use crate::openai_compat::{Config, OpenAiCompat};
 
 /// How long the test clip lasts. Providers reject clips under 0.1 s.
@@ -44,6 +47,25 @@ pub const TIMEOUT: Duration = Duration::from_secs(15);
 /// other reply.
 pub async fn check_key(config: Config, key: Secret) -> Result<(), TranscribeError> {
     check_key_within(config, key, TIMEOUT).await
+}
+
+/// [`check_key`] for `provider`: `AssemblyAI` is checked through its own
+/// Dictation API request (one real, cheap call: 0.25 s of silence), the
+/// others as [`check_key`].
+///
+/// # Errors
+///
+/// As [`check_key`].
+pub async fn check_key_for(
+    provider: Provider,
+    config: Config,
+    key: Secret,
+) -> Result<(), TranscribeError> {
+    if provider != Provider::AssemblyAi {
+        return check_key(config, key).await;
+    }
+    let engine = AssemblyAi::new(check_config(config, TIMEOUT), key)?;
+    engine.transcribe_text(&clip()).await.map(|_| ())
 }
 
 /// [`check_key`] with another time budget; tests use a short one instead of

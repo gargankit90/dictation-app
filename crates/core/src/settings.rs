@@ -57,11 +57,14 @@ pub enum Provider {
     /// The `OpenAI` Whisper API.
     #[serde(rename = "openai")]
     OpenAi,
+    /// `AssemblyAI`'s Dictation API, as "Vocet Cloud". Experimental.
+    #[serde(rename = "assemblyai")]
+    AssemblyAi,
 }
 
 impl Provider {
     /// Every provider.
-    pub const ALL: [Self; 2] = [Self::Groq, Self::OpenAi];
+    pub const ALL: [Self; 3] = [Self::Groq, Self::OpenAi, Self::AssemblyAi];
 
     /// The model a new user gets with this provider.
     #[must_use]
@@ -69,6 +72,7 @@ impl Provider {
         match self {
             Self::Groq => "whisper-large-v3-turbo",
             Self::OpenAi => "whisper-1",
+            Self::AssemblyAi => "assemblyai-dictation",
         }
     }
 
@@ -79,6 +83,7 @@ impl Provider {
         match self {
             Self::Groq => "groq-api-key",
             Self::OpenAi => "openai-api-key",
+            Self::AssemblyAi => "vocet-cloud-token",
         }
     }
 }
@@ -88,6 +93,7 @@ impl fmt::Display for Provider {
         f.write_str(match self {
             Self::Groq => "groq",
             Self::OpenAi => "openai",
+            Self::AssemblyAi => "assemblyai",
         })
     }
 }

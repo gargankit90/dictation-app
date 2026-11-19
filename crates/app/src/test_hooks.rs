@@ -39,6 +39,10 @@ pub const DEBUG_SAVE_AUDIO_FLAG: &str = "--debug-save-audio";
 /// `--debug-fail-paste`: every paste fails, for U7's "Not pasted" entries.
 pub const DEBUG_FAIL_PASTE_FLAG: &str = "--debug-fail-paste";
 
+/// `--debug-key-provider=assemblyai`: the two key hooks below act on the
+/// experimental Vocet Cloud token instead of the Groq key.
+pub const DEBUG_KEY_PROVIDER_ASSEMBLYAI_FLAG: &str = "--debug-key-provider=assemblyai";
+
 /// `--debug-set-api-key-stdin`: store the Groq API key read from stdin (never
 /// an argument, which any local process can read) and exit.
 pub const DEBUG_SET_API_KEY_FLAG: &str = "--debug-set-api-key-stdin";
@@ -148,6 +152,21 @@ impl KeyCommand {
 pub fn run_key_command<S: SecretStore>(
     command: KeyCommand,
     config: &Config<S>,
+    stdin: impl Read,
+) -> Result<&'static str, String> {
+    run_key_command_for(Provider::Groq, command, config, stdin)
+}
+
+/// As [`run_key_command`], for `provider`'s keychain item
+/// (`--debug-key-provider=assemblyai` picks the Vocet Cloud token).
+///
+/// # Errors
+///
+/// As [`run_key_command`].
+pub fn run_key_command_for<S: SecretStore>(
+    provider: Provider,
+    command: KeyCommand,
+    config: &Config<S>,
     mut stdin: impl Read,
 ) -> Result<&'static str, String> {
     match command {
@@ -162,12 +181,12 @@ pub fn run_key_command<S: SecretStore>(
             let key = String::from_utf8(input)
                 .map_err(|_| "the key on stdin is not valid UTF-8".to_owned())?;
             config
-                .set_api_key(Provider::Groq, &key)
+                .set_api_key(provider, &key)
                 .map(|()| "API key stored")
                 .map_err(|error| error.to_string())
         }
         KeyCommand::Delete => config
-            .delete_api_key(Provider::Groq)
+            .delete_api_key(provider)
             .map(|()| "API key deleted")
             .map_err(|error| error.to_string()),
     }

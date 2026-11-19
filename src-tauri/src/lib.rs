@@ -240,8 +240,19 @@ fn run_key_commands(argv: &[String], mut stdin: impl std::io::Read) -> Option<i3
         std::env::temp_dir(),
         dictation_platform::secrets::KeychainSecretStore::new(),
     );
+    let provider = if flags::TEST_FLAGS
+        && argv
+            .iter()
+            .any(|arg| arg == dictation_pipeline::test_hooks::DEBUG_KEY_PROVIDER_ASSEMBLYAI_FLAG)
+    {
+        dictation_core::settings::Provider::AssemblyAi
+    } else {
+        dictation_core::settings::Provider::Groq
+    };
     for command in launch.key_commands {
-        match dictation_pipeline::test_hooks::run_key_command(command, &config, &mut stdin) {
+        match dictation_pipeline::test_hooks::run_key_command_for(
+            provider, command, &config, &mut stdin,
+        ) {
             Ok(message) => eprintln!("{message}"),
             Err(error) => {
                 eprintln!("{error}");

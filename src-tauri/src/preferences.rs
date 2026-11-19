@@ -249,10 +249,12 @@ pub fn status_of(engine: &Engine) -> EngineStatus {
             state: EngineState::Failed,
             message: Some(error.user_message()),
         },
-        Engine::Mock(_) | Engine::Remote(_) | Engine::Local(_) => EngineStatus {
-            state: EngineState::Ready,
-            message: None,
-        },
+        Engine::Mock(_) | Engine::Remote(_) | Engine::AssemblyAi(_) | Engine::Local(_) => {
+            EngineStatus {
+                state: EngineState::Ready,
+                message: None,
+            }
+        }
     }
 }
 
@@ -370,6 +372,8 @@ pub enum Link {
     GroqKeys,
     /// `OpenAI`'s page for creating an API key.
     OpenaiKeys,
+    /// `AssemblyAI`'s data retention and model training policy.
+    AssemblyaiRetention,
     /// The privacy notice: what the app sends.
     Privacy,
     /// The source code.
@@ -389,6 +393,9 @@ impl Link {
         match self {
             Self::GroqKeys => "https://console.groq.com/keys".to_owned(),
             Self::OpenaiKeys => "https://platform.openai.com/api-keys".to_owned(),
+            Self::AssemblyaiRetention => {
+                "https://www.assemblyai.com/docs/data-retention-and-model-training".to_owned()
+            }
             Self::Privacy => format!("{REPOSITORY}/blob/main/docs/privacy.md"),
             Self::Repository => REPOSITORY.to_owned(),
             Self::Licence => format!("{REPOSITORY}/blob/main/LICENSE"),

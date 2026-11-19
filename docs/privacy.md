@@ -22,6 +22,30 @@ and error reports are built field by field from an allow-list
 - **A build without a PostHog key sends nothing.** Development builds, CI and
   forks have no key (`DICTATION_POSTHOG_KEY` is read at build time).
 
+## Where your audio goes (speech-to-text)
+
+Usage events (below) never include audio. Dictation itself sends each
+recording to the engine you chose, and to no one else:
+
+- **On this Mac:** nowhere; the model runs on your computer.
+- **Your own key (Groq, OpenAI):** to that provider, with your key, under its
+  terms.
+- **Vocet Cloud (AssemblyAI), experimental:** to AssemblyAI's Dictation API
+  (`dictation.assemblyai.com`), with a token for Vocet's own AssemblyAI
+  account, so the recording and its text are handled by AssemblyAI under
+  [its data retention and model training policy](https://www.assemblyai.com/docs/data-retention-and-model-training).
+  As that page reads on 2026-11-18: AssemblyAI offers zero data retention of
+  audio and transcripts for the Dictation API to accounts that have opted out
+  of model training, and files are used for model training only as the
+  account's contract permits, so whether data is used depends on the account's
+  opt-out, which Vocet's owner must set. The text rewrite runs with zero data
+  retention. In a later version the app will talk to a Vocet proxy, which
+  forwards the recording to AssemblyAI without keeping it. The token is kept
+  in the macOS Keychain and never written to a file or a log.
+
+The app keeps audio in memory unless debug mode is on, and never logs
+transcripts at info level.
+
 ## Error reports (Sentry)
 
 When the app panics (a crash in our own code) or a dictation fails, it can
@@ -88,7 +112,7 @@ links one install's events together. Turning sharing off deletes it.
 | `onboarding_completed` | You finish onboarding | `step` (`ready`) |
 | `onboarding_left` | You close setup's window or quit with setup on it, and it isn't finished | `step`, as above: where you stopped |
 | `setup_problem` | Something gets in the way during setup | `reason`, one of the values under [Setup problems](#setup-problems) |
-| `engine_selected` | You pick a provider or save its key, or switch between On this Mac and Your own key | `kind` (`cloud`, `local`), `provider` (`groq`, `openai`; cloud only; which local model is never sent) |
+| `engine_selected` | You pick a provider or save its key, or switch between On this Mac and Your own key | `kind` (`cloud`, `local`), `provider` (`groq`, `openai`, `assemblyai`; cloud only; which local model is never sent) |
 | `dictation_finished` | A dictation was pasted | `engine_kind` (`cloud`, `local`), `duration_bucket` (`under2s`, `from2_to5s`, `from5_to15s`, `from15_to60s`, `over60s`), `latency_bucket` (`under500ms`, `from500_to1000ms`, `from1_to2s`, `from2_to5s`, `over5s`) |
 | `dictation_failed` | A dictation failed | `error_type` (`transcription`, `empty_transcript`, `insert`, `secure_input`, `microphone_permission`, `accessibility_permission`, `hotkey`) |
 | `setting_changed` | You save a changed setting | `setting` (`provider`, `model`, `language`, `hotkey`, `launch_at_login`, `share_usage_events`, `history_limit`). Turning sharing off sends nothing, not even this. |

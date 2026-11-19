@@ -213,6 +213,7 @@ pub fn engine_name(settings: &Settings) -> String {
         Transcription::Cloud => match settings.provider {
             Provider::Groq => "Groq".to_owned(),
             Provider::OpenAi => "OpenAI".to_owned(),
+            Provider::AssemblyAi => "Vocet Cloud (AssemblyAI)".to_owned(),
         },
         Transcription::Local => local_models::find(&settings.local_model).map_or_else(
             || "On this Mac".to_owned(),

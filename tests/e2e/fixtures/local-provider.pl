@@ -179,6 +179,12 @@ sub form_file_bytes {
   return 0;
 }
 
+sub form_part_bytes {
+  my ($body, $name) = @_;
+  return length $1 if $body =~ /name="\Q$name\E"[^\r\n]*\r\n(?:[^\r\n]+\r\n)*\r\n(.*?)\r\n--/s;
+  return 0;
+}
+
 sub respond {
   my ($sock, $status, $reason, $body) = @_;
   my $response = "HTTP/1.1 $status $reason\r\n"
@@ -232,7 +238,12 @@ sub serve {
     return;
   }
   my $auth = 'none';
-  if (($headers->{authorization} // '') =~ /^Bearer (\S+)$/) {
+  # The OpenAI shape sends "Bearer <key>"; AssemblyAI's Dictation API
+  # (POST .../v1/transcribe) sends the bare key.
+  my $dictation = $path =~ m{/transcribe$};
+  my $presented = ($headers->{authorization} // '');
+  $presented = "Bearer $presented" if $dictation && $presented ne '' && $presented !~ /^Bearer /;
+  if ($presented =~ /^Bearer (\S+)$/) {
     my $want = '';
     if (open my $fh, '<', "$dir/accept-key.sha256") {
       $want = <$fh> // '';
@@ -244,17 +255,34 @@ sub serve {
   my $fields = sprintf 'model=%s language=%s format=%s audio_bytes=%d',
     form_field($body, 'model'), form_field($body, 'language'),
     form_field($body, 'response_format'), form_file_bytes($body);
+  if ($dictation) {
+    # The config part is JSON: {"language_codes":["de"]}, or absent.
+    my $config = form_field($body, 'config');
+    my ($language) = $config =~ /"language_codes":\["([a-z]+)"\]/;
+    $fields = sprintf 'model=- language=%s format=dictation audio_bytes=%d',
+      $language // '-', form_part_bytes($body, 'audio');
+  }
   $fields =~ s/[^\x20-\x7e]/?/g;
   (my $safe_path = $path) =~ s/[^\x21-\x7e]/?/g;
   my $text = reply_text();
   my $n = log_request("path=$safe_path auth=$auth $fields");
   hold($sock, $n);
   my ($status, $reason, $reply);
-  if ($method ne 'POST' || $path !~ m{/audio/transcriptions$}) {
+  if ($method ne 'POST' || $path !~ m{/(audio/transcriptions|transcribe)$}) {
     ($status, $reason, $reply) = (404, 'Not Found', '{"error":{"message":"not found"}}');
   } elsif ($auth ne 'good') {
     ($status, $reason, $reply) = (401, 'Unauthorized',
       '{"error":{"message":"Invalid API Key","type":"invalid_request_error","code":"invalid_api_key"}}');
+  } elsif ($dictation) {
+    # Verbatim text with a filler, and the cleaned-up rewrite: the app must
+    # paste the rewrite.
+    $reply = JSON::PP->new->ascii->canonical->encode({
+      text             => "um $text",
+      llm_response     => $text,
+      llm_error        => undef,
+      audio_duration_ms => 1500,
+    });
+    ($status, $reason) = (200, 'OK');
   } else {
     # ASCII JSON: every non-ASCII character as a \u escape (a non-BMP one as
     # a surrogate pair), which the app's JSON parser must put back together.

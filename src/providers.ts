@@ -15,8 +15,12 @@ export interface ProviderInfo {
 const GROQ: ProviderInfo = { id: "groq", name: "Groq", defaultModel: "whisper-large-v3-turbo" };
 const OPENAI: ProviderInfo = { id: "openai", name: "OpenAI", defaultModel: "whisper-1" };
 
-export const PROVIDERS: readonly ProviderInfo[] = [GROQ, OPENAI];
+/** Experimental (exp/assemblyai): Vocet's own AssemblyAI account, reached with a token. */
+// prettier-ignore
+const ASSEMBLYAI: ProviderInfo = { id: "assemblyai", name: "Vocet Cloud (AssemblyAI)", defaultModel: "assemblyai-dictation" };
+
+export const PROVIDERS: readonly ProviderInfo[] = [GROQ, OPENAI, ASSEMBLYAI];
 
 export function providerInfo(id: Provider): ProviderInfo {
-  return id === "openai" ? OPENAI : GROQ;
+  return PROVIDERS.find((provider) => provider.id === id) ?? GROQ;
 }

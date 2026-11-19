@@ -23,12 +23,13 @@
 
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
-use dictation_core::settings::Settings;
+use dictation_core::settings::{Provider, Settings};
 use dictation_core::text::Transcript;
 use dictation_ports::{Audio, Secret, SecretError, TranscribeError, Transcriber};
 
 use dictation_core::local_models::LocalModel;
 
+use crate::assemblyai::AssemblyAi;
 use crate::local::LocalTranscriber;
 use crate::mock::MockTranscriber;
 use crate::openai_compat::{Config, OpenAiCompat, Preset};
@@ -39,6 +40,8 @@ pub enum Engine {
     Mock(MockTranscriber),
     /// Groq or OpenAI.
     Remote(Box<OpenAiCompat>),
+    /// `AssemblyAI` (experimental).
+    AssemblyAi(Box<AssemblyAi>),
     /// A downloaded model on this Mac (L1).
     Local(LocalTranscriber),
     /// No engine can be built; every dictation fails with this error.
@@ -84,6 +87,12 @@ impl Engine {
         if let Some(base_url) = base_url {
             base_url.clone_into(&mut config.base_url);
         }
+        if settings.provider == Provider::AssemblyAi {
+            return match AssemblyAi::new(config, key) {
+                Ok(engine) => Self::AssemblyAi(Box::new(engine)),
+                Err(error) => Self::Unavailable(error),
+            };
+        }
         match OpenAiCompat::new(config, key) {
             Ok(engine) => Self::Remote(Box::new(engine)),
             Err(error) => Self::Unavailable(error),
@@ -107,7 +116,7 @@ impl Engine {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Mock(_) => "mock",
-            Self::Remote(_) => "remote",
+            Self::Remote(_) | Self::AssemblyAi(_) => "remote",
             Self::Local(_) => "local",
             Self::Unavailable(_) => "unavailable",
         }
@@ -119,6 +128,7 @@ impl Transcriber for Engine {
         match self {
             Self::Mock(engine) => engine.transcribe(audio).await,
             Self::Remote(engine) => engine.transcribe(audio).await,
+            Self::AssemblyAi(engine) => engine.transcribe(audio).await,
             Self::Local(engine) => engine.transcribe(audio).await,
             Self::Unavailable(error) => Err(error.clone()),
         }
@@ -130,6 +140,7 @@ impl Transcriber for Engine {
         match self {
             Self::Mock(engine) => engine.transcribe_detailed(audio).await,
             Self::Remote(engine) => engine.transcribe_detailed(audio).await,
+            Self::AssemblyAi(engine) => engine.transcribe_detailed(audio).await,
             Self::Local(engine) => engine.transcribe_detailed(audio).await,
             Self::Unavailable(error) => Err(error.clone()),
         }

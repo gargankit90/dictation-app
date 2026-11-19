@@ -68,6 +68,7 @@ fn provider_name(provider: Provider) -> &'static str {
     match provider {
         Provider::Groq => "groq",
         Provider::OpenAi => "openai",
+        Provider::AssemblyAi => "assemblyai",
     }
 }
 
@@ -81,7 +82,11 @@ struct Known {
 
 fn known() -> impl Strategy<Value = Known> {
     (
-        prop_oneof![Just(Provider::Groq), Just(Provider::OpenAi)],
+        prop_oneof![
+            Just(Provider::Groq),
+            Just(Provider::OpenAi),
+            Just(Provider::AssemblyAi)
+        ],
         "[a-z0-9.-]{1,40}",
         proptest::option::of("[a-z]{2,3}"),
         prop_oneof![Just("RightAlt"), Just("Ctrl+Space"), Just("F5")],

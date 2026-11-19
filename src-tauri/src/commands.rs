@@ -32,7 +32,7 @@ use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, Undo
 use dictation_pipeline::launch::LoginSync;
 use dictation_platform::secrets::KeychainSecretStore;
 use dictation_ports::{LaunchAtLogin, Permission, SecretStore, SetupProblem, TranscribeError};
-use dictation_transcribe::check_key::check_key;
+use dictation_transcribe::check_key::check_key_for;
 use dictation_transcribe::openai_compat::{self, Preset};
 use serde::Serialize;
 use tauri::State;
@@ -634,6 +634,7 @@ fn provider_name(provider: Provider) -> &'static str {
     match provider {
         Provider::Groq => "Groq",
         Provider::OpenAi => "OpenAI",
+        Provider::AssemblyAi => "Vocet Cloud (AssemblyAI)",
     }
 }
 
@@ -742,7 +743,7 @@ async fn key_test<S: SecretStore + 'static>(
         base_url: base_url.to_owned(),
         ..openai_compat::Config::from_preset(Preset::for_provider(provider))
     };
-    let result = check_key(engine, key).await;
+    let result = check_key_for(provider, engine, key).await;
     match &result {
         Ok(()) => tracing::info!(%provider, source, "API key works"),
         Err(error) => tracing::warn!(%provider, source, %error, "API key test failed"),

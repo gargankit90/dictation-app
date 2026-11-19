@@ -435,9 +435,9 @@ impl LiveEngine {
         let outcome = |engine: &Engine| match engine {
             Engine::Local(_) => Ok(()),
             Engine::Unavailable(error) => Err(error.clone()),
-            Engine::Mock(_) | Engine::Remote(_) => Err(TranscribeError::Engine(
-                "the on-device model didn't load".to_owned(),
-            )),
+            Engine::Mock(_) | Engine::Remote(_) | Engine::AssemblyAi(_) => Err(
+                TranscribeError::Engine("the on-device model didn't load".to_owned()),
+            ),
         };
         let on_device_now = self
             .current_engine()
