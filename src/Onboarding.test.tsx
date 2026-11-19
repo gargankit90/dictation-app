@@ -124,6 +124,7 @@ class Backend {
     local_model: PARAKEET.id,
     share_usage_events: true,
     history_limit: 25,
+    cleanup_model: null,
   };
   engine: { state: "loading" | "ready" | "failed"; message: string | null } = {
     state: "ready",

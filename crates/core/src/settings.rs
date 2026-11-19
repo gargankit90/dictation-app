@@ -136,6 +136,10 @@ pub struct Settings {
     /// How many recent dictations are kept, one of [`HISTORY_LIMITS`] (U7).
     /// A file without it loads with [`DEFAULT_HISTORY_LIMIT`].
     pub history_limit: u32,
+    /// Experimental, Groq only, off by default (`None`): the Groq chat model
+    /// that cleans up each transcript after Whisper (fillers, false starts,
+    /// spoken symbols). A file without it loads with `None`.
+    pub cleanup_model: Option<String>,
 }
 
 impl Default for Settings {
@@ -152,6 +156,7 @@ impl Default for Settings {
             local_model: local_models::DEFAULT_MODEL.to_owned(),
             share_usage_events: true,
             history_limit: DEFAULT_HISTORY_LIMIT,
+            cleanup_model: None,
         }
     }
 }
@@ -187,7 +192,8 @@ impl Settings {
     /// `version` other than [`CURRENT_VERSION`], an empty, over-long or
     /// whitespace-holding `model` or `local_model`, a `language` that isn't
     /// 2–3 lowercase letters, a `hotkey` that doesn't parse, or a
-    /// `history_limit` not in [`HISTORY_LIMITS`].
+    /// `history_limit` not in [`HISTORY_LIMITS`], or a `cleanup_model` that
+    /// fails the model-name check.
     pub fn validate(&self) -> Result<(), SettingsError> {
         if self.version != CURRENT_VERSION {
             return Err(invalid(
@@ -197,6 +203,9 @@ impl Settings {
         }
         check_model_name("model", &self.model)?;
         check_model_name("local_model", &self.local_model)?;
+        if let Some(model) = &self.cleanup_model {
+            check_model_name("cleanup_model", model)?;
+        }
         if let Some(language) = &self.language {
             let letters = (2..=3).contains(&language.len())
                 && language.chars().all(|c| c.is_ascii_lowercase());
@@ -364,6 +373,28 @@ mod tests {
         assert_eq!(settings.model, "whisper-large-v3");
         assert_eq!(settings.language.as_deref(), Some("fr"));
         assert_eq!(settings.hotkey, "RightAlt");
+    }
+
+    #[test]
+    fn cleanup_model_defaults_to_off_round_trips_and_is_checked() {
+        assert_eq!(Settings::default().cleanup_model, None);
+        assert_eq!(from_json("{}").unwrap().cleanup_model, None);
+        let settings = Settings {
+            cleanup_model: Some("llama-3.1-8b-instant".to_owned()),
+            ..Settings::default()
+        };
+        assert_eq!(from_json(&to_json(&settings).unwrap()).unwrap(), settings);
+        let bad = Settings {
+            cleanup_model: Some("has space".to_owned()),
+            ..Settings::default()
+        };
+        assert!(matches!(
+            bad.validate(),
+            Err(SettingsError::Invalid {
+                field: "cleanup_model",
+                ..
+            })
+        ));
     }
 
     #[test]

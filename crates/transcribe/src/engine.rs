@@ -23,12 +23,13 @@
 
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
-use dictation_core::settings::Settings;
+use dictation_core::settings::{Provider, Settings};
 use dictation_core::text::Transcript;
 use dictation_ports::{Audio, Secret, SecretError, TranscribeError, Transcriber};
 
 use dictation_core::local_models::LocalModel;
 
+use crate::groq_cleanup::Cleanup;
 use crate::local::LocalTranscriber;
 use crate::mock::MockTranscriber;
 use crate::openai_compat::{Config, OpenAiCompat, Preset};
@@ -84,8 +85,22 @@ impl Engine {
         if let Some(base_url) = base_url {
             base_url.clone_into(&mut config.base_url);
         }
+        // Experimental: the Groq LLM cleanup, Groq only, off unless set. A
+        // cleanup that can't be built is left out; dictation still works.
+        let cleanup = match (&settings.cleanup_model, settings.provider) {
+            (Some(model), Provider::Groq) => {
+                match Cleanup::new(&config.base_url, model, key.clone()) {
+                    Ok(cleanup) => Some(cleanup),
+                    Err(error) => {
+                        tracing::warn!(%error, "groq cleanup unavailable");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
         match OpenAiCompat::new(config, key) {
-            Ok(engine) => Self::Remote(Box::new(engine)),
+            Ok(engine) => Self::Remote(Box::new(engine.with_cleanup(cleanup))),
             Err(error) => Self::Unavailable(error),
         }
     }

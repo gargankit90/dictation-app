@@ -58,6 +58,7 @@ class Backend {
     local_model: ENGLISH,
     share_usage_events: true,
     history_limit: 25,
+    cleanup_model: null,
   };
   keys: Record<Provider, boolean> = { groq: false, openai: false };
   models: LocalModelInfo_Serialize[] = [model(ENGLISH), model(MULTI)];
@@ -100,6 +101,9 @@ class Backend {
         return null;
       case "set_language":
         this.settings = { ...this.settings, language: args.language as string | null };
+        return null;
+      case "set_cleanup_model":
+        this.settings = { ...this.settings, cleanup_model: args.model as string | null };
         return null;
       case "set_launch_at_login":
         this.settings = { ...this.settings, launch_at_login: args.enabled as boolean };
@@ -354,6 +358,36 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     await waitFor(() => {
       expect(backend.named("set_language").at(-1)?.args).toEqual({ language: null });
     });
+  });
+
+  it("experimental Groq cleanup: off by default, Groq only, saves the model", async () => {
+    backend.keys.groq = true;
+    await open("speech");
+    const select = await screen.findByLabelText<HTMLSelectElement>("Groq cleanup");
+    expect(select.value).toBe("");
+    fireEvent.change(select, { target: { value: "llama-3.1-8b-instant" } });
+    await waitFor(() => {
+      expect(backend.named("set_cleanup_model")[0]?.args).toEqual({
+        model: "llama-3.1-8b-instant",
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLSelectElement>("Groq cleanup").value).toBe(
+        "llama-3.1-8b-instant",
+      );
+    });
+    fireEvent.change(screen.getByLabelText("Groq cleanup"), { target: { value: "" } });
+    await waitFor(() => {
+      expect(backend.settings.cleanup_model).toBeNull();
+    });
+  });
+
+  it("experimental Groq cleanup is not offered for OpenAI", async () => {
+    backend.settings = { ...backend.settings, provider: "openai", model: "whisper-1" };
+    backend.keys.openai = true;
+    await open("speech");
+    await screen.findByText("Your own key");
+    expect(screen.queryByLabelText("Groq cleanup")).toBeNull();
   });
 
   it("language: a refused language shows the app's error next to it", async () => {

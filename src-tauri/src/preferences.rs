@@ -95,6 +95,30 @@ fn language_change<S: SecretStore + 'static>(
     .map_err(|error| error.to_string())
 }
 
+/// Experimental, Groq only: the Groq chat model that cleans up each
+/// transcript (`None` or empty: off). The engine follows at once.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_cleanup_model(
+    state: State<'_, AppConfig>,
+    engine: State<'_, LiveEngine>,
+    hotkey: State<'_, ActiveHotkey>,
+    usage: State<'_, Usage>,
+    model: Option<String>,
+) -> Result<(), String> {
+    let (live, control) = (engine.inner().clone(), hotkey.0.clone());
+    let model = model
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty());
+    write(Arc::clone(&state.0), &usage, move |config| {
+        commands::write_change(config, &live, &control, |settings| {
+            settings.cleanup_model = model;
+        })
+        .map_err(|error| error.to_string())
+    })
+    .await
+}
+
 /// Dictates with `provider` and the user's own key from now on. Switching
 /// provider also switches to its default model.
 #[tauri::command]

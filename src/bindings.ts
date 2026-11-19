@@ -165,6 +165,11 @@ export const commands = {
 	 */
 	setLanguage: (language: string | null) => typedError<null, string>(__TAURI_INVOKE("set_language", { language })),
 	/**
+	 *  Experimental, Groq only: the Groq chat model that cleans up each
+	 *  transcript (`None` or empty: off). The engine follows at once.
+	 */
+	setCleanupModel: (model: string | null) => typedError<null, string>(__TAURI_INVOKE("set_cleanup_model", { model })),
+	/**
 	 *  Dictates with `provider` and the user's own key from now on. Switching
 	 *  provider also switches to its default model.
 	 */
@@ -854,6 +859,12 @@ export type Settings_Deserialize = {
 	 *  A file without it loads with [`DEFAULT_HISTORY_LIMIT`].
 	 */
 	history_limit?: number,
+	/**
+	 *  Experimental, Groq only, off by default (`None`): the Groq chat model
+	 *  that cleans up each transcript after Whisper (fillers, false starts,
+	 *  spoken symbols). A file without it loads with `None`.
+	 */
+	cleanup_model?: string | null,
 };
 
 /**  What the user can set. Never holds the API key. */
@@ -895,6 +906,12 @@ export type Settings_Serialize = {
 	 *  A file without it loads with [`DEFAULT_HISTORY_LIMIT`].
 	 */
 	history_limit: number,
+	/**
+	 *  Experimental, Groq only, off by default (`None`): the Groq chat model
+	 *  that cleans up each transcript after Whisper (fillers, false starts,
+	 *  spoken symbols). A file without it loads with `None`.
+	 */
+	cleanup_model: string | null,
 };
 
 /**  The engine the user selected on [`Step::Speech`], before they continue. */

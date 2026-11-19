@@ -51,6 +51,9 @@ interface Props {
   onSheetOffered?: () => void;
 }
 
+/** Groq chat models for the experimental cleanup: fast and small, then stronger (`groq_cleanup.rs`). */
+export const CLEANUP_MODELS = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"];
+
 /** What a model action's button says. */
 function actionLabel(action: ModelAction, model: LocalModelInfo_Serialize): string {
   switch (action) {
@@ -154,6 +157,7 @@ export function Speech({
   const [actionError, setActionError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const cloud = useSave();
+  const cleanup = useSave();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [dismissed, setDismissed] = useState(noticeDismissed);
   // Selecting the own key with no key waits here for one that works.
@@ -174,6 +178,14 @@ export function Speech({
     } catch {
       // What is shown stays; the next change reads again.
     }
+  }
+
+  async function changeCleanup(model: string) {
+    await cleanup.track(async () => {
+      const result = await commands.setCleanupModel(model === "" ? null : model);
+      await reread();
+      return result.status === "error" ? messageOf(result.error) : null;
+    });
   }
 
   async function chooseModel(model: LocalModelInfo_Serialize) {
@@ -458,6 +470,32 @@ export function Speech({
           </EngineRow>
         </div>
       </Group>
+      {cloudActive && settings.provider === "groq" && (
+        <Group title="Experimental">
+          <Row
+            label={<label htmlFor="cleanup-model">Groq cleanup</label>}
+            caption="After Whisper, a Groq model removes fillers and false starts. The text, not the audio, goes to Groq with your key. Off by default."
+            below={<SaveStatus save={cleanup.save} />}
+          >
+            <select
+              id="cleanup-model"
+              value={settings.cleanup_model ?? ""}
+              onChange={(event) => void changeCleanup(event.target.value)}
+            >
+              <option value="">Off</option>
+              {CLEANUP_MODELS.includes(settings.cleanup_model ?? "") ||
+              settings.cleanup_model === null ? null : (
+                <option value={settings.cleanup_model}>{settings.cleanup_model}</option>
+              )}
+              {CLEANUP_MODELS.map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))}
+            </select>
+          </Row>
+        </Group>
+      )}
       {actionError !== null && (
         <p role="alert" className="error">
           {actionError}

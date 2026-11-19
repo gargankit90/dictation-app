@@ -133,4 +133,13 @@ The licence files of the vendored crates stay with them:
 third_party/handy-keys/LICENSE, third_party/coreaudio-rs/LICENSE-MIT and
 third_party/coreaudio-rs/LICENSE-APACHE.
 
+Blurt (https://github.com/AssemblyAI/blurt), Sources/BlurtEngine/STT/
+CleanupInstruction.swift and RewriteGrounding.swift
+  Adapted: Blurt's Smart cleanup instruction as the system prompt of the
+  experimental Groq LLM cleanup, and the idea of the check that keeps a
+  reply which is only an echo of the instruction out of the paste
+  (crates/transcribe/src/groq_cleanup_prompt.rs and groq_cleanup.rs,
+  experimental branch).
+  MIT License, Copyright (c) 2026 Alex Kroman
+
 dictation-app's own code is MIT (see LICENSE).

@@ -34,6 +34,7 @@
     "allow-dictation-progress",
     "allow-launch-notice",
     "allow-set-language",
+    "allow-set-cleanup-model",
     "allow-use-cloud-engine",
     "allow-use-local-model",
     "allow-get-engine-status",

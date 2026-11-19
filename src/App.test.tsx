@@ -136,6 +136,7 @@ describe("App", () => {
             local_model: "parakeet-unified-en-0.6b-q4_k_m",
             share_usage_events: true,
             history_limit: 25,
+            cleanup_model: null,
           };
         case "list_history":
           return { rows: [], unreadable: false };

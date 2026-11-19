@@ -27,6 +27,8 @@ use dictation_core::text::{Transcript, mean_no_speech_prob};
 use dictation_core::upload_limits::{LONG_CLIP, may_retry_after_timeout, request_timeout};
 use dictation_core::wav;
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
+
+use crate::groq_cleanup::Cleanup;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, RETRY_AFTER};
 use reqwest::multipart::{Form, Part};
 use reqwest::{Client, StatusCode};
@@ -178,6 +180,8 @@ pub struct OpenAiCompat<W = TokioWait> {
     key: Secret,
     wait: W,
     rng: Arc<Mutex<SplitMix64>>,
+    /// Experimental: the Groq LLM cleanup after a transcription succeeds.
+    cleanup: Option<Cleanup>,
 }
 
 impl OpenAiCompat<TokioWait> {
@@ -219,7 +223,28 @@ impl<W: Wait> OpenAiCompat<W> {
             key,
             wait,
             rng: Arc::new(Mutex::new(SplitMix64::new(seed))),
+            cleanup: None,
         })
+    }
+
+    /// Experimental: runs `cleanup` on each transcript before it is
+    /// returned (the raw text if the cleanup fails or is refused).
+    #[must_use]
+    pub fn with_cleanup(mut self, cleanup: Option<Cleanup>) -> Self {
+        self.cleanup = cleanup;
+        self
+    }
+
+    /// The transcript after the cleanup, if one is set; the raw text
+    /// otherwise.
+    async fn transcribe_cleaned(&self, audio: &Audio) -> Result<Transcription, TranscribeError> {
+        let mut transcription = self.transcribe_verbose(audio).await?;
+        if let Some(cleanup) = &self.cleanup {
+            if !transcription.text.trim().is_empty() {
+                transcription.text = cleanup.clean(&transcription.text).await.text;
+            }
+        }
+        Ok(transcription)
     }
 
     /// Transcribes `audio`, keeping the segments.
@@ -330,11 +355,11 @@ impl<W: Wait> OpenAiCompat<W> {
 
 impl<W: Wait> Transcriber for OpenAiCompat<W> {
     async fn transcribe(&self, audio: &Audio) -> Result<String, TranscribeError> {
-        self.transcribe_verbose(audio).await.map(|t| t.text)
+        self.transcribe_cleaned(audio).await.map(|t| t.text)
     }
 
     async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
-        self.transcribe_verbose(audio)
+        self.transcribe_cleaned(audio)
             .await
             .map(Transcription::into_transcript)
     }
@@ -346,6 +371,7 @@ impl<W> std::fmt::Debug for OpenAiCompat<W> {
             .field("endpoint", &self.endpoint)
             .field("config", &self.config)
             .field("key", &self.key)
+            .field("cleanup", &self.cleanup)
             .finish_non_exhaustive()
     }
 }
