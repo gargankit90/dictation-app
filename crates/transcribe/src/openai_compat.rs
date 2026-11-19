@@ -239,10 +239,10 @@ impl<W: Wait> OpenAiCompat<W> {
     /// otherwise.
     async fn transcribe_cleaned(&self, audio: &Audio) -> Result<Transcription, TranscribeError> {
         let mut transcription = self.transcribe_verbose(audio).await?;
-        if let Some(cleanup) = &self.cleanup {
-            if !transcription.text.trim().is_empty() {
-                transcription.text = cleanup.clean(&transcription.text).await.text;
-            }
+        if let Some(cleanup) = &self.cleanup
+            && !transcription.text.trim().is_empty()
+        {
+            transcription.text = cleanup.clean(&transcription.text).await.text;
         }
         Ok(transcription)
     }
