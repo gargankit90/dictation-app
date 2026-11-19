@@ -1340,7 +1340,8 @@ mod tests {
                 "transcription",
                 "local_model",
                 "share_usage_events",
-                "history_limit"
+                "history_limit",
+                "cleanup_model"
             ]
         );
         // L1: the model list carries no key either.
