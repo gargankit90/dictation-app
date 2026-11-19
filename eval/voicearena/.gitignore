@@ -1,0 +1,8 @@
+clips/
+work/
+*.flac
+*.wav
+*.parquet
+# raw harness output holds the dataset reference text; harness_results.csv is the stripped copy
+results/*/results.csv
+results/*/*.bak*
