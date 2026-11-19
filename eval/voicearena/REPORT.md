@@ -10,6 +10,12 @@
 > **Parakeet (the default) ZER 53.0%, AMEND 1.38%** and **Qwen3 ZER 49.0%,
 > AMEND 1.70%**: below Groq, around 14th of 15 on the public set. See
 > [On-device (Parakeet / Qwen3)](#on-device-parakeet--qwen3).
+>
+> **Update, 2026-11-19, AssemblyAI split:** a second AssemblyAI run kept the
+> word-for-word text next to the cleaned one. AssemblyAI's **transcription alone
+> scores ZER 70.9%** (the best of the uncleaned engines, lowest WER), and its
+> **cleanup takes it to 88.1%** without making a single draft unsendable. See
+> [AssemblyAI: transcription vs cleanup](#assemblyai-transcription-vs-cleanup).
 
 **Unofficial: single judge (Claude Opus 5.5 via Claude Code), public set
 only.** Run on 2026-11-18 with Vocet built from `cfe583a` (the 0.1.0 release
@@ -575,6 +581,151 @@ less than it lifts Groq.
   Groq.
 - `results/vocet_parakeet_check/`, `results/vocet_parakeet_limit5/`,
   `results/vocet_qwen3_check/`: the one-clip and five-clip trials.
+
+## AssemblyAI: transcription vs cleanup
+
+Run on 2026-11-19, 08:21–09:43 local time, with Vocet built from
+`exp/assemblyai` at `9911b0a`: the first AssemblyAI build (`6a652ca`) plus an
+opt-in, test-only dump of each AssemblyAI reply (`VOCET_EVAL_DUMP_DIR`, PR #322).
+Vocet was started with `open --env VOCET_EVAL_DUMP_DIR=…`. Same Smart mode
+and instruction, clips, harness, timing, judge and prompt as every other run.
+The dump has the verbatim transcript (`text`), the rewrite (`llm_response`) and
+what Vocet pasted. Its 151 lines were matched to the 151 clips by time, and the
+pasted text equals what landed in TextEdit for all 151, which checks the match.
+No 401s: 151 HTTP 200s. One rewrite timed out (dict_0551, a 77 s clip), so
+Vocet pasted the verbatim text there, as designed.
+
+Each draft was judged twice: the cleaned text that was pasted, and the
+verbatim text alone, as if it had been pasted. WER uses the Whisper English
+normaliser (`whisper-normalizer` 1.0.1) and jiwer, pooled over the 151 clips.
+
+### The table
+
+| | ZER | AMEND | WER vs spoken | WER vs intended |
+| --- | ---: | ---: | ---: | ---: |
+| Groq, pasted (no cleanup) | 60.3% | 1.43% | 3.98% | 6.89% |
+| Parakeet, pasted (no cleanup) | 53.0% | 1.38% | 3.79% | 7.05% |
+| Qwen3, pasted (no cleanup) | 49.0% | 1.70% | 4.12% | 8.63% |
+| **AssemblyAI verbatim** (run 2, judged as if pasted) | **70.9%** (63.6–78.0) | **0.99%** | **2.48%** | 5.36% |
+| **AssemblyAI cleaned** (run 2, pasted) | **88.1%** (81.7–93.6) | **0.26%** | 5.10% | **4.15%** |
+| AssemblyAI cleaned (run 1, pasted) | 86.8% | 0.26% | 5.10% | 4.25% |
+
+"WER vs spoken" measures transcription alone: how far the text is from what
+was said, fillers included. "WER vs intended" measures how far it is from the
+text the speaker meant. Cleanup moves text away from the spoken words and
+toward the intended ones, so cleaned text has a higher WER vs spoken by design.
+
+### What this says
+
+- **AssemblyAI's speech engine is the best of the four on its own.** WER vs
+  what was said is 2.48%, against 3.8–4.1% for Groq, Parakeet and Qwen3, and
+  its uncleaned text is sendable as is 70.9% of the time (Groq 60.3%). Part of
+  that is punctuation and formatting the API does even in verbatim (digits,
+  some emails), part is fewer mishearings.
+- **The cleanup adds about 17 points on top** (70.9% → 88.1%). It fixed 26
+  drafts and broke none: no draft was sendable verbatim but not after
+  cleanup. Of the 26, 18 had fillers in the verbatim text and 6 had a spoken
+  "at"/"slash"/"dot".
+- So roughly **a third of AssemblyAI's lead over Groq is the engine** (60.3 →
+  70.9) and **two thirds is the cleanup** (70.9 → 88.1).
+
+By context (ZER %, verbatim → cleaned): AI prompts 72.7 → 95.5, email 63.6 →
+90.9, personal messages 72.0 → 96.0, work chat 75.0 → 87.5, docs and notes
+77.3 → 86.4, code 84.6 → 88.5, long-form 20.0 → 50.0. Code gains least, because
+its errors are misheard terms that cleanup can't know.
+
+### What the cleanup did right
+
+- **Fillers:** filler-like words (like, you know, so, oh, okay so, kind of)
+  fell from 146 to 79 across the 151 texts. The rest are mostly real uses of
+  "so" and "like".
+- **Self-corrections:** the cue words ("no wait", "sorry", "actually") fell from
+  26 to 15. It applied corrections such as "4.2— wait, no, 4.3" → "4.3",
+  "$15,000— sorry, $16,000" → "$16,000", "4,200 pounds— sorry, no, 3,900" →
+  "3,900".
+- **Spoken symbols:** "ops at northwind.io" → ops@northwind.io, "budget slash
+  2026" → budget/2026, "fieldbook.app slash new" → fieldbook.app/new.
+
+### What the cleanup broke
+
+The check: every number, email, capitalised name and content word that is in
+the verbatim text and in the intended reference but missing from the cleaned
+text, then each case read by hand.
+
+- **No content was dropped by the cleanup in run 2.** The check found two
+  candidates, and neither is a loss: "OK, so" removed at the start of a prompt
+  (dict_0350), and "six, no, six thirty" → "six, six thirty" (dict_0579, the
+  cue dropped but both numbers kept).
+- **One draft got worse:** dict_0430 went from 1 to 3 edits. Both texts carry
+  the same name error ("Owens Park"), and the difference is judge variance on
+  casing, not a real harm.
+- **dict_0279:** the engine heard "Jest is like hanging…" as "Just is like
+  hanging…", and the cleanup then deleted "is like" as filler, giving "Just
+  hanging after the auth tests." The mishearing is the engine's, but the
+  cleanup made the sentence lose its verb.
+- **dict_0551:** the rewrite timed out, so the verbatim text was pasted with
+  its "you know"; it passed in run 1 and fails in run 2.
+
+**The two earlier drops, settled:**
+
+- **dict_0119, the phone number: the speech engine, not the cleanup.** The
+  verbatim text already reads "…talk on the phone. My number's Thanks for
+  considering it." The transcript has no number at all (run 2), and run 1's
+  pasted text has the same gap.
+  AssemblyAI's transcription left out a spoken phone number (possibly a
+  privacy redaction on their side; not documented in the reply). A cleanup
+  guard can't recover it; only the engine (or a redaction setting) can.
+- **dict_0621, "pot":** a rewrite variance. In run 2 the rewrite left "blue
+  pot— sorry, the green one" alone, which the judge accepts.
+
+### The digits/names guard: would it help?
+
+Simulated on run 2: fall back to the verbatim text whenever a digit group,
+email or capitalised mid-sentence name in the verbatim text is missing from
+the cleaned text (after normalisation, so "three" vs "3" counts as kept).
+
+- It fires on **10 of 151** clips. **It helps none and hurts one** (dict_0544,
+  2 edits → 10, with the fillers and the uncorrected "4,200 pounds" back). The
+  other 9 are neutral only because the judge accepts a kept self-correction.
+- **Every time it fires, the cleanup was right:** it had applied a spoken
+  self-correction ("20— no, 25" → "25", "Tuesday the 14th— no wait…"), so
+  the superseded number was meant to go.
+- It **would not have caught dict_0119**, because the number was missing
+  from the verbatim text too.
+- **Verdict: a plain digits/names guard does more harm than good here.** A
+  guard worth having would have to ignore numbers that sit inside a
+  self-correction ("X, no, Y"). On this data it would then have fired on
+  nothing. The bigger risk is the engine dropping content, which a guard
+  can't see.
+
+### Run-to-run noise (run 1 vs run 2, same build apart from the dump)
+
+- 122 of 151 cleaned texts are identical. 29 differ: the rewrite isn't
+  deterministic.
+- 10 clips flipped verdict between the runs: 6 better in run 2, 4 worse.
+  9 of the 10 flips come with a changed text; one (dict_0726) is the same
+  text judged differently, the same clip that flipped between Groq and
+  AssemblyAI.
+- ZER 86.8% → 88.1% and AMEND 0.26% both times. So **one run's ZER is good to
+  about ±3–4 points from run variance alone**, on top of the sampling interval.
+
+### Harness note
+
+One clip (dict_0108) stalled for 11 minutes inside the harness while the key was held, the same hiccup seen once in the very first trial. Vocet kept recording, the whole clip was heard, and the transcript is complete, so the draft counts. Its latency is not affected, because latency is timed from the key-up.
+
+### Files for this run
+
+- `results/vocet_assemblyai_run2/assemblyai-replies.jsonl`: the raw dump,
+  151 lines (no key, no headers).
+- `results/vocet_assemblyai_run2/replies.csv`: each reply joined to its
+  clip, with verbatim, rewrite and pasted text.
+- `results/vocet_assemblyai_run2/scored.csv`: the judged cleaned text;
+  `results/vocet_assemblyai_run2_verbatim/scored.csv`: the judged verbatim text.
+- `results/vocet_assemblyai_run2/cleanup_analysis.csv`: per clip, both
+  verdicts, filler and cue counts, words lost, whether the guard fires, and the
+  three texts.
+- `results/wer_summary.csv`: the WER table.
+- `aai_split.py`: `join`, `wer` and `cleanup`.
 
 ## Files
 

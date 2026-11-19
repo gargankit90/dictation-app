@@ -1,0 +1,181 @@
+{
+ "engine": "vocet_assemblyai_run2",
+ "n": 151,
+ "zer": 88.0794701986755,
+ "zer_ci95": [
+  81.65652385589094,
+  93.63135821297209
+ ],
+ "amend": 0.26111210017209663,
+ "amend_ci95": [
+  0.1346490800450557,
+  0.3978100099617894
+ ],
+ "judge": "claude-opus-5-5 effort=max via claude -p (Claude Code CLI)",
+ "prompt": "amend-va 0.2.1 prompt v1 fingerprint 8ed04caf4663",
+ "label": "unofficial: single judge (Claude Opus 5.5 via Claude Code), public set only",
+ "empty_drafts": 0,
+ "latency_s": {
+  "n": 151,
+  "median": 1.19,
+  "p90": 2.27,
+  "mean": 1.4066225165562913,
+  "max": 6.57
+ },
+ "by_domain": {
+  "personal_messaging": {
+   "n": 25,
+   "zer": 96.0,
+   "amend": 0.06814310051107325
+  },
+  "work_chat": {
+   "n": 24,
+   "zer": 87.5,
+   "amend": 0.2152080344332855
+  },
+  "email": {
+   "n": 22,
+   "zer": 90.9090909090909,
+   "amend": 0.11327166320558807
+  },
+  "ai_prompt": {
+   "n": 22,
+   "zer": 95.45454545454545,
+   "amend": 0.06493506493506493
+  },
+  "code": {
+   "n": 26,
+   "zer": 88.46153846153847,
+   "amend": 0.27516624627379044
+  },
+  "docs_notes": {
+   "n": 22,
+   "zer": 86.36363636363636,
+   "amend": 0.317208564631245
+  },
+  "long_form": {
+   "n": 10,
+   "zer": 50.0,
+   "amend": 0.4738858640855011
+  }
+ },
+ "by_length": {
+  "short (<=15 words)": {
+   "n": 20,
+   "zer": 95.0,
+   "amend": 0.5305039787798409
+  },
+  "standard (16-80 words)": {
+   "n": 121,
+   "zer": 90.08264462809917,
+   "amend": 0.16066000868432478
+  },
+  "long (>80 words)": {
+   "n": 10,
+   "zer": 50.0,
+   "amend": 0.4738858640855011
+  }
+ },
+ "worst": [
+  {
+   "clip_id": "dict_0119",
+   "domain": "long_form",
+   "edits": "16",
+   "chars": "969",
+   "draft": "Hi, Mr. Castellano. I'm writing about the lease renewal notice you left for unit 4B at 2915 Linden Street. First off, thank you for getting the heater fixed so fast last winter. I really appreciated that. I'd like to stay another year, but I wanted to talk about the new rent. The notice has it going from $1,675 $1,900 a month, which is about a 13% jump. I looked at similar 2-bedrooms around here on Zillow, and most of them are listed somewhere between $1,700 and $1,750. I've paid on time every month for 3 years and never had a complaint, and honestly, I think a reliable tenant probably saves you more than the difference. Would you consider $1,750 a month on a 12-month lease? I'd be open to an 18-month lease too, if that makes it easier on your end. The notice says you need an answer by December 1st, so I wanted to get in touch early. I'm around most evenings after 6 if you'd rather just talk on the phone. My number's Thanks for considering it. Best, Alicia Moreno.",
+   "fixed": "Hi, Mr. Castellano. I'm writing about the lease renewal notice you left for unit 4B at 2915 Linden Street. First off, thank you for getting the heater fixed so fast last winter. I really appreciated that. I'd like to stay another year, but I wanted to talk about the new rent. The notice has it going from $1,675 to $1,900 a month, which is about a 13% jump. I looked at similar 2-bedrooms around here on Zillow, and most of them are listed somewhere between $1,700 and $1,750. I've paid on time every month for 3 years and never had a complaint, and honestly, I think a reliable tenant probably saves you more than the difference. Would you consider $1,750 a month on a 12-month lease? I'd be open to an 18-month lease too, if that makes it easier on your end. The notice says you need an answer by December 1st, so I wanted to get in touch early. I'm around most evenings after 6 if you'd rather just talk on the phone. My number's (312) 555-0164. Thanks for considering it. Best, Alicia Moreno.",
+   "intended_text": "Hi Mr. Castellano,\n\nI'm writing about the lease renewal notice you left for Unit 4B at 2915 Linden Street. And first off, thank you for getting the heater fixed so fast last winter, I really appreciated that.\n\nI'd like to stay another year, but I wanted to talk about the new rent. The notice has it going from $1,675 to $1,900 a month, which is about a 13% jump. I looked at similar two-bedrooms around here on Zillow and most of them are listed somewhere between $1,700 and $1,750. I've paid on time every month for three years and never had a complaint, and honestly I think a reliable tenant probably saves you more than the difference.\n\nWould you consider $1,750 a month on a 12-month lease? And I'd be open to an 18-month lease too if that makes it easier on your end.\n\nThe notice says you need an answer by December 1, so I wanted to get in touch early. I'm around most evenings after 6 if you'd rather just talk on the phone, my number's (312) 555-0164.\n\nThanks for considering it.\n\nBest,\nAlicia Moreno",
+   "spoken_text": "Hi Mr. Castellano, I'm writing about the lease renewal notice you left for unit four B at twenty nine fifteen Linden Street. And first off, thank you for getting the heater fixed so fast last winter, I really appreciated that. I'd like to stay another year, but I wanted to talk about the new rent. The notice has it going from sixteen seventy five to nineteen hundred a month, which is about a thirteen percent jump. I looked at similar two bedrooms around here on Zillow and most of them are listed somewhere between seventeen hundred and seventeen fifty. I've paid on time every month for three years and never had a complaint, and honestly I think a reliable tenant probably saves you more than the difference. Would you consider seventeen fifty a month on a twelve month lease? And I'd be open to an eighteen month lease too if that makes it easier on your end. The notice says you need an answer by December first, so I wanted to get in touch early. I'm around most evenings after six if you'd rather just talk on the phone, my number's three one two, five five five, zero one six four. Thanks for considering it. Best, Alicia Moreno"
+  },
+  {
+   "clip_id": "dict_0533",
+   "domain": "long_form",
+   "edits": "13",
+   "chars": "939",
+   "draft": "Update on the Regional Sales Summit since we're about six weeks out now. Venue's locked in. We're at the Lakeshore Conference Center in Milwaukee, February 19th and 20th. Room block at the Harborview Hotel is 110 rooms at $169 a night, and the cutoff for that rate is January 23rd. Sorry, January 29th. I just double-checked the contract. We've got 94 people registered so far out of about 130 invited, budget's $85,000 total, and we've committed about $61,000 so far, mostly venue, catering, and AV. Keynotes confirmed: Dana Whitlock from ClearPath Consulting is opening the first morning at 9:00 AM. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales. Registration link is summit.northwind. So please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements. Per diem is $75 a day. I'll send the full agenda draft next Tuesday for comment.",
+   "fixed": "Update on the Regional Sales Summit since we're about six weeks out now. Venue's locked in. We're at the Lakeshore Conference Center in Milwaukee, February 19th and 20th. Room block at the Harbor View Hotel is 110 rooms at $169 a night, and the cutoff for that rate is January 23rd. Sorry, January 29th. I just double-checked the contract. We've got 94 people registered so far out of about 130 invited, budget's $85,000 total, and we've committed about $61,000 so far, mostly venue, catering, and AV. Keynotes confirmed: Dana Whitlock from Clearpath Consulting is opening the first morning at 9:00 AM. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales. Registration link is summit.northwind.io/register. So please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements. Per diem is $75 a day. I'll send the full agenda draft next Tuesday for comment.",
+   "intended_text": "Update on the regional sales summit, since we're about six weeks out now.\n\nVenue's locked in, we're at the Lakeshore Conference Center in Milwaukee, February 19 and 20. Room block at the Harbor View Hotel is 110 rooms at $169 a night, and the cutoff for that rate is January 29, I just double-checked the contract.\n\nWe've got 94 people registered so far out of about 130 invited. Budget's $85,000 total and we've committed about $61,000 so far, mostly venue, catering, and AV.\n\nKeynote's confirmed, Dana Whitlock from Clearpath Consulting is opening the first morning at 9 AM. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales.\n\nRegistration link is summit.northwind.io/register, so please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements, per diem is $75 a day.\n\nI'll send the full agenda draft next Tuesday for comments.",
+   "spoken_text": "Okay update on the regional sales summit, since we're about six weeks out now. Venue's locked in, we're at the Lakeshore Conference Center in Milwaukee, February nineteenth and twentieth. Room block at the Harbor View Hotel is a hundred and ten rooms at a hundred sixty nine a night, and the cutoff for that rate is January twenty third, sorry, January twenty ninth, I just double checked the contract. We've got ninety four people registered so far out of about a hundred and thirty invited. Budget's eighty five thousand total and we've committed about sixty one thousand so far, mostly venue, catering, and AV. Keynote's confirmed, Dana Whitlock from Clearpath Consulting is opening the first morning at nine a m. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales. Registration link is summit dot northwind dot io slash register, so please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements, per diem is seventy five dollars a day. I'll send the full agenda draft next Tuesday for comments."
+  },
+  {
+   "clip_id": "dict_0551",
+   "domain": "long_form",
+   "edits": "9",
+   "chars": "1071",
+   "draft": "Recap from tonight's PTA meeting so the people who couldn't make it are in the loop. We talked about a bunch of things, so I'll go through them one at a time. The fall fundraiser did better than we expected, and the board voted to put most of it toward new library books, and, you know, the rest towards the playground shade structure. The teachers asked us for more volunteers at lunch duty, especially on Fridays, because they're stretched really thin. There is a sign-up sheet going around, and they love even one shift a month. The carpool line is still a mess in the mornings. The principal is going to try a staggered drop-off by grade starting after the holiday, so watch for an email about that. We also decided to bring back the family movie night in the gym, probably once a month in the winter. And we need someone to take the lead on organizing snacks. Last thing, a few parents raised concerns about how much homework the 4th graders are getting, and the principal agreed to bring it up at the next staff meeting and report back to us. Next meeting is in 4 weeks, same time in the cafeteria.",
+   "fixed": "Recap from tonight's PTA meeting so the people who couldn't make it are in the loop. We talked about a bunch of things, so I'll go through them one at a time. The fall fundraiser did better than we expected, and the board voted to put most of it toward new library books, and the rest towards the playground shade structure. The teachers asked us for more volunteers at lunch duty, especially on Fridays, because they're stretched really thin. There is a sign-up sheet going around, and they love even one shift a month. The carpool line is still a mess in the mornings. The principal is going to try a staggered drop-off by grade starting after the holiday, so watch for an email about that. We also decided to bring back the family movie night in the gym, probably once a month in the winter. And we need someone to take the lead on organizing snacks. Last thing, a few parents raised concerns about how much homework the 4th graders are getting, and the principal agreed to bring it up at the next staff meeting and report back to us. Next meeting is in 4 weeks, same time in the cafeteria.",
+   "intended_text": "Recap from tonight's PTA meeting, so the people who couldn't make it are in the loop. We talked about a bunch of things, so I'll go through them one at a time.\n\n- The fall fundraiser did better than we expected, and the board voted to put most of it toward new library books and the rest toward the playground shade structure.\n- The teachers asked us for more volunteers at lunch duty, especially on Fridays, because they're stretched really thin. There's a sign-up sheet going around and they'd love even one shift a month.\n- The carpool line is still a mess in the mornings. The principal is going to try a staggered drop-off by grade starting after the holidays, so watch for an email about that.\n- We decided to bring back the family movie night in the gym, probably once a month in the winter, and we need someone to take the lead on organizing snacks.\n- A few parents raised concerns about how much homework the fourth graders are getting, and the principal agreed to bring it up at the next staff meeting and report back to us.\n\nNext meeting is in four weeks, same time, in the cafeteria.",
+   "spoken_text": "Recap from tonight's PTA meeting, so the people who couldn't make it are in the loop. We talked about a bunch of things, so I'll go through them one at a time. The fall fundraiser did better than we expected, and the board voted to put most of it toward new library books and, you know, the rest toward the playground shade structure. The teachers asked us for more volunteers at lunch duty, especially on Fridays, because they're stretched really thin. There's a sign up sheet going around and they'd love even one shift a month. The carpool line is still a mess in the mornings. The principal is going to try a staggered drop off by grade starting after the holidays, so watch for an email about that. We also, we decided to bring back the family movie night in the gym, probably once a month in the winter, and we need someone to take the lead on organizing snacks. Last thing, a few parents raised concerns about how much homework the fourth graders are getting, and the principal agreed to bring it up at the next staff meeting and report back to us. Next meeting is in four weeks, same time, in the cafeteria."
+  },
+  {
+   "clip_id": "dict_0407",
+   "domain": "docs_notes",
+   "edits": "8",
+   "chars": "155",
+   "draft": "Stock check for the shop. We're down to— down to 8 bags of the house blend, 3 tins of the Earl Grey, and maybe 2 cases of oat milk. Reorder from Ridgeline Coffee Supply.",
+   "fixed": "Stock check for the shop. We're down to 8 bags of the house blend, 3 tins of the Earl Grey, and maybe 2 cases of oat milk. Reorder from Ridgeline Coffee Supply.",
+   "intended_text": "Stock check for the shop. We're down to:\n- 8 bags of the house blend\n- 3 tins of the Earl Grey\n- Maybe 2 cases of oat milk\n\nReorder from Ridgeline Coffee Supply.",
+   "spoken_text": "Stock check for the shop. We're down to, down to eight bags of the house blend, like three tins of the Earl Grey, and maybe two cases of oat milk. Reorder from Ridgeline Coffee Supply."
+  },
+  {
+   "clip_id": "dict_0536",
+   "domain": "long_form",
+   "edits": "7",
+   "chars": "982",
+   "draft": "Hey Marcus, I've started this email probably 5 times, so I'm just going to say it. I'm sorry about how things went at Mom's birthday dinner. I said some things about your job that weren't fair, and I, I think I was taking out a bad week on you, which isn't an excuse. You've always been the one who shows up for the family, and I made it sound like you didn't care, and that's just not true. I've been thinking about why I get so defensive around you, and I think part of it is that I always felt like this grew-up brother, and when you give advice, it sounds like judgment to me, even when you don't mean it that way. That's my thing to work on, not yours. I miss talking to you. We used to text every day about basketball and dumb stuff, and it's been almost 2 months now. I'd really like to get lunch or a beer sometime soon if you're up for it. Just the two of us. No pressure if you need more time. Either way, I love you and I'm proud of you, and I should say that more often. Talk soon, I hope. Your brother.",
+   "fixed": "Hey Marcus, I've started this email probably 5 times, so I'm just going to say it. I'm sorry about how things went at Mom's birthday dinner. I said some things about your job that weren't fair, and I think I was taking out a bad week on you, which isn't an excuse. You've always been the one who shows up for the family, and I made it sound like you didn't care, and that's just not true. I've been thinking about why I get so defensive around you, and I think part of it is that I always felt like the screwup brother, and when you give advice, it sounds like judgment to me, even when you don't mean it that way. That's my thing to work on, not yours. I miss talking to you. We used to text every day about basketball and dumb stuff, and it's been almost 2 months now. I'd really like to get lunch or a beer sometime soon if you're up for it. Just the two of us. No pressure if you need more time. Either way, I love you and I'm proud of you, and I should say that more often. Talk soon, I hope. Your brother.",
+   "intended_text": "Hey Marcus,\n\nI've started this email probably five times, so I'm just going to say it. I'm sorry about how things went at Mom's birthday dinner. I said some things about your job that weren't fair, and I think I was taking out a bad week on you, which isn't an excuse. You've always been the one who shows up for the family, and I made it sound like you didn't care, and that's just not true.\n\nI've been thinking about why I get so defensive around you, and I think part of it is that I always felt like the screwup brother, and when you give advice it sounds like judgment to me even when you don't mean it that way. That's my thing to work on, not yours.\n\nI miss talking to you. We used to text every day about basketball and dumb stuff and it's been almost two months now. I'd really like to get lunch or a beer sometime soon if you're up for it, just the two of us. No pressure if you need more time.\n\nEither way, I love you and I'm proud of you, and I should say that more often.\n\nTalk soon, I hope.\nYour brother",
+   "spoken_text": "Hey Marcus, I've started this email probably five times, so I'm just going to say it. I'm sorry about how things went at Mom's birthday dinner. I said some things about your job that weren't fair, and I, you know, I think I was taking out a bad week on you, which isn't an excuse. You've always been the one who shows up for the family, and I made it sound like you didn't care, and that's just not true. I've been thinking about why I get so defensive around you, and I think part of it is that I always felt like the screwup brother, and when you give advice it sounds like judgment to me even when you don't mean it that way. That's my thing to work on, not yours. I miss talking to you. We used to text every day about basketball and dumb stuff and it's been almost two months now. I'd really like to get lunch or a beer sometime soon if you're up for it, just the two of us. No pressure if you need more time. Either way, I love you and I'm proud of you, and I should say that more often. Talk soon, I hope. Your brother"
+  },
+  {
+   "clip_id": "dict_0356",
+   "domain": "code",
+   "edits": "5",
+   "chars": "355",
+   "draft": "A few things on the payment service. The Stripe webhook handler's timing out, so bump its timeout to 15 seconds. Actually, make it 20. Then add a retry with backoff when we call the Ledger API and write a test that sends the webhook twice so we know it's independent. And don't upgrade the Stripe library while you're in there. We're staying on version 12 for now.",
+   "fixed": "A few things on the payment service. The Stripe webhook handler's timing out, so bump its timeout to 15 seconds. Actually, make it 20. Then add a retry with backoff when we call the Ledger API and write a test that sends the webhook twice so we know it's idempotent. And don't upgrade the Stripe library while you're in there. We're staying on version 12 for now.",
+   "intended_text": "Okay so a few things on the payments service. The Stripe webhook handler's timing out, so bump its timeout to 20 seconds. Then add a retry with backoff when we call the ledger API, and write a test that sends the webhook twice so we know it's idempotent. Oh and don't upgrade the Stripe library while you're in there, we're staying on version 12 for now.",
+   "spoken_text": "Okay so a few things on the payments service. The Stripe webhook handler's timing out, so bump its timeout to fifteen seconds, actually make it twenty. Then add a retry with backoff when we call the ledger API, and write a test that sends the webhook twice so we know it's idempotent. Oh and don't upgrade the Stripe library while you're in there, we're staying on version twelve for now."
+  },
+  {
+   "clip_id": "dict_0097",
+   "domain": "email",
+   "edits": "4",
+   "chars": "344",
+   "draft": "Hi everyone, couple reminders for the tournament this weekend. Get the players there well before their first game and send them with a water bottle, sunscreen, and both jerseys. Parking at the complex fills up fast, so carpool if you can. And we're doing a team lunch between games, so pack something or bring cash for the food trucks. Thanks, and go Hornets!",
+   "fixed": "Hi everyone, couple reminders for the tournament this weekend. Get the players there well before their first game and send them with a water bottle, sunscreen, and both jerseys. Parking at the complex fills up fast, so carpool if you can. We're doing a team lunch between games, so pack something or bring cash for the food trucks. Thanks, and go Hornets!",
+   "intended_text": "Hi everyone,\n\nCouple reminders for the tournament this weekend:\n\n- Get the players there well before their first game, and send them with a water bottle, sunscreen, and both jerseys.\n- Parking at the complex fills up fast, so carpool if you can.\n- We're doing a team lunch between games, so pack something or bring cash for the food trucks.\n\nThanks, and go Hornets!",
+   "spoken_text": "Hi everyone, couple reminders for the tournament this weekend. Get the players there well before their first game, and send them with a water bottle, sunscreen, and both jerseys. Parking at the complex fills up fast so carpool if you can. Oh and we're doing a team lunch between games, so pack something or bring cash for the food trucks. Thanks, and go Hornets!"
+  },
+  {
+   "clip_id": "dict_0279",
+   "domain": "code",
+   "edits": "4",
+   "chars": "57",
+   "draft": "Just hanging after the auth tests. Find the open handle.",
+   "fixed": "Jest is hanging after the auth tests. Find the open handle.",
+   "intended_text": "Jest is hanging after the auth tests, find the open handle.",
+   "spoken_text": "Jest is, like, hanging after the auth tests, find the open handle."
+  },
+  {
+   "clip_id": "dict_0232",
+   "domain": "ai_prompt",
+   "edits": "3",
+   "chars": "142",
+   "draft": "My Docker container keeps exiting with code 137 right after startup. The image is node:20-alpine and the memory limit is 512 megs. What's going on?",
+   "fixed": "My Docker container keeps exiting with code 137 right after startup. The image is node:20-alpine and the memory limit is 512 MB. What's going on?",
+   "intended_text": "My Docker container keeps exiting with code 137 right after startup. The image is node:20-alpine and the memory limit is 512 MB. What's going on?",
+   "spoken_text": "My Docker container keeps exiting with code one thirty seven right after startup. The image is node twenty alpine and the memory limit is five twelve megs. What's going on?"
+  },
+  {
+   "clip_id": "dict_0351",
+   "domain": "code",
+   "edits": "3",
+   "chars": "341",
+   "draft": "we're moving the FastAPI app settings over to Pindanic version 2. Can you swap the old config class for settings model that reads from env vars, same names, and have it blow up on startup if the database URL or the Redis URL is missing? Pool size defaults to 10, request timeout 30 seconds, and then fix anywhere that imports the old configuration.",
+   "fixed": "we're moving the FastAPI app settings over to Pydantic version 2. Can you swap the old config class for settings model that reads from env vars, same names, and have it blow up on startup if the database URL or the Redis URL is missing? Pool size defaults to 10, request timeout 30 seconds, and then fix anywhere that imports the old configuration.",
+   "intended_text": "OK, so we're moving the FastAPI app's settings over to Pydantic version 2. Can you swap the old config class for a settings model that reads from env vars, same names, and have it blow up on startup if the database URL or the Redis URL is missing? Pool size defaults to 10, request timeout 30 seconds. And then fix anywhere that imports the old config.",
+   "spoken_text": "Ok so we're moving the FastAPI app's settings over to Pydantic version two. Can you swap the old config class for a settings model that reads from env vars, same names, and have it blow up on startup if the database URL or the Redis URL is missing? Pool size defaults to ten, request timeout thirty seconds. And then fix anywhere that imports the old config."
+  }
+ ]
+}

@@ -147,6 +147,23 @@ On-device engines (run on 2026-11-19 from `cfe583a`, the same build as Groq):
   `qwen3-asr-0.6b-q4_k_m`), which makes the driver's settings check expect
   `transcription: local` and that model.
 
+AssemblyAI with the verbatim text (run 2, 2026-11-19, `exp/assemblyai` at
+`9911b0a`, which adds an opt-in reply dump):
+
+- With Vocet quit, set the VM's settings back to `provider: assemblyai`,
+  `model: assemblyai-dictation`, `transcription: cloud` (backup of the
+  on-device settings: `settings.json.local-backup`).
+- Start it with the dump on: `open -g --env
+  VOCET_EVAL_DUMP_DIR=/Users/lume/va/dump ~/Applications/Vocet.app`, which goes
+  through LaunchServices so Vocet keeps its own permissions. The new
+  signature asks again for the token's keychain item: VM user's password,
+  Always Allow; then relaunch the same way so the engine reads it.
+- After the run, copy `~/va/dump/assemblyai-replies.jsonl` to
+  `results/<engine>/`, then `uv run aai_split.py join results/<engine>`, score
+  both `results/<engine>` and `results/<engine>_verbatim` with
+  `score_claude_cli.py`, then `uv run aai_split.py wer` and `uv run
+  aai_split.py cleanup`.
+
 Two VMs at once: `BENCH_VM` picks the VM for every command (only
 `dictation-vm-eval` and `dictation-vm-eval-*` are accepted). Since
 2026-11-19 there is a second eval VM, `dictation-vm-eval-2`, a clone of
