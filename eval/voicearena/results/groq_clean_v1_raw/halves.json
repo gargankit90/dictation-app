@@ -13,8 +13,8 @@
     1.0871964679911699,
     2.0778189518263632
    ],
-   "latency_median_s": 1.185,
-   "latency_p90_s": 2.46,
+   "latency_median_s": null,
+   "latency_p90_s": null,
    "cleanup_median_ms": null,
    "cleanup_p90_ms": null,
    "cleaned": 0,
@@ -33,8 +33,8 @@
     0.7496172728712454,
     1.6440948607250576
    ],
-   "latency_median_s": 1.09,
-   "latency_p90_s": 2.6300000000000003,
+   "latency_median_s": null,
+   "latency_p90_s": null,
    "cleanup_median_ms": null,
    "cleanup_p90_ms": null,
    "cleaned": 0,
@@ -53,8 +53,8 @@
     1.0307114707459832,
     1.6864647816630416
    ],
-   "latency_median_s": 1.15,
-   "latency_p90_s": 2.5,
+   "latency_median_s": null,
+   "latency_p90_s": null,
    "cleanup_median_ms": null,
    "cleanup_p90_ms": null,
    "cleaned": 0,
