@@ -107,6 +107,12 @@ class Backend {
       case "set_share_usage_events":
         this.settings = { ...this.settings, share_usage_events: args.share as boolean };
         return null;
+      case "set_vocet_cleanup":
+        this.settings = {
+          ...this.settings,
+          model: args.fast ? "assemblyai-dictation-fast" : "assemblyai-dictation",
+        };
+        return null;
       case "use_cloud_engine":
         this.settings = {
           ...this.settings,
@@ -793,6 +799,33 @@ describe("u12_criterion_4 the key sheet", () => {
     expect(await screen.findByText(CONNECTED)).toBeTruthy();
     expect(screen.queryByText("A key is saved in your Keychain.")).toBeNull();
     expect(screen.queryByText(/never shown again/)).toBeNull();
+  });
+
+  it("Vocet Cloud (experimental) says where audio goes and offers Smart or Fast cleanup", async () => {
+    backend.settings = {
+      ...backend.settings,
+      provider: "assemblyai",
+      model: "assemblyai-dictation",
+    };
+    backend.keys.assemblyai = true;
+    await open("speech");
+    click("Change key…");
+    const sheet = within(await screen.findByRole("dialog"));
+    expect(sheet.getByLabelText("Vocet Cloud token")).toBeTruthy();
+    expect(sheet.getByRole("button", { name: "its own retention policy" })).toBeTruthy();
+    const cleanup = sheet.getByLabelText<HTMLSelectElement>("Cleanup");
+    expect(cleanup.value).toBe("smart");
+    fireEvent.change(cleanup, { target: { value: "fast" } });
+    await waitFor(() => {
+      expect(backend.named("set_vocet_cleanup")[0]?.args).toEqual({ fast: true });
+    });
+    await waitFor(() => {
+      expect(sheet.getByLabelText<HTMLSelectElement>("Cleanup").value).toBe("fast");
+    });
+    fireEvent.change(sheet.getByLabelText("Cleanup"), { target: { value: "smart" } });
+    await waitFor(() => {
+      expect(backend.settings.model).toBe("assemblyai-dictation");
+    });
   });
 
   it("has Provider, the how-to, the field, Test & Save, Remove key and Done", async () => {

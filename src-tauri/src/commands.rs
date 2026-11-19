@@ -1083,6 +1083,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::dictation_progress,
         launch_notice,
         crate::preferences::set_language,
+        crate::preferences::set_vocet_cleanup,
         crate::preferences::use_cloud_engine,
         crate::preferences::use_local_model,
         crate::preferences::get_engine_status,
@@ -1248,7 +1249,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 54,
+            commands, 55,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -3596,7 +3597,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 54);
+        assert_eq!(COMMAND_NAMES.len(), 55);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");

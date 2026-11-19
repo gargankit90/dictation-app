@@ -145,6 +145,14 @@ The licence files of the vendored crates stay with them:
 third_party/handy-keys/LICENSE, third_party/coreaudio-rs/LICENSE-MIT and
 third_party/coreaudio-rs/LICENSE-APACHE.
 
+Blurt (https://github.com/AssemblyAI/blurt), Sources/BlurtEngine/STT/
+CleanupInstruction.swift and RewriteGrounding.swift
+  Adapted: the two cleanup instructions sent to AssemblyAI's Dictation API
+  and the idea and wording of the check that keeps a rewrite which is only
+  an echo of the instruction out of the paste
+  (crates/transcribe/src/assemblyai_prompt.rs, experimental branch).
+  MIT License, Copyright (c) 2026 Alex Kroman
+
 dictation-app's own code is MIT (see LICENSE).
 
 --------------------------------------------------------------------------------

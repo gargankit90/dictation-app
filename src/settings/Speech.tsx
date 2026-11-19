@@ -233,6 +233,7 @@ export function Speech({
     switchToCloud,
     refreshEngine,
     draftProvider: true,
+    onStored,
     onConnected: async (which) => {
       const waiting = switchOnceConnected.current;
       switchOnceConnected.current = false;

@@ -10,11 +10,12 @@ use dictation_core::retry::RetryPolicy;
 use dictation_core::settings::{Provider, Settings};
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
 use dictation_transcribe::assemblyai::AssemblyAi;
+use dictation_transcribe::assemblyai_prompt::{FAST_INSTRUCTION, FAST_MODEL, SMART_INSTRUCTION};
 use dictation_transcribe::check_key::check_key_for;
 use dictation_transcribe::engine::Engine;
 use dictation_transcribe::openai_compat::{ASSEMBLYAI, Config, Wait};
 use wiremock::matchers::{header, method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 /// Obviously fake; the leak test looks for it everywhere.
 const KEY: &str = "test-key-NOT-REAL-aai-5e1b77";
@@ -88,6 +89,31 @@ async fn mount(server: &MockServer, response: ResponseTemplate) {
         .await;
 }
 
+/// The JSON of the request's `config` part.
+fn config_json(request: &Request) -> serde_json::Value {
+    let body = String::from_utf8_lossy(&request.body);
+    let at = body.find(r#"name="config""#).unwrap();
+    let rest = &body[at..];
+    let start = rest.find("\r\n\r\n").unwrap() + 4;
+    let end = rest[start..].find("\r\n--").unwrap();
+    serde_json::from_str(&rest[start..start + end]).unwrap()
+}
+
+async fn mount_fn(
+    server: &MockServer,
+    respond: impl Fn(&Request) -> ResponseTemplate + Send + Sync + 'static,
+) {
+    Mock::given(method("POST"))
+        .and(path(ENDPOINT))
+        .respond_with(respond)
+        .mount(server)
+        .await;
+}
+
+fn engine_for(server: &MockServer) -> AssemblyAi<RecordWait> {
+    engine(config(server, None)).0
+}
+
 async fn count(server: &MockServer) -> usize {
     server.received_requests().await.unwrap().len()
 }
@@ -120,13 +146,159 @@ async fn success_pastes_the_rewrite_and_sends_the_documented_request() {
         "RIFF",
         r#"name="config""#,
         "Content-Type: application/json",
-        r#"{"language_codes":["de"]}"#,
     ] {
         assert!(body.contains(expected), "body lacks {expected:?}");
     }
-    // The default cleanup: no instruction, no mode.
-    assert!(!body.contains("llm_instruction"));
-    assert!(!body.contains("rewrite_mode"));
+    // Smart by default, with Smart's instruction.
+    let config = config_json(request);
+    assert_eq!(config["rewrite_mode"], "smart");
+    assert_eq!(config["llm_instruction"], SMART_INSTRUCTION);
+    assert_eq!(config["language_codes"], serde_json::json!(["de"]));
+}
+
+#[tokio::test]
+async fn fast_sends_fast_s_instruction_and_no_rewrite_mode() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        ok(serde_json::json!({"text": "hi", "llm_response": "Hi there."})),
+    )
+    .await;
+    let fast = Config {
+        model: FAST_MODEL.to_owned(),
+        ..config(&server, None)
+    };
+    assert_eq!(
+        engine(fast).0.transcribe(&audio()).await.unwrap(),
+        "Hi there."
+    );
+    let config = config_json(&server.received_requests().await.unwrap()[0]);
+    assert_eq!(config["llm_instruction"], FAST_INSTRUCTION);
+    assert!(config.get("rewrite_mode").is_none(), "{config}");
+    assert!(config.get("language_codes").is_none());
+}
+
+/// 400 for the key that nobody has verified: Smart is sent once more
+/// without it, the request succeeds, and later ones skip it.
+#[tokio::test]
+async fn a_400_to_rewrite_mode_is_retried_once_without_it_and_remembered() {
+    let server = MockServer::start().await;
+    mount_fn(&server, |request: &Request| {
+        if String::from_utf8_lossy(&request.body).contains("rewrite_mode") {
+            ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "status": 400, "title": "Bad Request", "detail": "unknown field rewrite_mode",
+            }))
+        } else {
+            ok(serde_json::json!({"text": "raw words", "llm_response": "Clean words here."}))
+        }
+    })
+    .await;
+    let (engine, wait) = engine(config(&server, None));
+    assert_eq!(
+        engine.transcribe(&audio()).await.unwrap(),
+        "Clean words here."
+    );
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(config_json(&requests[0])["rewrite_mode"], "smart");
+    let second = config_json(&requests[1]);
+    assert!(second.get("rewrite_mode").is_none());
+    // The instruction stays, so the rewrite is still the tuned one.
+    assert_eq!(second["llm_instruction"], SMART_INSTRUCTION);
+    // Not a retry of the failing kind: no wait in between.
+    assert!(wait.waits().is_empty());
+    // Remembered: the next dictation sends one request, without the key.
+    assert_eq!(
+        engine.transcribe(&audio()).await.unwrap(),
+        "Clean words here."
+    );
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(config_json(&requests[2]).get("rewrite_mode").is_none());
+}
+
+#[tokio::test]
+async fn a_400_that_is_not_about_rewrite_mode_is_an_error_and_is_not_remembered() {
+    let server = MockServer::start().await;
+    mount(&server, ResponseTemplate::new(400)).await;
+    let (engine, _) = engine(config(&server, None));
+    for round in 1..=2 {
+        let error = engine.transcribe(&audio()).await.unwrap_err();
+        assert!(
+            matches!(&error, TranscribeError::Engine(m) if m.contains("HTTP 400")),
+            "{error:?}"
+        );
+        // Smart, then the same request without the key; both refused.
+        assert_eq!(count(&server).await, round * 2);
+    }
+    // Every Smart attempt still carried the key (nothing was remembered).
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(config_json(&requests[2])["rewrite_mode"], "smart");
+}
+
+#[tokio::test]
+async fn fast_never_retries_a_400() {
+    let server = MockServer::start().await;
+    mount(&server, ResponseTemplate::new(400)).await;
+    let fast = Config {
+        model: FAST_MODEL.to_owned(),
+        ..config(&server, None)
+    };
+    assert!(engine(fast).0.transcribe(&audio()).await.is_err());
+    assert_eq!(count(&server).await, 1);
+}
+
+/// The rewrite model answers with its own instruction, or a bare ".", when
+/// cleanup empties the speech: the verbatim text is pasted instead.
+#[tokio::test]
+async fn a_rewrite_that_is_blank_null_or_an_echo_pastes_the_verbatim_text() {
+    let echo_all = SMART_INSTRUCTION.to_owned();
+    let echo_sentence = "Collapse a stammered immediate repeat of a single word to one copy.";
+    for (rewrite, why) in [
+        (serde_json::Value::Null, "null"),
+        (serde_json::json!(""), "blank"),
+        (serde_json::json!("  \n"), "whitespace"),
+        (serde_json::json!("."), "a bare full stop"),
+        (serde_json::json!(echo_all), "the whole instruction"),
+        (serde_json::json!(echo_sentence), "one instruction sentence"),
+        (
+            serde_json::json!(format!("Okay. {echo_sentence}")),
+            "an instruction sentence after a word",
+        ),
+    ] {
+        let server = MockServer::start().await;
+        mount(
+            &server,
+            ok(serde_json::json!({"text": "Yeah.", "llm_response": rewrite})),
+        )
+        .await;
+        let (engine, _) = engine(config(&server, None));
+        assert_eq!(engine.transcribe(&audio()).await.unwrap(), "Yeah.", "{why}");
+        // Not an error, not retried.
+        assert_eq!(count(&server).await, 1, "{why}");
+    }
+}
+
+#[tokio::test]
+async fn a_real_rewrite_is_kept_and_silence_pastes_nothing_even_with_an_echo() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        ok(serde_json::json!({"text": "um hey marcus so just letting you know", "llm_response": "Hey Marcus, just letting you know."})),
+    )
+    .await;
+    let (engine, _) = engine(config(&server, None));
+    assert_eq!(
+        engine.transcribe(&audio()).await.unwrap(),
+        "Hey Marcus, just letting you know."
+    );
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        ok(serde_json::json!({"text": "", "llm_response": SMART_INSTRUCTION})),
+    )
+    .await;
+    assert_eq!(engine_for(&server).transcribe(&audio()).await.unwrap(), "");
 }
 
 #[tokio::test]
@@ -154,8 +326,10 @@ async fn a_language_the_api_does_not_know_is_left_out() {
         let (engine, _) = engine(config(&server, language));
         engine.transcribe(&audio()).await.unwrap();
         let request = &server.received_requests().await.unwrap()[0];
-        let body = String::from_utf8_lossy(&request.body);
-        assert!(!body.contains(r#"name="config""#), "{language:?}");
+        assert!(
+            config_json(request).get("language_codes").is_none(),
+            "{language:?}"
+        );
     }
 }
 
@@ -385,9 +559,9 @@ async fn test_and_save_makes_one_real_call_with_a_quarter_second_of_silence() {
         .await
         .unwrap();
     let request = &server.received_requests().await.unwrap()[0];
-    // 4,000 samples of 16-bit PCM plus the 44-byte header.
-    assert!(request.body.len() > 8_044 && request.body.len() < 8_400);
-    assert!(!String::from_utf8_lossy(&request.body).contains("language_codes"));
+    // 4,000 samples of 16-bit PCM plus the 44-byte header, plus the config.
+    assert!(request.body.len() > 8_044 && request.body.len() < 13_000);
+    assert!(config_json(request).get("language_codes").is_none());
 }
 
 #[tokio::test]
@@ -428,7 +602,7 @@ async fn the_app_engine_for_this_provider_dictates_through_the_settings() {
     let server = MockServer::start().await;
     mount(
         &server,
-        ok(serde_json::json!({"text": "raw", "llm_response": "Clean."})),
+        ok(serde_json::json!({"text": "raw", "llm_response": "Clean text here."})),
     )
     .await;
     let settings = Settings {
@@ -439,7 +613,10 @@ async fn the_app_engine_for_this_provider_dictates_through_the_settings() {
     };
     let engine = Engine::from_settings_at(&settings, Ok(Some(Secret::new(KEY))), &server.uri());
     assert_eq!(engine.name(), "remote");
-    assert_eq!(engine.transcribe(&audio()).await.unwrap(), "Clean.");
+    assert_eq!(
+        engine.transcribe(&audio()).await.unwrap(),
+        "Clean text here."
+    );
     let none = Engine::from_settings(&settings, Ok(None));
     assert_eq!(
         none.transcribe(&audio()).await,

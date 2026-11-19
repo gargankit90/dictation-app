@@ -17,6 +17,9 @@ export const SAVED_LINE = "A key is saved in your Keychain.";
 /** A good key the Keychain wouldn't keep (U6 criterion 5). */
 export const KEY_NOT_SAVED = "Key works, but couldn't be saved to your Keychain";
 
+/** The model label that asks Vocet Cloud for the Fast rewrite (`FAST_MODEL` in `assemblyai_prompt.rs`). */
+const VOCET_FAST_MODEL = "assemblyai-dictation-fast";
+
 /** Where each provider's keys are made, and the steps to get one. */
 const KEY_STEPS: Record<
   Exclude<Provider, "assemblyai">,
@@ -66,6 +69,8 @@ interface Options {
    * switches here at all: it passes `onDevice` and switches on Continue (U11).
    */
   draftProvider?: boolean;
+  /** Settings were saved here (the Vocet Cloud rewrite choice): the new ones. */
+  onStored?: (settings: Settings_Serialize) => void;
 }
 
 /** The panel's state and actions. */
@@ -76,6 +81,7 @@ export function useOwnKey({
   refreshEngine,
   onConnected,
   draftProvider = false,
+  onStored,
 }: Options) {
   const [provider, setProvider] = useState<Provider>(settings.provider);
   const [keyInput, setKeyInput] = useState("");
@@ -249,7 +255,31 @@ export function useOwnKey({
     await refreshEngine();
   }
 
+  /** Vocet Cloud's rewrite mode lives in the (otherwise unused) model label. */
+  const rewriteFast = settings.provider === "assemblyai" && settings.model === VOCET_FAST_MODEL;
+  const [rewriteError, setRewriteError] = useState<string | null>(null);
+
+  async function setRewriteFast(fast: boolean) {
+    setRewriteError(null);
+    try {
+      const saved = await commands.setVocetCleanup(fast);
+      if (saved.status === "error") {
+        setRewriteError(messageOf(saved.error));
+        return;
+      }
+      const reread = await commands.getSettings();
+      if (reread.status === "ok") onStored?.(reread.data);
+      await refreshEngine();
+    } catch {
+      setRewriteError(BROKEN);
+    }
+  }
+
   return {
+    settingsProvider: settings.provider,
+    rewriteFast,
+    rewriteError,
+    setRewriteFast,
     provider,
     keyInput,
     keyStatus,
@@ -373,6 +403,26 @@ export function OwnKeyPanel({
         />
       </div>
       <KeyStatusLine id="api-key-status" ownKey={ownKey} />
+      {provider === "assemblyai" && ownKey.settingsProvider === "assemblyai" && (
+        <div className="panel-row">
+          <label htmlFor="rewrite-mode">Cleanup</label>
+          <select
+            id="rewrite-mode"
+            value={ownKey.rewriteFast ? "fast" : "smart"}
+            onChange={(event) => {
+              void ownKey.setRewriteFast(event.target.value === "fast");
+            }}
+          >
+            <option value="smart">Smart (better cleanup, a little slower)</option>
+            <option value="fast">Fast (lighter cleanup, lower latency)</option>
+          </select>
+        </div>
+      )}
+      {ownKey.rewriteError !== null && (
+        <p role="alert" className="notice error">
+          {ownKey.rewriteError}
+        </p>
+      )}
       <div className="row own-key-actions">
         <button
           type="button"

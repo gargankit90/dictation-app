@@ -38,6 +38,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "dictation_progress",
     "launch_notice",
     "set_language",
+    "set_vocet_cleanup",
     "use_cloud_engine",
     "use_local_model",
     "get_engine_status",

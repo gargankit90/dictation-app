@@ -5,17 +5,19 @@
 //! `POST {base}/v1/transcribe`, `multipart/form-data` with
 //!
 //! - `audio`: the clip as a 16-bit mono WAV (`audio/wav`);
-//! - `config` (JSON, optional): `language_codes` with the saved language,
-//!   if the API knows it (an unknown code is a 400, so any other language
-//!   is left to the service). Nothing else: no `llm_instruction`, so the
-//!   service's default cleanup runs (filler removed, punctuation and
-//!   capitalisation, self-corrections resolved), and `rewrite_mode` stays
-//!   `fast`.
+//! - `config` (JSON): `llm_instruction` (Blurt's cleanup text for the mode,
+//!   see [`crate::assemblyai_prompt`]), `rewrite_mode: "smart"` unless the
+//!   settings chose Fast (the key is then left out), and `language_codes`
+//!   with the saved language, if the API knows it (an unknown code is a
+//!   400, so any other language is left to the service). If the service
+//!   answers 400 with `rewrite_mode`, the request is sent once more
+//!   without it, and later ones leave it out.
 //!
 //! The reply holds the verbatim transcript in `text` and the cleaned-up
 //! rewrite in `llm_response`, which is `null` (with `llm_error` saying why)
 //! when the rewrite failed although the request succeeded. The rewrite is
-//! the dictation; the verbatim text is the fallback.
+//! the dictation; the verbatim text is the fallback, also when the rewrite
+//! is blank or only an echo of the instruction.
 //!
 //! The batch endpoint takes up to 20 minutes and 256 MB, so a clip of
 //! Vocet's 5-minute maximum (about 9.6 MB of WAV) goes in one request:
@@ -31,6 +33,7 @@
 //! Privacy: errors and logs never contain the key, the audio or the text;
 //! logs hold statuses, sizes, lengths and which text was used.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -44,6 +47,7 @@ use reqwest::multipart::{Form, Part};
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 
+use crate::assemblyai_prompt::{RewriteMode, is_speech};
 use crate::openai_compat::{Config, Failure, MAX_RETRY_AFTER, TokioWait, Wait, audio_duration};
 
 /// The languages `config.language_codes` accepts (the API answers 400 to
@@ -62,6 +66,9 @@ pub struct AssemblyAi<W = TokioWait> {
     key: Secret,
     wait: W,
     rng: Arc<Mutex<SplitMix64>>,
+    /// Set once the service answered 400 to `rewrite_mode` and then accepted
+    /// the same request without it: later dictations leave it out at once.
+    smart_refused: Arc<AtomicBool>,
 }
 
 impl AssemblyAi<TokioWait> {
@@ -99,6 +106,7 @@ impl<W: Wait> AssemblyAi<W> {
             key,
             wait,
             rng: Arc::new(Mutex::new(SplitMix64::new(seed))),
+            smart_refused: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -157,17 +165,46 @@ impl<W: Wait> AssemblyAi<W> {
     }
 
     async fn attempt(&self, wav: &[u8], timeout: Duration) -> Result<String, Failure> {
+        let mode = self.mode();
+        let sends_mode = mode == RewriteMode::Smart && !self.smart_refused.load(Ordering::Relaxed);
+        match self.post(wav, timeout, sends_mode).await {
+            // Nobody has verified that the buffered endpoint takes
+            // `rewrite_mode` (the config is validated strictly, so an
+            // unknown key is a 400): try once more without it, and
+            // remember that it worked.
+            Err(Rejected::BadRequest) if sends_mode => {
+                tracing::info!("assemblyai answered 400 to rewrite_mode; retrying without it");
+                let text = self
+                    .post(wav, timeout, false)
+                    .await
+                    .map_err(Rejected::failure)?;
+                self.smart_refused.store(true, Ordering::Relaxed);
+                tracing::info!("assemblyai takes no rewrite_mode here; dictating without it");
+                Ok(text)
+            }
+            other => other.map_err(Rejected::failure),
+        }
+    }
+
+    fn mode(&self) -> RewriteMode {
+        RewriteMode::from_model(&self.config.model)
+    }
+
+    /// One request; `with_mode` sends `rewrite_mode: "smart"`.
+    async fn post(
+        &self,
+        wav: &[u8],
+        timeout: Duration,
+        with_mode: bool,
+    ) -> Result<String, Rejected> {
         let audio = Part::bytes(wav.to_vec())
             .file_name("audio.wav")
             .mime_str("audio/wav")
             .map_err(|_| Failure::fatal(TranscribeError::Engine("bad MIME type".into())))?;
-        let mut form = Form::new().part("audio", audio);
-        if let Some(config) = self.config_part() {
-            let config = Part::text(config)
-                .mime_str("application/json")
-                .map_err(|_| Failure::fatal(TranscribeError::Engine("bad MIME type".into())))?;
-            form = form.part("config", config);
-        }
+        let config = Part::text(self.config_part(with_mode))
+            .mime_str("application/json")
+            .map_err(|_| Failure::fatal(TranscribeError::Engine("bad MIME type".into())))?;
+        let form = Form::new().part("audio", audio).part("config", config);
         let response = self
             .client
             .post(&self.endpoint)
@@ -181,22 +218,35 @@ impl<W: Wait> AssemblyAi<W> {
         if status == StatusCode::PAYLOAD_TOO_LARGE {
             return Err(Failure::fatal(TranscribeError::Engine(
                 "the recording is longer than the provider accepts (HTTP 413)".into(),
-            )));
+            ))
+            .into());
+        }
+        if status == StatusCode::BAD_REQUEST {
+            return Err(Rejected::BadRequest);
         }
         if !status.is_success() {
             // The body isn't read: it can echo request details.
-            return Err(Failure::from_status(status, response.headers()));
+            return Err(Failure::from_status(status, response.headers()).into());
         }
         let body = response.bytes().await.map_err(Failure::from_reqwest)?;
-        parse(&body).map_err(Failure::fatal)
+        parse(&body, self.mode().instruction()).map_err(|e| Failure::fatal(e).into())
     }
 
-    /// The JSON of the `config` part, or `None` to send none (defaults).
-    fn config_part(&self) -> Option<String> {
-        let language = self.config.language.as_deref()?;
-        LANGUAGES
-            .contains(&language)
-            .then(|| serde_json::json!({ "language_codes": [language] }).to_string())
+    /// The JSON of the `config` part: the cleanup instruction for the mode,
+    /// `rewrite_mode` for Smart (`with_mode`; Fast is the service's default,
+    /// so the key is left out), and `language_codes` if the saved language
+    /// is one the API knows.
+    fn config_part(&self, with_mode: bool) -> String {
+        let mut config = serde_json::json!({ "llm_instruction": self.mode().instruction() });
+        if with_mode {
+            config["rewrite_mode"] = serde_json::json!("smart");
+        }
+        if let Some(language) = self.config.language.as_deref()
+            && LANGUAGES.contains(&language)
+        {
+            config["language_codes"] = serde_json::json!([language]);
+        }
+        config.to_string()
     }
 
     fn auth_header(&self) -> Result<HeaderMap, Failure> {
@@ -233,6 +283,30 @@ impl<W> std::fmt::Debug for AssemblyAi<W> {
     }
 }
 
+/// Why a request failed: a 400 is told apart so `rewrite_mode` can be
+/// dropped; anything else is a [`Failure`].
+enum Rejected {
+    BadRequest,
+    Failed(Failure),
+}
+
+impl From<Failure> for Rejected {
+    fn from(failure: Failure) -> Self {
+        Self::Failed(failure)
+    }
+}
+
+impl Rejected {
+    fn failure(self) -> Failure {
+        match self {
+            Self::BadRequest => Failure::fatal(TranscribeError::Engine(
+                "the provider rejected the request (HTTP 400)".into(),
+            )),
+            Self::Failed(failure) => failure,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct Reply {
     #[serde(default)]
@@ -243,39 +317,41 @@ struct Reply {
     llm_error: Option<String>,
 }
 
-/// The text to paste from a reply: the rewrite if there is one, else the
-/// verbatim text. Logs which, and the rewrite's error code (a fixed word
-/// such as `timeout`), never the text. The error never quotes the body.
-fn parse(body: &[u8]) -> Result<String, TranscribeError> {
+/// The text to paste from a reply: the rewrite if it is a rewrite of the
+/// speech, else the verbatim text. Silence (empty verbatim text) pastes
+/// nothing whatever the rewrite says. Logs which one and why, and the
+/// rewrite's error code (a fixed word such as `timeout`), never the text. The
+/// error never quotes the body.
+fn parse(body: &[u8], instruction: &str) -> Result<String, TranscribeError> {
     let reply: Reply = serde_json::from_slice(body).map_err(|e| {
         TranscribeError::Engine(format!("unreadable reply ({:?} error)", e.classify()))
     })?;
     let verbatim = reply.text.unwrap_or_default().trim().to_owned();
-    let rewrite = reply
-        .llm_response
-        .map(|text| text.trim().to_owned())
-        .filter(|text| !text.is_empty());
-    // An empty verbatim text is silence: nothing to paste, whatever the
-    // rewrite says.
-    match rewrite {
-        Some(text) if !verbatim.is_empty() => {
-            tracing::info!(
-                source = "rewrite",
-                chars = text.chars().count(),
-                "assemblyai text"
-            );
-            Ok(text)
+    let rewrite = reply.llm_response.map(|text| text.trim().to_owned());
+    let (text, reason) = if verbatim.is_empty() {
+        (verbatim, "silence")
+    } else {
+        match rewrite {
+            None => (verbatim, "no_rewrite"),
+            Some(rewrite) if rewrite.is_empty() => (verbatim, "blank_rewrite"),
+            Some(rewrite) if !is_speech(&rewrite, instruction) => {
+                (verbatim, "echo_or_empty_rewrite")
+            }
+            Some(rewrite) => (rewrite, "rewrite"),
         }
-        _ => {
-            tracing::info!(
-                source = "verbatim",
-                rewrite_error = reply.llm_error.as_deref().map_or("none", short_code),
-                chars = verbatim.chars().count(),
-                "assemblyai text"
-            );
-            Ok(verbatim)
-        }
-    }
+    };
+    tracing::info!(
+        source = if reason == "rewrite" {
+            "rewrite"
+        } else {
+            "verbatim"
+        },
+        reason,
+        rewrite_error = reply.llm_error.as_deref().map_or("none", short_code),
+        chars = text.chars().count(),
+        "assemblyai text"
+    );
+    Ok(text)
 }
 
 /// `code` if it looks like one of the API's error words (`timeout`,

@@ -165,6 +165,13 @@ export const commands = {
 	 */
 	setLanguage: (language: string | null) => typedError<null, string>(__TAURI_INVOKE("set_language", { language })),
 	/**
+	 *  Vocet Cloud's cleanup (experimental): `fast` asks the service for its
+	 *  lighter, lower-latency rewrite, otherwise Smart. The choice is the model
+	 *  label (`assemblyai-dictation-fast` or the default), which this provider
+	 *  doesn't otherwise use; any other provider's model is left alone.
+	 */
+	setVocetCleanup: (fast: boolean) => typedError<null, string>(__TAURI_INVOKE("set_vocet_cleanup", { fast })),
+	/**
 	 *  Dictates with `provider` and the user's own key from now on. Switching
 	 *  provider also switches to its default model.
 	 */

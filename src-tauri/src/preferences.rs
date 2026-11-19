@@ -95,6 +95,36 @@ fn language_change<S: SecretStore + 'static>(
     .map_err(|error| error.to_string())
 }
 
+/// Vocet Cloud's cleanup (experimental): `fast` asks the service for its
+/// lighter, lower-latency rewrite, otherwise Smart. The choice is the model
+/// label (`assemblyai-dictation-fast` or the default), which this provider
+/// doesn't otherwise use; any other provider's model is left alone.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_vocet_cleanup(
+    state: State<'_, AppConfig>,
+    engine: State<'_, LiveEngine>,
+    hotkey: State<'_, ActiveHotkey>,
+    usage: State<'_, Usage>,
+    fast: bool,
+) -> Result<(), String> {
+    let (live, control) = (engine.inner().clone(), hotkey.0.clone());
+    write(Arc::clone(&state.0), &usage, move |config| {
+        commands::write_change(config, &live, &control, |settings| {
+            if settings.provider == Provider::AssemblyAi {
+                let model = if fast {
+                    dictation_transcribe::assemblyai_prompt::FAST_MODEL
+                } else {
+                    Provider::AssemblyAi.default_model()
+                };
+                model.clone_into(&mut settings.model);
+            }
+        })
+        .map_err(|error| error.to_string())
+    })
+    .await
+}
+
 /// Dictates with `provider` and the user's own key from now on. Switching
 /// provider also switches to its default model.
 #[tauri::command]
