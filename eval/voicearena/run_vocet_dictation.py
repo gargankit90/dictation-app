@@ -107,9 +107,13 @@ class Vocet(Driver):
                        help="max wait for the pill to go away before the next clip (s)")
         p.add_argument("--no-pill", action="store_true",
                        help="don't wait for the pill: key down, then only --start-delay")
+        p.add_argument("--provider", default="groq",
+                       help="the cloud provider Vocet must be set to (settings.json 'provider'): groq, openai, "
+                            "assemblyai")
 
     def preflight(self, args) -> None:
         self.start_timeout, self.hide_timeout, self.no_pill = args.start_timeout, args.hide_timeout, args.no_pill
+        self.provider = args.provider
         self.key_down = False
         if vocet_pid() is None:
             raise SystemExit("Vocet isn't running. Open it (past onboarding, Groq key saved) and rerun.")
@@ -130,9 +134,9 @@ class Vocet(Driver):
                 "vocet_transcription": s.get("transcription", "cloud"), "default_input": mic}
 
     def env_problem(self, env: dict) -> str | None:
-        if env.get("vocet_transcription") != "cloud" or env.get("vocet_provider") != "groq":
+        if env.get("vocet_transcription") != "cloud" or env.get("vocet_provider") != self.provider:
             return (f"Vocet's engine is {env.get('vocet_transcription')}/{env.get('vocet_provider')}, "
-                    "not cloud/groq (Settings > Speech)")
+                    f"not cloud/{self.provider} (Settings > Speech)")
         hotkey = env.get("vocet_hotkey", "").lower().replace(" ", "")
         if hotkey not in ("", "rightalt", "rightoption"):
             return f"Vocet's hotkey is '{env.get('vocet_hotkey')}', not Right Option"

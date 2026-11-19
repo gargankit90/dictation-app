@@ -114,12 +114,30 @@ Then, inside the VM:
 - The first harness runs ask to let Terminal control System Events and
   TextEdit; allow both (the harness README asks for it).
 
+Another engine (the experimental Vocet Cloud (AssemblyAI) provider from PR
+#322, run on 2026-11-18/19 from `exp/assemblyai` at `6a652ca`):
+
+- Build that commit the same way (dev certificate) and `bench.sh install-app
+  <path to its Vocet.app>`.
+- The token is in the VM's login keychain (the owner put it there; agents
+  never read it). In Settings → Speech → Change key…, pick the provider
+  "Vocet Cloud (AssemblyAI)" and type nothing in the key field. The rebuilt app
+  is a new code signature, so macOS asks whether Vocet may use the keychain
+  item. For the Groq item we answered Deny (not needed any more). For the
+  token we typed the throwaway VM user's password and chose Always Allow,
+  as the e2e scenarios do for the same VM user. The provider switches only
+  when its key check succeeds, so pick another provider and pick Vocet Cloud
+  again after allowing it. Cleanup stays at its default, Smart.
+- Run with `--provider assemblyai`, which makes the driver's settings
+  check expect that provider instead of Groq.
+
 Each run, per engine (`<engine>` is a label such as `vocet_groq`):
 
 ```sh
 eval/voicearena/bench.sh check                       # harness preflight in the VM
 eval/voicearena/bench.sh run <engine> --limit 5      # a short trial
 eval/voicearena/bench.sh run <engine>                # all 151; rerun the same command to resume
+                                                     # (add --provider assemblyai for Vocet Cloud)
 eval/voicearena/bench.sh score <engine>              # judge + score (needs the claude CLI, signed in)
 eval/voicearena/bench.sh report results/<engine> [results/<other engine>]
 ```
