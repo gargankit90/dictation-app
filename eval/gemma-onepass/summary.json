@@ -1,0 +1,1543 @@
+{
+  "Parakeet raw": {
+    "dir": "baselines/parakeet_raw",
+    "meta": {
+      "name": "raw",
+      "source": "parakeet",
+      "note": "the engine draft, no cleanup; finalize_s is the VM key-up-to-text time from PR #323"
+    },
+    "wer_spoken": 3.8523041139700536,
+    "wer_intended": 7.021244538194968,
+    "wer_spoken_over30": 3.690205011389522,
+    "halves": {
+      "tune": 6.332533013205283,
+      "check": 7.715582450832073
+    },
+    "claude": {
+      "tune": {
+        "zer": 51.31578947368421,
+        "amend": 1.457087010602381
+      },
+      "check": {
+        "zer": 54.666666666666664,
+        "amend": 1.2989252255876775
+      },
+      "all": {
+        "zer": 52.980132450331126,
+        "amend": 1.376815821714019,
+        "zer_ci95": [44.57015655577299, 62.0],
+        "amend_ci95": [1.0505825884935003, 1.7492989818281819]
+      },
+      "over30": {
+        "zer": 7.6923076923076925,
+        "amend": 1.0363161214742724
+      },
+      "upto30": {
+        "zer": 57.2463768115942,
+        "amend": 1.5397886564589174
+      }
+    },
+    "codex": {
+      "tune": {
+        "zer": 48.68421052631579,
+        "amend": 1.2829608608253518
+      },
+      "check": {
+        "zer": 52.0,
+        "amend": 1.4252873563218391
+      },
+      "all": {
+        "zer": 50.33112582781457,
+        "amend": 1.3551320160867284,
+        "zer_ci95": [42.07306560134567, 59.42028985507246],
+        "amend_ci95": [1.0267560671555678, 1.7311741666683949]
+      },
+      "over30": {
+        "zer": 7.6923076923076925,
+        "amend": 1.1902614968440035
+      },
+      "upto30": {
+        "zer": 54.34782608695652,
+        "amend": 1.433861522562866
+      }
+    },
+    "paired": {
+      "claude": {
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 2,
+          "losses": 21,
+          "ties": 128,
+          "fewer_edits": 4,
+          "more_edits": 34,
+          "tune": {
+            "wins": 1,
+            "losses": 13,
+            "ties": 62,
+            "fewer_edits": 2,
+            "more_edits": 18
+          },
+          "check": {
+            "wins": 1,
+            "losses": 8,
+            "ties": 66,
+            "fewer_edits": 2,
+            "more_edits": 16
+          }
+        }
+      },
+      "codex": {
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 3,
+          "losses": 21,
+          "ties": 127,
+          "fewer_edits": 5,
+          "more_edits": 33,
+          "tune": {
+            "wins": 1,
+            "losses": 13,
+            "ties": 62,
+            "fewer_edits": 2,
+            "more_edits": 17
+          },
+          "check": {
+            "wins": 2,
+            "losses": 8,
+            "ties": 65,
+            "fewer_edits": 3,
+            "more_edits": 16
+          }
+        }
+      }
+    },
+    "both_zer": 49.66887417218543
+  },
+  "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+    "dir": "baselines/parakeet_gemma4-e2b__v3",
+    "meta": {
+      "name": "gemma4-e2b",
+      "source": "parakeet",
+      "prompt": "v3",
+      "half": "all",
+      "n": 151,
+      "model_file": "gemma-4-E2B-it-Q4_K_M.gguf",
+      "model_bytes": 3106738272,
+      "model_sha256": "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
+      "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+      "load_s": 2.54,
+      "peak_memory_bytes": 482397520,
+      "max_rss_bytes": 3118841856,
+      "latency_s": {
+        "median": 0.524,
+        "p90": 1.353,
+        "mean": 0.8474768211920529,
+        "max": 4.709
+      },
+      "fallbacks": {
+        "name": 3,
+        "number": 2
+      },
+      "fallback_total": 5,
+      "unchanged": 83,
+      "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+    },
+    "wer_spoken": 5.727576682657363,
+    "wer_intended": 6.418562603585958,
+    "wer_spoken_over30": 5.0113895216400905,
+    "halves": {
+      "tune": 5.582232893157263,
+      "check": 7.2617246596066565
+    },
+    "claude": {
+      "tune": {
+        "zer": 67.10526315789474,
+        "amend": 0.7177462766911896
+      },
+      "check": {
+        "zer": 64.0,
+        "amend": 0.800742717883254
+      },
+      "all": {
+        "zer": 65.56291390728477,
+        "amend": 0.7598739433923365,
+        "zer_ci95": [57.82165039929015, 72.84940673289182],
+        "amend_ci95": [0.5012706904503486, 1.0417018588159062]
+      },
+      "over30": {
+        "zer": 30.76923076923077,
+        "amend": 0.6257368277863427
+      },
+      "upto30": {
+        "zer": 68.84057971014492,
+        "amend": 0.8243915205443602
+      }
+    },
+    "codex": {
+      "tune": {
+        "zer": 64.47368421052632,
+        "amend": 0.6452769313497042
+      },
+      "check": {
+        "zer": 60.0,
+        "amend": 0.9287745980147443
+      },
+      "all": {
+        "zer": 62.25165562913907,
+        "amend": 0.7890707808267577,
+        "zer_ci95": [54.76110038610038, 69.65517241379311],
+        "amend_ci95": [0.541680330669478, 1.0626699633810492]
+      },
+      "over30": {
+        "zer": 30.76923076923077,
+        "amend": 0.7449127906976745
+      },
+      "upto30": {
+        "zer": 65.21739130434783,
+        "amend": 0.8102456874019864
+      }
+    },
+    "paired": {
+      "claude": {
+        "Parakeet raw": {
+          "wins": 21,
+          "losses": 2,
+          "ties": 128,
+          "fewer_edits": 34,
+          "more_edits": 4,
+          "tune": {
+            "wins": 13,
+            "losses": 1,
+            "ties": 62,
+            "fewer_edits": 18,
+            "more_edits": 2
+          },
+          "check": {
+            "wins": 8,
+            "losses": 1,
+            "ties": 66,
+            "fewer_edits": 16,
+            "more_edits": 2
+          }
+        }
+      },
+      "codex": {
+        "Parakeet raw": {
+          "wins": 21,
+          "losses": 3,
+          "ties": 127,
+          "fewer_edits": 33,
+          "more_edits": 5,
+          "tune": {
+            "wins": 13,
+            "losses": 1,
+            "ties": 62,
+            "fewer_edits": 17,
+            "more_edits": 2
+          },
+          "check": {
+            "wins": 8,
+            "losses": 2,
+            "ties": 65,
+            "fewer_edits": 16,
+            "more_edits": 3
+          }
+        }
+      }
+    },
+    "both_zer": 61.58940397350993
+  },
+  "Parakeet + Gemma 4 E4B text cleanup (v3, guard)": {
+    "dir": "baselines/parakeet_gemma4-e4b__v3",
+    "meta": {
+      "name": "gemma4-e4b",
+      "source": "parakeet",
+      "prompt": "v3",
+      "half": "all",
+      "n": 151,
+      "model_file": "gemma-4-E4B-it-Q4_K_M.gguf",
+      "model_bytes": 4977171584,
+      "model_sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+      "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+      "load_s": 4.28,
+      "peak_memory_bytes": 603558808,
+      "max_rss_bytes": 4121493504,
+      "latency_s": {
+        "median": 1.182,
+        "p90": 3.04,
+        "mean": 1.925973509933775,
+        "max": 11.732
+      },
+      "fallbacks": {
+        "number": 3,
+        "name": 2
+      },
+      "fallback_total": 5,
+      "unchanged": 68,
+      "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+    },
+    "wer_spoken": 5.6694286960313995,
+    "wer_intended": 6.298026216664156,
+    "wer_spoken_over30": 5.10250569476082,
+    "halves": {
+      "tune": 5.2521008403361344,
+      "check": 7.35249621785174
+    },
+    "claude": {
+      "tune": {
+        "zer": 67.10526315789474,
+        "amend": 0.604428485936565
+      },
+      "check": {
+        "zer": 64.0,
+        "amend": 0.6705977569661232
+      },
+      "all": {
+        "zer": 65.56291390728477,
+        "amend": 0.6380851564337803,
+        "zer_ci95": [57.93103448275862, 72.94330495356036],
+        "amend_ci95": [0.4596597151026539, 0.8497222359596096]
+      },
+      "over30": {
+        "zer": 30.76923076923077,
+        "amend": 0.5538405665516615
+      },
+      "upto30": {
+        "zer": 68.84057971014492,
+        "amend": 0.6784378533530486
+      }
+    },
+    "codex": {
+      "tune": {
+        "zer": 65.78947368421052,
+        "amend": 0.6041392511065917
+      },
+      "check": {
+        "zer": 61.333333333333336,
+        "amend": 0.8037004914715236
+      },
+      "all": {
+        "zer": 63.57615894039735,
+        "amend": 0.7056125599035663,
+        "zer_ci95": [56.05039074852058, 71.03596443965516],
+        "amend_ci95": [0.4975244407903527, 0.9568718853839042]
+      },
+      "over30": {
+        "zer": 30.76923076923077,
+        "amend": 0.6996183899691077
+      },
+      "upto30": {
+        "zer": 66.66666666666667,
+        "amend": 0.7084800278176208
+      }
+    },
+    "paired": {
+      "claude": {
+        "Parakeet raw": {
+          "wins": 21,
+          "losses": 2,
+          "ties": 128,
+          "fewer_edits": 37,
+          "more_edits": 2,
+          "tune": {
+            "wins": 13,
+            "losses": 1,
+            "ties": 62,
+            "fewer_edits": 20,
+            "more_edits": 1
+          },
+          "check": {
+            "wins": 8,
+            "losses": 1,
+            "ties": 66,
+            "fewer_edits": 17,
+            "more_edits": 1
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 3,
+          "losses": 3,
+          "ties": 145,
+          "fewer_edits": 7,
+          "more_edits": 6,
+          "tune": {
+            "wins": 2,
+            "losses": 2,
+            "ties": 72,
+            "fewer_edits": 3,
+            "more_edits": 2
+          },
+          "check": {
+            "wins": 1,
+            "losses": 1,
+            "ties": 73,
+            "fewer_edits": 4,
+            "more_edits": 4
+          }
+        }
+      },
+      "codex": {
+        "Parakeet raw": {
+          "wins": 21,
+          "losses": 1,
+          "ties": 129,
+          "fewer_edits": 34,
+          "more_edits": 4,
+          "tune": {
+            "wins": 13,
+            "losses": 0,
+            "ties": 63,
+            "fewer_edits": 17,
+            "more_edits": 2
+          },
+          "check": {
+            "wins": 8,
+            "losses": 1,
+            "ties": 66,
+            "fewer_edits": 17,
+            "more_edits": 2
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 4,
+          "losses": 2,
+          "ties": 145,
+          "fewer_edits": 8,
+          "more_edits": 8,
+          "tune": {
+            "wins": 2,
+            "losses": 1,
+            "ties": 73,
+            "fewer_edits": 2,
+            "more_edits": 3
+          },
+          "check": {
+            "wins": 2,
+            "losses": 1,
+            "ties": 72,
+            "fewer_edits": 6,
+            "more_edits": 5
+          }
+        }
+      }
+    },
+    "both_zer": 63.57615894039735
+  },
+  "Gemma 4 E2B one pass, no guard": {
+    "dir": "runs/gemma4-e2b__onepass",
+    "meta": {
+      "name": "gemma4-e2b",
+      "mode": "onepass",
+      "n": 151,
+      "model_file": "gemma-4-E2B-it-Q4_K_M.gguf",
+      "model_bytes": 3106738272,
+      "model_sha256": "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
+      "mmproj_file": "mmproj-F16.gguf",
+      "mmproj_bytes": 985654080,
+      "mmproj_sha256": "140be8d7849741f88c50757d529b84373ee8e27052cc2236855b537f4a8215fa",
+      "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+      "load_s": 1.21,
+      "peak_memory_bytes": 1586401672,
+      "max_rss_bytes": 4697030656,
+      "latency_s": {
+        "median": 0.667,
+        "p90": 1.553,
+        "mean": 1.0149867549668874,
+        "max": 4.806
+      },
+      "latency_single_part_s": {
+        "median": 0.6355,
+        "p90": 1.361
+      },
+      "real_time_factor_median": 0.05802700675168792,
+      "split_clips": 13,
+      "empty": 0,
+      "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 8192, one slot, all layers and the projector on Metal, --jinja (the model's own chat template)",
+      "note": "this Mac was shared with another eval running llama.cpp at the same time; timings are rough"
+    },
+    "wer_spoken": 4.797208896641954,
+    "wer_intended": 8.196474310682538,
+    "wer_spoken_over30": 4.874715261958998,
+    "halves": {
+      "tune": 7.893157262905162,
+      "check": 8.502269288956127
+    },
+    "claude": {
+      "tune": {
+        "zer": 50.0,
+        "amend": 1.4503861800601379
+      },
+      "check": {
+        "zer": 49.333333333333336,
+        "amend": 1.4788813442283346
+      },
+      "all": {
+        "zer": 49.66887417218543,
+        "amend": 1.4648067794635837,
+        "zer_ci95": [41.40072479683725, 58.33603896103895],
+        "amend_ci95": [1.1319251671066128, 1.8281207485877073]
+      },
+      "over30": {
+        "zer": 7.6923076923076925,
+        "amend": 1.0063797286368945
+      },
+      "upto30": {
+        "zer": 53.6231884057971,
+        "amend": 1.6846186988367082
+      }
+    },
+    "codex": {
+      "tune": {
+        "zer": 50.0,
+        "amend": 1.379066478076379
+      },
+      "check": {
+        "zer": 49.333333333333336,
+        "amend": 1.5257067188669469
+      },
+      "all": {
+        "zer": 49.66887417218543,
+        "amend": 1.4532428575589014,
+        "zer_ci95": [41.37931034482759, 58.17252080688389],
+        "amend_ci95": [1.1099956491436846, 1.837067421919933]
+      },
+      "over30": {
+        "zer": 7.6923076923076925,
+        "amend": 1.08010801080108
+      },
+      "upto30": {
+        "zer": 53.6231884057971,
+        "amend": 1.6317217031902527
+      }
+    },
+    "paired": {
+      "claude": {
+        "Parakeet raw": {
+          "wins": 17,
+          "losses": 22,
+          "ties": 112,
+          "fewer_edits": 34,
+          "more_edits": 41,
+          "tune": {
+            "wins": 7,
+            "losses": 8,
+            "ties": 61,
+            "fewer_edits": 15,
+            "more_edits": 19
+          },
+          "check": {
+            "wins": 10,
+            "losses": 14,
+            "ties": 51,
+            "fewer_edits": 19,
+            "more_edits": 22
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 13,
+          "losses": 37,
+          "ties": 101,
+          "fewer_edits": 22,
+          "more_edits": 54,
+          "tune": {
+            "wins": 6,
+            "losses": 19,
+            "ties": 51,
+            "fewer_edits": 10,
+            "more_edits": 27
+          },
+          "check": {
+            "wins": 7,
+            "losses": 18,
+            "ties": 50,
+            "fewer_edits": 12,
+            "more_edits": 27
+          }
+        }
+      },
+      "codex": {
+        "Parakeet raw": {
+          "wins": 18,
+          "losses": 19,
+          "ties": 114,
+          "fewer_edits": 36,
+          "more_edits": 36,
+          "tune": {
+            "wins": 8,
+            "losses": 7,
+            "ties": 61,
+            "fewer_edits": 17,
+            "more_edits": 16
+          },
+          "check": {
+            "wins": 10,
+            "losses": 12,
+            "ties": 53,
+            "fewer_edits": 19,
+            "more_edits": 20
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 15,
+          "losses": 34,
+          "ties": 102,
+          "fewer_edits": 26,
+          "more_edits": 53,
+          "tune": {
+            "wins": 7,
+            "losses": 18,
+            "ties": 51,
+            "fewer_edits": 13,
+            "more_edits": 26
+          },
+          "check": {
+            "wins": 8,
+            "losses": 16,
+            "ties": 51,
+            "fewer_edits": 13,
+            "more_edits": 27
+          }
+        }
+      }
+    },
+    "both_zer": 48.34437086092715
+  },
+  "Gemma 4 E2B one pass + guard": {
+    "dir": "runs/gemma4-e2b__onepass__guard",
+    "meta": {
+      "name": "gemma4-e2b",
+      "mode": "onepass",
+      "n": 151,
+      "model_file": "gemma-4-E2B-it-Q4_K_M.gguf",
+      "model_bytes": 3106738272,
+      "model_sha256": "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
+      "mmproj_file": "mmproj-F16.gguf",
+      "mmproj_bytes": 985654080,
+      "mmproj_sha256": "140be8d7849741f88c50757d529b84373ee8e27052cc2236855b537f4a8215fa",
+      "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+      "load_s": 1.21,
+      "peak_memory_bytes": 1586401672,
+      "max_rss_bytes": 4697030656,
+      "latency_s": {
+        "median": 0.667,
+        "p90": 1.553,
+        "mean": 1.0149867549668874,
+        "max": 4.806
+      },
+      "latency_single_part_s": {
+        "median": 0.6355,
+        "p90": 1.361
+      },
+      "real_time_factor_median": 0.05802700675168792,
+      "split_clips": 13,
+      "empty": 0,
+      "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 8192, one slot, all layers and the projector on Metal, --jinja (the model's own chat template)",
+      "note": "this Mac was shared with another eval running llama.cpp at the same time; timings are rough; with the guard the model runs twice per clip (plain + one-pass), so the real latency is the sum of both runs",
+      "guard": "vendor/guard.py against gemma4-e2b__plain",
+      "fallbacks": {
+        "number": 25,
+        "name": 4,
+        "url_email": 2
+      },
+      "fallback_total": 31
+    },
+    "wer_spoken": 4.709986916703009,
+    "wer_intended": 8.422480036160916,
+    "wer_spoken_over30": 5.0113895216400905,
+    "halves": {
+      "tune": 7.953181272509004,
+      "check": 8.895612708018154
+    },
+    "claude": {
+      "tune": {
+        "zer": 48.68421052631579,
+        "amend": 1.6237037037037036
+      },
+      "check": {
+        "zer": 49.333333333333336,
+        "amend": 1.6608038752090422
+      },
+      "all": {
+        "zer": 49.00662251655629,
+        "amend": 1.6425064297404723,
+        "zer_ci95": [40.87889872930304, 57.7143815915628],
+        "amend_ci95": [1.3010280373440406, 1.9942574433766949]
+      },
+      "over30": {
+        "zer": 7.6923076923076925,
+        "amend": 1.1926273942898447
+      },
+      "upto30": {
+        "zer": 52.89855072463768,
+        "amend": 1.8576118887160877
+      }
+    },
+    "codex": {
+      "tune": {
+        "zer": 48.68421052631579,
+        "amend": 1.5271694092577246
+      },
+      "check": {
+        "zer": 49.333333333333336,
+        "amend": 1.6857175845745296
+      },
+      "all": {
+        "zer": 49.00662251655629,
+        "amend": 1.6074351180734159,
+        "zer_ci95": [41.174456083803385, 57.692953020134226],
+        "amend_ci95": [1.2684521865438168, 1.9829117014726443]
+      },
+      "over30": {
+        "zer": 7.6923076923076925,
+        "amend": 1.284486657620986
+      },
+      "upto30": {
+        "zer": 52.89855072463768,
+        "amend": 1.7615819696904278
+      }
+    },
+    "paired": {
+      "claude": {
+        "Parakeet raw": {
+          "wins": 17,
+          "losses": 23,
+          "ties": 111,
+          "fewer_edits": 31,
+          "more_edits": 42,
+          "tune": {
+            "wins": 7,
+            "losses": 9,
+            "ties": 60,
+            "fewer_edits": 15,
+            "more_edits": 20
+          },
+          "check": {
+            "wins": 10,
+            "losses": 14,
+            "ties": 51,
+            "fewer_edits": 16,
+            "more_edits": 22
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 13,
+          "losses": 38,
+          "ties": 100,
+          "fewer_edits": 20,
+          "more_edits": 58,
+          "tune": {
+            "wins": 6,
+            "losses": 20,
+            "ties": 50,
+            "fewer_edits": 10,
+            "more_edits": 29
+          },
+          "check": {
+            "wins": 7,
+            "losses": 18,
+            "ties": 50,
+            "fewer_edits": 10,
+            "more_edits": 29
+          }
+        }
+      },
+      "codex": {
+        "Parakeet raw": {
+          "wins": 18,
+          "losses": 20,
+          "ties": 113,
+          "fewer_edits": 34,
+          "more_edits": 40,
+          "tune": {
+            "wins": 8,
+            "losses": 8,
+            "ties": 60,
+            "fewer_edits": 16,
+            "more_edits": 20
+          },
+          "check": {
+            "wins": 10,
+            "losses": 12,
+            "ties": 53,
+            "fewer_edits": 18,
+            "more_edits": 20
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 15,
+          "losses": 35,
+          "ties": 101,
+          "fewer_edits": 25,
+          "more_edits": 55,
+          "tune": {
+            "wins": 7,
+            "losses": 19,
+            "ties": 50,
+            "fewer_edits": 13,
+            "more_edits": 28
+          },
+          "check": {
+            "wins": 8,
+            "losses": 16,
+            "ties": 51,
+            "fewer_edits": 12,
+            "more_edits": 27
+          }
+        }
+      }
+    },
+    "both_zer": 47.682119205298015
+  },
+  "Gemma 4 E2B plain transcription": {
+    "dir": "runs/gemma4-e2b__plain",
+    "meta": {
+      "name": "gemma4-e2b",
+      "mode": "plain",
+      "n": 151,
+      "model_file": "gemma-4-E2B-it-Q4_K_M.gguf",
+      "model_bytes": 3106738272,
+      "model_sha256": "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
+      "mmproj_file": "mmproj-F16.gguf",
+      "mmproj_bytes": 985654080,
+      "mmproj_sha256": "140be8d7849741f88c50757d529b84373ee8e27052cc2236855b537f4a8215fa",
+      "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+      "load_s": 2.89,
+      "peak_memory_bytes": 3837859768,
+      "max_rss_bytes": 4354228224,
+      "latency_s": {
+        "median": 0.601,
+        "p90": 1.365,
+        "mean": 0.930682119205298,
+        "max": 4.62
+      },
+      "latency_single_part_s": {
+        "median": 0.5774999999999999,
+        "p90": 1.211
+      },
+      "real_time_factor_median": 0.052216569767441864,
+      "split_clips": 13,
+      "empty": 0,
+      "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 8192, one slot, all layers and the projector on Metal, --jinja (the model's own chat template)",
+      "note": "this Mac was shared with another eval running llama.cpp at the same time; timings are rough"
+    },
+    "wer_spoken": 4.739060910015991,
+    "wer_intended": 8.738888051830648,
+    "wer_spoken_over30": 5.10250569476082,
+    "halves": {
+      "tune": 8.403361344537815,
+      "check": 9.07715582450832
+    },
+    "claude": {
+      "tune": {
+        "zer": 48.68421052631579,
+        "amend": 1.915890622219586
+      },
+      "check": {
+        "zer": 44.0,
+        "amend": 1.8254059656800645
+      },
+      "all": {
+        "zer": 46.35761589403973,
+        "amend": 1.8699780861943025,
+        "zer_ci95": [37.955011688373645, 55.09125132088763],
+        "amend_ci95": [1.5004120761502455, 2.282343091746281]
+      },
+      "over30": {
+        "zer": 0.0,
+        "amend": 1.2556458897922314
+      },
+      "upto30": {
+        "zer": 50.72463768115942,
+        "amend": 2.1636795508529474
+      }
+    },
+    "codex": {
+      "tune": {
+        "zer": 51.31578947368421,
+        "amend": 1.6984258492129245
+      },
+      "check": {
+        "zer": 44.0,
+        "amend": 1.826247263509621
+      },
+      "all": {
+        "zer": 47.682119205298015,
+        "amend": 1.7631947687996263,
+        "zer_ci95": [39.30972906403941, 56.209150326797385],
+        "amend_ci95": [1.388580550569342, 2.1886861696455675]
+      },
+      "over30": {
+        "zer": 0.0,
+        "amend": 1.3475626300081396
+      },
+      "upto30": {
+        "zer": 52.17391304347826,
+        "amend": 1.9612914349756454
+      }
+    },
+    "paired": {
+      "claude": {
+        "Parakeet raw": {
+          "wins": 11,
+          "losses": 21,
+          "ties": 119,
+          "fewer_edits": 24,
+          "more_edits": 47,
+          "tune": {
+            "wins": 6,
+            "losses": 8,
+            "ties": 62,
+            "fewer_edits": 11,
+            "more_edits": 23
+          },
+          "check": {
+            "wins": 5,
+            "losses": 13,
+            "ties": 57,
+            "fewer_edits": 13,
+            "more_edits": 24
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 11,
+          "losses": 40,
+          "ties": 100,
+          "fewer_edits": 17,
+          "more_edits": 63,
+          "tune": {
+            "wins": 7,
+            "losses": 21,
+            "ties": 48,
+            "fewer_edits": 9,
+            "more_edits": 31
+          },
+          "check": {
+            "wins": 4,
+            "losses": 19,
+            "ties": 52,
+            "fewer_edits": 8,
+            "more_edits": 32
+          }
+        }
+      },
+      "codex": {
+        "Parakeet raw": {
+          "wins": 13,
+          "losses": 17,
+          "ties": 121,
+          "fewer_edits": 26,
+          "more_edits": 44,
+          "tune": {
+            "wins": 8,
+            "losses": 6,
+            "ties": 62,
+            "fewer_edits": 12,
+            "more_edits": 22
+          },
+          "check": {
+            "wins": 5,
+            "losses": 11,
+            "ties": 59,
+            "fewer_edits": 14,
+            "more_edits": 22
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 14,
+          "losses": 36,
+          "ties": 101,
+          "fewer_edits": 20,
+          "more_edits": 59,
+          "tune": {
+            "wins": 9,
+            "losses": 19,
+            "ties": 48,
+            "fewer_edits": 11,
+            "more_edits": 29
+          },
+          "check": {
+            "wins": 5,
+            "losses": 17,
+            "ties": 53,
+            "fewer_edits": 9,
+            "more_edits": 30
+          }
+        }
+      }
+    },
+    "both_zer": 45.6953642384106
+  },
+  "Gemma 4 E2B plain_then_v3": {
+    "dir": "runs/gemma4-e2b__plain_then_v3",
+    "meta": {
+      "name": "gemma4-e2b",
+      "mode": "plain_then_v3",
+      "source": "gemma4-e2b__plain",
+      "model_file": "gemma-4-E2B-it-Q4_K_M.gguf",
+      "model_bytes": 3106738272,
+      "fallbacks": {
+        "number": 5,
+        "name": 2
+      },
+      "fallback_total": 7,
+      "latency_s": {
+        "median": 1.303,
+        "p90": 3.367
+      },
+      "cleanup_latency_s": {
+        "median": 0.75,
+        "p90": 1.992
+      },
+      "note": "latency = Gemma plain transcription + Gemma text cleanup; this Mac was shared, timings rough"
+    },
+    "wer_spoken": 6.556185492077336,
+    "wer_intended": 8.106072020491185,
+    "wer_spoken_over30": 5.649202733485194,
+    "halves": {
+      "tune": 7.593037214885954,
+      "check": 8.623298033282904
+    },
+    "claude": {
+      "tune": {
+        "zer": 63.1578947368421,
+        "amend": 1.0404209519253766
+      },
+      "check": {
+        "zer": 53.333333333333336,
+        "amend": 1.3028558134124353
+      },
+      "all": {
+        "zer": 58.27814569536424,
+        "amend": 1.1734528407583218,
+        "zer_ci95": [49.67211328976035, 67.36148049645391],
+        "amend_ci95": [0.8906551585024652, 1.4686835044194537]
+      },
+      "over30": {
+        "zer": 0.0,
+        "amend": 1.0067114093959733
+      },
+      "upto30": {
+        "zer": 63.768115942028984,
+        "amend": 1.2537678563627626
+      }
+    },
+    "codex": {
+      "tune": {
+        "zer": 63.1578947368421,
+        "amend": 1.0038240917782026
+      },
+      "check": {
+        "zer": 53.333333333333336,
+        "amend": 1.2972658522396743
+      },
+      "all": {
+        "zer": 58.27814569536424,
+        "amend": 1.15250840063668,
+        "zer_ci95": [49.673202614379086, 66.88345275414241],
+        "amend_ci95": [0.8800350274382651, 1.4436398934458101]
+      },
+      "over30": {
+        "zer": 0.0,
+        "amend": 1.080737444373808
+      },
+      "upto30": {
+        "zer": 63.768115942028984,
+        "amend": 1.1869954178485709
+      }
+    },
+    "paired": {
+      "claude": {
+        "Parakeet raw": {
+          "wins": 27,
+          "losses": 19,
+          "ties": 105,
+          "fewer_edits": 41,
+          "more_edits": 37,
+          "tune": {
+            "wins": 16,
+            "losses": 7,
+            "ties": 53,
+            "fewer_edits": 22,
+            "more_edits": 15
+          },
+          "check": {
+            "wins": 11,
+            "losses": 12,
+            "ties": 52,
+            "fewer_edits": 19,
+            "more_edits": 22
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 13,
+          "losses": 24,
+          "ties": 114,
+          "fewer_edits": 20,
+          "more_edits": 43,
+          "tune": {
+            "wins": 8,
+            "losses": 11,
+            "ties": 57,
+            "fewer_edits": 10,
+            "more_edits": 18
+          },
+          "check": {
+            "wins": 5,
+            "losses": 13,
+            "ties": 57,
+            "fewer_edits": 10,
+            "more_edits": 25
+          }
+        }
+      },
+      "codex": {
+        "Parakeet raw": {
+          "wins": 28,
+          "losses": 16,
+          "ties": 107,
+          "fewer_edits": 44,
+          "more_edits": 35,
+          "tune": {
+            "wins": 16,
+            "losses": 5,
+            "ties": 55,
+            "fewer_edits": 23,
+            "more_edits": 14
+          },
+          "check": {
+            "wins": 12,
+            "losses": 11,
+            "ties": 52,
+            "fewer_edits": 21,
+            "more_edits": 21
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 16,
+          "losses": 22,
+          "ties": 113,
+          "fewer_edits": 22,
+          "more_edits": 43,
+          "tune": {
+            "wins": 9,
+            "losses": 10,
+            "ties": 57,
+            "fewer_edits": 10,
+            "more_edits": 19
+          },
+          "check": {
+            "wins": 7,
+            "losses": 12,
+            "ties": 56,
+            "fewer_edits": 12,
+            "more_edits": 24
+          }
+        }
+      }
+    },
+    "both_zer": 56.29139072847682
+  },
+  "Gemma 4 E4B one pass, no guard": {
+    "dir": "runs/gemma4-e4b__onepass",
+    "meta": {
+      "name": "gemma4-e4b",
+      "mode": "onepass",
+      "n": 151,
+      "model_file": "gemma-4-E4B-it-Q4_K_M.gguf",
+      "model_bytes": 4977171584,
+      "model_sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+      "mmproj_file": "mmproj-F16.gguf",
+      "mmproj_bytes": 990372672,
+      "mmproj_sha256": "ddf46c21d7078e95338cfc22306b19b276a29a5ad089023449dd54d4b6170a51",
+      "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+      "load_s": 1.21,
+      "peak_memory_bytes": 1819613088,
+      "max_rss_bytes": 6842089472,
+      "latency_s": {
+        "median": 1.598,
+        "p90": 3.708,
+        "mean": 2.3409668874172187,
+        "max": 10.895
+      },
+      "latency_single_part_s": {
+        "median": 1.5535,
+        "p90": 3.491
+      },
+      "real_time_factor_median": 0.13637295081967213,
+      "split_clips": 13,
+      "empty": 0,
+      "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 8192, one slot, all layers and the projector on Metal, --jinja (the model's own chat template)",
+      "note": "this Mac was shared with another eval running llama.cpp at the same time; timings are rough"
+    },
+    "wer_spoken": 3.954063090565489,
+    "wer_intended": 7.292451408769023,
+    "wer_spoken_over30": 4.419134396355353,
+    "halves": {
+      "tune": 7.202881152460984,
+      "check": 7.382753403933434
+    },
+    "claude": {
+      "tune": {
+        "zer": 52.63157894736842,
+        "amend": 1.6041198058482302
+      },
+      "check": {
+        "zer": 54.666666666666664,
+        "amend": 1.0880202636578205
+      },
+      "all": {
+        "zer": 53.64238410596027,
+        "amend": 1.342477746972129,
+        "zer_ci95": [45.911949685534594, 61.49305029540977],
+        "amend_ci95": [1.0251823569604561, 1.6670597666973472]
+      },
+      "over30": {
+        "zer": 7.6923076923076925,
+        "amend": 0.9107303877366997
+      },
+      "upto30": {
+        "zer": 57.971014492753625,
+        "amend": 1.5490830636461705
+      }
+    },
+    "codex": {
+      "tune": {
+        "zer": 52.63157894736842,
+        "amend": 1.4354066985645932
+      },
+      "check": {
+        "zer": 53.333333333333336,
+        "amend": 1.1334867663981587
+      },
+      "all": {
+        "zer": 52.980132450331126,
+        "amend": 1.2824623276691247,
+        "zer_ci95": [44.87997238981491, 61.02965049656226],
+        "amend_ci95": [0.95237575563879, 1.616457012804965]
+      },
+      "over30": {
+        "zer": 7.6923076923076925,
+        "amend": 0.9841097869266884
+      },
+      "upto30": {
+        "zer": 57.2463768115942,
+        "amend": 1.4246976283734343
+      }
+    },
+    "paired": {
+      "claude": {
+        "Parakeet raw": {
+          "wins": 18,
+          "losses": 17,
+          "ties": 116,
+          "fewer_edits": 36,
+          "more_edits": 31,
+          "tune": {
+            "wins": 7,
+            "losses": 6,
+            "ties": 63,
+            "fewer_edits": 14,
+            "more_edits": 16
+          },
+          "check": {
+            "wins": 11,
+            "losses": 11,
+            "ties": 53,
+            "fewer_edits": 22,
+            "more_edits": 15
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 15,
+          "losses": 33,
+          "ties": 103,
+          "fewer_edits": 28,
+          "more_edits": 48,
+          "tune": {
+            "wins": 7,
+            "losses": 18,
+            "ties": 51,
+            "fewer_edits": 13,
+            "more_edits": 26
+          },
+          "check": {
+            "wins": 8,
+            "losses": 15,
+            "ties": 52,
+            "fewer_edits": 15,
+            "more_edits": 22
+          }
+        }
+      },
+      "codex": {
+        "Parakeet raw": {
+          "wins": 19,
+          "losses": 15,
+          "ties": 117,
+          "fewer_edits": 39,
+          "more_edits": 29,
+          "tune": {
+            "wins": 9,
+            "losses": 6,
+            "ties": 61,
+            "fewer_edits": 16,
+            "more_edits": 17
+          },
+          "check": {
+            "wins": 10,
+            "losses": 9,
+            "ties": 56,
+            "fewer_edits": 23,
+            "more_edits": 12
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 17,
+          "losses": 31,
+          "ties": 103,
+          "fewer_edits": 32,
+          "more_edits": 46,
+          "tune": {
+            "wins": 9,
+            "losses": 18,
+            "ties": 49,
+            "fewer_edits": 15,
+            "more_edits": 26
+          },
+          "check": {
+            "wins": 8,
+            "losses": 13,
+            "ties": 54,
+            "fewer_edits": 17,
+            "more_edits": 20
+          }
+        }
+      }
+    },
+    "both_zer": 51.65562913907285
+  },
+  "Gemma 4 E4B one pass + guard": {
+    "dir": "runs/gemma4-e4b__onepass__guard",
+    "meta": {
+      "name": "gemma4-e4b",
+      "mode": "onepass",
+      "n": 151,
+      "model_file": "gemma-4-E4B-it-Q4_K_M.gguf",
+      "model_bytes": 4977171584,
+      "model_sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+      "mmproj_file": "mmproj-F16.gguf",
+      "mmproj_bytes": 990372672,
+      "mmproj_sha256": "ddf46c21d7078e95338cfc22306b19b276a29a5ad089023449dd54d4b6170a51",
+      "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+      "load_s": 1.21,
+      "peak_memory_bytes": 1819613088,
+      "max_rss_bytes": 6842089472,
+      "latency_s": {
+        "median": 1.598,
+        "p90": 3.708,
+        "mean": 2.3409668874172187,
+        "max": 10.895
+      },
+      "latency_single_part_s": {
+        "median": 1.5535,
+        "p90": 3.491
+      },
+      "real_time_factor_median": 0.13637295081967213,
+      "split_clips": 13,
+      "empty": 0,
+      "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 8192, one slot, all layers and the projector on Metal, --jinja (the model's own chat template)",
+      "note": "this Mac was shared with another eval running llama.cpp at the same time; timings are rough; with the guard the model runs twice per clip (plain + one-pass), so the real latency is the sum of both runs",
+      "guard": "vendor/guard.py against gemma4-e4b__plain",
+      "fallbacks": {
+        "number": 19,
+        "name": 8
+      },
+      "fallback_total": 27
+    },
+    "wer_spoken": 3.939526093908998,
+    "wer_intended": 7.277384360403796,
+    "wer_spoken_over30": 4.191343963553531,
+    "halves": {
+      "tune": 7.202881152460984,
+      "check": 7.35249621785174
+    },
+    "codex": {
+      "tune": {
+        "zer": 52.63157894736842,
+        "amend": 1.413281296197741
+      },
+      "check": {
+        "zer": 53.333333333333336,
+        "amend": 1.067697812662319
+      },
+      "all": {
+        "zer": 52.980132450331126,
+        "amend": 1.238390092879257,
+        "zer_ci95": [44.44444444444444, 61.03052210817212],
+        "amend_ci95": [0.9231249788872403, 1.5652819759503915]
+      },
+      "over30": {
+        "zer": 7.6923076923076925,
+        "amend": 0.9497964721845319
+      },
+      "upto30": {
+        "zer": 57.2463768115942,
+        "amend": 1.376008281930725
+      }
+    },
+    "paired": {
+      "codex": {
+        "Parakeet raw": {
+          "wins": 18,
+          "losses": 14,
+          "ties": 119,
+          "fewer_edits": 40,
+          "more_edits": 27,
+          "tune": {
+            "wins": 8,
+            "losses": 5,
+            "ties": 63,
+            "fewer_edits": 15,
+            "more_edits": 16
+          },
+          "check": {
+            "wins": 10,
+            "losses": 9,
+            "ties": 56,
+            "fewer_edits": 25,
+            "more_edits": 11
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 16,
+          "losses": 30,
+          "ties": 105,
+          "fewer_edits": 32,
+          "more_edits": 43,
+          "tune": {
+            "wins": 8,
+            "losses": 17,
+            "ties": 51,
+            "fewer_edits": 14,
+            "more_edits": 25
+          },
+          "check": {
+            "wins": 8,
+            "losses": 13,
+            "ties": 54,
+            "fewer_edits": 18,
+            "more_edits": 18
+          }
+        }
+      }
+    }
+  },
+  "Gemma 4 E4B plain transcription": {
+    "dir": "runs/gemma4-e4b__plain",
+    "meta": {
+      "name": "gemma4-e4b",
+      "mode": "plain",
+      "n": 151,
+      "model_file": "gemma-4-E4B-it-Q4_K_M.gguf",
+      "model_bytes": 4977171584,
+      "model_sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+      "mmproj_file": "mmproj-F16.gguf",
+      "mmproj_bytes": 990372672,
+      "mmproj_sha256": "ddf46c21d7078e95338cfc22306b19b276a29a5ad089023449dd54d4b6170a51",
+      "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+      "load_s": 3.88,
+      "peak_memory_bytes": 9054235568,
+      "max_rss_bytes": 5825986560,
+      "latency_s": {
+        "median": 1.106,
+        "p90": 2.538,
+        "mean": 1.6741986754966887,
+        "max": 7.779
+      },
+      "latency_single_part_s": {
+        "median": 1.044,
+        "p90": 2.286
+      },
+      "real_time_factor_median": 0.09344262295081968,
+      "split_clips": 13,
+      "empty": 0,
+      "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 8192, one slot, all layers and the projector on Metal, --jinja (the model's own chat template)",
+      "note": "this Mac was shared with another eval running llama.cpp at the same time; timings are rough"
+    },
+    "wer_spoken": 3.954063090565489,
+    "wer_intended": 7.4129877956908246,
+    "wer_spoken_over30": 4.373576309794989,
+    "halves": {
+      "tune": 7.322929171668667,
+      "check": 7.503782148260211
+    },
+    "codex": {
+      "tune": {
+        "zer": 56.578947368421055,
+        "amend": 1.5102161681966242
+      },
+      "check": {
+        "zer": 50.666666666666664,
+        "amend": 1.2170502393724405
+      },
+      "all": {
+        "zer": 53.64238410596027,
+        "amend": 1.3616971538776226,
+        "zer_ci95": [45.51724137931034, 61.80555555555556],
+        "amend_ci95": [1.03753480307841, 1.6939582324857005]
+      },
+      "over30": {
+        "zer": 15.384615384615385,
+        "amend": 1.0053437188660448
+      },
+      "upto30": {
+        "zer": 57.2463768115942,
+        "amend": 1.531426599370174
+      }
+    },
+    "paired": {
+      "codex": {
+        "Parakeet raw": {
+          "wins": 19,
+          "losses": 14,
+          "ties": 118,
+          "fewer_edits": 38,
+          "more_edits": 30,
+          "tune": {
+            "wins": 10,
+            "losses": 4,
+            "ties": 62,
+            "fewer_edits": 14,
+            "more_edits": 16
+          },
+          "check": {
+            "wins": 9,
+            "losses": 10,
+            "ties": 56,
+            "fewer_edits": 24,
+            "more_edits": 14
+          }
+        },
+        "Parakeet + Gemma 4 E2B text cleanup (v3, guard)": {
+          "wins": 18,
+          "losses": 31,
+          "ties": 102,
+          "fewer_edits": 32,
+          "more_edits": 45,
+          "tune": {
+            "wins": 10,
+            "losses": 16,
+            "ties": 50,
+            "fewer_edits": 14,
+            "more_edits": 23
+          },
+          "check": {
+            "wins": 8,
+            "losses": 15,
+            "ties": 52,
+            "fewer_edits": 18,
+            "more_edits": 22
+          }
+        }
+      }
+    }
+  }
+}

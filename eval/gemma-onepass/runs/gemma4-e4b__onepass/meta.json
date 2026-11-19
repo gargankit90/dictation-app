@@ -1,0 +1,30 @@
+{
+  "name": "gemma4-e4b",
+  "mode": "onepass",
+  "n": 151,
+  "model_file": "gemma-4-E4B-it-Q4_K_M.gguf",
+  "model_bytes": 4977171584,
+  "model_sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+  "mmproj_file": "mmproj-F16.gguf",
+  "mmproj_bytes": 990372672,
+  "mmproj_sha256": "ddf46c21d7078e95338cfc22306b19b276a29a5ad089023449dd54d4b6170a51",
+  "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+  "load_s": 1.21,
+  "peak_memory_bytes": 1819613088,
+  "max_rss_bytes": 6842089472,
+  "latency_s": {
+    "median": 1.598,
+    "p90": 3.708,
+    "mean": 2.3409668874172187,
+    "max": 10.895
+  },
+  "latency_single_part_s": {
+    "median": 1.5535,
+    "p90": 3.491
+  },
+  "real_time_factor_median": 0.13637295081967213,
+  "split_clips": 13,
+  "empty": 0,
+  "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 8192, one slot, all layers and the projector on Metal, --jinja (the model's own chat template)",
+  "note": "this Mac was shared with another eval running llama.cpp at the same time; timings are rough"
+}

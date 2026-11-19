@@ -1,0 +1,31 @@
+clip_id,status,transcript
+dict_0007,ok,Write a docstring for this function that explains what it returns and what happens when the input list is empty. Keep it short and use Google style.
+dict_0008,ok,Write a short out of office message saying I'm away until January 6th and to contact Priya Rahman at priya.rahman@northwind.io for anything urgent.
+dict_0014,ok,"I'm on the checkout v2 feature branch. How do I undo my last git commit but keep the changes staged? Actually, no. The last three commits, not just one."
+dict_0023,ok,"I need a quick variance explanation for the October budget report. Marketing spent 62,000 against a budget of 55,000. So, we're over by 7,000. Wait now, the budget was 58, so we're over by 4,000. Most of it was the trade show in Austin. Write two or three sentences I can drop into the report for the CFO and keep it neutral."
+dict_0024,ok,"Okay, so in billing.ts the calculate prorated amount function returns NaN whenever a subscription starts on the 31st and I'm pretty sure it's the date math on plan.start date. Can you rewrite it with datefns and add a unit test that goes from January 31st to February 28th? Oh, and we're on datefns version 3, so don't use the old imports."
+dict_0039,ok,The unit test for the ambiguous parser started failing after it merged previous branch. Can you figure out which of her changes broke them and explain why?
+dict_0041,ok,Pull the hardcoded feature flags out of the checkout page and read them from the config service like we do everywhere else.
+dict_0042,ok,For the comment form trim the whitespace block empty submissions disable the button while it's posting clear the field when it succeeds
+dict_0048,ok,"Look at the flaky upno test, the one that times out on CI. Figure out why and fix it and then run it a bunch of times in a row so we know is actually stable."
+dict_0053,ok,"Look at the Swift crash report I dropped in the chat. It's crashing in the feed view controller when the user scrolls really fast, and it looks like an index out of range. This started in build 4.2. Wait. No, 4.3 when we added the prefetching. Can you find where we're reading from the array after it's been reloaded and make it that safe? Don't rewrite the whole data source. Just fix the race."
+dict_0060,ok,Move the move the budget section above the timeline
+dict_0063,ok,"Closing line for the newsletter. As always, if you have a story idea or just want to say hi, reply to this email and it'll come straight to me."
+dict_0066,ok,Agenda for the parent volunteer meeting introductions review last year's fall festival assign booth leads and open floor for questions at the end
+dict_0069,ok,Recipe from Aunt Rosa for the flan three eggs one can of condensed milk one can of evaporated milk a teaspoon of vanilla and bake at 350 for 50 minutes in a water bath
+dict_0077,ok,"Q4 budget review. Marketing's at 62% of their annual spend and there's 10 weeks left. The Austin trade show booth came in at 14,200, which is about 3 grand over the estimate. Jordan O'Kaffer wants to move 8,000 from events into paid search for December. And finance needs to revise forecast by Friday, November 6th. Tracking sheets in the shared drive under budget/2026."
+dict_0083,ok,"Hey, just wanted to say great job on the presentation today. The client clearly loved it and you handled their questions really"
+dict_0087,ok,"Hi, for the plumber visit, I'll leave the spare key at the front desk. Sorry, with my neighbors across the hall, the desk closes early on Sundays. Thanks."
+dict_0097,ok,"Hi everyone. A couple reminders for the tournament this weekend. Get the players there well before their first game and send them with a water bottle, sunscreen, and both jerseys. Parking at the complex fills up fast, so carpool if you can. Oh, and we're doing a team lunch between games, so pack something or bring cash for the food trucks. Thanks and go Hornets."
+dict_0103,ok,"Hi Owen. So the export feature we promised for this month is going to slip a bit. We found a problem with how large files get, you know, get handled and we rather fix that properly than ship something that breaks on your big as accounts. I'm thinking it is more like like a two week delay. I'll keep you posted as we get closer. And sorry for the change."
+dict_0124,ok,Did you did you feed the dog yet?
+dict_0138,ok,Did you did you take the trash out already? It's like totally overflowing and pickup is tomorrow morning.
+dict_0152,ok,Running like 10 minutes late to stand up
+dict_0161,ok,I'm going to the latest of the afternoon family thing. I'll check messages tonight if anything is urgent.
+dict_0168,ok,"Thanks for jumping on that customer call with me. I was a little nervous, but having you there to answer the technical questions really helped."
+dict_0170,ok,"The staging environment is back up. Turns out it was an expired certificate, so I renewed it and set a reminder for next time."
+dict_0173,ok,Can you like send me the login for the Northwind portal? The username should be ops@northwind.io.
+dict_0177,ok,Our booth at the Osher trade show is number 1124 Set up opens at 7:00 a.m. on the 12th so plan to get there early
+dict_0179,ok,"So I talked to the customer this morning and honestly there they're not upset about the delay. They just want to know what's going on. I think if we send them a short update every couple of days, like even just a quick note saying where things are, that'll go a long way. Can you set a reminder on your end too so we don't drop it?"
+dict_0182,ok,How do I fix a squeaky door hinge?
+dict_0183,ok,Explain what a race condition is with a simple example

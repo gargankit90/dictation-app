@@ -1,0 +1,9 @@
+# Models live outside the repo (~/vocet-onepass-models, ~/vocet-cleanup-models); never commit models, audio or large binaries.
+*.gguf
+*.wav
+*.flac
+models/
+__pycache__/
+judge_cache/
+*.log
+*.judge.jsonl

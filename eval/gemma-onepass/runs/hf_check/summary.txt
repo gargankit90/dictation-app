@@ -1,0 +1,7 @@
+uv run hf_check.py --model ~/vocet-onepass-models/hf/gemma-4-E2B-it --n 30   (2026-11-19, transformers >= 5.10.1, torch 2.15.0, MPS, bf16)
+first 30 clips of up to 30 s; google/gemma-4-E2B-it model.safetensors sha256 2db5482b20d746879bb3ef79b5203e9075a2e2b98f54ec7c2f281c1477ddc550
+loaded on mps in 15.1 s
+plain: transformers bf16  WER spoken 5.29  intended 11.83  fillers 12  median 1.13 s
+plain: llama.cpp Q4_K_M   WER spoken 4.80  intended 11.30  fillers 12  identical text 15/30
+onepass: transformers bf16  WER spoken 6.29  intended 11.93  fillers 12  median 1.29 s
+onepass: llama.cpp Q4_K_M   WER spoken 6.09  intended 11.51  fillers 9  identical text 17/30

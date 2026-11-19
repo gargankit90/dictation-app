@@ -1,0 +1,53 @@
+run,clip_id,kind,where,words,replaced_by
+Parakeet raw,dict_0351,invented,middle,fast apis app,fastapi apps
+Parakeet + E2B text cleanup,dict_0239,dropped,end,it not some corporation,
+Parakeet + E2B text cleanup,dict_0351,invented,middle,fast apis app,fastapi apps
+gemma4-e2b__onepass,dict_0350,dropped,start,ok so write,right
+gemma4-e2b__onepass,dict_0351,invented,middle,fast apis app,fastapi apps
+gemma4-e2b__onepass,dict_0364,invented,start,drop down refetchs,dropdown refetches
+gemma4-e2b__onepass,dict_0428,dropped,middle,we are setting up,or sitting at
+gemma4-e2b__onepass,dict_0487,invented,middle,give me your,giving you a
+gemma4-e2b__onepass__guard,dict_0119,invented,middle,number is 312 5550164,numbers 3125550164
+gemma4-e2b__onepass__guard,dict_0177,invented,middle,0 a m,am
+gemma4-e2b__onepass__guard,dict_0350,dropped,start,ok so write,right
+gemma4-e2b__onepass__guard,dict_0351,invented,middle,fast apis app,fastapi apps
+gemma4-e2b__onepass__guard,dict_0364,invented,start,drop down refetchs,dropdown refetches
+gemma4-e2b__onepass__guard,dict_0428,dropped,middle,we are setting up,or sitting at
+gemma4-e2b__onepass__guard,dict_0487,invented,middle,give me your,giving you a
+gemma4-e2b__onepass__guard,dict_0544,dropped,end,fooddrive at eastsidehelps dot,fooddriveandeastsidehelps
+gemma4-e2b__onepass__guard,dict_0579,invented,end,b is era,be there at
+gemma4-e2b__onepass__guard,dict_0729,dropped,end,portal is benefits dot acme dot,portoisbenefits acmy
+gemma4-e2b__plain,dict_0119,invented,split,number is 312 5550164,numbers 3125550164
+gemma4-e2b__plain,dict_0177,invented,middle,0 a m,am
+gemma4-e2b__plain,dict_0351,invented,middle,fast apis app,fastapi apps
+gemma4-e2b__plain,dict_0364,invented,start,drop down re fetchs,dropdown refetches
+gemma4-e2b__plain,dict_0428,dropped,middle,we are setting up,or sitting at
+gemma4-e2b__plain,dict_0487,invented,middle,give me your,giving you a
+gemma4-e2b__plain,dict_0544,dropped,end,fooddrive at eastsidehelps dot,fooddriveandeastsidehelps
+gemma4-e2b__plain,dict_0579,invented,end,b is era,be there at
+gemma4-e2b__plain,dict_0614,invented,middle,el pa store,al pastor
+gemma4-e2b__plain,dict_0729,dropped,end,portal is benefits dot acme dot,portoisbenefits acmy
+gemma4-e2b__plain_then_v3,dict_0119,invented,middle,number is 312 5550164,numbers 3125550164
+gemma4-e2b__plain_then_v3,dict_0177,invented,middle,0 a m,am
+gemma4-e2b__plain_then_v3,dict_0350,dropped,start,ok so write,
+gemma4-e2b__plain_then_v3,dict_0351,invented,middle,fast apis app,fastapi apps
+gemma4-e2b__plain_then_v3,dict_0364,invented,start,drop down re fetchs,dropdown refetches
+gemma4-e2b__plain_then_v3,dict_0428,dropped,middle,we are setting up,or sitting at
+gemma4-e2b__plain_then_v3,dict_0487,invented,middle,give me your,giving you a
+gemma4-e2b__plain_then_v3,dict_0544,dropped,end,fooddrive at eastsidehelps dot,fooddriveandeastsidehelps
+gemma4-e2b__plain_then_v3,dict_0579,invented,end,b is era,be there at
+gemma4-e2b__plain_then_v3,dict_0614,invented,middle,el pa store,al pastor
+gemma4-e2b__plain_then_v3,dict_0729,dropped,end,portal is benefits dot acme dot,portoisbenefits acmy
+gemma4-e4b__onepass,dict_0177,invented,middle,0 a m,am
+gemma4-e4b__onepass,dict_0351,invented,middle,fast apis app,fastapi apps
+gemma4-e4b__onepass__guard,dict_0053,dropped,middle,feed view controller,feedviewcontroller
+gemma4-e4b__onepass__guard,dict_0177,invented,middle,0 a m,am
+gemma4-e4b__onepass__guard,dict_0351,invented,middle,fast apis app,fastapi apps
+gemma4-e4b__onepass__guard,dict_0506,invented,middle,0 a m,am
+gemma4-e4b__plain,dict_0053,dropped,middle,feed view controller,feedviewcontroller
+gemma4-e4b__plain,dict_0177,invented,middle,0 a m,am
+gemma4-e4b__plain,dict_0351,invented,middle,fast apis app,fastapi apps
+gemma4-e4b__plain,dict_0506,invented,middle,0 a m,am
+probe_gemma4-e2b__onepassu_tune,dict_0364,invented,start,drop down refetchs,dropdown refetches
+probe_gemma4-e2b__onepassu_tune,dict_0428,dropped,middle,we are setting up,or sitting at
+probe_gemma4-e2b__onepassu_tune,dict_0487,invented,middle,give me your,giving you a

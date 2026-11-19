@@ -1,0 +1,21 @@
+{
+  "name": "gemma4-e2b",
+  "mode": "plain_then_v3",
+  "source": "gemma4-e2b__plain",
+  "model_file": "gemma-4-E2B-it-Q4_K_M.gguf",
+  "model_bytes": 3106738272,
+  "fallbacks": {
+    "number": 5,
+    "name": 2
+  },
+  "fallback_total": 7,
+  "latency_s": {
+    "median": 1.303,
+    "p90": 3.367
+  },
+  "cleanup_latency_s": {
+    "median": 0.75,
+    "p90": 1.992
+  },
+  "note": "latency = Gemma plain transcription + Gemma text cleanup; this Mac was shared, timings rough"
+}

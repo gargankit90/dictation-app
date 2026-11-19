@@ -1,0 +1,37 @@
+{
+  "name": "gemma4-e2b",
+  "mode": "onepass",
+  "n": 151,
+  "model_file": "gemma-4-E2B-it-Q4_K_M.gguf",
+  "model_bytes": 3106738272,
+  "model_sha256": "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
+  "mmproj_file": "mmproj-F16.gguf",
+  "mmproj_bytes": 985654080,
+  "mmproj_sha256": "140be8d7849741f88c50757d529b84373ee8e27052cc2236855b537f4a8215fa",
+  "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+  "load_s": 1.21,
+  "peak_memory_bytes": 1586401672,
+  "max_rss_bytes": 4697030656,
+  "latency_s": {
+    "median": 0.667,
+    "p90": 1.553,
+    "mean": 1.0149867549668874,
+    "max": 4.806
+  },
+  "latency_single_part_s": {
+    "median": 0.6355,
+    "p90": 1.361
+  },
+  "real_time_factor_median": 0.05802700675168792,
+  "split_clips": 13,
+  "empty": 0,
+  "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 8192, one slot, all layers and the projector on Metal, --jinja (the model's own chat template)",
+  "note": "this Mac was shared with another eval running llama.cpp at the same time; timings are rough; with the guard the model runs twice per clip (plain + one-pass), so the real latency is the sum of both runs",
+  "guard": "vendor/guard.py against gemma4-e2b__plain",
+  "fallbacks": {
+    "number": 25,
+    "name": 4,
+    "url_email": 2
+  },
+  "fallback_total": 31
+}
