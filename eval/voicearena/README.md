@@ -29,10 +29,11 @@ intended text of ten clips to explain the failures.
 | `fetch_dataset.py` | downloads the dataset parquet (pinned revision and sha256), writes `clips/<id>.flac` and `clips/manifest.csv` |
 | `run_vocet_dictation.py` | the Vocet driver for the harness, next to the other `run_<tool>_dictation.py` files |
 | `score_claude_cli.py` | sends amend-va's exact v1 prompt to Claude Opus 5.5 (effort max) with `claude -p`, then scores with amend-va's own `char_edits` |
+| `score_codex_cli.py` | the second judge: the same prompt to GPT-6 Astra (effort max) with `codex exec`, same parsing, scoring and columns; writes `scored_codex.csv` ([below](#second-judge-codex)) |
 | `report.py` | ZER / AMEND overall, by domain and length, speaker-bootstrap intervals, latency, the 10 worst drafts |
 | `strip_results.py` | copies the harness CSV without the reference text column |
 | `bench.sh` | one command per step and per engine (below) |
-| `results/<engine>/` | `harness_results.csv` (the harness's own row per clip), `harness.log`, `scored.csv`, `scored.judge.jsonl` (each judge answer), `summary.json` |
+| `results/<engine>/` | `harness_results.csv` (the harness's own row per clip), `harness.log`, `scored.csv`, `scored.judge.jsonl` (each judge answer), `summary.json`; `scored_codex.csv` and `scored_codex.judge.jsonl` from the second judge |
 
 ## How the Vocet driver works
 
@@ -175,3 +176,39 @@ and writes the stripped `harness_results.csv`. The harness skips clips already
 `ok` in its results file, so a rerun resumes. To rerun particular clips, delete
 their rows from `~/va/results_<engine>.csv` in the VM and rerun, or pass
 `--clips-file`.
+
+## Second judge (Codex)
+
+`score_codex_cli.py` is a drop-in second judge next to `score_claude_cli.py`:
+same arguments, same output columns, same prompt (amend-va 0.2.1 `v1`, built
+by `build_prompt`), same parsing (`json.loads(...)["fixed"].strip()`, an empty
+answer for a non-empty intended text is retried) and same `char_edits` scoring.
+The judge is **GPT-6 Astra** (`gpt-6-astra`), the OpenAI judge on Voice
+Arena's own panel, at effort `max`, through `codex exec` on the owner's
+ChatGPT plan: read-only sandbox, no shell or web tools, Codex's agent
+instructions replaced by the Claude judge's one-line system prompt. Every
+answer is checked against Codex's run header (model, effort, sandbox) before
+it is cached. Comparison with the Claude judge on the four full runs:
+[../codex-judge/REPORT.md](../codex-judge/REPORT.md).
+
+From any eval branch that has this folder (or copy the one file; it needs only
+`uv`, a signed-in `codex` CLI and `clips/manifest.csv`):
+
+```sh
+eval/voicearena/bench.sh score-codex <engine>     # -> results/<engine>/scored_codex.csv
+# or directly, for any harness CSV with clip_id, status and transcript columns:
+uv run eval/voicearena/score_codex_cli.py <harness csv> eval/voicearena/clips/manifest.csv \
+    -o <dir>/scored_codex.csv --label <engine> [--workers 8] [--limit 5] [--max-calls 400]
+python3 eval/codex-judge/compare_judges.py        # both judges side by side (edit ENGINES for other runs)
+```
+
+- Answers are cached in `<output>.judge.jsonl` by prompt sha256: rerun the
+  same command to resume, and identical drafts are judged once.
+- Budget: one Codex call per unique prompt, about 4 minutes per 151 drafts
+  with 8 workers. `--max-calls` caps a run (default 400). On a usage or rate
+  limit message the script stops, keeps its cache and exits 3.
+- Rows record `judge_model gpt-6-astra`, `judge_effort max`, `judge_via codex
+  exec (Codex CLI <version>, ChatGPT plan)`, the prompt version, fingerprint
+  `8ed04caf4663` and the amend-va version, like the Claude rows.
+- Orca's Codex status hooks are switched off for judge calls (the `ORCA_*`
+  environment is not passed on, and the `hooks` feature is off).

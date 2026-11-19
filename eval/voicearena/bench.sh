@@ -8,6 +8,7 @@
 #   eval/voicearena/bench.sh install-app [Vocet.app]  # host -> VM: the app (default: this checkout's debug build)
 #   eval/voicearena/bench.sh run <engine> [harness args...]   # VM: run the harness in Terminal, wait, copy results back
 #   eval/voicearena/bench.sh score <engine>           # host: judge + score -> results/<engine>/scored.csv
+#   eval/voicearena/bench.sh score-codex <engine>     # host: second judge (Codex) -> results/<engine>/scored_codex.csv
 #   eval/voicearena/bench.sh report <engine>...       # host: summary.json + tables for REPORT.md
 #   eval/voicearena/bench.sh cloud-sources <engine>   # Vocet Cloud only: rewrite vs verbatim per clip
 #
@@ -110,6 +111,13 @@ case "$cmd" in
     engine=${1:?engine label}
     out=$HERE/results/$engine
     uv run --quiet "$HERE/score_claude_cli.py" "$out/results.csv" "$CLIPS/manifest.csv" -o "$out/scored.csv" --label "$engine"
+    ;;
+  score-codex)
+    engine=${1:?engine label}
+    out=$HERE/results/$engine
+    src=$out/results.csv
+    [ -f "$src" ] || src=$out/harness_results.csv
+    uv run --quiet "$HERE/score_codex_cli.py" "$src" "$CLIPS/manifest.csv" -o "$out/scored_codex.csv" --label "$engine"
     ;;
   report)
     uv run --quiet "$HERE/report.py" "$@"

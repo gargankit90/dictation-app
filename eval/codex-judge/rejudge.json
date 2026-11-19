@@ -1,0 +1,322 @@
+[
+  {
+    "engine": "vocet_assemblyai",
+    "clip_id": "dict_0069",
+    "e_codex": 2,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 2
+  },
+  {
+    "engine": "vocet_assemblyai",
+    "clip_id": "dict_0108",
+    "e_codex": 0,
+    "e_claude": 3,
+    "dis": true,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_assemblyai",
+    "clip_id": "dict_0350",
+    "e_codex": 1,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 1
+  },
+  {
+    "engine": "vocet_assemblyai",
+    "clip_id": "dict_0551",
+    "e_codex": 16,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 11
+  },
+  {
+    "engine": "vocet_groq",
+    "clip_id": "dict_0069",
+    "e_codex": 2,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 2
+  },
+  {
+    "engine": "vocet_groq",
+    "clip_id": "dict_0302",
+    "e_codex": 2,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 2
+  },
+  {
+    "engine": "vocet_groq",
+    "clip_id": "dict_0346",
+    "e_codex": 1,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 1
+  },
+  {
+    "engine": "vocet_groq",
+    "clip_id": "dict_0350",
+    "e_codex": 3,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 3
+  },
+  {
+    "engine": "vocet_groq",
+    "clip_id": "dict_0377",
+    "e_codex": 2,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_parakeet",
+    "clip_id": "dict_0302",
+    "e_codex": 2,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 2
+  },
+  {
+    "engine": "vocet_parakeet",
+    "clip_id": "dict_0350",
+    "e_codex": 3,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 3
+  },
+  {
+    "engine": "vocet_parakeet",
+    "clip_id": "dict_0377",
+    "e_codex": 2,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 2
+  },
+  {
+    "engine": "vocet_parakeet",
+    "clip_id": "dict_0474",
+    "e_codex": 5,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 5
+  },
+  {
+    "engine": "vocet_parakeet",
+    "clip_id": "dict_0606",
+    "e_codex": 1,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0069",
+    "e_codex": 2,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 2
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0302",
+    "e_codex": 2,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 2
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0350",
+    "e_codex": 4,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 4
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0474",
+    "e_codex": 5,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 5
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0598",
+    "e_codex": 0,
+    "e_claude": 1,
+    "dis": true,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0635",
+    "e_codex": 1,
+    "e_claude": 0,
+    "dis": true,
+    "e_codex2": 1
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0168",
+    "e_codex": 0,
+    "e_claude": 0,
+    "dis": false,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0693",
+    "e_codex": 0,
+    "e_claude": 0,
+    "dis": false,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0229",
+    "e_codex": 14,
+    "e_claude": 14,
+    "dis": false,
+    "e_codex2": 14
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0161",
+    "e_codex": 0,
+    "e_claude": 0,
+    "dis": false,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0430",
+    "e_codex": 13,
+    "e_claude": 16,
+    "dis": false,
+    "e_codex2": 13
+  },
+  {
+    "engine": "vocet_groq",
+    "clip_id": "dict_0279",
+    "e_codex": 7,
+    "e_claude": 7,
+    "dis": false,
+    "e_codex2": 7
+  },
+  {
+    "engine": "vocet_groq",
+    "clip_id": "dict_0247",
+    "e_codex": 0,
+    "e_claude": 0,
+    "dis": false,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0469",
+    "e_codex": 0,
+    "e_claude": 0,
+    "dis": false,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0285",
+    "e_codex": 10,
+    "e_claude": 10,
+    "dis": false,
+    "e_codex2": 10
+  },
+  {
+    "engine": "vocet_groq",
+    "clip_id": "dict_0255",
+    "e_codex": 13,
+    "e_claude": 13,
+    "dis": false,
+    "e_codex2": 13
+  },
+  {
+    "engine": "vocet_assemblyai",
+    "clip_id": "dict_0504",
+    "e_codex": 0,
+    "e_claude": 0,
+    "dis": false,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0108",
+    "e_codex": 7,
+    "e_claude": 10,
+    "dis": false,
+    "e_codex2": 7
+  },
+  {
+    "engine": "vocet_parakeet",
+    "clip_id": "dict_0097",
+    "e_codex": 7,
+    "e_claude": 7,
+    "dis": false,
+    "e_codex2": 7
+  },
+  {
+    "engine": "vocet_assemblyai",
+    "clip_id": "dict_0743",
+    "e_codex": 0,
+    "e_claude": 0,
+    "dis": false,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_assemblyai",
+    "clip_id": "dict_0496",
+    "e_codex": 2,
+    "e_claude": 2,
+    "dis": false,
+    "e_codex2": 2
+  },
+  {
+    "engine": "vocet_qwen3",
+    "clip_id": "dict_0595",
+    "e_codex": 0,
+    "e_claude": 0,
+    "dis": false,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_assemblyai",
+    "clip_id": "dict_0255",
+    "e_codex": 0,
+    "e_claude": 0,
+    "dis": false,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_parakeet",
+    "clip_id": "dict_0595",
+    "e_codex": 0,
+    "e_claude": 0,
+    "dis": false,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_groq",
+    "clip_id": "dict_0083",
+    "e_codex": 0,
+    "e_claude": 0,
+    "dis": false,
+    "e_codex2": 0
+  },
+  {
+    "engine": "vocet_assemblyai",
+    "clip_id": "dict_0087",
+    "e_codex": 0,
+    "e_claude": 0,
+    "dis": false,
+    "e_codex2": 0
+  }
+]
