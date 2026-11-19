@@ -11,6 +11,7 @@
 #   eval/voicearena/bench.sh report <engine>...       # host: summary.json + tables for REPORT.md
 #   eval/voicearena/bench.sh cloud-sources <engine>   # Vocet Cloud only: rewrite vs verbatim per clip
 #
+# BENCH_VM=<name> picks the VM (default dictation-vm-eval; dictation-vm-eval-2 for a second run at once).
 # <engine> is a label such as vocet_groq or vocet_assemblyai. Everything else (clips, harness timing,
 # judge, prompt version) is fixed, so two engines' results are directly comparable.
 # Never point this at dictation-vm, dictation-vm-2 or the golden image: the name is checked.

@@ -131,6 +131,33 @@ Another engine (the experimental Vocet Cloud (AssemblyAI) provider from PR
 - Run with `--provider assemblyai`, which makes the driver's settings
   check expect that provider instead of Groq.
 
+On-device engines (run on 2026-11-19 from `cfe583a`, the same build as Groq):
+
+- The 0.1.0 build can't read a settings file with `"provider": "assemblyai"`
+  (written by the AssemblyAI build). With Vocet quit, the VM's
+  `settings.json` was set back to `"provider": "groq"` and
+  `"model": "whisper-large-v3-turbo"` (backup: `settings.json.aai-backup`).
+- The new build again asked for the old keychain items. All those prompts
+  were denied; the on-device engine needs no key.
+- Settings → Speech: "English" → Download (Parakeet), wait for "downloaded
+  and verified" in Vocet's log, then choose it. Later "30 languages" →
+  Download (Qwen3), then choose it.
+- Run with `--local-model parakeet-unified-en-0.6b-q4_k_m` (or
+  `qwen3-asr-0.6b-q4_k_m`), which makes the driver's settings check expect
+  `transcription: local` and that model.
+
+Two VMs at once: `BENCH_VM` picks the VM for every command (only
+`dictation-vm-eval` and `dictation-vm-eval-*` are accepted). Since
+2026-11-19 there is a second eval VM, `dictation-vm-eval-2`, a clone of
+`dictation-vm-eval` with the harness, clips, BlackHole and uv set up. Apple
+allows two running macOS VMs, so the Lead frees a slot first. Give each run its
+own engine label, so its results go to their own `results/<engine>/` folder:
+
+```sh
+BENCH_VM=dictation-vm-eval-2 eval/voicearena/bench.sh start
+BENCH_VM=dictation-vm-eval-2 eval/voicearena/bench.sh run <engine> ...
+```
+
 Each run, per engine (`<engine>` is a label such as `vocet_groq`):
 
 ```sh

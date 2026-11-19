@@ -1,0 +1,10 @@
+06:46:05 151 clips, 0 done, 1 to run
+06:46:05 audio -> BlackHole 2ch (2 ch, 48000 Hz)
+06:46:06 tool settings before first clip: vocet_provider=groq, vocet_model=whisper-large-v3-turbo, vocet_language=en, vocet_hotkey=RightAlt, vocet_transcription=local, vocet_local_model=qwen3-asr-0.6b-q4_k_m, default_input=BlackHole 2ch
+06:46:07 scratch document: window id 248
+06:46:10 TextEdit substitutions: Smart Quotes=already off, Smart Dashes=already off, Text Replacement=turned off, Smart Links=already off, Data Detectors=already off, Correct Spelling Automatically=already off, Check Spelling While Typing=turned off, Check Grammar With Spelling=already off
+06:46:10 Starting in 3s - don't touch the keyboard/mouse. Ctrl-C stops safely; rerun to resume.
+06:46:35 [1/1] dict_0007.flac [ok] 'Write a docstring for this function that explains what it returns and what happens when the input list is empty. Keep it short and use Google style.'
+06:46:35 tool settings in use: vocet_provider=groq, vocet_model=whisper-large-v3-turbo, vocet_language=en, vocet_hotkey=RightAlt, vocet_transcription=local, vocet_local_model=qwen3-asr-0.6b-q4_k_m, default_input=BlackHole 2ch
+06:46:35 --- batch check after 1/1 (1 ok in total): OK
+06:46:37 results: /Users/lume/va/results_vocet_qwen3_check.csv - ok=1

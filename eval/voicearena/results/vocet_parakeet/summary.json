@@ -1,0 +1,181 @@
+{
+ "engine": "vocet_parakeet",
+ "n": 151,
+ "zer": 52.980132450331126,
+ "zer_ci95": [
+  44.57015655577299,
+  62.0
+ ],
+ "amend": 1.376815821714019,
+ "amend_ci95": [
+  1.0505825884935003,
+  1.7492989818281819
+ ],
+ "judge": "claude-opus-5-5 effort=max via claude -p (Claude Code CLI)",
+ "prompt": "amend-va 0.2.1 prompt v1 fingerprint 8ed04caf4663",
+ "label": "unofficial: single judge (Claude Opus 5.5 via Claude Code), public set only",
+ "empty_drafts": 0,
+ "latency_s": {
+  "n": 151,
+  "median": 1.17,
+  "p90": 2.13,
+  "mean": 1.560927152317881,
+  "max": 7.49
+ },
+ "by_domain": {
+  "personal_messaging": {
+   "n": 25,
+   "zer": 64.0,
+   "amend": 1.692665117822768
+  },
+  "work_chat": {
+   "n": 24,
+   "zer": 62.5,
+   "amend": 1.2539184952978057
+  },
+  "email": {
+   "n": 22,
+   "zer": 63.63636363636363,
+   "amend": 1.4514328247115742
+  },
+  "ai_prompt": {
+   "n": 22,
+   "zer": 54.54545454545455,
+   "amend": 1.7075773745997866
+  },
+  "code": {
+   "n": 26,
+   "zer": 53.84615384615385,
+   "amend": 0.9645580978017048
+  },
+  "docs_notes": {
+   "n": 22,
+   "zer": 40.90909090909091,
+   "amend": 1.961297071129707
+  },
+  "long_form": {
+   "n": 10,
+   "zer": 0.0,
+   "amend": 1.0838222133837128
+  }
+ },
+ "by_length": {
+  "short (<=15 words)": {
+   "n": 20,
+   "zer": 75.0,
+   "amend": 4.786545924967658
+  },
+  "standard (16-80 words)": {
+   "n": 121,
+   "zer": 53.71900826446281,
+   "amend": 1.3900733412928534
+  },
+  "long (>80 words)": {
+   "n": 10,
+   "zer": 0.0,
+   "amend": 1.0838222133837128
+  }
+ },
+ "worst": [
+  {
+   "clip_id": "dict_0544",
+   "domain": "long_form",
+   "edits": "34",
+   "chars": "953",
+   "draft": "Okay, meeting recap for the Fall Food Drive Planning Call. On the call were Lorraine Whitfield, Thomas Herrera, Kiara Bell, and me. So we confirmed the drive runs November 8th through November 22nd, and the main drop-off is the Eastside Community Center at 1710 Harmon Avenue. Last year, we got about £4,200. Sorry, no. £3,900, and this year we're aiming for £5,000. Thomas got Greenleaf Market to commit to a $50 gift card donation for every $100 we collect, capped at $1,500. Kiera's handling volunteer sign-ups, and she's already got 28 people for the two weekend shifts, but we still need drivers for the pickup route on the 16th. Lorraine's going to reach out to the three elementary schools about doing the classroom competitions again, since that was almost a third of last year's total. Printed flyers were $240. That comes out of the general fund. Next check-in call is Thursday at 6.30 p.m., and if anything changes before then, email me at fooddrive at eastsidelps.org",
+   "fixed": "Meeting recap for the Fall Food Drive Planning Call. On the call were Lorraine Whitfield, Tomas Herrera, Kiara Bell, and me. We confirmed the drive runs November 8th through November 22nd, and the main drop-off is the Eastside Community Center at 1710 Harmon Avenue. Last year, we got about £4,200. Sorry, no. 3,900 pounds, and this year we're aiming for 5,000. Tomas got Greenleaf Market to commit to a $50 gift card donation for every 100 pounds we collect, capped at $1,500. Kiara's handling volunteer sign-ups, and she's already got 28 people for the two weekend shifts, but we still need drivers for the pickup route on the 16th. Lorraine's going to reach out to the three elementary schools about doing the classroom competitions again, since that was almost a third of last year's total. Printed flyers were $240. That comes out of the general fund. Next check-in call is Thursday at 6.30 p.m., and if anything changes before then, email me at fooddrive@eastsidehelps.org",
+   "intended_text": "Meeting recap for the fall food drive planning call\n\nOn the call were Lorraine Whitfield, Tomas Herrera, Kiara Bell, and me.\n\nWe confirmed the drive runs November 8 through November 22, and the main drop-off is the Eastside Community Center at 1710 Harmon Avenue. Last year we got about 3,900 pounds, and this year we're aiming for 5,000.\n\nTomas got Greenleaf Market to commit to a $50 gift card donation for every 100 pounds we collect, capped at $1,500. Kiara's handling volunteer signups and she's already got 28 people for the two weekend shifts, but we still need drivers for the pickup route on the 16th. Lorraine's going to reach out to the three elementary schools about doing the classroom competitions again, since that was almost a third of last year's total.\n\nPrinted flyers were $240, that comes out of the general fund.\n\nNext check-in call is Thursday at 6:30 PM, and if anything changes before then, email me at fooddrive@eastsidehelps.org.",
+   "spoken_text": "Okay meeting recap for the fall food drive planning call. On the call were Lorraine Whitfield, Tomas Herrera, Kiara Bell, and me. So we confirmed the drive runs November eighth through November twenty second, and the main drop off is the Eastside Community Center at seventeen ten Harmon Avenue. Last year we got about four thousand two hundred pounds, sorry, no, three thousand nine hundred pounds, and this year we're aiming for five thousand. Tomas got Greenleaf Market to commit to a fifty dollar gift card donation for every hundred pounds we collect, capped at fifteen hundred dollars. Kiara's handling volunteer signups and she's already got twenty eight people for the two weekend shifts, but we still need drivers for the pickup route on the sixteenth. Lorraine's going to reach out to the three elementary schools about doing the classroom competitions again, since that was almost a third of last year's total. Printed flyers were two hundred and forty dollars, that comes out of the general fund. Next check in call is Thursday at six thirty p m, and if anything changes before then email me at fooddrive at eastsidehelps dot org."
+  },
+  {
+   "clip_id": "dict_0461",
+   "domain": "email",
+   "edits": "20",
+   "chars": "136",
+   "draft": "Hey, for mom and dad's anniversary, I was going to what if we split a dinner, some flowers, and like a frame photo from the old house? Let me know what you think",
+   "fixed": "Hey, for mom and dad's anniversary, what if we split a dinner, some flowers, and a frame photo from the old house? Let me know what you think",
+   "intended_text": "Hey,\n\nFor Mom and Dad's anniversary, what if we split a dinner, some flowers, and a framed photo from the old house? Let me know what you think.",
+   "spoken_text": "Hey, for Mom and Dad's anniversary, I was going to, what if we split a dinner, some flowers, and, like, a framed photo from the old house? Let me know what you think."
+  },
+  {
+   "clip_id": "dict_0497",
+   "domain": "email",
+   "edits": "20",
+   "chars": "265",
+   "draft": "Hey guys, so I've been thinking about doing a reunion this summer since it's been like almost 10 years since graduation. I was going to I figured we could rent a cabin somewhere for a long weekend. If you're in, reply and let me know which month works best and I'll start looking at places",
+   "fixed": "Hey guys, so I've been thinking about doing a reunion this summer since it's been almost 10 years since graduation. I figured we could rent a cabin somewhere for a long weekend. If you're in, reply and let me know which month works best and I'll start looking at places",
+   "intended_text": "Hey guys,\n\nSo I've been thinking about doing a reunion this summer, since it's been almost ten years since graduation. I figured we could rent a cabin somewhere for a long weekend. If you're in, reply and let me know which months work best, and I'll start looking at places.",
+   "spoken_text": "Hey guys, so I've been thinking about doing a reunion this summer, since it's been, like, almost ten years since graduation. I was going to, I figured we could rent a cabin somewhere for a long weekend. If you're in, reply and let me know which months work best, and I'll start looking at places."
+  },
+  {
+   "clip_id": "dict_0407",
+   "domain": "docs_notes",
+   "edits": "18",
+   "chars": "165",
+   "draft": "Start check for the shop. We're down to down to eight bags of the house blend like three tens of the Earl Gray and maybe two cases of oat milk reorder from Ridgeline Coffee Supply",
+   "fixed": "Stock check for the shop. We're down to eight bags of the house blend three tins of the Earl Grey and maybe two cases of oat milk reorder from Ridgeline Coffee Supply",
+   "intended_text": "Stock check for the shop. We're down to:\n- 8 bags of the house blend\n- 3 tins of the Earl Grey\n- Maybe 2 cases of oat milk\n\nReorder from Ridgeline Coffee Supply.",
+   "spoken_text": "Stock check for the shop. We're down to, down to eight bags of the house blend, like three tins of the Earl Grey, and maybe two cases of oat milk. Reorder from Ridgeline Coffee Supply."
+  },
+  {
+   "clip_id": "dict_0399",
+   "domain": "docs_notes",
+   "edits": "17",
+   "chars": "97",
+   "draft": "Car stuff The oil change is it's due at like 42,000 miles and the shop on Delancey quoted 89 bucks for synthetic",
+   "fixed": "Car stuff The oil change is due at 42,000 miles and the shop on Delancey quoted $89 for synthetic",
+   "intended_text": "Car stuff: The oil change is due at 42,000 miles, and the shop on Delancey quoted $89 for synthetic.",
+   "spoken_text": "Car stuff. The oil change is, it's due at like forty two thousand miles, and the shop on Delancey quoted eighty nine bucks for synthetic."
+  },
+  {
+   "clip_id": "dict_0229",
+   "domain": "ai_prompt",
+   "edits": "14",
+   "chars": "242",
+   "draft": "I signed up for the Twin Cities Marathon on October 4th, and right now I'm running like 15 miles a week. Can you build me a 16-week plan that gets me there without, you know, wrecking my knees? I can only run four days a week, and Sundays have to be the long run.",
+   "fixed": "I signed up for the Twin Cities Marathon on October 4th, and right now I'm running 15 miles a week. Can you build me a 16-week plan that gets me there without wrecking my knees? I can only run four days a week, and Sundays have to be the long run.",
+   "intended_text": "I signed up for the Twin Cities Marathon on October 4th and right now I'm running 15 miles a week. Can you build me a 16-week plan that gets me there without wrecking my knees? I can only run four days a week and Sundays have to be the long run.",
+   "spoken_text": "I signed up for the Twin Cities Marathon on October fourth and right now I'm running like fifteen miles a week. Can you build me a sixteen week plan that gets me there without, you know, wrecking my knees? I can only run four days a week and Sundays have to be the long run."
+  },
+  {
+   "clip_id": "dict_0231",
+   "domain": "ai_prompt",
+   "edits": "14",
+   "chars": "242",
+   "draft": "I signed up for the Twin Cities Marathon on October 4th, and right now I'm running like 15 miles a week. Can you build me a 16-week plan that gets me there without, you know, wrecking my knees? I can only run four days a week, and Sundays have to be the long run",
+   "fixed": "I signed up for the Twin Cities Marathon on October 4th, and right now I'm running 15 miles a week. Can you build me a 16-week plan that gets me there without wrecking my knees? I can only run four days a week, and Sundays have to be the long run",
+   "intended_text": "I signed up for the Twin Cities Marathon on October 4th and right now I'm running 15 miles a week. Can you build me a 16-week plan that gets me there without wrecking my knees? I can only run four days a week and Sundays have to be the long run.",
+   "spoken_text": "I signed up for the Twin Cities Marathon on October fourth and right now I'm running like fifteen miles a week. Can you build me a sixteen week plan that gets me there without, you know, wrecking my knees? I can only run four days a week and Sundays have to be the long run."
+  },
+  {
+   "clip_id": "dict_0103",
+   "domain": "email",
+   "edits": "13",
+   "chars": "328",
+   "draft": "Hi, Owen. So the export feature we promised for this month is going to slip a bit. We found a problem with how large files get, you know, get handled and we rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like a two-week delay. I'll keep you posted as we get closer and sorry for the change",
+   "fixed": "Hi, Owen. So the export feature we promised for this month is going to slip a bit. We found a problem with how large files get handled and we rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like a two-week delay. I'll keep you posted as we get closer and sorry for the change",
+   "intended_text": "Hi Owen,\n\nSo the export feature we promised for this month is going to slip a bit. We found a problem with how large files get handled, and we'd rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like a two-week delay. I'll keep you posted as we get closer, and sorry for the change.",
+   "spoken_text": "Hi Owen, so the export feature we promised for this month is going to slip a bit. We found a problem with how large files get, you know, get handled, and we'd rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like, like a two week delay. I'll keep you posted as we get closer, and sorry for the change."
+  },
+  {
+   "clip_id": "dict_0138",
+   "domain": "personal_messaging",
+   "edits": "13",
+   "chars": "90",
+   "draft": "Did you? Did you take the trash out already? It's like totally overflowing and pickup is tomorrow morning",
+   "fixed": "Did you take the trash out already? It's totally overflowing and pickup is tomorrow morning",
+   "intended_text": "Did you take the trash out already? It's totally overflowing and pickup is tomorrow morning.",
+   "spoken_text": "Did you, did you take the trash out already? It's like totally overflowing and pickup is tomorrow morning."
+  },
+  {
+   "clip_id": "dict_0533",
+   "domain": "long_form",
+   "edits": "12",
+   "chars": "935",
+   "draft": "Okay, update on the Regional Sales Summit. Since we're about six weeks out now, venues locked in. We're at the Lakeshore Conference Center in Milwaukee, February 19th and 20th. Room block at the Harbor View Hotel is 110 rooms at $169 a night, and the cutoff for that rate is January 23rd. Sorry, January 29th. I just double-checked the contract. We've got 94 people registered so far out of about 130 invited. Budget's 85,000 total. And we've committed about $61,000 so far. Mostly venue, catering, and AV. Keynotes confirmed. Dana Whitlock from ClearPath Consulting is opening the first morning at 9 a.m. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales. Registration link is summit.northwind.io slash register. So please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements. Per diem is $75 a day. I'll send the full agenda draft next Tuesday for comment",
+   "fixed": "Update on the Regional Sales Summit. Since we're about six weeks out now, venues locked in. We're at the Lakeshore Conference Center in Milwaukee, February 19th and 20th. Room block at the Harbor View Hotel is 110 rooms at $169 a night, and the cutoff for that rate is January 23rd. Sorry, January 29th. I just double-checked the contract. We've got 94 people registered so far out of about 130 invited. Budget's 85,000 total. And we've committed about $61,000 so far. Mostly venue, catering, and AV. Keynotes confirmed. Dana Whitlock from Clearpath Consulting is opening the first morning at 9 a.m. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales. Registration link is summit.northwind.io/register. So please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements. Per diem is $75 a day. I'll send the full agenda draft next Tuesday for comment",
+   "intended_text": "Update on the regional sales summit, since we're about six weeks out now.\n\nVenue's locked in, we're at the Lakeshore Conference Center in Milwaukee, February 19 and 20. Room block at the Harbor View Hotel is 110 rooms at $169 a night, and the cutoff for that rate is January 29, I just double-checked the contract.\n\nWe've got 94 people registered so far out of about 130 invited. Budget's $85,000 total and we've committed about $61,000 so far, mostly venue, catering, and AV.\n\nKeynote's confirmed, Dana Whitlock from Clearpath Consulting is opening the first morning at 9 AM. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales.\n\nRegistration link is summit.northwind.io/register, so please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements, per diem is $75 a day.\n\nI'll send the full agenda draft next Tuesday for comments.",
+   "spoken_text": "Okay update on the regional sales summit, since we're about six weeks out now. Venue's locked in, we're at the Lakeshore Conference Center in Milwaukee, February nineteenth and twentieth. Room block at the Harbor View Hotel is a hundred and ten rooms at a hundred sixty nine a night, and the cutoff for that rate is January twenty third, sorry, January twenty ninth, I just double checked the contract. We've got ninety four people registered so far out of about a hundred and thirty invited. Budget's eighty five thousand total and we've committed about sixty one thousand so far, mostly venue, catering, and AV. Keynote's confirmed, Dana Whitlock from Clearpath Consulting is opening the first morning at nine a m. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales. Registration link is summit dot northwind dot io slash register, so please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements, per diem is seventy five dollars a day. I'll send the full agenda draft next Tuesday for comments."
+  }
+ ]
+}

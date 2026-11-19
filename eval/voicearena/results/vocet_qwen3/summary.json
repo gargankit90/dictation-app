@@ -1,0 +1,181 @@
+{
+ "engine": "vocet_qwen3",
+ "n": 151,
+ "zer": 49.00662251655629,
+ "zer_ci95": [
+  41.13640051931191,
+  57.14532019704433
+ ],
+ "amend": 1.6994296632986885,
+ "amend_ci95": [
+  1.3315605017258303,
+  2.0816045237747978
+ ],
+ "judge": "claude-opus-5-5 effort=max via claude -p (Claude Code CLI)",
+ "prompt": "amend-va 0.2.1 prompt v1 fingerprint 8ed04caf4663",
+ "label": "unofficial: single judge (Claude Opus 5.5 via Claude Code), public set only",
+ "empty_drafts": 0,
+ "latency_s": {
+  "n": 151,
+  "median": 1.87,
+  "p90": 3.88,
+  "mean": 2.6038410596026487,
+  "max": 14.73
+ },
+ "by_domain": {
+  "personal_messaging": {
+   "n": 25,
+   "zer": 52.0,
+   "amend": 2.2787318361955085
+  },
+  "work_chat": {
+   "n": 24,
+   "zer": 54.166666666666664,
+   "amend": 1.7696044413601666
+  },
+  "email": {
+   "n": 22,
+   "zer": 50.0,
+   "amend": 1.4022946639956293
+  },
+  "ai_prompt": {
+   "n": 22,
+   "zer": 50.0,
+   "amend": 1.729660474055093
+  },
+  "code": {
+   "n": 26,
+   "zer": 53.84615384615385,
+   "amend": 1.5215931975833519
+  },
+  "docs_notes": {
+   "n": 22,
+   "zer": 54.54545454545455,
+   "amend": 2.158086323452938
+  },
+  "long_form": {
+   "n": 10,
+   "zer": 0.0,
+   "amend": 1.5578781305462432
+  }
+ },
+ "by_length": {
+  "short (<=15 words)": {
+   "n": 20,
+   "zer": 65.0,
+   "amend": 5.751633986928105
+  },
+  "standard (16-80 words)": {
+   "n": 121,
+   "zer": 50.413223140495866,
+   "amend": 1.629009054751629
+  },
+  "long (>80 words)": {
+   "n": 10,
+   "zer": 0.0,
+   "amend": 1.5578781305462432
+  }
+ },
+ "worst": [
+  {
+   "clip_id": "dict_0533",
+   "domain": "long_form",
+   "edits": "37",
+   "chars": "934",
+   "draft": "Okay, update on the regional sales summit. Since we're about six weeks out now, venue's locked in. We're at the Lake Shore Conference Center in Milwaukee, February 19th and 20th. Room block at the Harbor View Hotel is 110 rooms at $169 a night, and the cut off for that rate is January 23rd. Sorry, January 29th. I just double checked the contract. We've got 94 people registered so far out of about 130 invited, budget's 85, 000 total, and we've committed about 61, 000 so far. Mostly venue catering and AV. Key notes confirmed. Dana Whitlock from Clear Pass Consulting is opening the first morning at 9 a.m. We still need someone to lead the breakout of the new pricing model. And I really like that to be someone from product, not sales. Registration link at summit dot northwind dot io slash register. So please note anyone on your team who hasn't signed up. Gave handling travel reimbursement per day is $75 a day. I'll send the full agenda draft next Tuesday for comment.",
+   "fixed": "Update on the regional sales summit. Since we're about six weeks out now, venue's locked in. We're at the Lakeshore Conference Center in Milwaukee, February 19th and 20th. Room block at the Harbor View Hotel is 110 rooms at $169 a night, and the cut off for that rate is January 23rd. Sorry, January 29th. I just double checked the contract. We've got 94 people registered so far out of about 130 invited, budget's 85, 000 total, and we've committed about 61, 000 so far. Mostly venue catering and AV. Keynote's confirmed. Dana Whitlock from Clearpath Consulting is opening the first morning at 9 a.m. We still need someone to lead the breakout of the new pricing model. And I really like that to be someone from product, not sales. Registration link at summit.northwind.io/register. So please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursement per diem is $75 a day. I'll send the full agenda draft next Tuesday for comment.",
+   "intended_text": "Update on the regional sales summit, since we're about six weeks out now.\n\nVenue's locked in, we're at the Lakeshore Conference Center in Milwaukee, February 19 and 20. Room block at the Harbor View Hotel is 110 rooms at $169 a night, and the cutoff for that rate is January 29, I just double-checked the contract.\n\nWe've got 94 people registered so far out of about 130 invited. Budget's $85,000 total and we've committed about $61,000 so far, mostly venue, catering, and AV.\n\nKeynote's confirmed, Dana Whitlock from Clearpath Consulting is opening the first morning at 9 AM. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales.\n\nRegistration link is summit.northwind.io/register, so please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements, per diem is $75 a day.\n\nI'll send the full agenda draft next Tuesday for comments.",
+   "spoken_text": "Okay update on the regional sales summit, since we're about six weeks out now. Venue's locked in, we're at the Lakeshore Conference Center in Milwaukee, February nineteenth and twentieth. Room block at the Harbor View Hotel is a hundred and ten rooms at a hundred sixty nine a night, and the cutoff for that rate is January twenty third, sorry, January twenty ninth, I just double checked the contract. We've got ninety four people registered so far out of about a hundred and thirty invited. Budget's eighty five thousand total and we've committed about sixty one thousand so far, mostly venue, catering, and AV. Keynote's confirmed, Dana Whitlock from Clearpath Consulting is opening the first morning at nine a m. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales. Registration link is summit dot northwind dot io slash register, so please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements, per diem is seventy five dollars a day. I'll send the full agenda draft next Tuesday for comments."
+  },
+  {
+   "clip_id": "dict_0544",
+   "domain": "long_form",
+   "edits": "24",
+   "chars": "958",
+   "draft": "Okay, meeting recap for the Fall Food Drive Planning Call. On the call were Lorraine Whitfield, Thomas Herrera, Kiara Bell, and me. So we confirmed the drive runs November 8 through November 22nd, and the main drop off is the East Side Community Center at 1710 Harmon Avenue. Last year we got about 4,200 pounds. Sorry, no. 3,900 pounds, and this year we're aiming for 5,000. Thomas got Greenleaf Market to commit to a $50 gift card donation for every hundred pounds we collect. Cap at $1,500. Kiara's handling volunteer sign ups, and she's already got 28 people for the two weekend shifts. But we still need drivers for the pickup food on the 16th. Lorraine's going to reach out to the three elementary schools about doing the classroom competitions again, since that was almost a third of last year's total. Printed flyers were $240, that comes out of the general fund. Next check in call is Thursday at 6:30 p.m. And if anything changes before then, email me at fooddrive at eastsidehelps dot org.",
+   "fixed": "Meeting recap for the Fall Food Drive Planning Call. On the call were Lorraine Whitfield, Tomas Herrera, Kiara Bell, and me. We confirmed the drive runs November 8 through November 22nd, and the main drop off is the Eastside Community Center at 1710 Harmon Avenue. Last year we got about 4,200 pounds. Sorry, no. 3,900 pounds, and this year we're aiming for 5,000. Tomas got Greenleaf Market to commit to a $50 gift card donation for every hundred pounds we collect. Cap at $1,500. Kiara's handling volunteer sign ups, and she's already got 28 people for the two weekend shifts. But we still need drivers for the pickup route on the 16th. Lorraine's going to reach out to the three elementary schools about doing the classroom competitions again, since that was almost a third of last year's total. Printed flyers were $240, that comes out of the general fund. Next check in call is Thursday at 6:30 p.m. And if anything changes before then, email me at fooddrive@eastsidehelps.org.",
+   "intended_text": "Meeting recap for the fall food drive planning call\n\nOn the call were Lorraine Whitfield, Tomas Herrera, Kiara Bell, and me.\n\nWe confirmed the drive runs November 8 through November 22, and the main drop-off is the Eastside Community Center at 1710 Harmon Avenue. Last year we got about 3,900 pounds, and this year we're aiming for 5,000.\n\nTomas got Greenleaf Market to commit to a $50 gift card donation for every 100 pounds we collect, capped at $1,500. Kiara's handling volunteer signups and she's already got 28 people for the two weekend shifts, but we still need drivers for the pickup route on the 16th. Lorraine's going to reach out to the three elementary schools about doing the classroom competitions again, since that was almost a third of last year's total.\n\nPrinted flyers were $240, that comes out of the general fund.\n\nNext check-in call is Thursday at 6:30 PM, and if anything changes before then, email me at fooddrive@eastsidehelps.org.",
+   "spoken_text": "Okay meeting recap for the fall food drive planning call. On the call were Lorraine Whitfield, Tomas Herrera, Kiara Bell, and me. So we confirmed the drive runs November eighth through November twenty second, and the main drop off is the Eastside Community Center at seventeen ten Harmon Avenue. Last year we got about four thousand two hundred pounds, sorry, no, three thousand nine hundred pounds, and this year we're aiming for five thousand. Tomas got Greenleaf Market to commit to a fifty dollar gift card donation for every hundred pounds we collect, capped at fifteen hundred dollars. Kiara's handling volunteer signups and she's already got twenty eight people for the two weekend shifts, but we still need drivers for the pickup route on the sixteenth. Lorraine's going to reach out to the three elementary schools about doing the classroom competitions again, since that was almost a third of last year's total. Printed flyers were two hundred and forty dollars, that comes out of the general fund. Next check in call is Thursday at six thirty p m, and if anything changes before then email me at fooddrive at eastsidehelps dot org."
+  },
+  {
+   "clip_id": "dict_0539",
+   "domain": "long_form",
+   "edits": "21",
+   "chars": "1039",
+   "draft": "Hey team, quick status on the billing migration. Since a few people asked in Stand Up, so as of this morning, we've moved about 85% of active accounts off the old Paybridge setup. And on Stripe, that's roughly 14,200 customers. What's left is mostly annual plans with custom invoicing and pre-ass working through those by hand. We did hit one real issue Monday. About 300 accounts got double charged because the webhook retry fired before the identity key got saved. That's Bill dash 4417. Refunds went out yesterday afternoon. 11,650 total. And support has a macro ready. If anyone writes in, fix is merged and deployed. And we added a data dog alert. So if it ever happens again, we'll catch it within five minutes. Next milestone is shutting off the old Paybridge cron jobs on November 3rd. And after that, Jordan's team can start ripping out the legacy tables. So if you own anything that's still reusing the payments legacy schema, please let me know by the end of next week so we don't break you. Full writeup in the migration doc pinned in the channel.",
+   "fixed": "Hey team, quick status on the billing migration. Since a few people asked in Stand Up, as of this morning, we've moved about 85% of active accounts off the old Paybridge setup. And on Stripe, that's roughly 14,200 customers. What's left is mostly annual plans with custom invoicing and Priya's working through those by hand. We did hit one real issue Monday. About 300 accounts got double charged because the webhook retry fired before the idempotency key got saved. That's Bill dash 4417. Refunds went out yesterday afternoon. $11,650 total. And support has a macro ready. If anyone writes in, fix is merged and deployed. And we added a Datadog alert. So if it ever happens again, we'll catch it within five minutes. Next milestone is shutting off the old Paybridge cron jobs on November 3rd. And after that, Jordan's team can start ripping out the legacy tables. So if you own anything that's still reading from the payments legacy schema, please let me know by the end of next week so we don't break you. Full writeup in the migration doc pinned in the channel.",
+   "intended_text": "Hey team, quick status on the billing migration since a few people asked in standup.\n\nAs of this morning we've moved about 85% of active accounts off the old Paybridge setup and onto Stripe, that's roughly 14,200 customers. What's left is mostly annual plans with custom invoicing and Priya's working through those by hand.\n\nWe did hit one real issue Monday: about 300 accounts got double charged because the webhook retry fired before the idempotency key got saved. That's BILL-4417, refunds went out yesterday afternoon, $11,650 total, and support has a macro ready if anyone writes in. Fix is merged and deployed, and we added a Datadog alert so if it ever happens again we'll catch it within 5 minutes.\n\nNext milestone is shutting off the old Paybridge cron jobs on November 3, and after that Jordan's team can start ripping out the legacy tables. So if you own anything that still reads from the payments legacy schema, please let me know by end of next week so we don't break you. Full write-up's in the migration doc pinned in the channel.",
+   "spoken_text": "Hey team, quick status on the billing migration since a few people asked in standup. So as of this morning we've moved about eighty five percent of active accounts off the old Paybridge setup and onto Stripe, that's roughly fourteen thousand two hundred customers. What's left is mostly annual plans with custom invoicing and Priya's working through those by hand. We did hit one real issue Monday, about three hundred accounts got double charged because the webhook retry fired before the idempotency key got saved. That's BILL dash four four one seven, refunds went out yesterday afternoon, eleven thousand six hundred and fifty dollars total, and support has a macro ready if anyone writes in. Fix is merged and deployed, and we added a Datadog alert so if it ever happens again we'll catch it within five minutes. Next milestone is shutting off the old Paybridge cron jobs on November third, and after that Jordan's team can start ripping out the legacy tables. So if you own anything that still reads from the payments legacy schema, please let me know by end of next week so we don't break you. Full write up's in the migration doc pinned in the channel."
+  },
+  {
+   "clip_id": "dict_0077",
+   "domain": "docs_notes",
+   "edits": "19",
+   "chars": "355",
+   "draft": "Q4 budget review: Marketers at 62% of their annual spend, and there's 10 weeks left. The Austin trade show booth came in at $14,200, which is about 3 grand over the estimate. Jordan Okafar wants to move 8,000 from events into paid search for December. And finance needs a revised forecast by Friday, November 6. Tracking sheets in the shared drive under budget slash 2026.",
+   "fixed": "Q4 budget review: Marketing's at 62% of their annual spend, and there's 10 weeks left. The Austin trade show booth came in at $14,200, which is about $3K over the estimate. Jordan Okafor wants to move 8,000 from events into paid search for December. And finance needs a revised forecast by Friday, November 6. Tracking sheets in the shared drive under budget/2026.",
+   "intended_text": "Q4 budget review: Marketing's at 62% of their annual spend and there's 10 weeks left. The Austin trade show booth came in at $14,200, which is about $3K over the estimate. Jordan Okafor wants to move $8,000 from events into paid search for December, and finance needs the revised forecast by Friday, November 6. Tracking sheet's in the shared drive under budget/2026.",
+   "spoken_text": "Q four budget review. Marketing's at sixty two percent of their annual spend and there's ten weeks left. The Austin trade show booth came in at fourteen thousand two hundred, which is about three grand over the estimate. Jordan Okafor wants to move eight thousand from events into paid search for December, and finance needs the revised forecast by Friday, November sixth. Tracking sheet's in the shared drive under budget slash twenty twenty six."
+  },
+  {
+   "clip_id": "dict_0103",
+   "domain": "email",
+   "edits": "18",
+   "chars": "328",
+   "draft": "Hi Owen, so the export feature we promised for this month is going to slip a bit. We found a problem with how large files get, you know, get handled, and we rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like like a two week delay. I'll keep you posted as we get closer. And sorry for the change.",
+   "fixed": "Hi Owen, so the export feature we promised for this month is going to slip a bit. We found a problem with how large files get handled, and we rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like a two week delay. I'll keep you posted as we get closer. And sorry for the change.",
+   "intended_text": "Hi Owen,\n\nSo the export feature we promised for this month is going to slip a bit. We found a problem with how large files get handled, and we'd rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like a two-week delay. I'll keep you posted as we get closer, and sorry for the change.",
+   "spoken_text": "Hi Owen, so the export feature we promised for this month is going to slip a bit. We found a problem with how large files get, you know, get handled, and we'd rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like, like a two week delay. I'll keep you posted as we get closer, and sorry for the change."
+  },
+  {
+   "clip_id": "dict_0551",
+   "domain": "long_form",
+   "edits": "18",
+   "chars": "1078",
+   "draft": "Recap from tonight's PTA meeting. So the people who could make it are in the loop. We talked about a bunch of things. So I'll go through them one at a time. The fall fundraiser did better than we expected. And the board voted to put most of it toward new library books. And you know the rest towards the playground change structure. The teachers asked us for more volunteers at lunch duty, especially on Fridays because we're stretched really thin. There is a sign up sheet going around, and they love even one shift a month. The carpool line is still a mess in the mornings. The principal is going to try a staggered drop off by grade starting after the holidays. So watch for an email about that. We also decided to bring back the family movie night in the gym, probably once a month in the winter. And we need someone to take the lead on organizing snacks. Last thing, a few parents raised concerns about how much homework the fourth graders are getting, and the principal agreed to bring it up at the next staff meeting and report back to us. Next meeting is in four weeks, same time in the cafeteria.",
+   "fixed": "Recap from tonight's PTA meeting. So the people who couldn't make it are in the loop. We talked about a bunch of things. So I'll go through them one at a time. The fall fundraiser did better than we expected. And the board voted to put most of it toward new library books. And the rest towards the playground shade structure. The teachers asked us for more volunteers at lunch duty, especially on Fridays because they're stretched really thin. There is a sign up sheet going around, and they love even one shift a month. The carpool line is still a mess in the mornings. The principal is going to try a staggered drop off by grade starting after the holidays. So watch for an email about that. We also decided to bring back the family movie night in the gym, probably once a month in the winter. And we need someone to take the lead on organizing snacks. Last thing, a few parents raised concerns about how much homework the fourth graders are getting, and the principal agreed to bring it up at the next staff meeting and report back to us. Next meeting is in four weeks, same time in the cafeteria.",
+   "intended_text": "Recap from tonight's PTA meeting, so the people who couldn't make it are in the loop. We talked about a bunch of things, so I'll go through them one at a time.\n\n- The fall fundraiser did better than we expected, and the board voted to put most of it toward new library books and the rest toward the playground shade structure.\n- The teachers asked us for more volunteers at lunch duty, especially on Fridays, because they're stretched really thin. There's a sign-up sheet going around and they'd love even one shift a month.\n- The carpool line is still a mess in the mornings. The principal is going to try a staggered drop-off by grade starting after the holidays, so watch for an email about that.\n- We decided to bring back the family movie night in the gym, probably once a month in the winter, and we need someone to take the lead on organizing snacks.\n- A few parents raised concerns about how much homework the fourth graders are getting, and the principal agreed to bring it up at the next staff meeting and report back to us.\n\nNext meeting is in four weeks, same time, in the cafeteria.",
+   "spoken_text": "Recap from tonight's PTA meeting, so the people who couldn't make it are in the loop. We talked about a bunch of things, so I'll go through them one at a time. The fall fundraiser did better than we expected, and the board voted to put most of it toward new library books and, you know, the rest toward the playground shade structure. The teachers asked us for more volunteers at lunch duty, especially on Fridays, because they're stretched really thin. There's a sign up sheet going around and they'd love even one shift a month. The carpool line is still a mess in the mornings. The principal is going to try a staggered drop off by grade starting after the holidays, so watch for an email about that. We also, we decided to bring back the family movie night in the gym, probably once a month in the winter, and we need someone to take the lead on organizing snacks. Last thing, a few parents raised concerns about how much homework the fourth graders are getting, and the principal agreed to bring it up at the next staff meeting and report back to us. Next meeting is in four weeks, same time, in the cafeteria."
+  },
+  {
+   "clip_id": "dict_0497",
+   "domain": "email",
+   "edits": "17",
+   "chars": "280",
+   "draft": "Hey guys, so I've been thinking about doing every year in the summer. Since it's been like almost 10 years since graduation, I was going to. I figured we could rent a cabin somewhere for a long weekend. If you're in, reply and let me know which month works best, and I'll start looking at places.",
+   "fixed": "Hey guys, so I've been thinking about doing a reunion this summer. Since it's been almost 10 years since graduation, I was going to. I figured we could rent a cabin somewhere for a long weekend. If you're in, reply and let me know which month works best, and I'll start looking at places.",
+   "intended_text": "Hey guys,\n\nSo I've been thinking about doing a reunion this summer, since it's been almost ten years since graduation. I figured we could rent a cabin somewhere for a long weekend. If you're in, reply and let me know which months work best, and I'll start looking at places.",
+   "spoken_text": "Hey guys, so I've been thinking about doing a reunion this summer, since it's been, like, almost ten years since graduation. I was going to, I figured we could rent a cabin somewhere for a long weekend. If you're in, reply and let me know which months work best, and I'll start looking at places."
+  },
+  {
+   "clip_id": "dict_0399",
+   "domain": "docs_notes",
+   "edits": "16",
+   "chars": "104",
+   "draft": "Car stuff. The oil change is. It's due at like 42,000 miles, and the shop on Delancey quoted 89 bucks for synthetic.",
+   "fixed": "Car stuff. The oil change is due at 42,000 miles, and the shop on Delancey quoted 89 dollars for synthetic.",
+   "intended_text": "Car stuff: The oil change is due at 42,000 miles, and the shop on Delancey quoted $89 for synthetic.",
+   "spoken_text": "Car stuff. The oil change is, it's due at like forty two thousand miles, and the shop on Delancey quoted eighty nine bucks for synthetic."
+  },
+  {
+   "clip_id": "dict_0407",
+   "domain": "docs_notes",
+   "edits": "16",
+   "chars": "165",
+   "draft": "Start check for the shop. We're down to, down to eight bags of the house blend, like three tins of the Earl Grey, and maybe two cases of oat milk. Reorder from Ridgeline Coffee Supply.",
+   "fixed": "Stock check for the shop. We're down to eight bags of the house blend, three tins of the Earl Grey, and maybe two cases of oat milk. Reorder from Ridgeline Coffee Supply.",
+   "intended_text": "Stock check for the shop. We're down to:\n- 8 bags of the house blend\n- 3 tins of the Earl Grey\n- Maybe 2 cases of oat milk\n\nReorder from Ridgeline Coffee Supply.",
+   "spoken_text": "Stock check for the shop. We're down to, down to eight bags of the house blend, like three tins of the Earl Grey, and maybe two cases of oat milk. Reorder from Ridgeline Coffee Supply."
+  },
+  {
+   "clip_id": "dict_0430",
+   "domain": "docs_notes",
+   "edits": "16",
+   "chars": "310",
+   "draft": "Launch Sync Fieldbook app version 2.4 goes to App Store review November 2nd. Sorry, November 3rd because Mondays are Freez day. Pricing stays $4.99 a month, and the annual plan is $49.99. Press embargo lifts on the 10th at 9 a.m. Pacific. Owens Park doing the release notes, and the landing page is fieldbook dot app slash new.",
+   "fixed": "Launch Sync Fieldbook app version 2.4 goes to App Store review November 2nd. Sorry, November 3rd because Mondays are freeze day. Pricing stays $4.99 a month, and the annual plan is $49.99. Press embargo lifts on the 10th at 9 a.m. Pacific. Owen Park's doing the release notes, and the landing page is fieldbook.app/new.",
+   "intended_text": "Launch sync: Fieldbook app version 2.4 goes to App Store review November 3, because Monday's a freeze day. Pricing stays $4.99 a month and the annual plan is $49.99. Press embargo lifts on the 10th at 9 AM Pacific. Owen Park's doing the release notes, and the landing page is fieldbook.app/new.",
+   "spoken_text": "Launch sync. Fieldbook app version two point four goes to App Store review November second, sorry, November third, because Monday's a freeze day. Pricing stays four ninety nine a month and the annual plan is forty nine ninety nine. Press embargo lifts on the tenth at nine AM Pacific. Owen Park's doing the release notes, and the landing page is fieldbook dot app slash new."
+  }
+ ]
+}

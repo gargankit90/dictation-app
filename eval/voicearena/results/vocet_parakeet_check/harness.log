@@ -1,0 +1,10 @@
+05:23:54 151 clips, 0 done, 1 to run
+05:23:54 audio -> BlackHole 2ch (2 ch, 48000 Hz)
+05:23:54 tool settings before first clip: vocet_provider=groq, vocet_model=whisper-large-v3-turbo, vocet_language=en, vocet_hotkey=RightAlt, vocet_transcription=local, vocet_local_model=parakeet-unified-en-0.6b-q4_k_m, default_input=BlackHole 2ch
+05:23:56 scratch document: window id 137
+05:23:59 TextEdit substitutions: Smart Quotes=already off, Smart Dashes=already off, Text Replacement=turned off, Smart Links=already off, Data Detectors=already off, Correct Spelling Automatically=already off, Check Spelling While Typing=turned off, Check Grammar With Spelling=already off
+05:23:59 Starting in 3s - don't touch the keyboard/mouse. Ctrl-C stops safely; rerun to resume.
+05:24:23 [1/1] dict_0007.flac [ok] 'Write a doc string for this function that explains what it returns and what happens when the input list is empty. Keep it short and use Google Style.'
+05:24:23 tool settings in use: vocet_provider=groq, vocet_model=whisper-large-v3-turbo, vocet_language=en, vocet_hotkey=RightAlt, vocet_transcription=local, vocet_local_model=parakeet-unified-en-0.6b-q4_k_m, default_input=BlackHole 2ch
+05:24:23 --- batch check after 1/1 (1 ok in total): OK
+05:24:24 results: /Users/lume/va/results_vocet_parakeet_check.csv - ok=1

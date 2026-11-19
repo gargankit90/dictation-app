@@ -5,6 +5,11 @@
 > 60.3% / 1.43% for Groq: first on the public set by both measures, within
 > noise of Aqua Voice and Wispr Flow. See
 > [Groq vs Vocet Cloud (AssemblyAI)](#groq-vs-vocet-cloud-assemblyai) at the end.
+>
+> **Update, 2026-11-19, on-device:** Vocet's own on-device engines score
+> **Parakeet (the default) ZER 53.0%, AMEND 1.38%** and **Qwen3 ZER 49.0%,
+> AMEND 1.70%**: below Groq, around 14th of 15 on the public set. See
+> [On-device (Parakeet / Qwen3)](#on-device-parakeet--qwen3).
 
 **Unofficial: single judge (Claude Opus 5.5 via Claude Code), public set
 only.** Run on 2026-11-18 with Vocet built from `cfe583a` (the 0.1.0 release
@@ -423,6 +428,153 @@ number. That risk needs a guard before this ships.
   code, from Vocet's log (no text in it). `vocet_cloud_log_lines.txt` is the raw
   log lines.
 - `results/vocet_assemblyai_check/`: the one-clip proof run.
+
+## On-device (Parakeet / Qwen3)
+
+Run on 2026-11-19 (Parakeet 05:25–06:41, Qwen3 06:47–08:01 local time) with
+Vocet built from `cfe583a`, the 0.1.0 release, same debug build as the Groq
+run. Engine: Settings → Speech, on this Mac, nothing else changed. No key and
+no network were used for transcription. Everything else matched the Groq and
+AssemblyAI runs: same clips, VM, harness commit and timing (30 s timeout),
+judge, prompt and scoring. The driver's settings check expected
+`transcription: local` and the model (`--local-model`).
+
+| Model | Settings name | Download | Download time (this network) | Load time |
+| --- | --- | ---: | ---: | ---: |
+| `parakeet-unified-en-0.6b-q4_k_m` (the default) | "English" | 477,274,496 bytes | ~15 s | 10.2 s first load |
+| `qwen3-asr-0.6b-q4_k_m` | "30 languages" | 589,560,480 bytes | ~22 s | 0.2 s |
+
+Both downloaded the normal way, from the Download button in Settings, with
+the hash checked ("downloaded and verified" in Vocet's log).
+
+### Results
+
+| | Groq | AssemblyAI (Smart) | **Parakeet** (on device) | **Qwen3** (on device) |
+| --- | ---: | ---: | ---: | ---: |
+| **ZER** | 60.3% (52.2–68.5) | 86.8% (80.3–92.7) | **53.0%** (44.6–62.0) | **49.0%** (41.1–57.1) |
+| **AMEND** | 1.43% | 0.26% | **1.38%** (1.05–1.75) | **1.70%** (1.33–2.08) |
+| Drafts needing an edit | 60 | 20 | 71 | 77 |
+| Empty drafts | 0 | 0 | 0 | 0 |
+| Clips captured, first try | 151 | 151 | 151 | 151 |
+| Clips over the 30 s timeout | 0 | 0 | **0** | **0** |
+| Latency median / p90 / max | 0.63 / 1.12 / 1.87 s | 1.15 / 2.80 / 5.22 s | 1.17 / 2.13 / 7.49 s\* | 1.87 / 3.88 / 14.73 s\* |
+| Rank by ZER, public set (of 15) | ≈13 | ≈1 | ≈13–14 (tied with Perplexity, 53.0) | ≈14 (above Apple Dictation only) |
+| Rank by AMEND, public set (of 15) | ≈12 | ≈1 | ≈12 (tied with Kivi, 1.38) | ≈12 (between Kivi and Perplexity) |
+
+\* **On-device latency is measured in the VM, which is slower than real
+hardware:** 4 virtual CPUs and 6 GB of memory on the owner's Mac (the
+whitepaper used MacBook Air M5s with 16 GB). It's the time from key-up to the
+final text, so it includes all of the transcription. Expect a real Mac to
+be faster; these numbers are only for comparing the two models with each
+other. Even here no clip came close to the 30 s timeout (slowest 7.5 s for
+Parakeet and 14.7 s for Qwen3, both on long clips), so no timeout rerun was
+needed.
+
+The ranks place each engine alone among the paper's 14 tools on the public
+set, with the same caveats as above (one judge, one run, public set only).
+Parakeet's and Groq's intervals overlap widely; Parakeet is not clearly worse
+than Groq on ZER, and its AMEND is the same (1.38 vs 1.43%). Qwen3 is a little
+behind both.
+
+### By category
+
+| Context | Clips | Groq | Parakeet | Qwen3 | AssemblyAI |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Personal messages | 25 | 72.0 | 64.0 | 52.0 | 92.0 |
+| Work chat | 24 | 66.7 | 62.5 | 54.2 | 87.5 |
+| Email | 22 | 68.2 | 63.6 | 50.0 | 95.5 |
+| Docs and notes | 22 | 68.2 | 40.9 | 54.5 | 90.9 |
+| Code | 26 | 69.2 | 53.8 | 53.8 | 80.8 |
+| AI prompts | 22 | 36.4 | 54.5 | 50.0 | 90.9 |
+| Long-form | 10 | 10.0 | 0.0 | 0.0 | 50.0 |
+
+ZER %. Parakeet beats Groq only on AI prompts (12 of 22 against 8), partly
+because it never invents a "Thank you." (5 of Groq's 11 were AI prompts). No
+long-form dictation came out perfect on either on-device model.
+
+| Length | Clips | Groq | Parakeet | Qwen3 |
+| --- | ---: | ---: | ---: | ---: |
+| Short (15 words or fewer) | 20 | 80.0 | 75.0 | 65.0 |
+| Standard (16–80 words) | 121 | 61.2 | 53.7 | 50.4 |
+| Long (more than 80 words) | 10 | 10.0 | 0.0 | 0.0 |
+
+### What goes wrong on device
+
+Categories by hand, as for Groq (`categorise.py`):
+
+| Problem | Groq | Parakeet | Qwen3 | AssemblyAI |
+| --- | ---: | ---: | ---: | ---: |
+| Misheard words or numbers | 24 | **36** | **46** | 9 |
+| Fillers and hedges kept | 28 | 28 | 30 | 3 |
+| Names spelt wrong | 5 | **12** | **15** | 4 |
+| Code names and casing | 8 | 10 | 10 | 1 |
+| Spoken symbols left as words | 7 | 9 | 8 | 0 |
+| Invented "Thank you." | 11 | **0** | **0** | 0 |
+| Other (slang units, £ for pounds) | 3 | 3 | 3 | 1 |
+
+**Top three on device:** misheard words (Parakeet 36 drafts, Qwen3 46), kept
+fillers (28 / 30), and wrong names (12 / 15).
+
+**Shared with Groq:**
+
+- **Fillers** are the same problem in all three uncleaned engines: 27 drafts
+  keep the same "like", "you know", "Okay, so" with Groq, Parakeet and Qwen3
+  alike. None of them cleans up, and Vocet pastes what it gets.
+- **Self-corrections** are kept by all three: the cue words survive in 24
+  of 25 clips for each (AssemblyAI's rewrite: 14). Free in this benchmark but
+  visible to a user.
+- **Spoken symbols** ("at", "slash", "dot") and **code casing** are about the
+  same. Qwen3 is the most literal: "summit dot northwind dot io slash
+  register", "benefits.dot.acme.dot.co".
+- 16 drafts have the same mishearing in all three ("get" for git, "Austrian"
+  for Austin, "independent" for idempotent, "ideals" for ideas): hard audio,
+  not one engine's weakness.
+
+**New on device:**
+
+- **No invented endings.** Neither Parakeet nor Qwen3 added a "Thank you." or
+  anything else on silence. The 30-second hallucination is a Whisper problem.
+- **More mishearings and names**, the main reason they score below Groq:
+  "Prius" for Priya's, "O'Caffer" and "Okaforce" for Okafor, "Grendel" for
+  Grandma, "salon" for flan, "Olympic" for Alembic,
+  "U901208" for United 1208. Qwen3 has 17 mishearings no other engine
+  makes; Parakeet has 4.
+- **Wrong unit symbols:** Parakeet wrote a food drive's "3,900 pounds" as
+  "£3,900" and "100 pounds" as "$100".
+- Numbers: Parakeet wrote "seventeen fifty" as "$17.50" (Groq too) and
+  "sixteen seventy-five" as "$16.75" for $1,675. Qwen3 wrote "four one five,
+  five five five, zero one three eight" as "for 155550138".
+
+**What an app-side cleanup would do here:** fixing fillers and spoken symbols
+perfectly would take Parakeet to about 67.5% ZER and Qwen3 to about 63.6%
+(upper bounds, as for Groq's 77.5%). Adding code and name formatting, about
+74.8% and 68.9%. The bigger mishearing count means cleanup lifts on-device
+less than it lifts Groq.
+
+### What this means
+
+- **Out of the box, on-device Vocet is a little below Vocet with Groq**
+  (Parakeet 53.0% vs 60.3% ZER, overlapping intervals; same AMEND), and both
+  are near the bottom of the 14 tools. The gap to the top is mostly cleanup,
+  not the engine.
+- **Parakeet is the better default of the two local models:** higher ZER,
+  lower AMEND, fewer mishearings, and faster in the VM (median 1.17 s vs
+  1.87 s). Qwen3 is the choice only for its other 29 languages, not for
+  English accuracy.
+- **On-device has one real advantage over Groq:** no hallucinated text on
+  silence.
+- A cleanup step (local LLM, or the cloud rewrite) would help on-device
+  as much as it helps Groq on fillers and symbols, but on-device needs better
+  name and term recognition too (a user dictionary or vocabulary hints) to
+  reach the top tools.
+
+### Files for these runs
+
+- `results/vocet_parakeet/`, `results/vocet_qwen3/`: `harness_results.csv`,
+  `harness.log`, `scored.csv`, `scored.judge.jsonl`, `summary.json`, as for
+  Groq.
+- `results/vocet_parakeet_check/`, `results/vocet_parakeet_limit5/`,
+  `results/vocet_qwen3_check/`: the one-clip and five-clip trials.
 
 ## Files
 
