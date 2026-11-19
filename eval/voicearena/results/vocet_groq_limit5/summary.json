@@ -1,0 +1,131 @@
+{
+ "engine": "vocet_groq_limit5",
+ "n": 5,
+ "zer": 20.0,
+ "zer_ci95": [
+  0.0,
+  42.857142857142854
+ ],
+ "amend": 3.1135531135531136,
+ "amend_ci95": [
+  1.5463917525773196,
+  4.831932773109243
+ ],
+ "judge": "claude-opus-5-5 effort=max via claude -p (Claude Code CLI)",
+ "prompt": "amend-va 0.2.1 prompt v1 fingerprint 8ed04caf4663",
+ "label": "unofficial: single judge (Claude Opus 5.5 via Claude Code), public set only",
+ "empty_drafts": 0,
+ "latency_s": {
+  "n": 5,
+  "median": 0.84,
+  "p90": 0.9159999999999999,
+  "mean": 0.808,
+  "max": 0.94
+ },
+ "by_domain": {
+  "personal_messaging": {
+   "n": 0,
+   "zer": null,
+   "amend": null
+  },
+  "work_chat": {
+   "n": 0,
+   "zer": null,
+   "amend": null
+  },
+  "email": {
+   "n": 0,
+   "zer": null,
+   "amend": null
+  },
+  "ai_prompt": {
+   "n": 5,
+   "zer": 20.0,
+   "amend": 3.1135531135531136
+  },
+  "code": {
+   "n": 0,
+   "zer": null,
+   "amend": null
+  },
+  "docs_notes": {
+   "n": 0,
+   "zer": null,
+   "amend": null
+  },
+  "long_form": {
+   "n": 0,
+   "zer": null,
+   "amend": null
+  }
+ },
+ "by_length": {
+  "short (<=15 words)": {
+   "n": 0,
+   "zer": null,
+   "amend": null
+  },
+  "standard (16-80 words)": {
+   "n": 5,
+   "zer": 20.0,
+   "amend": 3.1135531135531136
+  },
+  "long (>80 words)": {
+   "n": 0,
+   "zer": null,
+   "amend": null
+  }
+ },
+ "worst": [
+  {
+   "clip_id": "dict_0024",
+   "domain": "ai_prompt",
+   "edits": "17",
+   "chars": "332",
+   "draft": "Okay, so in billing.tease the calculate prorated amount function returns NAN whenever a subscription starts on the 31st. And I'm pretty sure it's the date math on plan.startdate. Can you rewrite it with dateFNS and add a unit test that goes from January 31st to February 28th? Oh, and we're on dateFNS version 3, so don't use the old imports. Thank you.",
+   "fixed": "Okay, so in billing.ts the calculateProratedAmount function returns NaN whenever a subscription starts on the 31st. And I'm pretty sure it's the date math on plan.startDate. Can you rewrite it with date-fns and add a unit test that goes from January 31st to February 28th? Oh, and we're on date-fns version 3, so don't use the old imports.",
+   "intended_text": "Ok so in billing.ts the calculateProratedAmount function returns NaN whenever a subscription starts on the 31st, and I'm pretty sure it's the date math on plan.startDate. Can you rewrite it with date-fns and add a unit test that goes from January 31 to February 28? Oh and we're on date-fns version 3 so don't use the old imports.",
+   "spoken_text": "Ok so in billing dot ts the calculate prorated amount function returns NaN whenever a subscription starts on the thirty first, and I'm pretty sure it's the date math on plan dot start date. Can you rewrite it with date fns and add a unit test that goes from January thirty first to February twenty eighth? Oh and we're on date fns version three so don't use the old imports."
+  },
+  {
+   "clip_id": "dict_0023",
+   "domain": "ai_prompt",
+   "edits": "10",
+   "chars": "324",
+   "draft": "I need a quick variance explanation for the October budget report. Marketing spent $62,000 against a budget of $55,000, so we're over by $7,000. Wait no, the budget was $58,000, so we're over by $4,000. Most of it was the trade show in Austin. Write two or three sentences I can drop into the report for the CFO and keep it neutral. Thank you.",
+   "fixed": "I need a quick variance explanation for the October budget report. Marketing spent $62,000 against a budget of $55,000, so we're over by $7,000. Wait no, the budget was $58,000, so we're over by $4,000. Most of it was the trade show in Austin. Write two or three sentences I can drop into the report for the CFO and keep it neutral.",
+   "intended_text": "I need a quick variance explanation for the October budget report. Marketing spent $62,000 against a budget of $58,000, so we're over by $4,000. Most of it was the trade show in Austin. Write two or three sentences I can drop into the report for the CFO, and keep it neutral.",
+   "spoken_text": "I need a quick variance explanation for the October budget report. Marketing spent sixty two thousand against a budget of fifty five thousand, so we're over by seven thousand, wait no, the budget was fifty eight, so we're over by four thousand. Most of it was the trade show in Austin. Write two or three sentences I can drop into the report for the CFO, and keep it neutral."
+  },
+  {
+   "clip_id": "dict_0008",
+   "domain": "ai_prompt",
+   "edits": "6",
+   "chars": "144",
+   "draft": "Write a short out of office message saying I'm away until January 6th and to contact Priya Rahman at priya.rahman at northwind.io for anything urgent.",
+   "fixed": "Write a short out of office message saying I'm away until January 6th and to contact Priya Raman at priya.raman@northwind.io for anything urgent.",
+   "intended_text": "Write a short out-of-office message saying I'm away until January 6 and to contact Priya Raman at priya.raman@northwind.io for anything urgent.",
+   "spoken_text": "Write a short out of office message saying I'm away until January sixth and to contact Priya Raman at priya dot raman at northwind dot io for anything urgent."
+  },
+  {
+   "clip_id": "dict_0014",
+   "domain": "ai_prompt",
+   "edits": "1",
+   "chars": "146",
+   "draft": "I'm on the checkout v2 feature branch. How do I undo my last get commit but keep the changes staged? Actually, no. The last three commits, not just one.",
+   "fixed": "I'm on the checkout v2 feature branch. How do I undo my last git commit but keep the changes staged? Actually, no. The last three commits, not just one.",
+   "intended_text": "I'm on the checkout v2 feature branch. How do I undo my last three git commits but keep the changes staged?",
+   "spoken_text": "I'm on the checkout v two feature branch, how do I undo my last git commit but keep the changes staged? Actually no, the last three commits, not just one."
+  },
+  {
+   "clip_id": "dict_0007",
+   "domain": "ai_prompt",
+   "edits": "0",
+   "chars": "146",
+   "draft": "Write a docstring for this function that explains what it returns and what happens when the input list is empty. Keep it short and use Google style.",
+   "fixed": "Write a docstring for this function that explains what it returns and what happens when the input list is empty. Keep it short and use Google style.",
+   "intended_text": "Write a docstring for this function that explains what it returns and what happens when the input list is empty. Keep it short and use Google style.",
+   "spoken_text": "Write a docstring for this function that explains what it returns and what happens when the input list is empty. Keep it short and use Google style."
+  }
+ ]
+}

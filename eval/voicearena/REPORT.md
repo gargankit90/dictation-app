@@ -1,0 +1,294 @@
+# How is Vocet doing? Voice Arena Dictation Bench, public set
+
+**Unofficial: single judge (Claude Opus 5.5 via Claude Code), public set
+only.** Run on 2026-11-18 with Vocet built from `cfe583a` (the 0.1.0 release
+commit, debug build, dev certificate), engine **Groq `whisper-large-v3-turbo`**,
+language English, in the Lume VM `dictation-vm-eval`. How it was run:
+[README.md](README.md).
+
+## The short answer
+
+| | Vocet + Groq | 95% interval (speaker bootstrap) |
+| --- | ---: | --- |
+| **ZER**: drafts you could send with no edit | **60.3%** (91 of 151) | 52.2 – 68.5% |
+| **AMEND**: share of characters that need fixing | **1.43%** | 1.11 – 1.76% |
+| Empty drafts | 0 of 151 | |
+| Latency, key-up to final text: median / p90 | **0.63 s / 1.12 s** | min 0.37 s, max 1.87 s |
+
+In plain words: about 6 in 10 dictations are ready to send. The rest usually
+need one small fix, and most of those fixes are things an app-side cleanup
+step would catch, not mistakes in what Groq heard. Vocet is fast: the text is
+in place well under a second after you let go of the key.
+
+## Where that puts Vocet among the 14 tools
+
+Voice Arena's public-set column (whitepaper section 10.6), with Vocet + Groq
+added:
+
+| Rank by ZER | Tool | ZER % public | AMEND % public |
+| ---: | --- | ---: | ---: |
+| 1 | Aqua Voice | 83.4 | 0.37 |
+| 2 | Wispr Flow | 80.8 | 0.34 |
+| 3 | Blurt | 79.5 | 0.41 |
+| 4 | Willow Voice | 77.5 | 0.46 |
+| 5 | Gemini | 76.2 | 1.30 |
+| 6 | Spokenly | 75.5 | 0.56 |
+| 7 | Granola | 73.5 | 0.79 |
+| 8 | Kivi | 70.2 | 1.38 |
+| 9 | Meta AI | 69.5 | 2.26 |
+| 10 | Claude | 65.6 | 0.82 |
+| 11 | ChatGPT | 64.9 | 1.14 |
+| 12 | Superwhisper | 61.6 | 1.37 |
+| **≈13** | **Vocet + Groq (this run)** | **60.3** | **1.43** |
+| 14 | Perplexity | 53.0 | 1.80 |
+| 15 | Apple Dictation | 35.1 | 2.65 |
+
+By ZER, Vocet + Groq sits between Superwhisper and Perplexity: 13th of 15.
+By AMEND it is 12th, just behind Superwhisper (1.37) and Kivi (1.38). Its
+interval (52–68%) overlaps everything from Perplexity up to Claude, so
+"somewhere from 10th to 14th" is the honest range.
+
+Why this placement isn't exact, and which comparisons are like for like:
+
+- **AMEND is close to like for like.** The paper's public-set AMEND column is
+  Claude Opus 5.5 alone, the same judge model, effort, prompt (amend-va 0.2.1,
+  v1) and scoring code used here. Two differences remain: the request went
+  through the `claude -p` CLI instead of the Anthropic API (a one-line system
+  prompt added, no server-side model fallback), and every tool, Vocet
+  included, was run only once.
+- **ZER is not like for like.** The paper's ZER is a 3-of-5 vote of five judges
+  from five providers. Ours is Opus alone. The paper's own per-judge table
+  (section 10.3) shows Opus's ZER within 1.3 points of the five-judge vote
+  for every tool, usually a little *below* it, so the single-judge figure
+  is a fair, slightly conservative stand-in. The paper doesn't publish per-judge
+  ZER for the public set alone, so the nearest exact comparison is Opus's
+  full-set ZER: there Vocet's 60.3 would sit just *above* Superwhisper
+  (59.9), 12th instead of 13th. Superwhisper and Vocet are tied either way.
+- **Public set only.** The paper notes the public set is a little easier than
+  the private one: every tool scored 1.5 points higher on it on average.
+  The ranking on it is almost the same as on the full benchmark (Spearman 0.995).
+- **Different machine.** The paper ran on MacBook Air M5s with macOS 27.2.
+  This ran in a 4-CPU, 6 GB macOS 15.6.1 VM on the owner's Mac, over the
+  host's network. That matters for latency, not for what Groq transcribes.
+- **Same harness, same timing.** Voice Arena's own harness at a pinned commit,
+  same padding (300 ms), start delay (0.5 s), tail (4 s), settle (2 s) and
+  timeout (30 s), same BlackHole audio path, text landing in TextEdit. The
+  Vocet driver is new (`run_vocet_dictation.py`); the latency is measured from
+  the key-up, because Vocet keeps its microphone open for 30 s after a
+  recording (README, "Latency").
+- **The prompt fingerprint.** The paper names fingerprint `d26616976626`.
+  amend-va doesn't publish how that is computed, so it can't be checked. The
+  prompt here is built by amend-va 0.2.1's own `build_prompt`, and its
+  `prompts.py` is byte identical in 0.2.1 and 0.2.2. Each scored row records the
+  model, effort, route, prompt version, our fingerprint (`8ed04caf4663`) and the
+  amend-va version.
+
+## Results by category
+
+**By writing context** (the dataset's `domain`):
+
+| Context | Clips | ZER % | AMEND % |
+| --- | ---: | ---: | ---: |
+| Personal messages | 25 | 72.0 | 1.33 |
+| Work chat | 24 | 66.7 | 1.33 |
+| Email | 22 | 68.2 | 0.74 |
+| Docs and notes | 22 | 68.2 | 1.88 |
+| Code | 26 | 69.2 | 1.57 |
+| AI prompts | 22 | **36.4** | **2.79** |
+| Long-form (60 s and more) | 10 | **10.0** | 0.98 |
+
+**By length** (from the spoken word count; the dataset has no length-band
+column, so the whitepaper's bands are approximated):
+
+| Length | Clips | ZER % | AMEND % |
+| --- | ---: | ---: | ---: |
+| Short (15 words or fewer) | 20 | 80.0 | 3.78 |
+| Standard (16–80 words) | 121 | 61.2 | 1.54 |
+| Long (more than 80 words) | 10 | 10.0 | 0.98 |
+
+**By difficulty:** not possible. The public dataset doesn't include the
+whitepaper's easy/medium/hard labels.
+
+Reading these: short messages are usually right (80%), but when one is wrong
+the error is a big share of a short text (AMEND 3.8%). Long-form is almost
+never perfect (1 in 10), but the errors are a small share of a long text
+(AMEND 1.0%). Over a minute of natural speech, one kept "you know" or one
+misspelt name is enough to need an edit. AI prompts score worst because
+they're the most conversational ("Okay, so…", "like", "you know") and the
+most technical (code names). Long clips also cross Whisper's 30-second
+window, which causes the hallucination below.
+
+## What goes wrong
+
+60 of the 151 drafts needed at least one edit. Each one was put into
+categories by hand from the judge's corrections (`categorise.py` records the
+mapping). Many drafts have more than one problem.
+
+| Problem | Drafts with it | Drafts where it is the only problem | Who can fix it |
+| --- | ---: | ---: | --- |
+| **Fillers and hedges kept**: "like", "you know", "Okay, so", "Oh, and", "I kind of", a stutter ("Did you? Did you…") | **28** | 19 | app cleanup |
+| **Misheard words or numbers**: "get" for git, "independent" for idempotent, "user's crashed" for user scrolls, "$850" for $150 | **24** | 15 | speech engine (partly app cleanup with context) |
+| **An invented "Thank you." at the end** | **11** | 3 | app (trim silence) |
+| **Code names and casing**: "calculate prorated amount", "dateFNS", "docker file", "React query" | 8 | 2 | app cleanup with context, or engine vocabulary hints |
+| **Spoken symbols left as words** in emails, URLs and paths: "ops at northwind.io", "budget slash 2026" | 7 | 1 | app cleanup |
+| **Names spelt wrong**: "Rahman" for Raman, "Thomas" for Tomas, "Kiera" for Kiara | 5 | 1 | engine vocabulary hints, or the user's own dictionary |
+| Other: slang units ("89 bucks", "512 megs"), one dropped URL path | 3 | 0 | app cleanup / engine |
+
+The questions from the brief, answered:
+
+- **Fillers kept?** Yes, the biggest single cause: 28 drafts, the only
+  problem in 19. Whisper writes down what was said, and Vocet pastes it as is.
+- **Self-corrections kept?** Always: all 28 clips with a spoken correction
+  ("January 23rd. Sorry, January 29th.") were pasted with both versions and
+  the cue words. The benchmark doesn't count a kept self-correction as an
+  error, as long as the final value is there, so it costs no ZER (11 of those 28
+  drafts were still zero-edit). A user would still have to delete it.
+- **Numbers as words?** Rarely. Groq writes most numbers as digits, and the
+  judge accepts either. The number errors are real mishearings: "$17.50"
+  for $1,750 ("seventeen fifty") and "$850" for $150.
+- **Cut-off endings?** None. No draft lost its end, and no draft was much
+  shorter than the speech.
+- **Empty drafts?** None. Every one of the 151 clips produced text on the first
+  try.
+- **Hallucination: "Thank you."** 11 drafts end with a "Thank you." nobody
+  said. This is a known Whisper habit on stretches of silence. It hit 10 of
+  the 11 clips between 25 and 29 s long, plus one 52 s clip, and no others.
+  The harness keeps recording 4 s after the speech ends, so these recordings
+  run just over 30 s, and Whisper's last 30-second window holds only silence.
+  A real user lets go sooner, but any dictation that ends just past a 30 s
+  mark, with a pause before the key-up, can get the same "Thank you." Vocet
+  sends the recording with its silence; it doesn't trim it.
+- One draft (dict_0430) came back all lower case with no punctuation. The
+  judge doesn't count punctuation, but a user would notice.
+
+## The 10 worst drafts
+
+Edits are characters the judge had to change, out of the length of the
+corrected text. The intended text is the dataset's reference (CC BY-NC 4.0,
+Voice Arena), shortened where long.
+
+1. **dict_0430, notes, 20 edits / 309.**
+   Intended: "…Owen Park's doing the release notes, and the landing page is
+   fieldbook.app/new."
+   Draft: "launch sync fieldbook app version 2.4 goes to app store review
+   november 2nd sorry november 3rd … owens park doing the release notes and
+   the landing page is fieldbook.app slash new Thank you."
+   *Wrong name, "slash" not written as /, invented "Thank you.", no
+   punctuation at all.*
+2. **dict_0533, long-form, 20 / 935.**
+   Intended: "Update on the regional sales summit… Harbor View Hotel… Clearpath
+   Consulting… summit.northwind.io/register…"
+   Draft: "Okay, update on the Regional Sales Summit… Harborview Hotel…
+   ClearPath Consulting… Registration link is summit.northwind.io. So please…"
+   *Leading "Okay", two name spellings, a dropped word, and "/register"
+   lost from the URL.*
+3. **dict_0024, AI prompt, 17 / 332.**
+   Intended: "Ok so in billing.ts the calculateProratedAmount function returns
+   NaN … plan.startDate … rewrite it with date-fns…"
+   Draft: "Okay, so in billing.tease the calculate prorated amount function
+   returns NAN … plan.startdate … rewrite it with dateFNS … Thank you."
+   *Code names, a mishearing ("tease"), invented "Thank you."*
+4. **dict_0077, notes, 17 / 359.**
+   Intended: "…Tracking sheet's in the shared drive under budget/2026."
+   Draft: "…Tracking sheets in the share drive under budget slash 2026. Thank you."
+   *"slash" left as a word, invented "Thank you."*
+5. **dict_0551, long-form, 17 / 1078.**
+   Intended: "…the rest toward the playground shade structure… because they're
+   stretched really thin…"
+   Draft: "…and you know, the rest towards the playground-shaped structure…
+   because are stretched really thin…"
+   *A kept "you know", a mishearing ("shaped" for shade), a dropped word.*
+6. **dict_0351, code, 16 / 350.**
+   Intended: "…moving the FastAPI app's settings over to Pydantic version 2…
+   Redis URL… Pool size defaults to 10…"
+   Draft: "…moving the FastAPI's app settings over the Pyndanic version 2…
+   redis URL… Pull size defaults to 10… Thank you."
+   *Mishearings ("Pyndanic", "Pull"), casing, invented "Thank you."*
+7. **dict_0544, long-form, 16 / 958.**
+   Intended: "…Lorraine Whitfield, Tomas Herrera, Kiara Bell… fooddrive@eastsidehelps.org"
+   Draft: "Okay, meeting recap… Thomas Herrera, Kiera Bell… So we confirmed…
+   fooddrive at eastsidehelps.org."
+   *Names spelt the common way, "Okay"/"So" kept, email not written out.*
+8. **dict_0108, long-form, 15 / 1020.**
+   Intended: "…Please don't…" (a long team message)
+   Draft: "…Like, please don't… Thank you."
+   *A kept "Like", invented "Thank you." on a 52 s clip.*
+9. **dict_0356, code, 15 / 366.**
+   Intended: "…write a test that sends the webhook twice so we know it's idempotent…"
+   Draft: "…so we know it's independent… Thank you."
+   *A technical word misheard, invented "Thank you." (The kept "15 seconds.
+   Actually, make it 20." is allowed.)*
+10. **dict_0428, notes, 15 / 402.**
+    Intended: "…We'll have a short how-to session on a Saturday morning…"
+    Draft: "…We'll have a short house 2 session on a Saturday morning… Thank you."
+    *"how-to" misheard as "house 2", invented "Thank you."*
+
+**The pattern:** the worst drafts aren't badly heard. Each has two to four
+small problems stacked up, and the invented "Thank you." is in 7 of the 10.
+None of the worst drafts is a garbled or missing transcript.
+
+## What an app-side cleanup step would fix, and what needs the engine
+
+**App side, no change of engine:**
+
+- **Trim the silence before sending, or drop an invented closing "Thank you."**
+  Vocet already measures the input level (the pill's meter and its "No sound"
+  check). Cutting trailing silence before upload would remove the hallucination
+  at its source. 11 drafts, the only problem in 3.
+- **Remove fillers and hedges** ("like", "you know", "Okay, so", "Oh, and", a
+  repeated start). This needs care: "like" is often a real word, so it needs an
+  LLM cleanup pass or a careful rule set. 28 drafts, the only problem in 19.
+- **Write out spoken symbols** in emails, URLs and paths ("at" → @,
+  "slash" → /, "dot" → .). 7 drafts.
+- **Resolve self-corrections** (keep only "January 29th"). Free in this
+  benchmark, but it's the cleanup users notice most.
+
+If all three of the first changes worked perfectly, 26 of the 60 failing drafts
+would need no edit: **ZER about 77.5%**, level with Willow Voice and just behind
+Blurt on the public set.
+
+**App side, with more context** (an LLM cleanup that knows the target app, or
+a personal dictionary): code identifiers and casing ("calculateProratedAmount",
+"date-fns", "Dockerfile") and names the user has used before. That covers 8 more
+drafts, about **82.8%** in the best case. Groq's Whisper API also takes a
+`prompt` that can carry such names and terms to bias spelling, which is an
+app-controlled hint to the engine.
+
+**Needs a better speech engine** (or a different model): genuine mishearings
+like "get"/git, "independent"/idempotent, "user's crashed"/user scrolls,
+"Pyndanic", "house 2", "$850"/$150. That's 24 drafts, the only problem in 15. An
+LLM cleanup can rescue some of them from context (git, idempotent, Jest), but
+it can also invent; a number like $850 vs $150 can't be recovered from the text.
+
+These "what if" figures are upper bounds. They assume the cleanup adds no new
+errors, and a rewriting step can add some (the paper shows tools that tidy more
+drift further from what was said).
+
+## How this run went
+
+- **151 of 151 clips captured**, all on the first attempt, from 22:13 to 23:22
+  local time, about 28 s per clip. No clip produced an empty draft.
+- **Network outage:** the owner reported about 30 s without internet while
+  the 5-clip trial was running, before the 151-clip run started (22:13). The
+  full run shows no failed or empty clip, and Vocet's log has no network error, timeout
+  or retry. **No clips were rerun.**
+- **One harness hiccup in the 5-clip trial:** on the very first clip, the
+  harness stalled for about 11 minutes while holding the key, so Vocet heard
+  silence and stopped at its 5-minute cap. The retry worked, and the problem
+  didn't come back in the full run. Probably first-run setup in the VM (macOS
+  had just shown two Automation prompts); not a Vocet issue.
+- **Usage sharing** was switched off in the eval VM, so the 151 benchmark
+  dictations sent no analytics.
+- **Judge:** 151 drafts, each judged once by Claude Opus 5.5 at max effort
+  through `claude -p`. Every answer is in `results/vocet_groq/scored.judge.jsonl`.
+
+## Files
+
+- `results/vocet_groq/harness_results.csv`: the harness's row per clip
+  (transcript, timings, Vocet settings), without the reference text.
+- `results/vocet_groq/harness.log`: the harness's log.
+- `results/vocet_groq/scored.csv`: the draft, the judge's corrected text,
+  edits, characters, zero-edit flag, judge model, effort, route, prompt version
+  and fingerprint, per clip.
+- `results/vocet_groq/summary.json`: the numbers above.
+- `results/vocet_groq_limit5/`: the 5-clip trial.

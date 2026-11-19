@@ -10,11 +10,14 @@ extend-exclude = [
     "third_party/",
     # Licence texts from the crates and packages we ship, as published.
     "THIRD-PARTY-LICENSES.txt",
+    # Benchmark output: transcripts keep the speech engine's misheard words as data.
+    "eval/voicearena/results/",
 ]
 
 [default]
 # Unicode ranges in the website font-face rules (site/index.html).
-extend-ignore-re = ["U\\+[0-9A-Fa-f]{4}(-[0-9A-Fa-f]{4})?"]
+# The AMEND prompt fingerprint (eval/voicearena), a hex digest.
+extend-ignore-re = ["U\\+[0-9A-Fa-f]{4}(-[0-9A-Fa-f]{4})?", "8ed04caf4663"]
 
 # ISO 639 language codes in src/languages.ts (Faroese, Bashkir).
 [default.extend-words]
