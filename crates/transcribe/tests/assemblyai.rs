@@ -623,3 +623,125 @@ async fn the_app_engine_for_this_provider_dictates_through_the_settings() {
         Err(TranscribeError::MissingKey)
     );
 }
+
+/// A fresh directory under the system temp dir (no tempfile crate here).
+fn scratch_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "vocet-dump-test-{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+#[tokio::test]
+async fn the_eval_dump_is_off_unless_asked_for_and_then_writes_nothing() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        ok(serde_json::json!({"text": "hi", "llm_response": "Hi there."})),
+    )
+    .await;
+    // Never set: nothing is created anywhere it could have been pointed.
+    let dir = scratch_dir("off");
+    let engine = engine_for(&server).with_dump_dir(None);
+    engine.transcribe(&audio()).await.unwrap();
+    assert!(!dir.exists());
+}
+
+#[tokio::test]
+async fn the_eval_dump_appends_one_line_per_request_without_the_key() {
+    let server = MockServer::start().await;
+    mount_fn(&server, |request: &Request| {
+        let body = String::from_utf8_lossy(&request.body);
+        if body.contains("rewrite_mode") {
+            return ResponseTemplate::new(400);
+        }
+        ok(serde_json::json!({
+            "text": "um hello there",
+            "llm_response": "Hello there.",
+            "llm_error": null,
+            "session_id": "11111111-2222-3333-4444-555555555555",
+            "audio_duration_ms": 1500,
+            "request_time_ms": 812.4,
+            "sync_time_ms": 430.1,
+        }))
+    })
+    .await;
+    let dir = scratch_dir("on");
+    let engine = engine_for(&server).with_dump_dir(Some(dir.clone()));
+    // Smart is refused (400) and retried without the key: two requests,
+    // two lines. A second dictation adds a third.
+    assert_eq!(engine.transcribe(&audio()).await.unwrap(), "Hello there.");
+    assert_eq!(engine.transcribe(&audio()).await.unwrap(), "Hello there.");
+    let file =
+        std::fs::read_to_string(dir.join(dictation_transcribe::assemblyai::DUMP_FILE)).unwrap();
+    let lines: Vec<serde_json::Value> = file
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 3, "{file}");
+
+    // The refused Smart request: what was sent and the status only.
+    assert_eq!(lines[0]["http_status"], 400);
+    assert_eq!(lines[0]["rewrite_mode_sent"], "smart");
+    assert_eq!(lines[0]["instruction"], "smart");
+    assert!(lines[0].get("verbatim_text").is_none());
+
+    // The request that worked.
+    let ok = &lines[1];
+    assert_eq!(ok["http_status"], 200);
+    assert!(ok["rewrite_mode_sent"].is_null());
+    assert_eq!(ok["instruction"], "smart", "the name, never its text");
+    assert_eq!(ok["verbatim_text"], "um hello there");
+    assert_eq!(ok["llm_response"], "Hello there.");
+    assert!(ok["llm_error"].is_null());
+    assert_eq!(ok["pasted"], "rewrite");
+    assert_eq!(ok["pasted_reason"], "rewrite");
+    assert_eq!(ok["pasted_text"], "Hello there.");
+    assert_eq!(ok["session_id"], "11111111-2222-3333-4444-555555555555");
+    assert_eq!(ok["audio_duration_ms"], 1500);
+    assert_eq!(ok["request_time_ms"], 812.4);
+    assert_eq!(ok["sync_time_ms"], 430.1);
+    let ts = ok["ts"].as_str().unwrap();
+    assert!(
+        ts.len() == 24 && ts.ends_with('Z') && ts.contains('T'),
+        "{ts}"
+    );
+
+    // Neither the key nor any header, and no instruction text.
+    assert!(!file.contains(KEY));
+    assert!(!file.to_lowercase().contains("authorization"));
+    assert!(!file.contains("Clean it by removing disfluencies"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn the_eval_dump_says_why_the_verbatim_text_was_pasted() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        ok(serde_json::json!({"text": "Yeah.", "llm_response": null, "llm_error": "timeout"})),
+    )
+    .await;
+    let dir = scratch_dir("why");
+    let fast = Config {
+        model: FAST_MODEL.to_owned(),
+        ..config(&server, None)
+    };
+    let engine = engine(fast).0.with_dump_dir(Some(dir.clone()));
+    assert_eq!(engine.transcribe(&audio()).await.unwrap(), "Yeah.");
+    let file =
+        std::fs::read_to_string(dir.join(dictation_transcribe::assemblyai::DUMP_FILE)).unwrap();
+    let line: serde_json::Value = serde_json::from_str(file.trim()).unwrap();
+    assert_eq!(line["instruction"], "fast");
+    assert!(line["rewrite_mode_sent"].is_null());
+    assert_eq!(line["pasted"], "verbatim");
+    assert_eq!(line["pasted_reason"], "no_rewrite");
+    assert_eq!(line["llm_error"], "timeout");
+    let _ = std::fs::remove_dir_all(&dir);
+}

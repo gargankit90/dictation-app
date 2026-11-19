@@ -33,6 +33,8 @@
 //! Privacy: errors and logs never contain the key, the audio or the text;
 //! logs hold statuses, sizes, lengths and which text was used.
 
+use std::io::Write as _;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -69,7 +71,21 @@ pub struct AssemblyAi<W = TokioWait> {
     /// Set once the service answered 400 to `rewrite_mode` and then accepted
     /// the same request without it: later dictations leave it out at once.
     smart_refused: Arc<AtomicBool>,
+    /// Eval only: where to append each reply (see [`EVAL_DUMP_ENV`]).
+    dump_dir: Option<PathBuf>,
 }
+
+/// Eval only, off by default: when this environment variable names a
+/// directory when the engine is built, every request appends one JSON line
+/// to `<dir>/assemblyai-replies.jsonl` (see [`DUMP_FILE`]): the full reply,
+/// both texts, which one was pasted and why. It holds transcripts, so it is
+/// for a test VM's eval runs; the normal log is unchanged. Never a key or
+/// a header. (A GUI launch doesn't inherit a shell's environment: start the
+/// app from the shell that sets it.)
+pub const EVAL_DUMP_ENV: &str = "VOCET_EVAL_DUMP_DIR";
+
+/// The file the dump appends to, inside the directory.
+pub const DUMP_FILE: &str = "assemblyai-replies.jsonl";
 
 impl AssemblyAi<TokioWait> {
     /// An engine for `config` (its `base_url` is the API root, e.g.
@@ -107,7 +123,17 @@ impl<W: Wait> AssemblyAi<W> {
             wait,
             rng: Arc::new(Mutex::new(SplitMix64::new(seed))),
             smart_refused: Arc::new(AtomicBool::new(false)),
+            dump_dir: std::env::var_os(EVAL_DUMP_ENV)
+                .filter(|dir| !dir.is_empty())
+                .map(PathBuf::from),
         })
+    }
+
+    /// Sets (or clears) the eval dump directory, instead of the environment's.
+    #[must_use]
+    pub fn with_dump_dir(mut self, dir: Option<PathBuf>) -> Self {
+        self.dump_dir = dir;
+        self
     }
 
     /// Transcribes `audio`: the cleaned-up text, or the verbatim text if the
@@ -215,6 +241,18 @@ impl<W: Wait> AssemblyAi<W> {
             .await
             .map_err(Failure::from_reqwest)?;
         let status = response.status();
+        let sent = Sent {
+            rewrite_mode: with_mode.then_some("smart"),
+            instruction: match self.mode() {
+                RewriteMode::Smart => "smart",
+                RewriteMode::Fast => "fast",
+            },
+            status: status.as_u16(),
+        };
+        if !status.is_success() {
+            // Only what was sent and the status; the body isn't read.
+            self.dump(&sent, None);
+        }
         if status == StatusCode::PAYLOAD_TOO_LARGE {
             return Err(Failure::fatal(TranscribeError::Engine(
                 "the recording is longer than the provider accepts (HTTP 413)".into(),
@@ -229,7 +267,26 @@ impl<W: Wait> AssemblyAi<W> {
             return Err(Failure::from_status(status, response.headers()).into());
         }
         let body = response.bytes().await.map_err(Failure::from_reqwest)?;
-        parse(&body, self.mode().instruction()).map_err(|e| Failure::fatal(e).into())
+        let parsed = parse(&body, self.mode().instruction()).map_err(Failure::fatal)?;
+        self.dump(&sent, Some(&parsed));
+        Ok(parsed.text)
+    }
+
+    /// Appends one line to the eval dump, if it is on. A failure to write
+    /// never fails a dictation.
+    fn dump(&self, sent: &Sent, parsed: Option<&Parsed>) {
+        let Some(dir) = &self.dump_dir else { return };
+        let line = dump_line(sent, parsed, std::time::SystemTime::now());
+        let written = std::fs::create_dir_all(dir).and_then(|()| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join(DUMP_FILE))
+                .and_then(|mut file| file.write_all(format!("{line}\n").as_bytes()))
+        });
+        if let Err(error) = written {
+            tracing::debug!(kind = ?error.kind(), "could not write the eval dump");
+        }
     }
 
     /// The JSON of the `config` part: the cleanup instruction for the mode,
@@ -315,6 +372,82 @@ struct Reply {
     llm_response: Option<String>,
     #[serde(default)]
     llm_error: Option<String>,
+    #[serde(default)]
+    session_id: Option<serde_json::Value>,
+    #[serde(default)]
+    audio_duration_ms: Option<serde_json::Value>,
+    #[serde(default)]
+    request_time_ms: Option<serde_json::Value>,
+    #[serde(default)]
+    sync_time_ms: Option<serde_json::Value>,
+}
+
+/// What a request sent, for the eval dump (no key, no header).
+struct Sent {
+    rewrite_mode: Option<&'static str>,
+    instruction: &'static str,
+    status: u16,
+}
+
+/// A parsed reply: the text to paste and everything the eval dump records.
+struct Parsed {
+    text: String,
+    reason: &'static str,
+    reply: Reply,
+}
+
+/// The dump's JSON line for one request.
+fn dump_line(sent: &Sent, parsed: Option<&Parsed>, now: std::time::SystemTime) -> String {
+    let millis = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let mut line = serde_json::json!({
+        "ts": iso8601(millis),
+        "rewrite_mode_sent": sent.rewrite_mode,
+        "instruction": sent.instruction,
+        "http_status": sent.status,
+    });
+    if let Some(parsed) = parsed {
+        let reply = &parsed.reply;
+        line["verbatim_text"] = serde_json::json!(reply.text);
+        line["llm_response"] = serde_json::json!(reply.llm_response);
+        line["llm_error"] = serde_json::json!(reply.llm_error);
+        line["pasted"] = serde_json::json!(if parsed.reason == "rewrite" {
+            "rewrite"
+        } else {
+            "verbatim"
+        });
+        line["pasted_reason"] = serde_json::json!(parsed.reason);
+        line["pasted_text"] = serde_json::json!(parsed.text);
+        line["session_id"] = serde_json::json!(reply.session_id);
+        line["audio_duration_ms"] = serde_json::json!(reply.audio_duration_ms);
+        line["request_time_ms"] = serde_json::json!(reply.request_time_ms);
+        line["sync_time_ms"] = serde_json::json!(reply.sync_time_ms);
+    }
+    line.to_string()
+}
+
+/// `millis` since the Unix epoch as `2026-11-19T07:08:09.123Z`.
+fn iso8601(millis: u128) -> String {
+    let secs = (millis / 1000) as i64;
+    let (days, rest) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
+        rest / 3_600,
+        rest % 3_600 / 60,
+        rest % 60,
+        millis % 1000
+    )
 }
 
 /// The text to paste from a reply: the rewrite if it is a rewrite of the
@@ -322,12 +455,15 @@ struct Reply {
 /// nothing whatever the rewrite says. Logs which one and why, and the
 /// rewrite's error code (a fixed word such as `timeout`), never the text. The
 /// error never quotes the body.
-fn parse(body: &[u8], instruction: &str) -> Result<String, TranscribeError> {
+fn parse(body: &[u8], instruction: &str) -> Result<Parsed, TranscribeError> {
     let reply: Reply = serde_json::from_slice(body).map_err(|e| {
         TranscribeError::Engine(format!("unreadable reply ({:?} error)", e.classify()))
     })?;
-    let verbatim = reply.text.unwrap_or_default().trim().to_owned();
-    let rewrite = reply.llm_response.map(|text| text.trim().to_owned());
+    let verbatim = reply.text.clone().unwrap_or_default().trim().to_owned();
+    let rewrite = reply
+        .llm_response
+        .clone()
+        .map(|text| text.trim().to_owned());
     let (text, reason) = if verbatim.is_empty() {
         (verbatim, "silence")
     } else {
@@ -351,7 +487,11 @@ fn parse(body: &[u8], instruction: &str) -> Result<String, TranscribeError> {
         chars = text.chars().count(),
         "assemblyai text"
     );
-    Ok(text)
+    Ok(Parsed {
+        text,
+        reason,
+        reply,
+    })
 }
 
 /// `code` if it looks like one of the API's error words (`timeout`,
@@ -361,5 +501,19 @@ fn short_code(code: &str) -> &str {
         code
     } else {
         "other"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_timestamp_is_utc_iso_8601() {
+        assert_eq!(iso8601(0), "1970-01-01T00:00:00.000Z");
+        // 2026-11-19 07:08:09.123 UTC.
+        assert_eq!(iso8601(1_795_072_089_123), "2026-11-19T07:08:09.123Z");
+        // A leap day.
+        assert_eq!(iso8601(1_709_164_800_000), "2024-02-29T00:00:00.000Z");
     }
 }
