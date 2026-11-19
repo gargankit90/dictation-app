@@ -1,0 +1,26 @@
+{
+ "name": "minicpm5-2b",
+ "source": "parakeet",
+ "prompt": "v2",
+ "half": "all",
+ "n": 151,
+ "model_file": "MiniCPM5-2B-Q4_K_M.gguf",
+ "model_bytes": 1561318368,
+ "model_sha256": "ec2d5801640099e97d8d7e8003ad4d81f336e757811f03a26173dddf386602fd",
+ "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+ "load_s": 1.67,
+ "peak_memory_bytes": 386877792,
+ "max_rss_bytes": 1831272448,
+ "latency_s": {
+  "median": 0.563,
+  "p90": 1.605,
+  "mean": 0.9150132450331125,
+  "max": 5.15
+ },
+ "fallbacks": {
+  "number": 2
+ },
+ "fallback_total": 2,
+ "unchanged": 146,
+ "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+}

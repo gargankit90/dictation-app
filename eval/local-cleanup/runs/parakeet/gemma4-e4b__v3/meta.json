@@ -1,0 +1,27 @@
+{
+ "name": "gemma4-e4b",
+ "source": "parakeet",
+ "prompt": "v3",
+ "half": "all",
+ "n": 151,
+ "model_file": "gemma-4-E4B-it-Q4_K_M.gguf",
+ "model_bytes": 4977171584,
+ "model_sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+ "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+ "load_s": 4.28,
+ "peak_memory_bytes": 603558808,
+ "max_rss_bytes": 4121493504,
+ "latency_s": {
+  "median": 1.182,
+  "p90": 3.04,
+  "mean": 1.925973509933775,
+  "max": 11.732
+ },
+ "fallbacks": {
+  "number": 3,
+  "name": 2
+ },
+ "fallback_total": 5,
+ "unchanged": 68,
+ "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+}

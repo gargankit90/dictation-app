@@ -18,3 +18,5 @@ about.hbs
 docs/design/
 # Benchmark output written by eval/voicearena scripts.
 eval/voicearena/results/
+eval/local-cleanup/runs/
+eval/local-cleanup/judge_cache/

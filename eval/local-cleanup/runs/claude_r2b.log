@@ -1,0 +1,66 @@
+151 drafts, 96 judged already (cache), 55 to judge with claude-opus-5-5 effort=max via claude -p
+  judged 10/55
+  judged 20/55
+  judged 30/55
+  judged 40/55
+  judged 50/55
+parakeet_s1-mini__s1: ZER 57.0%  AMEND 1.01%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/s1-mini__s1/scored.csv: 55 new judge answers
+151 drafts, 133 judged already (cache), 18 to judge with claude-opus-5-5 effort=max via claude -p
+  judged 10/18
+parakeet_gemma4-e2b__v2: ZER 64.9%  AMEND 0.79%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma4-e2b__v2/scored.csv: 18 new judge answers
+151 drafts, 80 judged already (cache), 71 to judge with claude-opus-5-5 effort=max via claude -p
+  judged 10/71
+  judged 20/71
+  judged 30/71
+  judged 40/71
+  judged 50/71
+  judged 60/71
+  judged 70/71
+parakeet_bitvoice-0.6b__bv: ZER 44.4%  AMEND 5.24%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/bitvoice-0.6b__bv/scored.csv: 71 new judge answers
+151 drafts, 148 judged already (cache), 3 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_gemma4-e2b__v3: ZER 65.6%  AMEND 0.76%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma4-e2b__v3/scored.csv: 3 new judge answers
+151 drafts, 148 judged already (cache), 3 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_gemma4-e4b__v3: ZER 65.6%  AMEND 0.64%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma4-e4b__v3/scored.csv: 3 new judge answers
+151 drafts, 132 judged already (cache), 19 to judge with claude-opus-5-5 effort=max via claude -p
+  judged 10/19
+parakeet_s1-mini__s1__noguard: ZER 55.6%  AMEND 1.00%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/s1-mini__s1__noguard/scored.csv: 19 new judge answers
+151 drafts, 133 judged already (cache), 18 to judge with claude-opus-5-5 effort=max via claude -p
+  judged 10/18
+parakeet_bitvoice-0.6b__bv__noguard: ZER 41.7%  AMEND 13.22%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/bitvoice-0.6b__bv__noguard/scored.csv: 18 new judge answers
+151 drafts, 151 judged already (cache), 0 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_s1-mini__s1__strict: ZER 57.6%  AMEND 0.96%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/s1-mini__s1__strict/scored.csv: 0 new judge answers
+151 drafts, 151 judged already (cache), 0 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_bitvoice-0.6b__bv__strict: ZER 47.7%  AMEND 1.93%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/bitvoice-0.6b__bv__strict/scored.csv: 0 new judge answers
+151 drafts, 145 judged already (cache), 6 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_gemma4-e2b__v1__noguard: ZER 63.6%  AMEND 0.78%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma4-e2b__v1__noguard/scored.csv: 6 new judge answers
+151 drafts, 151 judged already (cache), 0 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_gemma4-e2b__v1__strict: ZER 62.3%  AMEND 0.90%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma4-e2b__v1__strict/scored.csv: 0 new judge answers
+151 drafts, 148 judged already (cache), 3 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_gemma4-e2b__v2__noguard: ZER 64.9%  AMEND 0.74%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma4-e2b__v2__noguard/scored.csv: 3 new judge answers
+151 drafts, 151 judged already (cache), 0 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_gemma4-e2b__v2__strict: ZER 64.9%  AMEND 0.79%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma4-e2b__v2__strict/scored.csv: 0 new judge answers
+151 drafts, 148 judged already (cache), 3 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_gemma4-e4b__v2__noguard: ZER 64.2%  AMEND 0.67%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma4-e4b__v2__noguard/scored.csv: 3 new judge answers
+151 drafts, 151 judged already (cache), 0 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_gemma4-e4b__v2__strict: ZER 64.2%  AMEND 0.67%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma4-e4b__v2__strict/scored.csv: 0 new judge answers
+151 drafts, 151 judged already (cache), 0 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_qwen3.5-2b__v1__noguard: ZER 55.6%  AMEND 1.22%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/qwen3.5-2b__v1__noguard/scored.csv: 0 new judge answers
+151 drafts, 151 judged already (cache), 0 to judge with claude-opus-5-5 effort=max via claude -p
+parakeet_qwen3.5-2b__v1__strict: ZER 55.6%  AMEND 1.21%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/qwen3.5-2b__v1__strict/scored.csv: 0 new judge answers

@@ -1,0 +1,17 @@
+151 drafts, 109 judged already (cache), 42 to judge with claude-opus-5-5 effort=max via claude -p
+  judged 10/42
+  judged 20/42
+  judged 30/42
+  judged 40/42
+parakeet_gemma4-e4b__v1: ZER 61.6%  AMEND 0.94%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma4-e4b__v1/scored.csv: 42 new judge answers
+151 drafts, 73 judged already (cache), 78 to judge with claude-opus-5-5 effort=max via claude -p
+  judged 10/78
+  judged 20/78
+  judged 30/78
+  judged 40/78
+  judged 50/78
+  judged 60/78
+  judged 70/78
+parakeet_gemma3-4b__v1: ZER 57.6%  AMEND 0.96%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/parakeet/gemma3-4b__v1/scored.csv: 78 new judge answers

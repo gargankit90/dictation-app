@@ -1,0 +1,23 @@
+151 drafts, 91 judged already (cache), 60 to judge with gpt-6-astra effort=max via codex exec (Codex CLI 0.166.0, ChatGPT plan)
+  judged 10/60
+  judged 20/60
+  judged 30/60
+  judged 40/60
+  judged 50/60
+  judged 60/60
+groq_gemma4-e2b__v2: ZER 70.2%  AMEND 0.83%  over 151 drafts (0 unjudged)  judge gpt-6-astra/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1  codex calls this run 60
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/groq/gemma4-e2b__v2/scored_codex.csv: 60 new judge answers
+151 drafts, 95 judged already (cache), 56 to judge with gpt-6-astra effort=max via codex exec (Codex CLI 0.166.0, ChatGPT plan)
+  judged 10/56
+  judged 20/56
+  judged 30/56
+  judged 40/56
+  judged 50/56
+qwen3_gemma4-e2b__v2: ZER 58.9%  AMEND 0.98%  over 151 drafts (0 unjudged)  judge gpt-6-astra/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1  codex calls this run 56
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/qwen3/gemma4-e2b__v2/scored_codex.csv: 56 new judge answers
+151 drafts, 146 judged already (cache), 5 to judge with gpt-6-astra effort=max via codex exec (Codex CLI 0.166.0, ChatGPT plan)
+groq_gemma4-e2b__v3: ZER 72.2%  AMEND 0.76%  over 151 drafts (0 unjudged)  judge gpt-6-astra/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1  codex calls this run 5
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/groq/gemma4-e2b__v3/scored_codex.csv: 5 new judge answers
+151 drafts, 147 judged already (cache), 4 to judge with gpt-6-astra effort=max via codex exec (Codex CLI 0.166.0, ChatGPT plan)
+qwen3_gemma4-e2b__v3: ZER 58.9%  AMEND 0.97%  over 151 drafts (0 unjudged)  judge gpt-6-astra/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1  codex calls this run 4
+/Users/gauri/orca/workspaces/dictation-app/local-cleanup-eval/eval/local-cleanup/runs/qwen3/gemma4-e2b__v3/scored_codex.csv: 4 new judge answers

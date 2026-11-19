@@ -1,0 +1,32 @@
+{
+ "name": "bitvoice-0.6b",
+ "source": "parakeet",
+ "prompt": "bv",
+ "half": "all",
+ "n": 151,
+ "model_file": "bitvoice-qwen3-0.6b-ft.gguf",
+ "model_bytes": 396704480,
+ "model_sha256": "b14bfc4b67161a9b9951c4f8a9451258d70fc1b74551721c02414ea1f8027d7e",
+ "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+ "load_s": 0.72,
+ "peak_memory_bytes": 2034305904,
+ "max_rss_bytes": 1780400128,
+ "latency_s": {
+  "median": 0.201,
+  "p90": 0.571,
+  "mean": 0.30940397350993376,
+  "max": 1.963
+ },
+ "fallbacks": {
+  "url_email": 1,
+  "name": 5,
+  "dropped_words": 11,
+  "shorter": 1,
+  "number": 10,
+  "longer": 1
+ },
+ "fallback_total": 29,
+ "unchanged": 25,
+ "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal",
+ "guard": "strict"
+}

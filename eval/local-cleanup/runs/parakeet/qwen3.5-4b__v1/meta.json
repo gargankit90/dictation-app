@@ -1,0 +1,26 @@
+{
+ "name": "qwen3.5-4b",
+ "source": "parakeet",
+ "prompt": "v1",
+ "half": "all",
+ "n": 151,
+ "model_file": "Qwen3.5-4B-Q4_K_M.gguf",
+ "model_bytes": 2740937888,
+ "model_sha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+ "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+ "load_s": 1.88,
+ "peak_memory_bytes": 1931809160,
+ "max_rss_bytes": 3686268928,
+ "latency_s": {
+  "median": 0.743,
+  "p90": 1.821,
+  "mean": 1.1331986754966887,
+  "max": 5.123
+ },
+ "fallbacks": {
+  "number": 5
+ },
+ "fallback_total": 5,
+ "unchanged": 115,
+ "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+}

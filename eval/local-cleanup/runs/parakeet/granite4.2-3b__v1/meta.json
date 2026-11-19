@@ -1,0 +1,27 @@
+{
+ "name": "granite4.2-3b",
+ "source": "parakeet",
+ "prompt": "v1",
+ "half": "all",
+ "n": 151,
+ "model_file": "granite-4.2-3b-Q4_K_M.gguf",
+ "model_bytes": 2244011552,
+ "model_sha256": "e0406663965846ae22a403456eb826ccce5f450840491f71952f18a7cb78e7d5",
+ "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+ "load_s": 1.47,
+ "peak_memory_bytes": 874450112,
+ "max_rss_bytes": 2821242880,
+ "latency_s": {
+  "median": 0.489,
+  "p90": 1.184,
+  "mean": 0.7523642384105961,
+  "max": 3.422
+ },
+ "fallbacks": {
+  "number": 7,
+  "echo": 2
+ },
+ "fallback_total": 9,
+ "unchanged": 110,
+ "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+}

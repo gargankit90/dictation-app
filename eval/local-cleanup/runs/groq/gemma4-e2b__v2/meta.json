@@ -1,0 +1,28 @@
+{
+ "name": "gemma4-e2b",
+ "source": "groq",
+ "prompt": "v2",
+ "half": "all",
+ "n": 151,
+ "model_file": "gemma-4-E2B-it-Q4_K_M.gguf",
+ "model_bytes": 3106738272,
+ "model_sha256": "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
+ "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+ "load_s": 2.46,
+ "peak_memory_bytes": 464489784,
+ "max_rss_bytes": 3370287104,
+ "latency_s": {
+  "median": 0.403,
+  "p90": 1.039,
+  "mean": 0.6467615894039735,
+  "max": 4.477
+ },
+ "fallbacks": {
+  "url_email": 1,
+  "number": 5,
+  "name": 1
+ },
+ "fallback_total": 7,
+ "unchanged": 74,
+ "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+}

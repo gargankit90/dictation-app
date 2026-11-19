@@ -1,0 +1,30 @@
+{
+ "name": "s1-mini",
+ "source": "parakeet",
+ "prompt": "s1",
+ "half": "all",
+ "n": 151,
+ "model_file": "s1-mini-q4_k_m.gguf",
+ "model_bytes": 484219808,
+ "model_sha256": "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634",
+ "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+ "load_s": 1.2,
+ "peak_memory_bytes": 2469924104,
+ "max_rss_bytes": 1607106560,
+ "latency_s": {
+  "median": 0.207,
+  "p90": 0.716,
+  "mean": 0.3477814569536424,
+  "max": 1.991
+ },
+ "fallbacks": {
+  "number": 14,
+  "url_email": 2,
+  "name": 3,
+  "dropped_words": 2
+ },
+ "fallback_total": 21,
+ "unchanged": 28,
+ "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal",
+ "guard": "strict"
+}

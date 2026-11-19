@@ -1,0 +1,26 @@
+{
+ "name": "phi4-mini",
+ "source": "parakeet",
+ "prompt": "v1",
+ "half": "all",
+ "n": 151,
+ "model_file": "Phi-4-mini-instruct-Q4_K_M.gguf",
+ "model_bytes": 2491874272,
+ "model_sha256": "88c00229914083cd112853aab84ed51b87bdf6b9ce42f532d8c85c7c63b1730a",
+ "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+ "load_s": 1.61,
+ "peak_memory_bytes": 1258884744,
+ "max_rss_bytes": 3252142080,
+ "latency_s": {
+  "median": 0.526,
+  "p90": 1.283,
+  "mean": 0.8053576158940398,
+  "max": 3.752
+ },
+ "fallbacks": {
+  "number": 5
+ },
+ "fallback_total": 5,
+ "unchanged": 62,
+ "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+}

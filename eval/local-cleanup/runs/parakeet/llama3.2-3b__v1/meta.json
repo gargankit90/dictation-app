@@ -1,0 +1,29 @@
+{
+ "name": "llama3.2-3b",
+ "source": "parakeet",
+ "prompt": "v1",
+ "half": "all",
+ "n": 151,
+ "model_file": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+ "model_bytes": 2019377696,
+ "model_sha256": "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
+ "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+ "load_s": 1.45,
+ "peak_memory_bytes": 1178422512,
+ "max_rss_bytes": 2930753536,
+ "latency_s": {
+  "median": 0.43,
+  "p90": 1.085,
+  "mean": 0.6820794701986755,
+  "max": 3.046
+ },
+ "fallbacks": {
+  "longer": 3,
+  "number": 2,
+  "name": 1,
+  "assistant": 1
+ },
+ "fallback_total": 7,
+ "unchanged": 92,
+ "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+}

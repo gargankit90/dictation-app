@@ -1,0 +1,5 @@
+{
+ "name": "raw",
+ "source": "qwen3",
+ "note": "the engine draft, no cleanup; finalize_s is the VM key-up-to-text time from PR #323"
+}

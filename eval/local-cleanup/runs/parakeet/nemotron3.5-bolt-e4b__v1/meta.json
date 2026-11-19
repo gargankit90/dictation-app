@@ -1,0 +1,27 @@
+{
+ "name": "nemotron3.5-bolt-e4b",
+ "source": "parakeet",
+ "prompt": "v1",
+ "half": "all",
+ "n": 151,
+ "model_file": "NVIDIA-Nemotron-3.5-Bolt-E4B-Q4_K_M.gguf",
+ "model_bytes": 5162292576,
+ "model_sha256": "5f0f982d11bc1408783d13e4440b06e6c1e989024ac26f9a2999cb4c496bedcc",
+ "llama_cpp": "version: 1.0.0 (build 12359, commit b1b770d90)",
+ "load_s": 8.43,
+ "peak_memory_bytes": 1272337928,
+ "max_rss_bytes": 3608510464,
+ "latency_s": {
+  "median": 1.168,
+  "p90": 2.918,
+  "mean": 1.7359006622516555,
+  "max": 8.575
+ },
+ "fallbacks": {
+  "number": 7,
+  "url_email": 1
+ },
+ "fallback_total": 8,
+ "unchanged": 86,
+ "settings": "temperature 0, top_k 1, seed 1, thinking off, ctx 4096, one slot, all layers on Metal"
+}

@@ -12,6 +12,8 @@ extend-exclude = [
     "THIRD-PARTY-LICENSES.txt",
     # Benchmark output: transcripts keep the speech engine's misheard words as data.
     "eval/voicearena/results/",
+    "eval/local-cleanup/runs/",
+    "eval/local-cleanup/judge_cache/",
 ]
 
 [default]
