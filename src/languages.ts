@@ -225,9 +225,46 @@ const WHISPER_LANGUAGES: readonly string[] = [
  */
 const GROQ_LANGUAGES: readonly string[] = [...WHISPER_LANGUAGES, "yue"];
 
+/** The 32 languages AssemblyAI's Dictation API accepts (`crates/transcribe/src/assemblyai.rs`). */
+const ASSEMBLYAI_LANGUAGES: readonly string[] = [
+  "en",
+  "es",
+  "de",
+  "fr",
+  "it",
+  "pt",
+  "tr",
+  "nl",
+  "sv",
+  "no",
+  "da",
+  "fi",
+  "hi",
+  "vi",
+  "ar",
+  "he",
+  "ja",
+  "ur",
+  "zh",
+  "ko",
+  "ca",
+  "gl",
+  "ru",
+  "ro",
+  "et",
+  "fa",
+  "yue",
+  "af",
+  "mr",
+  "zu",
+  "xh",
+  "nn",
+];
+
 const BY_PROVIDER: Readonly<Record<Provider, readonly string[]>> = {
   groq: GROQ_LANGUAGES,
   openai: WHISPER_LANGUAGES,
+  assemblyai: ASSEMBLYAI_LANGUAGES,
 };
 
 /** The languages a cloud provider's Whisper models accept. */

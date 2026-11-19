@@ -59,7 +59,7 @@ class Backend {
     share_usage_events: true,
     history_limit: 25,
   };
-  keys: Record<Provider, boolean> = { groq: false, openai: false };
+  keys: Record<Provider, boolean> = { groq: false, openai: false, assemblyai: false };
   models: LocalModelInfo_Serialize[] = [model(ENGLISH), model(MULTI)];
   engine: EngineStatus = { state: "ready", message: null };
   /** What `test_api_key` answers: `null` for success, or an error to throw. */

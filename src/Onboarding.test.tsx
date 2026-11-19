@@ -111,7 +111,7 @@ class Backend {
   /** The server answers a resume with the whole file. */
   ignoresRange = false;
   micAnswer: PermissionState = "granted";
-  keys: Record<Provider, boolean> = { groq: false, openai: false };
+  keys: Record<Provider, boolean> = { groq: false, openai: false, assemblyai: false };
   models: LocalModelInfo_Serialize[] = [{ ...PARAKEET }, { ...QWEN }];
   settings: Settings_Serialize = {
     version: 2,
