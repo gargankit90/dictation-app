@@ -167,3 +167,37 @@ def names(text: str) -> list[str]:
 
 def word_parts(text: str) -> list[str]:
     return [w for w in normalized(text).split(" ") if w]
+
+
+# --- Not in the app: a relaxed variant, for a counterfactual only (relax_guard.py) ---------------------------
+import re as _re  # noqa: E402
+
+CORRECTION_CUE = _re.compile(r"\b(sorry|wait|no|actually|make that|i mean|rather|scratch that|correction)\b", _re.I)
+CUE_WINDOW = 30
+
+
+def corrected(raw: str, value: str) -> bool:
+    """Every occurrence of `value` in raw is followed within CUE_WINDOW characters by a correction cue
+    ("9, sorry, 10", "Sunday? No, wait, Saturday"): dropping it is resolving a self-correction."""
+    # numbers() drops thousands commas: allow a comma between digits. Whole numbers / words only.
+    body = r",?".join(_re.escape(c) for c in value) if value[:1].isdigit() else _re.escape(value)
+    spots = [m.end() for m in _re.finditer(rf"(?<![\w.,]){body}(?:st|th|[nr]d)?(?![\w]|[.,:]\d)", raw)]
+    return bool(spots) and all(CORRECTION_CUE.search(raw[e:e + CUE_WINDOW]) for e in spots)
+
+
+def judge_relaxed(raw: str, reply: str, prompt: str) -> str:
+    """judge(), except a dropped number or name is allowed when the raw text corrects it right after."""
+    first = judge(raw, reply, prompt)
+    if first not in ("dropped_number", "dropped_name"):
+        return first
+    kept = numbers(reply)
+    if any(n not in kept and not corrected(raw, n) for n in numbers(raw)):
+        return "dropped_number"
+    lower = reply.lower()
+    if any(link not in lower for link in links(raw)):
+        return "dropped_link"
+    words = word_parts(reply)
+    for name in names(raw):
+        if any(part not in words for part in word_parts(name)) and not corrected(raw, name):
+            return "dropped_name"
+    return "cleaned"

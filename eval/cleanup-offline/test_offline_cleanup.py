@@ -94,6 +94,28 @@ class RustGuardTests(unittest.TestCase):
         self.assertEqual(offline_cleanup.prompt_sha(P), "f2a6b565e9db")
 
 
+class RelaxedGuardTests(unittest.TestCase):
+    def test_a_resolved_self_correction_is_allowed(self):
+        self.assertEqual(guard.judge_relaxed("Starting at 9, sorry, starting at 10 at the garden.",
+                                             "Starting at 10 at the garden.", P), "cleaned")
+        self.assertEqual(guard.judge_relaxed("The cutoff is January 23rd. Sorry, January 29th.",
+                                             "The cutoff is January 29th.", P), "cleaned")
+        self.assertEqual(guard.judge_relaxed("Inspection at 1240 Birch is Friday at 10. Sorry, 1030.",
+                                             "Inspection at 1240 Birch is Friday at 1030.", P), "cleaned")
+        self.assertEqual(guard.judge_relaxed("We got about 4,200 pounds. Sorry, no. 3,900 pounds.",
+                                             "We got 3,900 pounds.", P), "cleaned")
+        self.assertEqual(guard.judge_relaxed("Brunch Sunday? No, wait, Saturday?", "Brunch Saturday?", P), "cleaned")
+
+    def test_other_drops_still_fall_back(self):
+        raw = "Use dateFNS. Oh, and we're on version 3, so don't use the old imports. Thank you."
+        self.assertEqual(guard.judge_relaxed(raw, "Use dateFNS. Thank you.", P), "dropped_number")
+        self.assertEqual(guard.judge_relaxed("Ask Tomas Herrera today.", "Ask him today.", P), "dropped_name")
+        # The corrected value itself must stay.
+        self.assertEqual(guard.judge_relaxed("At 9, sorry, 10.", "At the time.", P), "dropped_number")
+        self.assertEqual(guard.judge("At 9, sorry, 10.", "At 10.", P),
+                         "dropped_number")
+
+
 class FakeGroq(http.server.BaseHTTPRequestHandler):
     seen: list = []
 
