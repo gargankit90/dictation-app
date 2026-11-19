@@ -206,7 +206,7 @@ def openrouter_spend(results_dir: pathlib.Path) -> float:
 
 # --- run ----------------------------------------------------------------------------------------------
 
-def main() -> None:
+def main(chat_request=ask_chat) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--provider", choices=["codex", "groq", "openrouter"], required=True)
     ap.add_argument("--model", required=True)
@@ -295,7 +295,7 @@ def main() -> None:
                         ans = ask_codex(guard.user_message(raw), a.model, effort, workdir, instructions, timeout)
                         ans["content"] = guard.strip_tags(ans["content"])
                     else:
-                        ans = ask_chat(raw, a.model, prompt, base_url, key, timeout, a.provider)
+                        ans = chat_request(raw, a.model, prompt, base_url, key, timeout, a.provider)
                         with _lock:
                             spent[0] += float((ans.get("usage") or {}).get("cost") or 0)
                     ms = int((time.monotonic() - started) * 1000)

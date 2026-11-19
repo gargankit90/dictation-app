@@ -24,7 +24,7 @@ from collections import Counter
 HERE = pathlib.Path(__file__).resolve().parent
 SPLIT = {r["clip_id"]: r["half"] for r in csv.DictReader((HERE / ".." / "groq-cleanup" / "split.csv").open())}
 RAW = HERE / "input" / "vm" / "groq_clean_v1_raw"
-VM = ["groq_clean_v1_raw", "groq_clean_v1"]
+VM = ["groq_clean_v1_raw", "groq_clean_v1", "groq_clean_v2"]
 
 
 def load(path: pathlib.Path) -> dict:
@@ -103,7 +103,7 @@ def summarise(label: str) -> dict:
         reasons = Counter(x["reason"] for x in det.values())
         ms = [int(x["model_ms"]) for x in det.values() if str(x["model_ms"]).isdigit() and int(x["model_ms"]) > 0]
         out["reasons"] = dict(reasons)
-        out["fallbacks"] = sum(v for k, v in reasons.items() if k != "cleaned")
+        out["fallbacks"] = sum(v for k, v in reasons.items() if k not in ("cleaned", "not_run", "cost_cap") and not k.startswith("http_"))
         out["model_ms_median"] = statistics.median(ms) if ms else None
         out["changed"] = sum(x["pasted"] != x["raw"] for x in det.values())
     if label not in VM:
@@ -150,8 +150,8 @@ def main() -> None:
             return t
         fb = "-"
         if "reasons" in s:
-            rs = ", ".join(f"{k} {v}" for k, v in sorted(s["reasons"].items()) if k != "cleaned")
-            fb = f'{s["fallbacks"]}/151' + (f" ({rs})" if rs else "")
+            rs = ", ".join(f"{k} {v}" for k, v in sorted(s["reasons"].items()) if k not in ("cleaned", "not_run", "cost_cap") and not k.startswith("http_"))
+            fb = f'{s["fallbacks"]}/{151 - s["missing"]}' + (f" ({rs})" if rs else "")
         fx = "; ".join(f'{j["all"]["fixed"]}/{j["all"]["broke"]}' if j else "-" for j in (c, x))
         print(f'| {s["label"]} | {151 - s["missing"]} | {zz(c, True)} | {zz(x)} | {f(c and c["all"]["amend"], 2)} / '
               f'{f(x and x["all"]["amend"], 2)} | {fx} | {fb} | {s.get("changed", "-")} | '

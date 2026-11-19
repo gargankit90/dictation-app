@@ -7,7 +7,7 @@ measured here.
 models? **Answer so far:** yes, clearly, but the prompt matters more than the model. The best result
 is **gpt-6.2-sol + v4: ZER 82.1 % (Claude judge) / 80.8 % (Codex judge)**, against 60.3 / 57.6 for
 the raw Whisper text and 64.9 / 64.2 for the VM run of gpt-oss-20b + v1. The cheapest OpenAI model,
-**gpt-6-luna + v4, gets 77.5 / 76.2 at about 1/20 of sol's price**. *(Groq gpt-oss runs: pending the owner's `run_groq.sh`.)*
+**gpt-6-luna + v4, gets 77.5 / 76.2 at about 1/20 of sol's price**.
 
 ## Method
 
@@ -45,19 +45,23 @@ the raw Whisper text and 64.9 / 64.2 for the VM run of gpt-oss-20b + v1. The che
 ZER % on tune / check / **all**; AMEND % on all; fixed / broke = clips where the cleanup took the raw
 draft from ≥1 edit to 0, or from 0 to ≥1, per judge; changed = clips whose pasted text differs from raw.
 
-| Model + prompt | Claude ZER t / c / **all** (95 % CI) | Codex ZER t / c / **all** | AMEND Claude / Codex | Fixed / broke (Claude; Codex) | Guard fallbacks | Changed |
-| --- | --- | --- | --- | --- | --- | ---: |
-| Raw Whisper (no cleanup) | 55.3 / 65.3 / **60.3** (51.9–68.3) | 55.3 / 60.0 / **57.6** | 1.34 / 1.32 | – | – | – |
-| VM: gpt-oss-20b + v1 (groq_clean_v1) | 61.8 / 68.0 / **64.9** (55.3–73.7) | 64.5 / 64.0 / **64.2** | 1.45 / 1.37 | 11/4; 12/2 | 10 (empty 5, dropped number 2, timeout 2, name 1) | 48 |
-| VM: v2 | *(VM run in progress, Groq cleanup eval)* | | | | | |
-| Offline gpt-oss-20b / 120b | *(pending the owner's run_groq.sh)* | | | | | |
-| gpt-6-luna + v1 | 69.7 / 69.3 / **69.5** (59.9–78.3) | 69.7 / 65.3 / **67.5** | 1.40 / 1.35 | 19/5; 18/3 | 8 (dropped number 8) | 58 |
-| gpt-reserve + v1 | 69.7 / 68.0 / **68.9** (59.3–77.6) | 71.1 / 65.3 / **68.2** | 0.86 / 0.82 | 20/7; 19/3 | 11 (dropped number 10, name 1) | 59 |
-| gpt-6.2-sol + v1 | 73.7 / 69.3 / **71.5** (62.3–79.9) | 73.7 / 65.3 / **69.5** | 0.81 / 0.81 | 18/1; 18/0 | 3 (dropped number 3) | 55 |
-| gpt-6-luna + g3 | 77.6 / 76.0 / **76.8** (68.7–84.4) | 77.6 / 72.0 / **74.8** | 0.48 / 0.46 | 27/2; 26/0 | 0 | 60 |
-| gpt-6-luna + g4 | 75.0 / 76.0 / **75.5** (67.5–82.8) | 76.3 / 72.0 / **74.2** | 0.52 / 0.49 | 25/2; 25/0 | 3 (name 2, number 1) | 57 |
-| gpt-6-luna + v4 | 75.0 / 80.0 / **77.5** (69.2–84.8) | 76.3 / 76.0 / **76.2** | 0.48 / 0.44 | 28/2; 28/0 | 3 (name 2, link 1) | 61 |
-| **gpt-6.2-sol + v4** | 78.9 / 85.3 / **82.1** (74.8–88.7) | 80.3 / 81.3 / **80.8** | **0.44 / 0.44** | **33/0; 35/0** | 7 (name 4, number 2, link 1) | 66 |
+| Run | n | Claude ZER tune / check / all (95% CI) | Codex ZER tune / check / all | AMEND all Claude / Codex | Fixed / broke vs raw (Claude; Codex) | Fallbacks (reasons) | Changed | Model ms median |
+| --- | ---: | --- | --- | --- | --- | --- | ---: | ---: |
+| groq_clean_v1_raw | 151 | 55.3 / 65.3 / **60.3** (51.9–68.3) | 55.3 / 60.0 / **57.6** | 1.34 / 1.32 | 0/0; 0/0 | - | - | - |
+| groq_clean_v1 | 151 | 61.8 / 68.0 / **64.9** (55.3–73.7) | 64.5 / 64.0 / **64.2** | 1.45 / 1.37 | 11/4; 12/2 | 10/151 (dropped_name 1, dropped_number 2, empty 5, timeout 2) | 48 | 465 |
+| groq_clean_v2 | 151 | 64.5 / 65.3 / **64.9** (55.7–73.3) | 67.1 / 62.7 / **64.9** | 1.26 / 1.15 | 17/10; 19/8 | 2/151 (dropped_name 2) | 57 | 545 |
+| luna_g3 | 151 | 77.6 / 76.0 / **76.8** (68.7–84.4) | 77.6 / 72.0 / **74.8** | 0.48 / 0.46 | 27/2; 26/0 | 0/151 | 60 | 4545 |
+| luna_g4 | 151 | 75.0 / 76.0 / **75.5** (67.5–82.8) | 76.3 / 72.0 / **74.2** | 0.52 / 0.49 | 25/2; 25/0 | 3/151 (dropped_name 2, dropped_number 1) | 57 | 4392 |
+| luna_v1 | 151 | 69.7 / 69.3 / **69.5** (59.9–78.3) | 69.7 / 65.3 / **67.5** | 1.40 / 1.35 | 19/5; 18/3 | 8/151 (dropped_number 8) | 58 | 5670 |
+| luna_v4 | 151 | 75.0 / 80.0 / **77.5** (69.2–84.8) | 76.3 / 76.0 / **76.2** | 0.48 / 0.44 | 28/2; 28/0 | 3/151 (dropped_link 1, dropped_name 2) | 61 | 4568 |
+| oss120b_g3 | 141 | 71.8 / 65.7 / **68.8** (60.9–76.9) | - | 0.64 / - | 16/3; - | 2/141 (dropped_name 1, dropped_number 1) | 51 | 589 |
+| oss120b_v4 | 150 | 72.4 / 70.3 / **71.3** (61.5–80.0) | 72.4 / 67.6 / **70.0** | 0.63 / 0.56 | 19/3; 19/1 | 1/150 (dropped_number 1) | 56 | 570 |
+| oss20b_v1 | 151 | 65.8 / 66.7 / **66.2** (57.1–74.8) | 67.1 / 61.3 / **64.2** | 1.27 / 1.25 | 13/4; 13/3 | 11/151 (dropped_name 2, dropped_number 2, empty 7) | 46 | 496 |
+| reserve_v1 | 151 | 69.7 / 68.0 / **68.9** (59.3–77.6) | 71.1 / 65.3 / **68.2** | 0.86 / 0.82 | 20/7; 19/3 | 11/151 (dropped_name 1, dropped_number 10) | 59 | 4874 |
+| sol_v1 | 151 | 73.7 / 69.3 / **71.5** (62.3–79.9) | 73.7 / 65.3 / **69.5** | 0.81 / 0.81 | 18/1; 18/0 | 3/151 (dropped_number 3) | 55 | 5268 |
+| sol_v4 | 151 | 78.9 / 85.3 / **82.1** (74.8–88.7) | 80.3 / 81.3 / **80.8** | 0.44 / 0.44 | 33/0; 35/0 | 7/151 (dropped_link 1, dropped_name 4, dropped_number 2) | 66 | 5099 |
+
+Offline gpt-oss-20b + v1 exceeded the VM by 1.3 Claude ZER points and tied on Codex. For 120b, scores exclude missing API replies. The v2 VM used a separate transcription run, so its fixed/broke comparisons against v1 raw include transcription differences. The 120b g4 and v1 runs have incomplete coverage. Claude judging hit its session cap. OpenRouter v4 rows await the owner command in `run_openrouter.sh` (estimated $0.60, $2 cap).
 
 Guard counterfactuals (no new model calls; same replies, a different guard, scored by both judges):
 
@@ -159,7 +163,7 @@ the input share by 50–90 %.
    v1 on the same model, AMEND halved) and it stops v1's harmful deletions (whole sentences dropped,
    a cancelled instruction kept as the instruction).
 2. **Best quality: gpt-6.2-sol + v4** (82.1 / 80.8, nothing broken). **Best value: gpt-6-luna + v4**
-   (77.5 / 76.2) at 1/20 of sol's price and about the price of gpt-oss-120b. *(Groq gpt-oss runs: pending the owner's `run_groq.sh`.)*
+   (77.5 / 76.2) at 1/20 of sol's price and about the price of gpt-oss-120b.
 3. **Fix the guard next, before tuning prompts further.** With v4 the guard's name/number/link checks
    refuse correct spelling fixes (7 of 7 sol + v4 fallbacks; +2.7 / +2.6 ZER without it). Keep the
    checks (they caught a dropped sentence on v1) but accept a changed token when the reply has a
@@ -182,3 +186,22 @@ the input share by 50–90 %.
   model_ms), `cleanup.jsonl` (model replies), `scored*.csv` and judge caches, `harms.md`.
 - `input/vm/`: the VM v1 run's scores and replies, copied from the Groq cleanup eval for the table.
 - Budget used: Codex 1,252 calls (1,060 cleanup incl. a 3-clip smoke test + 192 judging) (cleanup + judging), Claude judge 179 clips.
+
+## Nemotron with OpenRouter GPT-6.2-sol and v4
+
+All 151 saved Nemotron transcripts received an API reply. The standard guard accepted 147 and returned the raw text for four dropped-name flags. Cleanup wall time was 0.972 s median and 2.126 s p90 (nearest rank). OpenRouter reported $0.29247 total.
+
+| Judge | Paired clips | Raw ZER % | Cleaned ZER % | Fixed / regressed | Raw / cleaned AMEND % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GPT-6 Astra, all | 151 | 64.9 | 84.1 | 29 / 0 | 1.35 / 0.41 |
+| GPT-6 Astra, tune | 76 | 69.7 | 89.5 | 15 / 0 | 1.05 / 0.37 |
+| GPT-6 Astra, check | 75 | 60.0 | 78.7 | 14 / 0 | 1.64 / 0.45 |
+| Claude Opus 5.5 (cache only), all | 44 | 86.4 | 95.5 | 4 / 0 | 0.97 / 0.20 |
+| Claude Opus 5.5 (cache only), tune | 19 | 89.5 | 94.7 | 1 / 0 | 0.71 / 0.23 |
+| Claude Opus 5.5 (cache only), check | 25 | 84.0 | 96.0 | 3 / 0 | 1.23 / 0.18 |
+
+Claude cached verdicts cover 49 raw drafts and 50 pasted drafts. Only matched pairs enter that judge’s rows. The session cap prevented fresh judgments. Cache matches favor previously seen wording, so this subset cannot estimate the full Claude effect. Fixes and regressions count transitions to and from zero edits.
+
+Dropped-name fallbacks: dict_0346, dict_0351, dict_0498, dict_0559.
+
+[Paired fixes and regressions](paired-results/nemotron_sol_v4/changes.md).
