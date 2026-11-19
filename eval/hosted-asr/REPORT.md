@@ -10,7 +10,7 @@ Nemotron is the strongest fully Codex-judged challenger so far. It reduced spoke
 | nvidia__nemotron-3.5-transcribe | – | 69.7 / 60.0 / **64.9** | – / 1.35 | –; 24/12/115 | 1.97 | 6.64 | 1.27 / 3.23 | 0 / 1 / 0 / 2 / 0 |
 | nvidia__parakeet-tdt-0.6b-v3 | – | 50.0 / 49.3 / **49.7** | – / 1.63 | –; 7/18/126 | 3.56 | 7.86 | 0.92 / 1.72 | 0 / 0 / 0 / 15 / 0 |
 | openai__whisper-large-v3-turbo | – | 40.8 / 50.7 / **45.7** | – / 2.49 | –; 3/20/128 | 5.14 | 8.44 | 1.45 / 3.30 | 5 / 1 / 4 / 24 / 0 |
-| qwen__qwen3-asr-0.6b | – | – | – / – | –; – | 5.92 | 10.25 | 1.02 / 1.72 | 0 / 1 / 4 / 19 / 0 |
+| qwen__qwen3-asr-0.6b | – | 48.7 / 58.7 / **53.6** | – / 4.00 | –; 13/18/120 | 5.92 | 10.25 | 1.02 / 1.72 | 0 / 1 / 4 / 19 / 0 |
 | qwen__qwen3-asr-1.7b | – | 57.9 / 64.0 / **60.9** | – / 7.07 | –; 16/10/125 | 8.39 | 12.19 | 1.76 / 42.71 | 0 / 0 / 6 / 19 / 0 |
 
 - mistralai__voxtral-small-24b-2507-stt: 151/151 ok, errors -, providers {'DeepInfra': 94, '?': 57}, cost $0.1703 for 0.95 h sent ($0.180/h)
@@ -53,8 +53,19 @@ Voxtral Small had the lowest raw Codex AMEND (1.00%) and higher check-half ZER (
 
 ## Coverage and limits
 
-Codex used 647 new GPT-6 Astra/max judge calls and 151 GPT-6.2 Sol/low cleanup calls, 798 in total. Exact matching judge prompts reused prior verdicts. For Qwen 0.6B, 80 of 151 Codex verdicts are available from cache and 71 remain. The cached subset favors recurring drafts and cannot establish full-set ZER.
+Qwen3-ASR 0.6B ranked fourth of seven hosted first-round models by Codex ZER both overall and on the held-out check half. It scored 53.6% overall (81/151 zero-edit drafts, 4.00% AMEND), 58.7% on check (44/75, 1.29% AMEND) and 48.7% on tune (37/76, 6.81% AMEND). Direct Groq scored 57.0% overall and tied Qwen on check. All 151 distinct scored clip IDs matched the manifest and the saved transcripts.
+
+The resumed GPT-6 Astra/max judge used 71 new calls and reused verdicts for 80 clips by exact prompt match. Cumulative Codex use reached 869 of 900 calls, comprising 718 judge calls and 151 GPT-6.2 Sol/low cleanup calls.
 
 Claude reported its five-hour cap. Full Claude scores remain pending for all seven raw candidates and cleaned Nemotron. Additional clip verdicts required after cache matching are 57 for Voxtral Small, 98 for Parakeet Ultra, 99 for cleaned Nemotron, 102 for raw Nemotron, 82 for Parakeet TDT, 109 for Whisper Turbo, 88 for Qwen 0.6B and 92 for Qwen 1.7B. Shared drafts may reduce the number of distinct new calls. Each score in the table covers the entire 151-clip public set.
 
-The owner-only second-round command covers Whisper large v3 and Voxtral Mini. Neither run had returned transcripts at publication. The first round cost about $0.41 in transcription charges. Claude and Codex CLI runs used subscription access.
+The first round cost about $0.41 in transcription charges. Claude and Codex CLI runs used subscription access.
+
+## Round 2 interim measurements
+
+The owner started Whisper large v3 and Voxtral Mini. This snapshot uses each model's successful clips saved by 14:09 Pacific on November 19. Clip counts differ, so the first-round ranking excludes both models. WER uses the normalized spoken reference for the clips available. Cache coverage counts exact judge-prompt matches using the original judge identities and settings.
+
+| Model | Clips of 151 | Spoken WER % | API s median / p90 | USD spent | USD/audio hour | Cached Claude / Codex verdicts |
+|---|---:|---:|---|---:|---:|---|
+| openai/whisper-large-v3 | 22 | 4.23 | 1.82 / 6.42 | 0.0057 | 0.037 | 5 / 7 |
+| mistralai/voxtral-mini-3b-2507 | 24 | 4.14 | 1.11 / 1.80 | 0.0096 | 0.060 | 11 / 13 |
