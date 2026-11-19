@@ -1,1 +1,5 @@
 __pycache__/
+# Local caches and progress logs. Publish the transcript and scored CSVs.
+results/*/*.jsonl
+results/*/*.log
+results/*/summary.json

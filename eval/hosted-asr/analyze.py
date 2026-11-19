@@ -103,7 +103,10 @@ def judged(d: pathlib.Path, judge: str) -> dict | None:
     p = d / JUDGES[judge]
     if not p.exists():
         return None
-    rows = list(read(p).values())
+    scored = read(p)
+    if scored.keys() != MANIFEST.keys() or any(r["edits"] == "" for r in scored.values()):
+        return None
+    rows = list(scored.values())
     for r in rows:
         r.setdefault("speaker_id", MANIFEST[r["clip_id"]]["speaker_id"])
     out = {}
