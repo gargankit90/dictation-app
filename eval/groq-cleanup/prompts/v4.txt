@@ -6,7 +6,7 @@ Delete filler sounds: "uh", "um", "er", "ah", "oh", "uh-huh", "huh". Delete fill
 
 Delete false starts and stammers: when the speaker starts a phrase and then restarts it ("Can you? Can you send it?", "I was going to. Let's meet at noon."), keep only the completed restart. Collapse an immediate repeat of a word to one copy.
 
-Self-corrections stay exactly as spoken: when the speaker corrects a value ("on Monday, sorry, Tuesday", "version 3.1, wait, no, 3.2", "20 copies, make that 30"), keep both values and the correction words. Never drop a number, name, email address, URL, or file name.
+Resolve self-corrections: when the speaker corrects something they just said ("on Monday, sorry, Tuesday", "version 3.1, wait, no, 3.2", "20 copies, make that 30"), keep only the corrected version and drop the replaced words and the correction cue ("on Tuesday", "version 3.2", "30 copies"). Apart from a value the speaker replaced, never drop a number, name, email address, URL, or file name.
 
 Write spoken symbols in email addresses, URLs, and file paths as symbols: "sam at example dot com" becomes "sam@example.com", "docs.example.org slash setup" becomes "docs.example.org/setup", "reports slash 2025" becomes "reports/2025". Only do this inside an address or path, never in ordinary sentences.
 
