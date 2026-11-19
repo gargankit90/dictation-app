@@ -128,6 +128,9 @@ pub struct Outcome {
     pub reply: Option<String>,
     /// How long the cleanup took.
     pub latency: Duration,
+    /// The reply's `finish_reason` and token `usage` (counts only), for the
+    /// eval dump; `None` if no reply came back.
+    pub meta: Option<serde_json::Value>,
 }
 
 /// The cleanup pass: a Groq chat model and the key.
@@ -220,14 +223,15 @@ impl Cleanup {
                 reason: Reason::Empty,
                 reply: None,
                 latency: Duration::ZERO,
+                meta: None,
             };
         }
-        let (reply, reason) = match self.request(raw).await {
-            Ok(reply) => {
+        let (reply, meta, reason) = match self.request(raw).await {
+            Ok((reply, meta)) => {
                 let reason = judge(raw, &reply, &self.prompt);
-                (Some(reply), reason)
+                (Some(reply), Some(meta), reason)
             }
-            Err(reason) => (None, reason),
+            Err(reason) => (None, None, reason),
         };
         let text = match (&reply, reason) {
             (Some(reply), Reason::Cleaned) => reply.clone(),
@@ -238,6 +242,7 @@ impl Cleanup {
             reason,
             reply,
             latency: started.elapsed(),
+            meta,
         };
         tracing::info!(
             used = if reason.cleaned() { "cleaned" } else { "raw" },
@@ -253,7 +258,7 @@ impl Cleanup {
         outcome
     }
 
-    async fn request(&self, raw: &str) -> Result<String, Reason> {
+    async fn request(&self, raw: &str) -> Result<(String, serde_json::Value), Reason> {
         let mut auth = HeaderValue::from_str(&format!("Bearer {}", self.key.expose()))
             .map_err(|_| Reason::HttpError(401))?;
         auth.set_sensitive(true);
@@ -273,7 +278,8 @@ impl Cleanup {
             return Err(Reason::HttpError(status.as_u16()));
         }
         let body = response.bytes().await.map_err(|e| from_reqwest(&e))?;
-        parse_reply(&body).ok_or(Reason::BadReply)
+        let text = parse_reply(&body).ok_or(Reason::BadReply)?;
+        Ok((text, reply_meta(&body)))
     }
 
     /// Appends one line to the eval dump, if it is on. Never fails a
@@ -293,6 +299,7 @@ impl Cleanup {
             "used": if outcome.reason.cleaned() { "cleaned" } else { "raw" },
             "reason": outcome.reason.name(),
             "cleanup_ms": outcome.latency.as_millis() as u64,
+            "meta": outcome.meta,
         });
         let written = std::fs::create_dir_all(dir).and_then(|()| {
             std::fs::OpenOptions::new()
@@ -331,7 +338,7 @@ pub fn prompt_sha(prompt: &str) -> String {
 /// think briefly and keep their reasoning out of the reply.
 fn request_body(model: &str, prompt: &str, raw: &str) -> serde_json::Value {
     let reasoning = model.starts_with("openai/gpt-oss");
-    let budget = raw.chars().count() / 2 + if reasoning { 1_280 } else { 256 };
+    let budget = raw.chars().count() / 2 + if reasoning { 4_096 } else { 256 };
     let mut body = serde_json::json!({
         "model": model,
         "temperature": 0,
@@ -381,6 +388,16 @@ fn parse_reply(body: &[u8]) -> Option<String> {
     text = text.strip_prefix(OPEN_TAG).unwrap_or(text).trim_start();
     text = text.strip_suffix(CLOSE_TAG).unwrap_or(text).trim_end();
     Some(text.to_owned())
+}
+
+/// The first choice's `finish_reason` and the reply's token `usage` (counts
+/// only, no text).
+fn reply_meta(body: &[u8]) -> serde_json::Value {
+    let reply: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+    serde_json::json!({
+        "finish_reason": reply["choices"][0]["finish_reason"],
+        "usage": reply["usage"],
+    })
 }
 
 /// Whether `reply` may replace `raw`: [`Reason::Cleaned`] if so, else the
@@ -681,6 +698,11 @@ mod tests {
     fn replies_are_read_without_the_tags() {
         let body = br#"{"choices":[{"message":{"role":"assistant","content":" <transcript>\nHi there.\n</transcript> "}}]}"#;
         assert_eq!(parse_reply(body).as_deref(), Some("Hi there."));
+        let meta = reply_meta(
+            br#"{"choices":[{"message":{"content":""},"finish_reason":"length"}],"usage":{"completion_tokens":9}}"#,
+        );
+        assert_eq!(meta["finish_reason"], "length");
+        assert_eq!(meta["usage"]["completion_tokens"], 9);
         assert_eq!(parse_reply(br#"{"choices":[]}"#), None);
         assert_eq!(parse_reply(b"nope"), None);
         assert_eq!(
