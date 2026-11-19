@@ -52,7 +52,7 @@ interface Props {
 }
 
 /** Groq chat models for the experimental cleanup: fast and small, then stronger (`groq_cleanup.rs`). */
-export const CLEANUP_MODELS = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"];
+export const CLEANUP_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"];
 
 /** What a model action's button says. */
 function actionLabel(action: ModelAction, model: LocalModelInfo_Serialize): string {

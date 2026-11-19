@@ -365,15 +365,15 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     await open("speech");
     const select = await screen.findByLabelText<HTMLSelectElement>("Groq cleanup");
     expect(select.value).toBe("");
-    fireEvent.change(select, { target: { value: "llama-3.1-8b-instant" } });
+    fireEvent.change(select, { target: { value: "openai/gpt-oss-20b" } });
     await waitFor(() => {
       expect(backend.named("set_cleanup_model")[0]?.args).toEqual({
-        model: "llama-3.1-8b-instant",
+        model: "openai/gpt-oss-20b",
       });
     });
     await waitFor(() => {
       expect(screen.getByLabelText<HTMLSelectElement>("Groq cleanup").value).toBe(
-        "llama-3.1-8b-instant",
+        "openai/gpt-oss-20b",
       );
     });
     fireEvent.change(screen.getByLabelText("Groq cleanup"), { target: { value: "" } });

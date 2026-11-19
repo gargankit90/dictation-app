@@ -33,11 +33,12 @@ use sha2::{Digest, Sha256};
 
 use crate::groq_cleanup_prompt::{self, CLOSE_TAG, OPEN_TAG, PROMPT_NAME, SYSTEM_PROMPT};
 
-/// The fast, small model offered in Settings.
-pub const FAST_MODEL: &str = "llama-3.1-8b-instant";
+/// The fast, small model offered in Settings (Groq production model,
+/// checked 2026-11-19; the Llama 3.x models were shut down on 2026-08-16).
+pub const FAST_MODEL: &str = "openai/gpt-oss-20b";
 
-/// The stronger model offered in Settings.
-pub const STRONG_MODEL: &str = "llama-3.3-70b-versatile";
+/// The stronger model offered in Settings (Groq production model).
+pub const STRONG_MODEL: &str = "openai/gpt-oss-120b";
 
 /// How long a cleanup may take before the raw text is pasted instead.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -690,8 +691,8 @@ mod tests {
 
     #[test]
     fn the_request_is_temperature_zero_with_the_transcript_as_data() {
-        let body = request_body(FAST_MODEL, "rules", "hello");
-        assert_eq!(body["model"], FAST_MODEL);
+        let body = request_body("some-chat-model", "rules", "hello");
+        assert_eq!(body["model"], "some-chat-model");
         assert_eq!(body["temperature"], 0);
         assert_eq!(body["messages"][0]["content"], "rules");
         assert_eq!(
@@ -699,7 +700,7 @@ mod tests {
             "<transcript>\nhello\n</transcript>"
         );
         assert!(body.get("reasoning_effort").is_none());
-        let body = request_body("openai/gpt-oss-120b", "rules", "hello");
+        let body = request_body(STRONG_MODEL, "rules", "hello");
         assert_eq!(body["reasoning_effort"], "low");
         assert_eq!(body["include_reasoning"], false);
     }

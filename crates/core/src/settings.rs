@@ -380,7 +380,7 @@ mod tests {
         assert_eq!(Settings::default().cleanup_model, None);
         assert_eq!(from_json("{}").unwrap().cleanup_model, None);
         let settings = Settings {
-            cleanup_model: Some("llama-3.1-8b-instant".to_owned()),
+            cleanup_model: Some("openai/gpt-oss-20b".to_owned()),
             ..Settings::default()
         };
         assert_eq!(from_json(&to_json(&settings).unwrap()).unwrap(), settings);
