@@ -69,12 +69,22 @@ def details(d: pathlib.Path) -> dict:
     return {}
 
 
+def missing(label: str, det: dict) -> set:
+    """Offline clips with no model reply because of the run, not the model (a rate limit, the cost cap,
+    not run yet): left out of the scores. The VM run's failures stay in (they are what the app pasted)."""
+    if label in VM:
+        return set()
+    return {cid for cid, x in det.items() if x["reason"] in ("not_run", "cost_cap") or x["reason"].startswith("http_")}
+
+
 def summarise(label: str) -> dict:
     d = run_dir(label)
-    judges = {"claude": load(d / "scored.csv"), "codex": load(d / "scored_codex.csv")}
-    raw = {"claude": load(RAW / "scored.csv"), "codex": load(RAW / "scored_codex.csv")}
     det = details(d)
-    out: dict = {"label": label, "judges": {}}
+    gone = missing(label, det)
+    judges = {j: {cid: r for cid, r in load(d / f).items() if cid not in gone}
+              for j, f in (("claude", "scored.csv"), ("codex", "scored_codex.csv"))}
+    raw = {"claude": load(RAW / "scored.csv"), "codex": load(RAW / "scored_codex.csv")}
+    out: dict = {"label": label, "judges": {}, "missing": len(gone)}
     for j, rows in judges.items():
         if not rows:
             continue
@@ -125,9 +135,9 @@ def main() -> None:
     labels = sys.argv[1:] or VM + sorted(p.name for p in (HERE / "results").iterdir()
                                           if (p / "scored.csv").exists() or (p / "scored_codex.csv").exists())
     sums = [summarise(lab) for lab in labels]
-    print("| Run | Claude ZER tune / check / all (95% CI) | Codex ZER tune / check / all | AMEND all Claude / Codex "
+    print("| Run | n | Claude ZER tune / check / all (95% CI) | Codex ZER tune / check / all | AMEND all Claude / Codex "
           "| Fixed / broke vs raw (Claude; Codex) | Fallbacks (reasons) | Changed | Model ms median |")
-    print("| --- | --- | --- | --- | --- | --- | ---: | ---: |")
+    print("| --- | ---: | --- | --- | --- | --- | --- | ---: | ---: |")
     for s in sums:
         c, x = s["judges"].get("claude"), s["judges"].get("codex")
 
@@ -143,7 +153,7 @@ def main() -> None:
             rs = ", ".join(f"{k} {v}" for k, v in sorted(s["reasons"].items()) if k != "cleaned")
             fb = f'{s["fallbacks"]}/151' + (f" ({rs})" if rs else "")
         fx = "; ".join(f'{j["all"]["fixed"]}/{j["all"]["broke"]}' if j else "-" for j in (c, x))
-        print(f'| {s["label"]} | {zz(c, True)} | {zz(x)} | {f(c and c["all"]["amend"], 2)} / '
+        print(f'| {s["label"]} | {151 - s["missing"]} | {zz(c, True)} | {zz(x)} | {f(c and c["all"]["amend"], 2)} / '
               f'{f(x and x["all"]["amend"], 2)} | {fx} | {fb} | {s.get("changed", "-")} | '
               f'{f(s.get("model_ms_median"), 0)} |')
 

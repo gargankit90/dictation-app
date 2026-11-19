@@ -32,6 +32,12 @@ Providers:
          max_completion_tokens = chars/2 + 1280 and reasoning_effort "low" for gpt-oss). The key is read
          from GROQ_API_KEY in this process's environment only; it is never printed, logged or stored.
          The app's 3 s timeout is --timeout (default 30 s offline; pass 3 to mimic the app).
+  openrouter  The same chat request to https://openrouter.ai/api/v1 (OpenAI-compatible) for open-weight
+         models: temperature 0, max_tokens = chars/2 + 1280, reasoning {"effort": "low", "exclude": true}
+         (models without reasoning ignore it), usage {"include": true} so each reply carries its cost.
+         Key from OPENROUTER_API_KEY only. --max-cost (USD) stops every run once the OpenRouter spend
+         recorded in all results/*/cleanup.jsonl reaches it. model_ms here is real API time (through
+         OpenRouter's router, default provider routing).
 """
 from __future__ import annotations
 
@@ -128,8 +134,18 @@ def ask_codex(user: str, model: str, effort: str, workdir: str, instructions: st
 
 # --- groq (OpenAI-compatible chat completions) -------------------------------------------------------
 
-def request_body(model: str, prompt: str, raw: str) -> dict:
-    """groq_cleanup.rs request_body, field for field."""
+KEY_ENV = {"groq": "GROQ_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
+BASE_URL = {"groq": "https://api.groq.com/openai/v1", "openrouter": "https://openrouter.ai/api/v1"}
+
+
+def request_body(model: str, prompt: str, raw: str, provider: str = "groq") -> dict:
+    """groq: groq_cleanup.rs request_body, field for field. openrouter: the same messages and
+    temperature, OpenRouter's names for the token budget and reasoning, and the cost in the reply."""
+    if provider == "openrouter":
+        return {"model": model, "temperature": 0, "max_tokens": len(raw) // 2 + 1280,
+                "messages": [{"role": "system", "content": prompt},
+                             {"role": "user", "content": guard.user_message(raw)}],
+                "reasoning": {"effort": "low", "exclude": True}, "usage": {"include": True}}
     reasoning = model.startswith("openai/gpt-oss")
     budget = len(raw) // 2 + (1280 if reasoning else 256)
     body = {"model": model, "temperature": 0, "max_completion_tokens": budget,
@@ -141,12 +157,13 @@ def request_body(model: str, prompt: str, raw: str) -> dict:
     return body
 
 
-def ask_groq(raw: str, model: str, prompt: str, base_url: str, key: str, timeout: float) -> dict:
+def ask_chat(raw: str, model: str, prompt: str, base_url: str, key: str, timeout: float,
+             provider: str = "groq") -> dict:
     req = urllib.request.Request(
         base_url.rstrip("/") + "/chat/completions", method="POST",
-        data=json.dumps(request_body(model, prompt, raw)).encode(),
+        data=json.dumps(request_body(model, prompt, raw, provider)).encode(),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
-                 "User-Agent": "vocet-offline-cleanup-eval"})
+                 "User-Agent": "offline-cleanup-eval"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read()
@@ -167,21 +184,39 @@ def ask_groq(raw: str, model: str, prompt: str, base_url: str, key: str, timeout
         usage = json.loads(body).get("usage") or {}
     except ValueError:
         pass
-    return {"content": text, "usage": {k: usage.get(k) for k in ("prompt_tokens", "completion_tokens")}}
+    kept = {k: usage.get(k) for k in ("prompt_tokens", "completion_tokens")}
+    if provider == "openrouter":
+        kept["cost"] = usage.get("cost")
+        details = usage.get("completion_tokens_details") or {}
+        kept["reasoning_tokens"] = details.get("reasoning_tokens")
+    return {"content": text, "usage": kept}
+
+
+def openrouter_spend(results_dir: pathlib.Path) -> float:
+    """USD recorded by every OpenRouter reply in results_dir/*/cleanup.jsonl."""
+    total = 0.0
+    for path in results_dir.glob("*/cleanup.jsonl"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if '"openrouter"' in line:
+                r = json.loads(line)
+                if r.get("provider") == "openrouter":
+                    total += float((r.get("usage") or {}).get("cost") or 0)
+    return total
 
 
 # --- run ----------------------------------------------------------------------------------------------
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--provider", choices=["codex", "groq"], required=True)
+    ap.add_argument("--provider", choices=["codex", "groq", "openrouter"], required=True)
     ap.add_argument("--model", required=True)
     ap.add_argument("--effort", default="low", help="codex reasoning effort (default low)")
     ap.add_argument("--prompt", type=pathlib.Path, required=True)
     ap.add_argument("--label", required=True, help="results/<label>/")
     ap.add_argument("--input", type=pathlib.Path, default=HERE / "input" / "raw_whisper.csv")
     ap.add_argument("--results-dir", type=pathlib.Path, default=HERE / "results")
-    ap.add_argument("--base-url", default="https://api.groq.com/openai/v1")
+    ap.add_argument("--base-url", help="API root (default: the provider's)")
+    ap.add_argument("--max-cost", type=float, default=2.0, help="openrouter: stop at this total USD spend")
     ap.add_argument("--timeout", type=float, help="per request, seconds (groq 30, codex 300)")
     ap.add_argument("--workers", type=int, help="parallel requests (codex 4, groq 2)")
     ap.add_argument("--attempts", type=int, default=3)
@@ -193,14 +228,19 @@ def main() -> None:
     if not prompt:
         sys.exit("empty prompt file")
     psha = prompt_sha(prompt)
-    effort = a.effort if a.provider == "codex" else ("low" if a.model.startswith("openai/gpt-oss") else "")
+    effort = a.effort if a.provider == "codex" else (
+        "low" if a.provider == "openrouter" or a.model.startswith("openai/gpt-oss") else "")
+    base_url = a.base_url or BASE_URL.get(a.provider, "")
     timeout = a.timeout or (300.0 if a.provider == "codex" else 30.0)
     workers = a.workers or (4 if a.provider == "codex" else 2)
     key = ""
-    if a.provider == "groq":
-        key = os.environ.get("GROQ_API_KEY", "")
+    if a.provider in KEY_ENV:
+        key = os.environ.get(KEY_ENV[a.provider], "")
         if not key:
-            sys.exit("GROQ_API_KEY is not set in this process's environment")
+            sys.exit(f"{KEY_ENV[a.provider]} is not set in this process's environment")
+    spent = [openrouter_spend(a.results_dir) if a.provider == "openrouter" else 0.0]
+    if a.provider == "openrouter":
+        print(f"OpenRouter spend so far ${spent[0]:.4f} of the ${a.max_cost:.2f} cap", file=sys.stderr)
 
     rows = list(csv.DictReader(a.input.open(newline="", encoding="utf-8")))
     if a.limit:
@@ -238,6 +278,14 @@ def main() -> None:
             sha, raw = item
             for attempt in range(1, a.attempts + 1):
                 with _lock:
+                    if a.provider == "openrouter" and spent[0] >= a.max_cost:
+                        if not _stop.is_set():
+                            print(f"OpenRouter spend ${spent[0]:.4f} reached the ${a.max_cost:.2f} cap, stopping",
+                                  file=sys.stderr)
+                            limit_hit.append("cost_cap")
+                        _stop.set()
+                        failures[sha] = "cost_cap"
+                        return
                     if _stop.is_set() or calls[0] >= a.max_calls:
                         return
                     calls[0] += 1
@@ -247,7 +295,9 @@ def main() -> None:
                         ans = ask_codex(guard.user_message(raw), a.model, effort, workdir, instructions, timeout)
                         ans["content"] = guard.strip_tags(ans["content"])
                     else:
-                        ans = ask_groq(raw, a.model, prompt, a.base_url, key, timeout)
+                        ans = ask_chat(raw, a.model, prompt, base_url, key, timeout, a.provider)
+                        with _lock:
+                            spent[0] += float((ans.get("usage") or {}).get("cost") or 0)
                     ms = int((time.monotonic() - started) * 1000)
                     rec = {"request_sha256": sha, "provider": a.provider, "model": a.model, "effort": effort,
                            "prompt_sha": psha, "reply": ans["content"], "model_ms": ms,
@@ -266,8 +316,8 @@ def main() -> None:
                 except Failed as e:
                     failures[sha] = e.reason
                     print(f"attempt {attempt} failed: {str(e)[:300]}", file=sys.stderr)
-                    if a.provider == "groq" and e.reason == "http_429" and attempt == a.attempts:
-                        print("Groq rate limit after retries, stopping", file=sys.stderr)
+                    if a.provider != "codex" and e.reason == "http_429" and attempt == a.attempts:
+                        print("rate limit after retries, stopping", file=sys.stderr)
                         limit_hit.append("http_429")
                         _stop.set()
                         return
@@ -311,7 +361,8 @@ def main() -> None:
                 out.update(transcript=raw, cleaned_text="", reason=failures.get(rkey(raw), "not_run"), model_ms="")
             reasons[out["reason"]] = reasons.get(out["reason"], 0) + 1
             w.writerow(out)
-    print(f"{a.label}: {reasons}  calls this run {calls[0]}  -> {out_dir / 'results.csv'}")
+    cost = f"  OpenRouter spend ${spent[0]:.4f}" if a.provider == "openrouter" else ""
+    print(f"{a.label}: {reasons}  calls this run {calls[0]}{cost}  -> {out_dir / 'results.csv'}")
     if limit_hit:
         sys.exit(3)
     if missing:

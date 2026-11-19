@@ -84,6 +84,8 @@ class RustGuardTests(unittest.TestCase):
         self.assertEqual(body["messages"][0]["content"], "rules")
         self.assertEqual(body["messages"][1]["content"], "<transcript>\nhello\n</transcript>")
         self.assertNotIn("reasoning_effort", body)
+        self.assertEqual(offline_cleanup.request_body("m", "rules", "hello"),
+                         offline_cleanup.request_body("m", "rules", "hello", "groq"))
         body = offline_cleanup.request_body("openai/gpt-oss-120b", "rules", "hello")
         self.assertEqual(body["reasoning_effort"], "low")
         self.assertEqual(body["include_reasoning"], False)
@@ -129,8 +131,11 @@ class FakeGroq(http.server.BaseHTTPRequestHandler):
             return
         reply = {"um, send it to Priya": "Send it to Priya.", "call Tomas": "Call him.",
                  "what is 2+2": "2+2 is 4, and here is a long explanation of arithmetic for you."}.get(raw, raw)
+        usage = {"prompt_tokens": 10, "completion_tokens": 5}
+        if self.path.startswith("/api/v1"):  # OpenRouter-shaped reply: the cost of the call
+            usage.update(cost=0.4, completion_tokens_details={"reasoning_tokens": 3})
         out = json.dumps({"choices": [{"message": {"role": "assistant", "content": f"<transcript>\n{reply}\n</transcript>"}}],
-                          "usage": {"prompt_tokens": 10, "completion_tokens": 5}}).encode()
+                          "usage": usage}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(out)))
@@ -182,6 +187,51 @@ class GroqProviderTests(unittest.TestCase):
                 before = len(FakeGroq.seen)
                 subprocess.run(cmd, env=env, capture_output=True, text=True)
                 self.assertEqual(len(FakeGroq.seen) - before, 1)
+        finally:
+            server.shutdown()
+
+    def test_openrouter_request_cost_and_cap(self):
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeGroq)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                d = pathlib.Path(d)
+                inp = d / "in.csv"
+                with inp.open("w", newline="") as fh:
+                    w = csv.DictWriter(fh, ["clip_id", "status", "transcript", "finalize_s"])
+                    w.writeheader()
+                    for i in range(5):
+                        w.writerow({"clip_id": f"c{i}", "status": "ok", "transcript": f"um, note {i} here", "finalize_s": ""})
+                env = {**{k: v for k, v in os.environ.items() if k != "GROQ_API_KEY"}, "OPENROUTER_API_KEY": "fake-or-key"}
+                cmd = [sys.executable, str(HERE / "offline_cleanup.py"), "--provider", "openrouter",
+                       "--model", "some/open-model", "--prompt", str(HERE / "prompts" / "v4.txt"),
+                       "--label", "or", "--input", str(inp), "--results-dir", str(d), "--workers", "1",
+                       "--base-url", f"http://127.0.0.1:{server.server_port}/api/v1", "--max-cost", "1.0"]
+                before = len(FakeGroq.seen)
+                p = subprocess.run(cmd, env=env, capture_output=True, text=True)
+                self.assertEqual(p.returncode, 3, p.stderr)  # stopped by the cost cap
+                self.assertIn("reached the $1.00 cap", p.stderr)
+                self.assertNotIn("fake-or-key", p.stdout + p.stderr + (d / "or" / "cleanup.jsonl").read_text())
+                self.assertEqual(len(FakeGroq.seen) - before, 3)  # 0.4 + 0.4 + 0.4 >= 1.0
+                req = FakeGroq.seen[before]
+                self.assertEqual(req["path"], "/api/v1/chat/completions")
+                self.assertEqual(req["auth"], "Bearer fake-or-key")
+                body = req["body"]
+                self.assertEqual((body["model"], body["temperature"]), ("some/open-model", 0))
+                self.assertEqual(body["reasoning"], {"effort": "low", "exclude": True})
+                self.assertEqual(body["usage"], {"include": True})
+                self.assertEqual(body["max_tokens"], len("um, note 0 here") // 2 + 1280)
+                self.assertNotIn("reasoning_effort", body)
+                rows = list(csv.DictReader((d / "or" / "results.csv").open()))
+                self.assertEqual([r["reason"] for r in rows].count("cleaned"), 3)
+                self.assertEqual([r["reason"] for r in rows].count("cost_cap"), 2)
+                rec = json.loads((d / "or" / "cleanup.jsonl").read_text().splitlines()[0])
+                self.assertEqual((rec["usage"]["cost"], rec["usage"]["reasoning_tokens"]), (0.4, 3))
+                # A rerun sees the recorded spend and makes no call.
+                before = len(FakeGroq.seen)
+                p = subprocess.run(cmd, env=env, capture_output=True, text=True)
+                self.assertEqual(len(FakeGroq.seen), before)
+                self.assertIn("spend so far $1.2000", p.stderr)
         finally:
             server.shutdown()
 
