@@ -27,6 +27,16 @@ aai_token_remove() {
     AAI_TOKEN_STORED=0
 }
 
+# aai_request_has_audio <n>: request <n> carried some audio.
+aai_request_has_audio() {
+  ! provider_events | grep -Eq "^request n=$1 .*audio_bytes=0\$"
+}
+
+# aai_log_lacks <text>: the app's log doesn't hold <text>.
+aai_log_lacks() {
+  ! app_log | grep -qF -- "$1"
+}
+
 aai_cleanup() {
   local ok=0
   provider_cleanup || ok=1
@@ -59,15 +69,15 @@ e2e_assemblyai_dictation() {
   expect "it reached the Dictation endpoint with the good token" provider_request_has 1 auth=good
   expect "as a Dictation API request without a language" \
     provider_request_has 1 "model=- language=-"
-  expect "carrying audio" sh -c "! provider_events | grep -Eq '^request n=1 .*audio_bytes=0\$'"
+  expect "carrying audio" aai_request_has_audio 1
   expect "the provider answered it" provider_wait_event '^replied n=1 status=200'
   expect "TextEdit holds exactly the rewrite, not the verbatim text" \
     textedit_is "$(esc_b64 "$PROVIDER_TEXT")"
   expect "it went through Inserting" \
     test "$(phases_since 0)" = "Recording Transcribing Inserting Idle"
   expect "the clipboard is the user's again" test "$(clipboard)" = "$PROVIDER_SENTINEL"
-  expect "the log says the rewrite was used, without the text" \
-    sh -c "app_log | grep -q 'assemblyai text.*source=\"rewrite\"\\|source=rewrite' && ! app_log | grep -q 'hello world'"
+  expect "the log says the rewrite was used" wait_for_log 'assemblyai text source="rewrite"'
+  expect "and does not hold the text" aai_log_lacks "$PROVIDER_TEXT"
   expect "no file holds the token" no_file_holds "$AAI_TOKEN"
 
   expect "Quit from the tray ends the app by itself" quit_from_tray
