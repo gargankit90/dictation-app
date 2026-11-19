@@ -54,14 +54,16 @@ draft from ≥1 edit to 0, or from 0 to ≥1, per judge; changed = clips whose p
 | luna_g4 | 151 | 75.0 / 76.0 / **75.5** (67.5–82.8) | 76.3 / 72.0 / **74.2** | 0.52 / 0.49 | 25/2; 25/0 | 3/151 (dropped_name 2, dropped_number 1) | 57 | 4392 |
 | luna_v1 | 151 | 69.7 / 69.3 / **69.5** (59.9–78.3) | 69.7 / 65.3 / **67.5** | 1.40 / 1.35 | 19/5; 18/3 | 8/151 (dropped_number 8) | 58 | 5670 |
 | luna_v4 | 151 | 75.0 / 80.0 / **77.5** (69.2–84.8) | 76.3 / 76.0 / **76.2** | 0.48 / 0.44 | 28/2; 28/0 | 3/151 (dropped_link 1, dropped_name 2) | 61 | 4568 |
-| oss120b_g3 | 141 | 71.8 / 65.7 / **68.8** (60.9–76.9) | - | 0.64 / - | 16/3; - | 2/141 (dropped_name 1, dropped_number 1) | 51 | 589 |
+| oss120b_g3 | 141 | 71.8 / 65.7 / **68.8** (60.9–76.9) | 70.4 / 64.3 / **67.4** | 0.64 / 0.61 | 16/3; 15/0 | 2/141 (dropped_name 1, dropped_number 1) | 51 | 589 |
+| oss120b_g4 | 18 | 70.0 / 71.4 / **70.6** (46.7–88.9) | 72.7 / 71.4 / **72.2** | 1.33 / 0.98 | 2/0; 2/0 | 0/18 | 6 | 564 |
+| oss120b_v1 | 5 | 66.7 / 50.0 / **60.0** (20.0–100.0) | 66.7 / 50.0 / **60.0** | 1.54 / 1.54 | 1/0; 1/0 | 0/5 | 4 | 939 |
 | oss120b_v4 | 150 | 72.4 / 70.3 / **71.3** (61.5–80.0) | 72.4 / 67.6 / **70.0** | 0.63 / 0.56 | 19/3; 19/1 | 1/150 (dropped_number 1) | 56 | 570 |
 | oss20b_v1 | 151 | 65.8 / 66.7 / **66.2** (57.1–74.8) | 67.1 / 61.3 / **64.2** | 1.27 / 1.25 | 13/4; 13/3 | 11/151 (dropped_name 2, dropped_number 2, empty 7) | 46 | 496 |
 | reserve_v1 | 151 | 69.7 / 68.0 / **68.9** (59.3–77.6) | 71.1 / 65.3 / **68.2** | 0.86 / 0.82 | 20/7; 19/3 | 11/151 (dropped_name 1, dropped_number 10) | 59 | 4874 |
 | sol_v1 | 151 | 73.7 / 69.3 / **71.5** (62.3–79.9) | 73.7 / 65.3 / **69.5** | 0.81 / 0.81 | 18/1; 18/0 | 3/151 (dropped_number 3) | 55 | 5268 |
 | sol_v4 | 151 | 78.9 / 85.3 / **82.1** (74.8–88.7) | 80.3 / 81.3 / **80.8** | 0.44 / 0.44 | 33/0; 35/0 | 7/151 (dropped_link 1, dropped_name 4, dropped_number 2) | 66 | 5099 |
 
-Offline gpt-oss-20b + v1 exceeded the VM by 1.3 Claude ZER points and tied on Codex. For 120b, scores exclude missing API replies. The v2 VM used a separate transcription run, so its fixed/broke comparisons against v1 raw include transcription differences. The 120b g4 and v1 runs have incomplete coverage. Claude judging hit its session cap. OpenRouter v4 rows await the owner command in `run_openrouter.sh` (estimated $0.60, $2 cap).
+Offline gpt-oss-20b + v1 exceeded the VM by 1.3 Claude ZER points and tied on Codex. For 120b, scores exclude missing API replies. The v2 VM used a separate transcription run, so its fixed/broke comparisons against v1 raw include transcription differences. The 120b g4 and v1 runs returned only 18 and 5 usable replies respectively. Claude had 17 matched g4 verdicts. Claude judging hit its session cap. OpenRouter results appear below.
 
 Guard counterfactuals (no new model calls; same replies, a different guard, scored by both judges):
 
@@ -207,3 +209,24 @@ Dropped-name fallbacks: dict_0346, dict_0351, dict_0498, dict_0559.
 [Paired fixes and regressions](paired-results/nemotron_sol_v4/changes.md).
 
 One already imperfect clip, dict_0399, worsened from 11 to 25 edits under GPT-6 Astra. It falls outside the zero-edit regression count.
+
+## Open-weight cleanup on the same Groq Whisper drafts
+
+All models used prompt v4 and the standard guard. Scores exclude requests without parseable replies. Claude coverage reflects exact cached Opus 5.5 verdicts only and favors familiar wording. GPT-6 Astra used cached verdicts plus fresh judgments. Tune/check/all entries are ZER percentages. Fixed and broken count transitions to and from zero edits relative to raw on the same clips.
+
+| OpenRouter model | API replies / 151 | Codex n; tune / check / all | Claude n; tune / check / all | Fixed / broken (Codex; Claude) | Fallbacks / missing | Median / p90 seconds | Recorded USD | USD/M input / output |
+| --- | ---: | --- | --- | --- | --- | ---: | ---: | ---: |
+| [deepseek/deepseek-v4.1-flash](results/or_dsv41flash_v4/paired_regressions.md) | 149 | 149; 77.3 / 75.7 / 76.5 | 138; 80.6 / 80.3 / 80.4 | 27/0; 22/0 | bad_reply 2, dropped_link 1, dropped_name 1, dropped_number 4 | 1.71 / 5.96 | 0.04320 | 0.0507 / 0.2028 |
+| [deepseek/deepseek-v4-pro](results/or_dsv4pro_v4/paired_regressions.md) | 147 | 147; 78.4 / 78.1 / 78.2 | 138; 81.2 / 82.6 / 81.9 | 28/0; 24/0 | bad_reply 4, dropped_name 1, dropped_number 3 | 4.18 / 11.19 | 0.20743 | 0.9 / 1.5 |
+| [google/gemma-4-31b-it](results/or_gemma4_31b_v4/paired_regressions.md) | 146 | 146; 78.7 / 78.9 / 78.8 | 143; 79.5 / 82.9 / 81.1 | 28/0; 26/0 | bad_reply 5, dropped_link 1, dropped_name 3, dropped_number 5 | 3.48 / 7.57 | 0.04604 | 0.2 / 0.4 |
+| [z-ai/glm-5.3-flash](results/or_glm53flash_v4/paired_regressions.md) | 151 | 151; 76.3 / 76.0 / 76.2 | 135; 80.0 / 86.2 / 83.0 | 28/0; 22/0 | dropped_link 1, dropped_name 1, dropped_number 3 | 0.91 / 2.35 | 0.01833 | 0.15 / 0.5 |
+| [mistralai/mistral-large-2512](results/or_mistral3_v4/paired_regressions.md) | 151 | 151; 69.7 / 69.3 / 69.5 | 117; 72.6 / 78.2 / 75.2 | 22/4; 13/1 | dropped_link 2, dropped_name 1, dropped_number 12 | 1.38 / 2.30 | 0.03604 | 0.5 / 1.5 |
+| [qwen/qwen3.5-397b-a17b](results/or_qwen35big_v4_snapshot/paired_regressions.md) | 17 | 17; 71.4 / 70.0 / 70.6 | 16; 66.7 / 70.0 / 68.8 | 2/0; 1/0 | not_run 134 | 7.02 / 92.17 | 0.12428 | 0.45 / 3 |
+
+Costs and times cover recorded parseable replies. The API may bill malformed replies separately. Each model link lists every matched draft whose edit count increased. Price source: [OpenRouter model catalog](https://openrouter.ai/api/v1/models).
+
+For context, GPT-6.2-sol via Codex with v4 scored 80.8% overall and 81.3% on check under GPT-6 Astra. The separate on-device Gemma 4 E2B + v3 evaluation on Groq Whisper scored 72.2% overall under Astra and 73.5% under Claude; its raw baseline and prompt differed slightly.
+
+**GLM-5.3-Flash + v4 is the strongest open candidate for an app trial on these drafts.** Counting all 151 clips as the app would paste them, including raw fallback for malformed replies, GPT-6 Astra gives GLM, Gemma 31B and DeepSeek Pro 76.2% ZER, DeepSeek Flash 75.5%, and Mistral 69.5%. GLM returned a usable reply for every clip and its guarded output never increased the judge’s edit count. Its $0.01833 recorded cost and 0.91 s median are the lowest of the five finished runs. GPT-6.2-sol + v4 still leads on the same Whisper drafts (80.8%). Its Codex CLI latency is unsuitable for this comparison.
+
+**Long-draft failures change the ranking.** On dict_0255, Gemma ended a game-night food request after “eight adults, and”. GPT-6 Astra’s edits rose from 4 to 267. DeepSeek Flash and Pro also truncated long drafts. Mistral increased the edit count on nine drafts, including four that were already perfect. GLM fixed 28 imperfect drafts to zero edits. Qwen’s table entry is an interim snapshot of 17 replies, including 16 Claude cache hits; its latency and quality estimates have substantial sampling uncertainty.
