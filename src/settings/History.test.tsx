@@ -70,6 +70,7 @@ function settingsWith(limit: number, hotkey = "RightAlt"): Settings_Serialize {
     local_model: "m",
     share_usage_events: true,
     history_limit: limit,
+    cleanup_model: null,
   };
 }
 

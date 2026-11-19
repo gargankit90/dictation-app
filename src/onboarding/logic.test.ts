@@ -53,6 +53,7 @@ const SETTINGS = {
   local_model: "parakeet",
   share_usage_events: true,
   history_limit: 25,
+  cleanup_model: null,
 };
 
 describe("recommendedModel", () => {

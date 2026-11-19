@@ -126,6 +126,7 @@ const settings: Settings_Serialize = {
   local_model: view === "ready-30" ? "qwen" : "parakeet",
   share_usage_events: true,
   history_limit: 25,
+  cleanup_model: null,
 };
 
 const status: OnboardingStatus = {
