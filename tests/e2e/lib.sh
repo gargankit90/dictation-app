@@ -429,6 +429,8 @@ run_scenarios() {
   done
   summary="${#passed[@]} passed, ${#failed[@]} failed, ${#skipped[@]} skipped"
   [ -z "$aborted" ] || results+=("ABORTED  before $aborted: the VM was filling up")
+  # Key-up to paste p50/p95 (e2e_latency, Q1), when that scenario ran.
+  if [ -s "$OUT_DIR/latency.txt" ]; then results+=("$(cat "$OUT_DIR/latency.txt")"); fi
   {
     printf '%s\n' ${results[@]+"${results[@]}"}
     echo "$summary"
