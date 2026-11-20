@@ -113,6 +113,7 @@ class Backend {
   micAnswer: PermissionState = "granted";
   keys: Record<Provider, boolean> = { groq: false, openai: false };
   models: LocalModelInfo_Serialize[] = [{ ...ENGLISH_MODEL }, { ...MULTI_MODEL }];
+  cleanup: LocalModelInfo_Serialize[] = [];
   settings: Settings_Serialize = {
     version: 2,
     provider: "groq",
@@ -270,6 +271,8 @@ class Backend {
       case "list_local_models":
         // A new list each time, as the app sends.
         return this.models.map((model) => ({ ...model }));
+      case "list_cleanup_models":
+        return this.cleanup.map((model) => ({ ...model }));
       case "get_engine_status":
         return this.engine;
       default:
@@ -1428,6 +1431,25 @@ describe("the download strip", () => {
       expect(screen.getByText("Download running")).toBeTruthy();
       unmount();
     }
+  });
+
+  it("Q4: after the speech model, the cleanup model's download shows, and practice needn't wait", async () => {
+    backend.allSet("try");
+    backend.cleanup = [
+      {
+        ...ENGLISH_MODEL,
+        id: "gemma-4-e2b-it-q4_k_m",
+        name: "Gemma 4 E2B",
+        size_bytes: 3_106_738_272,
+        downloaded_bytes: 1_000_000_000,
+        state: "downloading",
+      },
+    ];
+    show();
+    await screen.findByText("Downloading the cleanup model · 1000 of 3107 MB");
+    expect(screen.getByText(/You can dictate meanwhile/)).toBeTruthy();
+    // Nothing to cancel here; the speech model is ready, so nothing waits.
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 
   it("Cancel stops it, keeps that it was the user's choice, and offers Resume", async () => {

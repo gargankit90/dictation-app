@@ -115,6 +115,27 @@ export function stripView(
   };
 }
 
+/**
+ * The cleanup model's strip (Q4), while it downloads: after the speech model,
+ * setup fetches it too (about 3.1 GB). Dictation works meanwhile, without
+ * cleanup, so nothing waits for it and it has no action here (Settings can
+ * cancel it).
+ */
+export function cleanupStripView(
+  cleanup: readonly LocalModelInfo_Serialize[] | null,
+): StripView | null {
+  const running = cleanup?.find((model) => model.state === "downloading") ?? null;
+  if (running === null) return null;
+  const total = size(running);
+  return {
+    text: `Downloading the cleanup model · ${progressText(running)}`,
+    note: "You can dictate meanwhile. Punctuation and filler removal start once it's in.",
+    percent: total > 0 ? Math.min(100, Math.round((done(running) / total) * 100)) : 0,
+    actions: [],
+    model: running,
+  };
+}
+
 /** Why practice has to wait, or `null` if dictation can run now. */
 export function modelWait(
   settings: Settings_Serialize | null,

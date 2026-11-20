@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "./bindings";
-import type { OnboardingStatus, Settings_Serialize, Step } from "./bindings";
+import type {
+  LocalModelInfo_Serialize,
+  OnboardingStatus,
+  Settings_Serialize,
+  Step,
+} from "./bindings";
 import { BROKEN, messageOf } from "./keyTest";
-import { chosenModel, modelWait, stripView } from "./onboarding/logic";
+import { chosenModel, cleanupStripView, modelWait, stripView } from "./onboarding/logic";
 import type { StripAction } from "./onboarding/logic";
 import { PermissionsStep } from "./onboarding/PermissionsStep";
 import { ReadyStep } from "./onboarding/ReadyStep";
@@ -49,6 +54,34 @@ interface Props {
  * strip and whichever step the app says, and each step decides its own
  * primary action.
  */
+/**
+ * The cleanup models (Q4), read every second while on-device speech is
+ * chosen: their download follows the speech model's and its strip shows it.
+ */
+function useCleanupModels(local: boolean): LocalModelInfo_Serialize[] | null {
+  const [cleanup, setCleanup] = useState<LocalModelInfo_Serialize[] | null>(null);
+  useEffect(() => {
+    if (!local) return;
+    const state = { stopped: false };
+    const read = async () => {
+      try {
+        const result = await commands.listCleanupModels();
+        if (!state.stopped && result.status === "ok") setCleanup(result.data);
+      } catch {
+        // No strip: the speech model is what setup waits for.
+      }
+    };
+    const first = window.setTimeout(() => void read(), 0);
+    const timer = window.setInterval(() => void read(), POLL_MS);
+    return () => {
+      state.stopped = true;
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+    };
+  }, [local]);
+  return local ? cleanup : null;
+}
+
 export function Onboarding({ onFinished, onOpenHistory }: Props) {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -57,6 +90,7 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
   const [settings, setSettings] = useState<Settings_Serialize | null>(null);
   const { models, error: modelsError, refresh: refreshModels } = useModels();
   const { engine, refresh: refreshEngine } = useEngineStatus();
+  const cleanupModels = useCleanupModels(settings?.transcription === "local");
   const [downPolls, setDownPolls] = useState(0);
   const resumeChecked = useRef(false);
 
@@ -237,12 +271,15 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
   const index = STEPS.findIndex((item) => item.id === status.step);
   const previous = STEPS[index - 1];
   const next = STEPS[index + 1];
-  const strip = stripView(models, chosen);
+  const cleanupStrip = cleanupStripView(cleanupModels);
+  const strip = stripView(models, chosen) ?? cleanupStrip;
   // A strip only for a running download on the first two steps: until the
   // user has chosen, a stopped one isn't news.
   const stripShown =
     strip !== null &&
-    (strip.actions.includes("cancel") || index >= STEPS.findIndex((s) => s.id === "permissions"));
+    (strip === cleanupStrip ||
+      strip.actions.includes("cancel") ||
+      index >= STEPS.findIndex((s) => s.id === "permissions"));
   const downloading = models?.some((model) => model.state === "downloading") ?? false;
 
   const parts: FrameParts = {
