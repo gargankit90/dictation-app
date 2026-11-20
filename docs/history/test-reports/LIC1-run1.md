@@ -1,12 +1,12 @@
 # MLIC1 test report, run 1
 
-PR: #333 at ccb6d2e
+PR: #333 at (re-checked at bae31c3, after the Reviewer's site footer and NOTICE fix)  ccb6d2e
 Result: PASS
 
 | # | Criterion | Test(s) | Result | Notes |
 | - | --------- | ------- | ------ | ----- |
 | 1 | LICENSE is the unmodified FSL-1.1-ALv2 template | diff against https://fsl.software/FSL-1.1-ALv2.template.md | PASS | Only difference is line 9: `Copyright 2026 Ankit Garg (Vocet Labs)`. The template has two placeholders (year, licensor name), not three. |
-| 2 | No claim that Vocet is MIT; metadata says FSL | `git grep -i -E "\bMIT\b\|open[- ]source"` excluding third-party files; Cargo/npm inspection | PASS | The only remaining matches are third-party: TESTERS.md, gen-licences.sh, HelpAbout "Credits". README says versions up to 0.1.0 stay MIT. `Cargo.toml` and `package.json` say `FSL-1.1-ALv2`; all crates and src-tauri use `license.workspace`. `src/bindings.ts` carries the FSL comment. |
+| 2 | No claim that Vocet is MIT; metadata says FSL | `git grep -i -E "\bMIT\b\|open[- ]source"` excluding third-party files; Cargo/npm inspection | PASS | My first grep used \\b, which BSD git grep ignores, and missed the site footer and NOTICE (fixed in ccb6d2e); re-run with -w at bae31c3. Remaining matches are third-party or historic: TESTERS.md, gen-licences.sh, HelpAbout "Credits". docs/design/specs/U6.md:32 (old design spec, "licence (MIT)") is a minor, historic. README says versions up to 0.1.0 stay MIT. `Cargo.toml` and `package.json` say `FSL-1.1-ALv2`; all crates and src-tauri use `license.workspace`. `src/bindings.ts` carries the FSL comment. |
 | 3 | scripts/gate.sh passes | `scripts/gate.sh --full` (foreground) | PASS | "gate: all checks passed" |
 | 4 | Help & About shows FSL line | `src/settings/HelpAbout.tsx:133`; `src/Settings.test.tsx:1274` asserts `/FSL-1\.1-ALv2/` | PASS | Covered by the gate's frontend tests. |
 | 5 | Lead reads site and README | n/a | Lead's | Already PASS on the PR. |
