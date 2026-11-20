@@ -27,3 +27,6 @@ lcov.info
 
 # Seeded by scripts/vendor-tests.sh and removed again
 /third_party/*/Cargo.lock
+
+# The cleanup helper, built by scripts/build-llama-server.sh (Q4)
+/src-tauri/binaries/
