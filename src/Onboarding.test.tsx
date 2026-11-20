@@ -44,9 +44,9 @@ const KEY = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
 const ORDER: Step[] = ["welcome", "speech", "permissions", "try", "ready"];
 const WORDS = "this is my first dictation";
 
-const PARAKEET: LocalModelInfo_Serialize = {
-  id: "parakeet-unified-en-0.6b-q4_k_m",
-  name: "Parakeet Unified 0.6B",
+const ENGLISH_MODEL: LocalModelInfo_Serialize = {
+  id: "orukqwen-asr-1.7b-q4_k_m",
+  name: "OrukQwen 1.7B",
   languages: "English only",
   language_codes: ["en"],
   size_bytes: 477_000_000,
@@ -58,16 +58,16 @@ const PARAKEET: LocalModelInfo_Serialize = {
   restarted: false,
 };
 
-/** As in the catalogue (`crates/core/src/local_models.rs`), so the count is real. */
+/** A multilingual model's codes, as a catalogue entry could list them. */
 const THIRTY_LANGUAGES = [
   ..."zh en yue ar de fr es pt id it ko ru th vi ja tr hi ms nl sv da fi pl cs fil fa el ro hu mk".split(
     " ",
   ),
 ];
 
-const QWEN: LocalModelInfo_Serialize = {
-  id: "qwen3-asr-0.6b-q4_k_m",
-  name: "Qwen3-ASR 0.6B",
+const MULTI_MODEL: LocalModelInfo_Serialize = {
+  id: "multilingual-test-q4_k_m",
+  name: "Multilingual Test 0.6B",
   languages: "30 languages",
   language_codes: THIRTY_LANGUAGES,
   size_bytes: 590_000_000,
@@ -112,7 +112,7 @@ class Backend {
   ignoresRange = false;
   micAnswer: PermissionState = "granted";
   keys: Record<Provider, boolean> = { groq: false, openai: false };
-  models: LocalModelInfo_Serialize[] = [{ ...PARAKEET }, { ...QWEN }];
+  models: LocalModelInfo_Serialize[] = [{ ...ENGLISH_MODEL }, { ...MULTI_MODEL }];
   settings: Settings_Serialize = {
     version: 2,
     provider: "groq",
@@ -121,7 +121,7 @@ class Backend {
     hotkey: "RightAlt",
     launch_at_login: false,
     transcription: "cloud",
-    local_model: PARAKEET.id,
+    local_model: ENGLISH_MODEL.id,
     share_usage_events: true,
     history_limit: 25,
   };
@@ -288,8 +288,8 @@ class Backend {
     this.microphone = "granted";
     this.accessibility = "granted";
     this.settings = { ...this.settings, transcription: "local", language: "en" };
-    this.model(PARAKEET.id).state = "ready";
-    this.model(PARAKEET.id).downloaded_bytes = PARAKEET.size_bytes;
+    this.model(ENGLISH_MODEL.id).state = "ready";
+    this.model(ENGLISH_MODEL.id).downloaded_bytes = ENGLISH_MODEL.size_bytes;
   }
 }
 
@@ -957,7 +957,7 @@ describe("Speech", () => {
     ).toBe(true);
   });
 
-  it("criterion 3: English preselects Parakeet English, with its real size", async () => {
+  it("criterion 3: English preselects the English model, with its real size", async () => {
     show();
     const name = await screen.findByText("English · 477 MB");
     expect(name).toBeTruthy();
@@ -989,14 +989,14 @@ describe("Speech", () => {
     await screen.findByText("English · 477 MB");
     fireEvent.click(primary("Download and continue"));
     await screen.findByText("Two permissions");
-    expect(backend.named("choose_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
-    expect(backend.named("download_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
+    expect(backend.named("choose_local_model")[0]?.args).toEqual({ id: ENGLISH_MODEL.id });
+    expect(backend.named("download_local_model")[0]?.args).toEqual({ id: ENGLISH_MODEL.id });
     expect(backend.settings.transcription).toBe("local");
     expect(backend.step).toBe("permissions");
   });
 
   it("criterion 3: a model already here says Continue and downloads nothing", async () => {
-    backend.model(PARAKEET.id).state = "ready";
+    backend.model(ENGLISH_MODEL.id).state = "ready";
     show();
     await screen.findByText("English · 477 MB");
     fireEvent.click(primary("Continue"));
@@ -1210,7 +1210,13 @@ describe("Speech", () => {
       await screen.findByText("English · 477 MB");
       const shown = () => document.querySelector(".ob-main")?.textContent ?? "";
       const clean = () => {
-        for (const gone of [PARAKEET.name, QWEN.name, "Parakeet", "Qwen", "Multilingual"]) {
+        for (const gone of [
+          ENGLISH_MODEL.name,
+          MULTI_MODEL.name,
+          "OrukQwen",
+          "Gemma",
+          "Multilingual",
+        ]) {
           expect(shown()).not.toContain(gone);
         }
         expect(shown()).not.toMatch(/All languages|100\+/);
@@ -1403,7 +1409,7 @@ describe("the download strip", () => {
     backend.step = "permissions";
     backend.welcomePassed = true;
     backend.settings = { ...backend.settings, transcription: "local" };
-    const model = backend.model(PARAKEET.id);
+    const model = backend.model(ENGLISH_MODEL.id);
     model.state = "downloading";
     model.downloaded_bytes = 212_000_000;
   }
@@ -1438,7 +1444,7 @@ describe("the download strip", () => {
 
   it("a failed download offers Retry and the own key", async () => {
     downloading();
-    const model = backend.model(PARAKEET.id);
+    const model = backend.model(ENGLISH_MODEL.id);
     model.state = "partial";
     model.error = "The disk is full.";
     show();
@@ -1450,7 +1456,7 @@ describe("the download strip", () => {
 
   it("criterion 7: a part left by a quit picks up by itself, and says so", async () => {
     downloading();
-    const model = backend.model(PARAKEET.id);
+    const model = backend.model(ENGLISH_MODEL.id);
     model.state = "partial";
     show();
     await waitFor(() => {
@@ -1462,7 +1468,7 @@ describe("the download strip", () => {
   it("criterion 7: a restart stays a restart, also once it passes the old part's size", async () => {
     downloading();
     backend.ignoresRange = true;
-    const model = backend.model(PARAKEET.id);
+    const model = backend.model(ENGLISH_MODEL.id);
     model.state = "partial";
     show();
     const said = "The earlier download couldn't continue, so it started again.";
@@ -1478,7 +1484,7 @@ describe("the download strip", () => {
 
   it("criterion 7: a download the user cancelled doesn't start again by itself", async () => {
     downloading();
-    const model = backend.model(PARAKEET.id);
+    const model = backend.model(ENGLISH_MODEL.id);
     model.state = "partial";
     backend.downloadPaused = true;
     show();
@@ -1765,7 +1771,7 @@ describe("Try it", () => {
   });
 
   it("criterion 5: while the model downloads, practice is blocked with progress", async () => {
-    const model = backend.model(PARAKEET.id);
+    const model = backend.model(ENGLISH_MODEL.id);
     model.state = "downloading";
     model.downloaded_bytes = 477_000_000 * 0.82;
     const box = await stepOpen();
@@ -1777,7 +1783,7 @@ describe("Try it", () => {
   });
 
   it("criterion 5: the key comes back when the model is ready", async () => {
-    const model = backend.model(PARAKEET.id);
+    const model = backend.model(ENGLISH_MODEL.id);
     model.state = "downloading";
     const box = await stepOpen();
     await waitFor(() => {
@@ -2073,7 +2079,7 @@ describe("Ready", () => {
   });
 
   it("criterion 6: while the model isn't ready it doesn't say Ready", async () => {
-    const model = backend.model(PARAKEET.id);
+    const model = backend.model(ENGLISH_MODEL.id);
     model.state = "downloading";
     model.downloaded_bytes = 477_000_000 / 2;
     show();
@@ -2081,8 +2087,8 @@ describe("Ready", () => {
   });
 
   it("round 2: a multilingual model has Speech's name, with the count from its codes", async () => {
-    backend.settings = { ...backend.settings, local_model: QWEN.id };
-    backend.model(QWEN.id).state = "ready";
+    backend.settings = { ...backend.settings, local_model: MULTI_MODEL.id };
+    backend.model(MULTI_MODEL.id).state = "ready";
     show();
     await screen.findByText("On this Mac · 30 languages · ✓ Ready");
   });
@@ -2162,7 +2168,7 @@ describe("Ready", () => {
     { exit: "the strip's Use my own key", command: "set_onboarding_step" },
   ])("$exit waits for the sharing writes", async ({ exit, command }) => {
     // A paused model, so the strip offers its way out too.
-    const model = backend.model(PARAKEET.id);
+    const model = backend.model(ENGLISH_MODEL.id);
     model.state = "partial";
     model.downloaded_bytes = 212_000_000;
     backend.downloadPaused = true;
@@ -2231,7 +2237,7 @@ describe("Ready", () => {
   });
 
   it("a failed save holds every way out", async () => {
-    const model = backend.model(PARAKEET.id);
+    const model = backend.model(ENGLISH_MODEL.id);
     model.state = "partial";
     backend.downloadPaused = true;
     const original = backend.handle;

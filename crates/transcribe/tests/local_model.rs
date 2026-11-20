@@ -1,7 +1,7 @@
 //! L1 criterion 1 against a real model, skipped unless one is present.
 //!
 //! Set `DICTATION_LOCAL_MODEL` to a GGUF file (for example the catalogue's
-//! Parakeet download) to run it. With `DICTATION_LOCAL_SPEECH` (a 16 kHz mono
+//! OrukQwen download) to run it. With `DICTATION_LOCAL_SPEECH` (a 16 kHz mono
 //! 16-bit WAV of speech) and `DICTATION_LOCAL_EXPECT` (a word it says), the
 //! text is checked too; otherwise one second of silence must transcribe
 //! without an error.

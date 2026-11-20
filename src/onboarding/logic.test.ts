@@ -13,8 +13,8 @@ import {
 
 function model(update: Partial<LocalModelInfo_Serialize> = {}): LocalModelInfo_Serialize {
   return {
-    id: "parakeet",
-    name: "Parakeet Unified 0.6B",
+    id: "english",
+    name: "OrukQwen 1.7B",
     languages: "English only",
     language_codes: ["en"],
     size_bytes: 477_000_000,
@@ -28,8 +28,12 @@ function model(update: Partial<LocalModelInfo_Serialize> = {}): LocalModelInfo_S
   };
 }
 
-const QWEN = model({ id: "qwen", name: "Qwen3-ASR 0.6B", language_codes: ["en", "hi", "de"] });
-const PARAKEET = model();
+const MULTI_MODEL = model({
+  id: "multi",
+  name: "Multilingual Test 0.6B",
+  language_codes: ["en", "hi", "de"],
+});
+const ENGLISH_MODEL = model();
 
 const BASE: DictationProgressView = {
   started: 2,
@@ -50,28 +54,28 @@ const SETTINGS = {
   hotkey: "RightAlt",
   launch_at_login: false,
   transcription: "local" as const,
-  local_model: "parakeet",
+  local_model: "english",
   share_usage_events: true,
   history_limit: 25,
 };
 
 describe("recommendedModel", () => {
   it("is the English model for English", () => {
-    expect(recommendedModel([QWEN, PARAKEET], "en")?.id).toBe("parakeet");
+    expect(recommendedModel([MULTI_MODEL, ENGLISH_MODEL], "en")?.id).toBe("english");
   });
   it("is the multilingual model for Hindi, and for automatic", () => {
-    expect(recommendedModel([PARAKEET, QWEN], "hi")?.id).toBe("qwen");
-    expect(recommendedModel([PARAKEET, QWEN], "")?.id).toBe("qwen");
+    expect(recommendedModel([ENGLISH_MODEL, MULTI_MODEL], "hi")?.id).toBe("multi");
+    expect(recommendedModel([ENGLISH_MODEL, MULTI_MODEL], "")?.id).toBe("multi");
   });
   it("is nothing for a language no model speaks", () => {
-    expect(recommendedModel([PARAKEET, QWEN], "xx")).toBeNull();
+    expect(recommendedModel([ENGLISH_MODEL, MULTI_MODEL], "xx")).toBeNull();
   });
 });
 
 describe("chosenModel", () => {
   it("is nothing while the engine is the own key", () => {
-    expect(chosenModel({ ...SETTINGS, transcription: "cloud" }, [PARAKEET])).toBeNull();
-    expect(chosenModel(SETTINGS, [PARAKEET])?.id).toBe("parakeet");
+    expect(chosenModel({ ...SETTINGS, transcription: "cloud" }, [ENGLISH_MODEL])).toBeNull();
+    expect(chosenModel(SETTINGS, [ENGLISH_MODEL])?.id).toBe("english");
     expect(chosenModel(SETTINGS, null)).toBeNull();
   });
 });
@@ -117,7 +121,7 @@ describe("modelWait", () => {
   const engine = { state: "ready" as const, message: null };
 
   it("never waits with the own key", () => {
-    expect(modelWait({ ...SETTINGS, transcription: "cloud" }, [PARAKEET], null)).toBeNull();
+    expect(modelWait({ ...SETTINGS, transcription: "cloud" }, [ENGLISH_MODEL], null)).toBeNull();
   });
   it("gives the real percentage while downloading", () => {
     const halfway = model({ state: "downloading", downloaded_bytes: 390_000_000 });

@@ -23,7 +23,7 @@ pub struct Entry {
     pub text: String,
     /// When it finished, in milliseconds since the Unix epoch.
     pub created_at: u64,
-    /// The engine's display name ("Groq", "On this Mac (Parakeet English)").
+    /// The engine's display name ("Groq", "On this Mac (OrukQwen 1.7B)").
     pub engine: String,
     /// Whether the paste worked.
     pub pasted: bool,

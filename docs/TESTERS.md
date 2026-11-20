@@ -10,9 +10,9 @@ You need an **Apple Silicon Mac (M1 or newer; Intel Macs are not supported)**
 with **macOS 13 (Ventura) or newer**, and one of two ways to turn speech into
 text:
 
-- **On this Mac**: you download a model once (Parakeet for English, about
-  480 MB; Qwen3-ASR for about 30 languages, including Hindi, about 590 MB).
-  Your speech then stays on the Mac. It is the recommended choice in setup.
+- **On this Mac**: you download the models once (English speech
+  recognition, about 1.3 GB, and a cleanup model that adds punctuation and
+  removes fillers, about 3.1 GB). Your speech then stays on the Mac. It is the recommended choice in setup.
 - **Your own key**: an internet connection and an API key for Groq or OpenAI.
   Your speech goes to that provider. Groq has a free tier; OpenAI works the
   same way.

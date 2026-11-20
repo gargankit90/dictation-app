@@ -512,12 +512,12 @@ mod tests {
     fn criterion_2_a_dictation_is_stored_with_every_field() {
         let store = MemHistoryStore::new();
         let history = open(&store, 25);
-        history.record("hello there", "On this Mac (Parakeet English)", true);
+        history.record("hello there", "On this Mac (OrukQwen 1.7B)", true);
         let entries = history::from_json(&store.contents().unwrap()).unwrap();
         assert_eq!(entries.len(), 1);
         let entry = &entries[0];
         assert_eq!(entry.text, "hello there");
-        assert_eq!(entry.engine, "On this Mac (Parakeet English)");
+        assert_eq!(entry.engine, "On this Mac (OrukQwen 1.7B)");
         assert_eq!(entry.created_at, 1_000);
         assert!(entry.pasted);
         assert!(entry.id > 0);

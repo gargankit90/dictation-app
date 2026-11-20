@@ -222,7 +222,7 @@ pub struct Download {
 pub struct Ambient {
     /// The saved hotkey, as the settings write it (`RightAlt`).
     pub hotkey: String,
-    /// The engine's display name ("Groq", "On this Mac (Parakeet English)").
+    /// The engine's display name ("Groq", "On this Mac (OrukQwen 1.7B)").
     pub engine: String,
     /// A model downloading now.
     pub download: Option<Download>,
@@ -607,7 +607,7 @@ mod tests {
     /// U12 criterion 7: the menu, exactly, whichever engine is in use.
     #[test]
     fn u12_criterion_7_ready_menu_in_order() {
-        let tray = ready("RightAlt", "On this Mac (Parakeet English)");
+        let tray = ready("RightAlt", "On this Mac (OrukQwen 1.7B)");
         let menu = tray.menu();
         assert_eq!(
             menu.outline(),
@@ -663,7 +663,7 @@ mod tests {
     /// the menu says so, whatever a press with no engine said meanwhile.
     #[test]
     fn u12_criterion_7_a_download_of_the_chosen_model_outranks_no_key() {
-        let local = "On this Mac (Parakeet English)";
+        let local = "On this Mac (OrukQwen 1.7B)";
         let downloading = |chosen| Ambient {
             download: Some(Download {
                 percent: 42,
@@ -731,14 +731,14 @@ mod tests {
 
     #[test]
     fn criterion_1_downloading_shows_progress_and_no_fix() {
-        let mut tray = ready("RightAlt", "On this Mac (Parakeet English)");
+        let mut tray = ready("RightAlt", "On this Mac (OrukQwen 1.7B)");
         tray.set_ambient(Ambient {
             download: Some(Download {
                 percent: 42,
                 chosen: true,
             }),
             problem: Some(ErrorCode::ModelMissing),
-            ..ambient("RightAlt", "On this Mac (Parakeet English)")
+            ..ambient("RightAlt", "On this Mac (OrukQwen 1.7B)")
         });
         let menu = tray.menu();
         assert_eq!(
@@ -997,7 +997,7 @@ mod tests {
         assert_eq!(tray.problem(), Some(ErrorCode::KeyRejected));
         tray.set_ambient(Ambient {
             engine_generation: 2,
-            ..ambient("RightAlt", "On this Mac (Parakeet English)")
+            ..ambient("RightAlt", "On this Mac (OrukQwen 1.7B)")
         });
         assert_eq!(tray.problem(), None);
         assert_eq!(tray.menu().icon, TrayIcon::Normal);
@@ -1050,7 +1050,7 @@ mod tests {
     #[test]
     fn a_missing_model_error_clears_when_its_download_starts_and_finishes() {
         let mut tray = TrayStatus::default();
-        let local = "On this Mac (Parakeet English)";
+        let local = "On this Mac (OrukQwen 1.7B)";
         tray.set_ambient(Ambient {
             engine_generation: 1,
             problem: Some(ErrorCode::ModelMissing),

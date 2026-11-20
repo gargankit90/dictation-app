@@ -82,8 +82,8 @@ const plain =
 const downloaded = plain && view !== "ready-strip";
 
 const model: LocalModelInfo_Serialize = {
-  id: "parakeet",
-  name: "Parakeet Unified 0.6B",
+  id: "english",
+  name: "OrukQwen 1.7B",
   languages: "English only",
   language_codes: ["en"],
   size_bytes: 477_000_000,
@@ -99,8 +99,8 @@ const model: LocalModelInfo_Serialize = {
 /** As in the catalogue: without it, any other language would have no model. */
 const multilingual: LocalModelInfo_Serialize = {
   ...model,
-  id: "qwen",
-  name: "Qwen3 ASR 0.6B",
+  id: "multi",
+  name: "Multilingual Test 0.6B",
   languages: "30 languages, including English and Hindi",
   language_codes: [
     ..."zh en yue ar de fr es pt id it ko ru th vi ja tr hi ms nl sv da fi pl cs fil fa el ro hu mk".split(
@@ -123,7 +123,7 @@ const settings: Settings_Serialize = {
   hotkey: isTry || view === "welcome-plain" ? "RightAlt+RightCmd" : "RightAlt",
   launch_at_login: false,
   transcription: view === "speech-key" ? "cloud" : "local",
-  local_model: view === "ready-30" ? "qwen" : "parakeet",
+  local_model: view === "ready-30" ? "multi" : "english",
   share_usage_events: true,
   history_limit: 25,
 };

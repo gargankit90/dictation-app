@@ -442,7 +442,7 @@ mod tests {
         let cloud = Settings::default();
         let local = Settings {
             transcription: Transcription::Local,
-            local_model: "qwen3-asr-0.6b-q4_k_m".into(),
+            local_model: dictation_core::local_models::DEFAULT_MODEL.into(),
             ..Settings::default()
         };
         assert_eq!(
@@ -457,7 +457,7 @@ mod tests {
         );
         // Another local model is not an engine change, and its id isn't sent.
         let other = Settings {
-            local_model: "parakeet-unified-en-0.6b-q4_k_m".into(),
+            local_model: "another-model".into(),
             ..local.clone()
         };
         assert!(settings_change(&local, &other).events.is_empty());
