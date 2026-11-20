@@ -22,4 +22,5 @@ thiserror.workspace = true
 
 [dev-dependencies]
 hound.workspace = true
+sha2.workspace = true
 proptest.workspace = true
