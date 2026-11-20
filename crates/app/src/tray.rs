@@ -222,7 +222,7 @@ pub struct Download {
 pub struct Ambient {
     /// The saved hotkey, as the settings write it (`RightAlt`).
     pub hotkey: String,
-    /// The engine's display name ("OpenRouter", "On this Mac (Parakeet English)").
+    /// The engine's display name (`"OpenRouter"`, `"On this Mac (Parakeet English)"`).
     pub engine: String,
     /// A model downloading now.
     pub download: Option<Download>,

@@ -35,11 +35,8 @@ const WAIT: Duration = Duration::from_secs(5);
 struct Says;
 
 impl Transcriber for Says {
-    fn transcribe(
-        &self,
-        _audio: &Audio,
-    ) -> impl Future<Output = Result<String, TranscribeError>> + Send {
-        async { Ok(RAW.to_owned()) }
+    async fn transcribe(&self, _audio: &Audio) -> Result<String, TranscribeError> {
+        Ok(RAW.to_owned())
     }
 }
 

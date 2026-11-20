@@ -316,10 +316,13 @@ mod tests {
 
     fn sha256_hex(data: &[u8]) -> String {
         use sha2::{Digest, Sha256};
+        use std::fmt::Write as _;
         Sha256::digest(data)
             .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect()
+            .fold(String::new(), |mut hex, b| {
+                let _ = write!(hex, "{b:02x}");
+                hex
+            })
     }
 
     #[test]
@@ -609,8 +612,11 @@ mod tests {
             ["9"]
         );
         assert_eq!(corrected_numbers("node 20, sorry, node 22"), ["20"]);
-        assert!(corrected_numbers("I have 2 kids. Sorry I'm late.").is_empty());
-        assert!(corrected_numbers("version 3 is out").is_empty());
+        assert_eq!(
+            corrected_numbers("I have 2 kids. Sorry I'm late."),
+            Vec::<String>::new()
+        );
+        assert_eq!(corrected_numbers("version 3 is out"), Vec::<String>::new());
     }
 
     #[test]
