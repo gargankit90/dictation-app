@@ -45,6 +45,7 @@
 //! Vocet" (M5.2's restart), since a grant made in System Settings
 //! reaches the app only after a relaunch.
 
+pub mod cleanup;
 // Only the build script and the capability tests need the list.
 #[cfg(test)]
 mod command_names;
@@ -415,7 +416,9 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         models_dir,
         Arc::new(dictation_platform::disk::available_space),
     ) {
-        Ok(store) => live.with_local(engine::LocalModels::new(store)),
+        Ok(store) => live
+            .with_local(engine::LocalModels::new(store.clone()))
+            .with_cleanup(cleanup::LocalCleanup::new(store, cleanup::bundled_helper())),
         Err(error) => {
             tracing::error!(%error, "on-device models are unavailable");
             live

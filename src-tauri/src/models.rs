@@ -263,6 +263,24 @@ impl ModelDownloads {
         }
     }
 
+    /// Starts downloading the default cleanup model if it isn't on this
+    /// Mac yet (Q4): after the speech model, so a fresh install fetches both
+    /// (about 4.4 GB). A failure shows on its Settings row, where Download
+    /// tries again.
+    pub fn then_cleanup(&self, live: &LiveEngine) {
+        let id = local_models::DEFAULT_CLEANUP_MODEL;
+        let ready = live
+            .local()
+            .and_then(|local| find(id).ok().map(|model| local.store().status(model)))
+            == Some(ModelStatus::Ready);
+        if ready {
+            return;
+        }
+        if let Err(error) = self.start(live, id, None, |_| {}) {
+            tracing::warn!(%error, "cleanup model download didn't start");
+        }
+    }
+
     /// Whether `id` is downloading.
     #[must_use]
     pub fn is_running(&self, id: &str) -> bool {
@@ -282,6 +300,11 @@ impl ModelDownloads {
         self.cancel(id);
         if local.loaded() == Some(model.id) {
             local.release();
+        }
+        if let Some(cleanup) = live.cleanup()
+            && cleanup.model().id == model.id
+        {
+            cleanup.release();
         }
         lock(&self.inner).failed.remove(model.id);
         local
@@ -330,8 +353,17 @@ pub async fn download_local_model(
 ) -> Result<(), String> {
     let (config, live) = (Arc::clone(&state.0), engine.inner().clone());
     let (onboarding, usage) = (Arc::clone(&onboarding), usage.inner().clone());
+    let chain = downloads.inner().clone();
+    let speech = local_models::find(&id).is_some();
     downloads.start(engine.inner(), &id, None, move |result| match result {
-        Ok(()) => rebuild_later(config, live),
+        Ok(()) => {
+            // The speech model is in: the cleanup model follows (Q4), one
+            // download at a time. Dictation works meanwhile, uncleaned.
+            if speech {
+                chain.then_cleanup(&live);
+            }
+            rebuild_later(config, live);
+        }
         Err(error) => {
             if let Some(problem) = usage::download_problem(&error) {
                 usage::setup_problem(&usage, &onboarding, problem);

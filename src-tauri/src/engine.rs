@@ -44,6 +44,7 @@ use dictation_transcribe::engine::{Engine, Transcribers, local_language};
 use dictation_transcribe::local::{CppModel, LocalTranscriber, SpeechModel};
 use dictation_transcribe::models::{DownloadError, ModelStore};
 
+use crate::cleanup::LocalCleanup;
 use crate::key_writes::KeyWrites;
 
 /// How long a keychain read may take before the key counts as unreadable.
@@ -75,6 +76,8 @@ pub struct LiveEngine {
     writes: KeyWrites,
     /// The on-device models, if this build has a models folder (L1).
     local: Option<LocalModels>,
+    /// The on-device cleanup helper's keeper (Q4), with the models.
+    cleanup: Option<LocalCleanup>,
 }
 
 /// Loads a model file; [`CppModel::load`] in the app, a fake in tests.
@@ -231,6 +234,7 @@ impl LiveEngine {
             reads: KeyReads::default(),
             writes: KeyWrites::default(),
             local: None,
+            cleanup: None,
         }
     }
 
@@ -240,6 +244,20 @@ impl LiveEngine {
     pub fn with_local(mut self, local: LocalModels) -> Self {
         self.local = Some(local);
         self
+    }
+
+    /// Keeps the on-device cleanup helper running while the settings want
+    /// it (Q4): every rebuild tells `cleanup` the settings.
+    #[must_use]
+    pub fn with_cleanup(mut self, cleanup: LocalCleanup) -> Self {
+        self.cleanup = Some(cleanup);
+        self
+    }
+
+    /// The cleanup helper's keeper, if this build has a models folder.
+    #[must_use]
+    pub fn cleanup(&self) -> Option<&LocalCleanup> {
+        self.cleanup.as_ref()
     }
 
     /// The engine now current, if the engine follows the settings (E1:
@@ -265,6 +283,7 @@ impl LiveEngine {
             reads: KeyReads::default(),
             writes: KeyWrites::default(),
             local: None,
+            cleanup: None,
         }
     }
 
@@ -491,6 +510,9 @@ impl LiveEngine {
             )
         });
         tracing::info!(engine = transcribers.name(), "engine rebuilt");
+        if let (Some(cleanup), Ok(settings)) = (&self.cleanup, config.settings()) {
+            cleanup.follow(&settings);
+        }
     }
 
     /// [`rebuild`](Self::rebuild) on a thread of its own, so the caller (app
@@ -1047,6 +1069,7 @@ mod tests {
             reads: rig.live.reads.clone(),
             writes: rig.live.writes.clone(),
             local: None,
+            cleanup: None,
         };
         changed(&rig.config, &dead, |c| c.set_api_key(Provider::Groq, KEY)).unwrap();
         assert_eq!(

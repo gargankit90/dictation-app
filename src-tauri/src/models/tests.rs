@@ -274,3 +274,51 @@ async fn only_one_model_downloads_at_a_time() {
     assert!(downloads.is_running(GEMMA));
     downloads.cancel(GEMMA);
 }
+
+/// Q4: after the speech model, the cleanup model downloads too, unless it
+/// is already on this Mac.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_cleanup_model_follows_the_speech_model() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(vec![1u8; 1000])
+                .set_delay(Duration::from_secs(30)),
+        )
+        .mount(&server)
+        .await;
+    let dir = TempDir::new("chain");
+    let live = live(&dir.0);
+    let downloads = ModelDownloads::default().from_stand_in(&server.uri());
+    let gemma = local_models::DEFAULT_CLEANUP_MODEL;
+    downloads.then_cleanup(&live);
+    assert!(downloads.is_running(gemma));
+    for _ in 0..100 {
+        if !server.received_requests().await.unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(
+        requests[0].url.path(),
+        format!("/{}", local_models::GEMMA_4_E2B.file_name)
+    );
+    downloads.cancel(gemma);
+    for _ in 0..250 {
+        if !downloads.is_running(gemma) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // Already downloaded: nothing starts.
+    let model = &local_models::GEMMA_4_E2B;
+    std::fs::File::create(dir.0.join(model.file_name))
+        .unwrap()
+        .set_len(model.size_bytes)
+        .unwrap();
+    downloads.then_cleanup(&live);
+    assert!(!downloads.is_running(gemma));
+}
