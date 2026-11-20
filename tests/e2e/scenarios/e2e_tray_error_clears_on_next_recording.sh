@@ -71,7 +71,7 @@ e2e_tray_error_clears_on_next_recording() {
   fresh_app_state
   # No key, so the real engine can only fail (a run with --no-reset may have
   # one left; removing none is fine).
-  groq_key_remove || log "  note: could not make sure no key is in the VM's keychain"
+  apikey_key_remove || log "  note: could not make sure no key is in the VM's keychain"
   E2E_TRANSCRIBER=settings launch --debug-audio-file "$VM_TONE"
   expect "the app starts and logs ready" wait_for_log 'INFO .*ready'
   expect "the engine has no key" wait_for_log 'engine settings .*has_key=false' 30

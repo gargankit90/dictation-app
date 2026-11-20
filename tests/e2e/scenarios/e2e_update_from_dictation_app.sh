@@ -51,7 +51,7 @@ tr_use_app() {
   # The executable is named by the bundle: dictation-app in the old build,
   # Vocet in the new one (also inside dictation-app.app after an update).
   exe=$(vm "defaults read $(q "$VM_APP/Contents/Info") CFBundleExecutable" 2>/dev/null) || exe=$PROC_NAME
-  GROQ_VM_APP_BINARY="$VM_APP/Contents/MacOS/${exe:-$PROC_NAME}"
+  API_VM_APP_BINARY="$VM_APP/Contents/MacOS/${exe:-$PROC_NAME}"
 }
 
 # --- Host ------------------------------------------------------------------------
@@ -210,7 +210,7 @@ tr_engine_settings_kept() {
 tr_key_in_keychain() {
   local out
   out=$(printf '%s\n' "${VM_PASSWORD:-lume}" |
-    vm "read -r pw && security unlock-keychain -p \"\$pw\" \"$GROQ_KEYCHAIN_FILE\" && unset pw && security find-generic-password -s $TR_BUNDLE_ID -a groq-api-key 2>&1 | grep -c 'class: \"genp\"'") || true
+    vm "read -r pw && security unlock-keychain -p \"\$pw\" \"$API_KEYCHAIN_FILE\" && unset pw && security find-generic-password -s $TR_BUNDLE_ID -a groq-api-key 2>&1 | grep -c 'class: \"genp\"'") || true
   [ "$out" = 1 ]
 }
 
@@ -218,8 +218,8 @@ tr_key_in_keychain() {
 # made it may be gone or a different build).
 tr_key_remove() {
   printf '%s\n' "${VM_PASSWORD:-lume}" |
-    vm "read -r pw && security unlock-keychain -p \"\$pw\" \"$GROQ_KEYCHAIN_FILE\" && unset pw && (security delete-generic-password -s $TR_BUNDLE_ID -a groq-api-key >/dev/null 2>&1 || true)"
-  GROQ_KEY_STORED=0
+    vm "read -r pw && security unlock-keychain -p \"\$pw\" \"$API_KEYCHAIN_FILE\" && unset pw && (security delete-generic-password -s $TR_BUNDLE_ID -a groq-api-key >/dev/null 2>&1 || true)"
+  API_KEY_STORED=0
 }
 
 tr_engine_from_settings() {
@@ -317,7 +317,7 @@ e2e_update_from_dictation_app() {
   expect "the old build has Microphone and Accessibility" permissions_hold "$TR_OLD"
   fresh_app_state
   tr_write_settings
-  groq_key_store "$TR_KEY"
+  apikey_key_store "$TR_KEY"
   expect "launch at login is turned on in the old build" test "$(login_item on 2>&1)" = "launch at login: enabled"
   tr_note "BTM before the update:"
   tr_note "$(tr_btm)"
@@ -394,7 +394,7 @@ EOF' _ "$(vm "codesign -dvv $(q "$(tr_copies | head -1)") 2>&1")"
   tr_note "after the DMG-style move, ~/Applications holds: $(tr_copies | tr '\n' ' ')"
   expect "exactly one bundle with this id is left, Vocet.app" \
     test "$(tr_copies | tr -d '\n')" = "$TR_VM_NEW_APP"
-  groq_key_store "$TR_KEY"
+  apikey_key_store "$TR_KEY"
   clear_app_log
   E2E_TRANSCRIBER=settings launch_full "$VM_TONE"
   expect "Vocet.app starts" wait_for_log "INFO .*starting version=\"$TR_NEW\""

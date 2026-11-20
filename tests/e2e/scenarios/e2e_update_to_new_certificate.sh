@@ -332,7 +332,7 @@ e2e_update_to_new_certificate() {
 
   # 1. A tester's state, before the update.
   nc_seed_state
-  groq_key_store "$NC_KEY"
+  apikey_key_store "$NC_KEY"
   expect "launch at login is on" test "$(login_item on 2>&1)" = "launch at login: enabled"
   settings_before=$(nc_checksum "$NC_SETTINGS_VM")
   history_before=$(nc_checksum "$VM_HISTORY_FILE")

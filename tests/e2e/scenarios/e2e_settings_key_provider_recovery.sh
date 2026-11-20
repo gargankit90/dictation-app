@@ -72,7 +72,7 @@ e2e_settings_key_provider_recovery() {
   provider_key_store "$PROVIDER_BAD_KEY"
 
   expect "the app starts on the local provider" launch_on_provider
-  expect "with the saved (wrong) key" wait_for_log 'engine settings provider=groq .*has_key=true'
+  expect "with the saved (wrong) key" wait_for_log 'engine settings provider=openrouter .*has_key=true'
   pid=$(app_pid)
   log "  the app's pid: $pid"
   textedit_fresh
@@ -122,7 +122,7 @@ e2e_settings_key_provider_recovery() {
   textedit_fresh
   expect "a dictation after the save ends Idle" dictate_once 1
   expect "it was sent with the new key" provider_request_has 4 auth=good
-  expect "with the default model, no language" provider_request_has 4 "model=whisper-large-v3-turbo language=-"
+  expect "with the default model, no language" provider_request_has 4 "model=openai/gpt-4o-mini-transcribe language=-"
   expect "the provider answered it" provider_wait_event '^replied n=4 status=200'
   expect "TextEdit holds exactly the transcript" textedit_is "$(esc_b64 "$PROVIDER_TEXT")"
   expect "it went through Inserting" \
@@ -138,7 +138,7 @@ e2e_settings_key_provider_recovery() {
   expect "Quit from the tray ends the app by itself" quit_from_tray
   clear_app_log
   expect "the app starts again on the local provider" launch_on_provider
-  expect "with a saved key" wait_for_log 'engine settings provider=groq .*has_key=true'
+  expect "with a saved key" wait_for_log 'engine settings provider=openrouter .*has_key=true'
   textedit_fresh
   expect "a dictation after the relaunch ends Idle" dictate_once 1
   expect "it was sent with the new key" provider_request_has 5 auth=good

@@ -6,11 +6,11 @@ focus.
 **Status: alpha, first release for testers (0.1.0).** macOS 13 or newer on
 Apple Silicon only (the DMG is `aarch64`; no Intel build). Speech is
 transcribed on your Mac with a downloaded model, or in the cloud with your own
-Groq or OpenAI API key. Windows is planned.
+OpenRouter API key. Windows is planned.
 
 ![Holding Right Option in TextEdit: the overlay shows Recording, then Transcribing, then the spoken sentence appears.](docs/media/demo.gif)
 
-_Recorded in a macOS VM: a real Right Option hold, speech by macOS `say` fed to the app as audio, transcribed by Groq Whisper._
+_Recorded in a macOS VM: a real Right Option hold, speech by macOS `say` fed to the app as audio, transcribed by Groq Whisper (before Vocet moved to OpenRouter)._
 
 ## Try it
 

@@ -692,6 +692,8 @@ mod tests {
             (CleanupOutcome::FallbackError, "fallback_error"),
         ] {
             assert_eq!(serde_json::to_value(outcome).unwrap(), json!(name));
+            let page = include_str!("../../../docs/privacy.md");
+            assert!(page.contains(&format!("`{name}`")), "{name} isn't listed");
         }
     }
 }
