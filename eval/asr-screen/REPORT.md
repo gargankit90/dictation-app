@@ -2,7 +2,7 @@
 
 **Validate Voxtral Mini 3B Q4_K_M as the default when recognition runs alone. Prefer Oruk Qwen 1.7B Q4_K_M when the user enables Gemma 4 E2B v3 cleanup.** Voxtral produced the most sendable raw drafts on the 151 public clips. Against direct-file Parakeet it gained 22 Claude passes and 23 Codex passes, with zero losses for either judge. Both judges counted nine gains and zero losses on the 75-clip check half.
 
-**Does Voxtral + Gemma beat Oruk + Gemma?** Claude passed **116/151 for each**. Voxtral won 11 clips, lost 11 and tied 129. Codex passed **114/151 for Voxtral and 112/151 for Oruk** (12 wins, 10 losses, 129 ties). The two-clip Codex edge is unconfirmed. Oruk's cleaned AMEND was lower on both judges, and its ASR weights are 1.32 GB versus Voxtral's 2.98 GB. That saves 1.66 GB even after either pipeline adds the same 3.11 GB cleanup model.
+**Does Voxtral + Gemma beat Oruk + Gemma?** Claude passed **116/151 for each**. Voxtral won 11 clips, lost 11 and tied 129. Codex passed **114/151 for Voxtral and 112/151 for Oruk** (12 wins, 10 losses, 129 ties). The two-clip Codex edge is unconfirmed. Oruk's cleaned AMEND was lower on both judges, and its ASR weights are 1.32 GB versus Voxtral's 2.98 GB. With Gemma, users download 4.43 GB for Oruk or 6.09 GB for Voxtral. Summing the separately measured stages gives 0.93 s median / 2.33 s p90 for Oruk versus 1.83 / 3.16 s for Voxtral.
 
 | Direct-file recognizer | Raw ZER, Claude / Codex | With Gemma E2B v3, Claude / Codex | ASR download |
 | --- | ---: | ---: | ---: |
@@ -32,10 +32,13 @@ WER pools word edits across the corpus after Whisper English normalization. The 
 | Qwen3-ASR 0.6B, VM | 49.0% | 47.0% | 1.70% |
 | Parakeet + Gemma 4 E2B v3 cleanup | 65.6% | 62.3% | 0.76% |
 | Gemma 4 E2B one-pass, unguarded | 49.7% | 49.7% | 1.46% |
-| Gemma 4 E4B one-pass, unguarded | 53.6% | — | 1.34% |
+| Gemma 4 E4B one-pass, unguarded | 53.6% | 53.0% | 1.34% |
 | Groq Whisper large v3 turbo, VM | 60.3% | 57.0% | 1.43% |
-| Hosted Nemotron 3.5 Transcribe | — | 64.9% | — |
-| AssemblyAI | 86.8% | 85.4% | 0.26% |
+| Hosted Nemotron 3.5 Transcribe | 66.2% | 64.9% | 1.16% |
+| Hosted Voxtral Mini 3B | 64.9% | 62.9% | 0.94% |
+| Hosted Nemotron + guarded GPT-6.2-sol v4, OpenRouter | 84.8% | 84.1% | 0.34% |
+| AssemblyAI, first VM run | 86.8% | 85.4% | 0.26% |
+| AssemblyAI Smart, second VM run | 88.1% | 86.8% | 0.26% |
 
 The hosted comparison uses the separate experiment's results. Nemotron's Codex advantage over Groq was 7.9 points overall and 1.3 on check. Gemma E2B one-pass lost 37 sendable drafts and gained 13 against Parakeet + E2B text cleanup by Claude's judgment. [Voice Arena VM results](../voicearena/REPORT.md) · [Local cleanup](https://github.com/gargankit90/dictation-app/blob/eval/local-cleanup/eval/local-cleanup/REPORT.md) · [Gemma one-pass](https://github.com/gargankit90/dictation-app/blob/eval/gemma-onepass/eval/gemma-onepass/REPORT.md) · [Hosted screen](https://github.com/gargankit90/dictation-app/blob/eval/hosted-asr/eval/hosted-asr/REPORT.md)
 
@@ -118,6 +121,46 @@ ZER gives the percentage of drafts the judge would paste unchanged. AMEND pools 
 | Voxtral Mini 4B Realtime (`voxtral4`) | 53.9/66.7/60.3 | 1.27/0.86/1.06 | 53.9/64.0/58.9 | 1.24/0.96/1.09 |
 | Voxtral Mini 4B Realtime + Gemma E2B (`voxtral4gemma`) | 73.7/74.7/74.2 | 0.81/0.40/0.60 | 73.7/72.0/72.8 | 0.77/0.46/0.61 |
 
+## What users download and wait for
+
+A separate single-model replay timed all 151 clips in each mode. The native models use Metal, the two MLX models use their model-card loaders, and Granite 5.0 2B uses llama.cpp. A new process loaded each model; Granite's three prompts shared one loaded server. Load times include initialization and depend on filesystem and Metal shader caches. Parakeet and Voxtral Mini 3B each took about 11 seconds to initialize in their reported runs. After detecting unrelated CPU activity, we repeated four complete runs in a reserved GPU window. One five-second CPU sample during the Oruk replay recorded 64% of one core from Android Studio. No other monitored build process crossed 50% during those repeats.
+
+| Recognizer | Download GB | Max RSS / peak footprint GB | Load s | Per clip median / p90 s |
+| --- | ---: | ---: | ---: | ---: |
+| Voxtral Mini 3B | 2.98 | 0.91 / 0.80 | 11.00 | 1.43 / 2.22 |
+| Voxtral Mini 4B Realtime | 2.83 | 0.48 / 0.57 | 1.63 | 2.78 / 5.68 |
+| Parakeet unified 0.6B | 0.48 | 0.51 / 0.26 | 10.83 | 0.10 / 0.21 |
+| Qwen3-ASR 0.6B | 0.59 | 0.90 / 0.68 | 0.24 | 0.22 / 0.51 |
+| Qwen3-ASR 1.7B | 1.32 | 0.79 / 0.82 | 0.35 | 0.40 / 0.95 |
+| Qwen 1.7B, generic vocabulary | 1.32 | 0.79 / 0.74 | 0.35 | 0.43 / 1.00 |
+| Qwen 1.7B, user dictionary | 1.32 | 0.93 / 0.70 | 0.40 | 0.41 / 0.93 |
+| Oruk Qwen 1.7B | 1.32 | 0.95 / 0.70 | 0.35 | 0.39 / 0.92 |
+| Granite 470M | 0.28 | 0.64 / 0.36 | 0.11 | 0.06 / 0.12 |
+| Fluid raw | 0.75 | 0.89 / 16.54 | 0.66 | 0.17 / 0.55 |
+| Fluid clean | 0.81 | 0.77 / 16.63 | 0.72 | 0.18 / 0.48 |
+| Rumble-2-Flash | 0.73 | 1.38 / 3.48 | 1.48 | 0.16 / 0.36 |
+| Granite 5.0 2B written | 2.30 | 5.82 / 10.79 | 1.52 | 0.49 / 1.09 |
+| Granite 5.0 2B verbatim | 2.30 | 5.82 / 10.79 | 1.52 | 0.59 / 1.28 |
+| Granite 5.0 2B + dictionary | 2.30 | 5.82 / 10.79 | 1.52 | 0.60 / 1.28 |
+| Parakeet TDT 1.1B | 0.83 | 0.50 / 0.25 | 0.26 | 0.14 / 0.27 |
+| Cohere Transcribe | 1.56 | 0.39 / 0.34 | 0.76 | 0.27 / 0.60 |
+| Granite 4.1 2B | 1.60 | 0.76 / 0.55 | 0.36 | 0.51 / 1.22 |
+| Granite 4.1 2B Plus | 1.49 | 0.68 / 0.58 | 0.75 | 0.59 / 1.35 |
+| Canary Qwen 2.5B | 1.74 | 1.36 / 1.24 | 1.19 | 0.43 / 1.17 |
+
+### Adding cleanup
+
+Gemma 4 E2B Q4_K_M adds **3.11 GB** of weights. All cleanup rows reused the local-cleanup v3 prompt and guards, with temperature 0, top-k 1, seed 1, thinking disabled, a 4,096-token context, one slot and all layers on Metal. These strictly sequential per-clip delay estimates sum the ASR and guarded cleanup durations for the same clip before taking quantiles. They exclude clipboard, hotkey, UI, cold loading and any cost of evicting models. The two models were timed in separate processes. Combined peak RAM still needs an end-to-end measurement.
+
+| Pipeline | Total weights GB | Cleanup max RSS GB | Cleanup load s | Cleanup median / p90 s | ASR + cleanup median / p90 s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Voxtral Mini 3B + Gemma | 6.09 | 3.45 | 2.04 | 0.40 / 0.99 | 1.83 / 3.16 |
+| Oruk Qwen 1.7B + Gemma | 4.43 | 3.48 | 1.00 | 0.54 / 1.48 | 0.93 / 2.33 |
+| Qwen3-ASR 1.7B + Gemma | 4.43 | 3.21 | 2.63 | 0.52 / 1.45 | 0.92 / 2.38 |
+| Voxtral Mini 4B Realtime + Gemma | 5.94 | 3.07 | 2.85 | 0.41 / 1.04 | 3.17 / 6.67 |
+| Parakeet unified 0.6B + Gemma | 3.59 | 3.56 | 0.81 | 0.47 / 1.22 | 0.58 / 1.37 |
+| Qwen3-ASR 0.6B + Gemma | 3.70 | 3.48 | 0.77 | 0.47 / 1.18 | 0.7 / 1.69 |
+
 ## What the errors look like
 
 - Qwen 1.7B and Oruk had the lowest spoken WER, yet still rendered a spoken registration URL as prose, split “Lakeshore,” and heard “nudge” as “note” (0533). Both missed the temperature unit in a recipe (0069). Text cleanup can repair formatting but has no audio to recover a missing unit.
@@ -146,10 +189,11 @@ Keep #215 opt-in. Bias recovered names on clips containing tune-selected terms. 
 
 ## Runtime and shipping constraints
 
-- **Parakeet, both base Qwens, Oruk and Granite TurboCTC** ran through a Metal build of Vocet's exact transcribe-cpp **and** transcribe-cpp-sys 0.4.1. The harness loaded each GGUF, created one session, and submitted all clips with English and default run options. The native binary's deployment target was macOS 11. Vocet targets macOS 13. This establishes loader compatibility on macOS 15.7.4. A real macOS 13 end-to-end test remains outstanding.
+- **Both Voxtrals, both Parakeets, both base Qwens, Oruk, Cohere, Canary, Granite 4.1/Plus and Granite TurboCTC** ran through a Metal build of Vocet's exact transcribe-cpp **and** transcribe-cpp-sys 0.4.1. The harness loaded each GGUF, created one session, and submitted all clips with English and default run options. The native binary's deployment target was macOS 11. Vocet targets macOS 13. This establishes loader compatibility on macOS 15.7.4. A real macOS 13 end-to-end test remains outstanding.
+- **Voxtral Mini 3B and Mini 4B Realtime** each ran as one Apache-2.0 Q4_K_M GGUF without a separate projector. The exact model files weigh 2,984,721,056 and 2,830,493,984 bytes. The real-time model was evaluated offline on whole clips under Vocet's current settings. [Mini 3B weights](https://huggingface.co/handy-computer/Voxtral-Mini-3B-2507-gguf/tree/3d4e8e74a2ada47b400b2957575b2a9c058efe80) · [Realtime 4B weights](https://huggingface.co/handy-computer/Voxtral-Mini-4B-Realtime-2602-gguf/tree/7fd3d424fc558edca2c53808578b0541ef52a81a)
 - **Oruk** publishes a 4.08 GB Transformers 5 safetensors checkpoint. The evaluated download for a user would be the 1.32 GB Q4_K_M export. The conversion unpacked the publisher's tokenizer and feature extractor, mapped its audio tower, language model and projector layers to the older Qwen tensor names, and preserved all weight bytes before the upstream BF16 GGUF conversion and quantization. The converter and quantizer came from transcribe.cpp commit `db678a03`; the final GGUF SHA-256 was `057471662f060800a6374708ad679d4abe51775e52ca591a88ea4ade78b273bb`. [Oruk checkpoint](https://huggingface.co/oruk/orukqwen-asr-1.7b/tree/a526248ceb2b829cb8f2e1eec764eafbd6a10fe4)
 - **Fluid Speech Pro** used the weights repository's MLX loader with parakeet-mlx 0.7.0, 8-bit weights and the optional clean adapter. The MLX 0.32.4 wheel used here requires macOS 15 on Apple silicon. Supporting macOS 13 with clean mode would require testing the documented ONNX route and packaging a separate adapter. The weights require CC BY 4.0 attribution. [Fluid MLX weights and loader](https://huggingface.co/FluidVoice-Labs/fluid-speech-pro-mlx/tree/aeb1d4e43487586b15d86c0a1dd4511e1cf6b7a0)
-- **Rumble-2-Flash** used mlx-audio 0.6.3 with the system tokens `<digits><nofiller><noverbatim>` and English. The runner verified that the loaded decoder's stop set was exactly **99564 and 99562**, and all 151 clips returned. This Apache-2.0 MLX port has the same macOS deployment limitation. [Rumble Mac model card](https://huggingface.co/TypeWhisper/Rumble-2-Flash-8bit/tree/feb7feb016e58ec3f39f961dfb78e4837325a0d1)
+- **Rumble-2-Flash** used mlx-audio 0.6.3 with the system tokens `<digits><nofiller><noverbatim>` and English. The runner verified that the loaded decoder's stop set was exactly **99564 and 99562**, and all 151 clips returned. A decoder trace on clips 0007, 0108 and 0749 observed token 99564 entering the EOS branch once per clip, after reported output lengths of 30, 243 and 74 tokens. This Apache-2.0 MLX port has the same macOS deployment limitation. [Rumble Mac model card](https://huggingface.co/TypeWhisper/Rumble-2-Flash-8bit/tree/feb7feb016e58ec3f39f961dfb78e4837325a0d1)
 - **Granite Speech 5.0 2B** used IBM's Q4_K_M weights and F16 projector through llama.cpp build 12359's loopback transcription endpoint. The installed binary has a macOS 15 deployment target. Shipping on macOS 13 requires a compatible llama.cpp build and integration test. These three alternate runtimes are outside the 0.4.1 catalog; no newer transcribe.cpp release was verified for them. [IBM GGUF and projector](https://huggingface.co/ibm-granite/granite-speech-5.0-2b-GGUF/tree/945b4581e2b40cd9a3121de265fd8e387bdf782d)
 
 Direct loader probes on 0.4.1 rejected the IBM Granite 2B GGUF with “unsupported architecture” (status 5) and the two MLX safetensors artifacts with a GGUF format error (status 4). No candidate that completed this experiment required an upgrade of Vocet's Rust dependency. The external engines require a different runtime.
@@ -172,6 +216,8 @@ The 151 paired clips come from the public benchmark; prompt choices, candidate s
 The speed test processes one clip at a time through a loaded model. The Rust path times the inference call over PCM already in memory; the MLX and loopback llama.cpp paths also open or send a local WAV. The VM figures in the linked benchmark measure key release to pasted text. The size column uses decimal GB. macOS maximum resident set and peak memory footprint are separate process accounting measures. Mapped weights and GPU allocations prevent either number alone from predicting the minimum RAM a user needs. No test here establishes performance on an 8 GB Mac.
 
 The generic Qwen vocabulary was GitHub, ChatGPT, TypeScript, Postgres, Kubernetes, PyTorch, Jira, Figma, Linear, Miro, GraphQL and Vitest. A second list drew target names only from tune, then added unrelated names and tools. The same 24 entries went to Granite. The clean-mode audit compared token-level changes within the same clip and checked deleted spans against intended text. A spoken-number sequence that repeats a digit counts as meaningful repetition.
+
+The additional time allowed screening Parakeet TDT 1.1B, Cohere, Granite 4.1/Plus, Canary and both under-cap Voxtrals. Musci was deferred: the reviewed BF16 artifact exceeds 3 GB and no validated under-cap Mac artifact was identified. The separate hosted and Gemma one-pass reports supplied their results.
 
 [Per-clip numeric evidence](clip-scores.csv) · [Paired comparisons by half and judge](paired-differences.csv)
 
