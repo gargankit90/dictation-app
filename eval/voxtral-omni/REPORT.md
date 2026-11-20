@@ -107,25 +107,44 @@ judged MiMo, the best one-pass model; it needed 0 new calls, all cached. * = jud
 | Voxtral Small 24B chat (Apache-2.0) | one-pass | 40.8 / 54.7 / **47.7** | – | – | 42.8 | 1.84 / 3.28 | 1.72 | – |
 | Voxtral Small 24B chat (Apache-2.0) | one-pass + guard | 39.5 / 49.3 / **44.4** | – | – | 44.4 | 2.24 / 3.89 | 3.47 | dropped_name 3, dropped_number 10, missing 43, too_long 3 |
 
-## Closed models (Gemini, OpenAI): prepared, not yet run
+## Closed models (Gemini, OpenAI): results (2026-11-20)
 
-The owner asked for this comparison; these rows are labelled **closed model**. Our hosted shortlist
-so far has been open models. `closed_asr.py` (fake-server tested) runs the current models from
-Google's and OpenAI's docs (read 2026-11-19):
+Rows labelled **closed model**. Claude Opus 5.5 judge only (amend-va 0.2.1 v1); differences of a few
+points are within noise (±8 interval on 151 clips), so read the paired wins/losses.
 
-| Model | Why | Modes | Expected cost (151 clips) |
-|---|---|---|---:|
-| Gemini 3.5 Transcribe (`gemini-3.5-transcribe`) | Google's dedicated speech-to-text model | verbatim (plain), "smart" (Google's own clean-up) + guard | ~$0.65 |
-| Gemini 3.5 Flash-Lite | Google's fastest, cheapest audio-input model | plain, one-pass v4 (+ guard), thinking minimal | ~$0.15 |
-| Gemini 3.8 Flash | Google's most capable Flash model (dictation latency) | plain, one-pass v4 (+ guard), thinking low | ~$0.61 |
-| OpenAI `gpt-transcribe` | OpenAI's recommended transcription model | plain, plus Sol / Luna / GLM Flash clean-up | ~$0.26 + ~$0.32 OpenRouter |
-| OpenAI `gpt-4o-mini-transcribe-2025-12-15` | cheapest listed (deprecated, shuts down 2027-02-26) | plain | ~$0.17 |
+**Speech engine alone** (OpenAI and Gemini 3.5 Transcribe via OpenRouter `audio/transcriptions`,
+`transcribe_openrouter.py` into `results-or-closed/`; Flash-Lite direct via `closed_asr.py`):
 
-whisper-1 is left out (Groq Whisper data already exists). Gemini 4 Argon / Carbon were left out for
-latency and cost (about $1.7 for the two modes at today's prices, doubling on Dec 1). `--model
-gemini_flash` etc. can add one later. Owner command (GEMINI_API_KEY, OPENAI_API_KEY and
-OPENROUTER_API_KEY from the Keychain, service com.dictationapp.eval): see the header of
-`run_all_closed.sh`. Then judge with `score.sh results/<label> claude` and rerun `summarize.py`.
+| Engine (closed model) | ZER Claude | vs Groq W/L | vs Nemotron W/L | API s median | USD/1k |
+|---|---:|---|---|---:|---:|
+| OpenAI gpt-4o-transcribe | **74.8** | 26/4 | 19/6 | 1.52 | 1.11 |
+| OpenAI gpt-4o-mini-transcribe | 72.8 | 24/5 | 19/9 | 1.27 | 0.56 |
+| OpenAI gpt-transcribe | 68.2 | 19/7 | 11/8 | 1.28 | 1.73 |
+| Gemini 3.5 Transcribe | 66.9 | 21/11 | 12/11 | 2.91 | 1.84 |
+| Gemini 3.5 Flash-Lite plain / one-pass v4 / one-pass+guard | 58.9 / 62.9 / 58.9 | – | – | – | ~0.9 |
+| *Nemotron 3.5 (open, reference)* | *66.2* | 22/13 | – | 1.27 | 0.44 |
+| *Groq Whisper turbo (app)* | *60.3* | – | – | 0.63 key-up | – |
+
+**With clean-up (prompt v4 + guard, OpenRouter):**
+
+| Engine + clean-up | ZER Claude | vs Voxtral Small+Sol W/L | clean-up s median | USD/1k total |
+|---|---:|---|---:|---:|
+| gpt-4o-mini-transcribe + GPT-6.2 Sol | **88.7** | 8/4 | 1.50 | 2.48 |
+| gpt-4o-mini-transcribe + GLM Flash | **88.1** | 10/7 | 0.99 | **0.68** |
+| gpt-4o-mini-transcribe + GPT-6-luna | 87.4 | 11/9 | 1.28 | 0.68 |
+| gpt-4o-transcribe + GPT-6-luna | 87.4 | 10/8 | 1.19 | 1.22 |
+| gpt-4o-transcribe + GPT-6.2 Sol | 86.8 | 7/6 | 1.51 | 3.30 |
+| gpt-4o-transcribe + GLM Flash | 85.4 | 9/10 | 0.93 | 1.23 |
+| *Voxtral Small + Sol (best open)* | *86.1* | – | – | 2.75 |
+| *AssemblyAI Smart* | *88.1* | – | – | ~3.90 |
+
+**Caveat that decides it: OpenAI deprecated gpt-4o-transcribe and gpt-4o-mini-transcribe (announced
+2026-08); they shut down 2027-02-26.** OpenAI's named replacements are gpt-transcribe (68.2 raw here)
+and gpt-live-transcribe (not on OpenRouter; untested, needs a working OpenAI key). Not shippable as a
+default; useful as evidence of what a strong engine + cheap clean-up reaches. Gemini 3.8 Flash and
+most Gemini Transcribe clips hit Google 429s (free-tier quota) on the direct API; the OpenAI direct
+key returned 401, so OpenAI ran through OpenRouter. Total spend: Gemini direct $0.23, OpenRouter
+transcription $0.79, clean-up ~$0.69.
 
 ## Judges
 

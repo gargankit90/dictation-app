@@ -1,0 +1,6 @@
+151 drafts, 121 judged already (cache), 30 to judge with claude-opus-5-5 effort=max via claude -p
+  judged 10/30
+  judged 20/30
+  judged 30/30
+gpt4o__glm_v4: ZER 85.4%  AMEND 0.33%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+judge cache pruned to 151 answers used by this run

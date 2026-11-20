@@ -47,6 +47,9 @@ ENGINES = {  # name: (input dir, expected `model` column or None for on-device d
     "voxtral_small": ("mistralai__voxtral-small-24b-2507-stt", "mistralai/voxtral-small-24b-2507-stt"),
     # closed_asr.py's output (OpenAI gpt-transcribe, a closed model), cleaned only on request (EXTRA)
     "openai_transcribe": ("@results/openai_transcribe_plain", "gpt-transcribe"),
+    # OpenAI transcription via OpenRouter (transcribe_openrouter.py into results-or-closed/; closed models)
+    "gpt4o": ("@or/openai__gpt-4o-transcribe", None),
+    "gpt4o_mini": ("@or/openai__gpt-4o-mini-transcribe", None),
 }
 # model, worst-case USD per input token, per output token (list price x 2 for routes with several
 # providers; sol: the $2.5/M cache-write tariff), sub-cap USD.
@@ -68,7 +71,9 @@ PLAN = [("nemotron", "glm"),
 
 
 # Not in the default lanes: they need closed_asr.py's OpenAI transcripts first (run_all_closed.sh).
-EXTRA = [("openai_transcribe", "luna"), ("openai_transcribe", "glm"), ("openai_transcribe", "sol")]
+EXTRA = [("openai_transcribe", "luna"), ("openai_transcribe", "glm"), ("openai_transcribe", "sol"),
+         ("gpt4o", "sol"), ("gpt4o", "glm"), ("gpt4o", "luna"),
+         ("gpt4o_mini", "sol"), ("gpt4o_mini", "glm"), ("gpt4o_mini", "luna")]
 
 
 def label(engine: str, clean: str) -> str:
@@ -77,7 +82,12 @@ def label(engine: str, clean: str) -> str:
 
 def load_source(engine: str, results: pathlib.Path = RESULTS) -> pathlib.Path:
     d, model = ENGINES[engine]
-    base = results / d[len("@results/"):] if d.startswith("@results/") else HERE / "input" / d
+    if d.startswith("@results/"):
+        base = results / d[len("@results/"):]
+    elif d.startswith("@or/"):
+        base = HERE / "results-or-closed" / d[len("@or/"):]
+    else:
+        base = HERE / "input" / d
     source = base / "harness_results.csv"
     with source.open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))

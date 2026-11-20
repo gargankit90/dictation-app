@@ -1,0 +1,7 @@
+151 drafts, 102 judged already (cache), 49 to judge with claude-opus-5-5 effort=max via claude -p
+  judged 10/49
+  judged 20/49
+  judged 30/49
+  judged 40/49
+openai__gpt-transcribe: ZER 68.2%  AMEND 1.05%  over 151 drafts (0 unjudged)  judge claude-opus-5-5/max  prompt v1 fp 8ed04caf4663  amend-va 0.2.1
+judge cache pruned to 151 answers used by this run

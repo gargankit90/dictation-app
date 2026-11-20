@@ -62,3 +62,16 @@
 2026-11-19T21:17:24 voxtral_mini_dev__sol_v4 gemini new_verdicts=118 exit=0
 2026-11-19T21:31:44 mimo_v25_onepass_guard gemini new_verdicts=64 exit=3
 2026-11-19T21:31:53 voxtral_mini__glm_v4 gemini new_verdicts=0 exit=1
+2026-11-20T02:17:15 gemini_flash_lite_plain claude new_verdicts=86 exit=0
+2026-11-20T02:24:14 gemini_flash_lite_onepass claude new_verdicts=70 exit=0
+2026-11-20T02:24:17 gemini_flash_lite_onepass_guard claude new_verdicts=0 exit=0
+2026-11-20T08:54:13 google__gemini-3.5-transcribe claude new_verdicts=48 exit=0
+2026-11-20T08:55:07 openai__gpt-transcribe claude new_verdicts=49 exit=0
+2026-11-20T08:55:41 openai__gpt-4o-transcribe claude new_verdicts=58 exit=0
+2026-11-20T08:56:12 openai__gpt-4o-mini-transcribe claude new_verdicts=62 exit=0
+2026-11-20T09:36:13 gpt4o_mini__glm_v4 claude new_verdicts=31 exit=0
+2026-11-20T09:36:21 gpt4o__glm_v4 claude new_verdicts=30 exit=0
+2026-11-20T09:36:54 gpt4o_mini__sol_v4 claude new_verdicts=32 exit=0
+2026-11-20T09:36:58 gpt4o__luna_v4 claude new_verdicts=30 exit=0
+2026-11-20T09:37:23 gpt4o__sol_v4 claude new_verdicts=30 exit=0
+2026-11-20T09:39:39 gpt4o_mini__luna_v4 claude new_verdicts=31 exit=0
