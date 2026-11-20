@@ -19,7 +19,7 @@ import { HOTKEY_NOTICE_POLL_MS } from "./settings/Dictation";
 import { CONNECTED, KEY_NOT_SAVED, NOTICE_DISMISSED_KEY } from "./settings/Speech";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
-const KEY = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
+const KEY = "sk-or-dummy-NOT-A-REAL-KEY-0123456789";
 const ENGLISH = "parakeet-unified-en-0.6b-q4_k_m";
 const MULTI = "qwen3-asr-0.6b-q4_k_m";
 
@@ -49,8 +49,8 @@ function model(id: string, overrides: Partial<LocalModelInfo_Serialize> = {}) {
 class Backend {
   settings: Settings_Serialize = {
     version: 2,
-    provider: "groq",
-    model: "whisper-large-v3-turbo",
+    provider: "openrouter",
+    model: "openai/gpt-4o-mini-transcribe",
     language: null,
     hotkey: "RightAlt",
     launch_at_login: false,
@@ -59,7 +59,7 @@ class Backend {
     share_usage_events: true,
     history_limit: 25,
   };
-  keys: Record<Provider, boolean> = { groq: false, openai: false };
+  keys: Record<Provider, boolean> = { openrouter: false };
   models: LocalModelInfo_Serialize[] = [model(ENGLISH), model(MULTI)];
   engine: EngineStatus = { state: "ready", message: null };
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
@@ -549,7 +549,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     screen.getAllByRole<HTMLInputElement>("radio").filter((candidate) => candidate.checked);
   const ready = (id: string) => model(id, { state: "ready", downloaded_bytes: 477_274_496 });
   beforeEach(() => {
-    backend.keys.groq = true;
+    backend.keys.openrouter = true;
   });
 
   it("names lead, with no Downloaded, Use this, Active or Hide", async () => {
@@ -563,7 +563,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     ).toHaveLength(3);
     expect(screen.getAllByText("On this Mac · works offline")).toHaveLength(2);
     expect(
-      await screen.findByText("Groq · about 100 languages · speech is sent to Groq"),
+      await screen.findByText("OpenRouter · about 100 languages · speech is sent to OpenRouter"),
     ).toBeTruthy();
     for (const gone of ["Downloaded", "✓ Active", "Use this", "Hide", "Set up…", "Multilingual"]) {
       expect(screen.queryByText(gone), gone).toBeNull();
@@ -698,7 +698,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     await open("speech");
     fireEvent.click(radio(/^Your own key/));
     await waitFor(() => {
-      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "groq" });
+      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
     });
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => {
@@ -723,17 +723,17 @@ describe("u12_criterion_4 the key sheet", () => {
     expect(backend.named("use_cloud_engine")).toHaveLength(0);
     expect(radio(/^Your own key/).checked).toBe(false);
     // A key the provider rejects switches nothing.
-    backend.testResult = { kind: "invalid_key", message: "Groq rejected this key." };
+    backend.testResult = { kind: "invalid_key", message: "OpenRouter rejected this key." };
     fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
     click("Test & Save");
-    await screen.findByText("Groq rejected this key.");
+    await screen.findByText("OpenRouter rejected this key.");
     expect(backend.named("use_cloud_engine")).toHaveLength(0);
     // One that works does.
     backend.testResult = null;
     click("Test & Save");
     expect(await screen.findByText(CONNECTED)).toBeTruthy();
     await waitFor(() => {
-      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "groq" });
+      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
     });
     await waitFor(() => {
       expect(radio(/^Your own key/).checked).toBe(true);
@@ -783,7 +783,7 @@ describe("u12_criterion_4 the key sheet", () => {
   });
 
   it("shows one status line: saved, or connected after a test", async () => {
-    backend.keys.groq = true;
+    backend.keys.openrouter = true;
     await open("speech");
     click("Change key…");
     expect(await screen.findByText("A key is saved in your Keychain.")).toBeTruthy();
@@ -795,21 +795,22 @@ describe("u12_criterion_4 the key sheet", () => {
     expect(screen.queryByText(/never shown again/)).toBeNull();
   });
 
-  it("has Provider, the how-to, the field, Test & Save, Remove key and Done", async () => {
-    backend.keys.groq = true;
+  it("names OpenRouter, has the how-to, the field, Test & Save, Remove key and Done", async () => {
+    backend.keys.openrouter = true;
     await open("speech");
     click("Change key…");
     const sheet = within(await screen.findByRole("dialog"));
-    expect(sheet.getByLabelText("Provider")).toBeTruthy();
-    expect(sheet.getByRole("button", { name: "console.groq.com" })).toBeTruthy();
-    expect(sheet.getByLabelText("Groq API key")).toBeTruthy();
+    expect(sheet.getByText("Your OpenRouter key")).toBeTruthy();
+    expect(sheet.queryByLabelText("Provider")).toBeNull();
+    expect(sheet.getByRole("button", { name: "openrouter.ai" })).toBeTruthy();
+    expect(sheet.getByLabelText("OpenRouter API key")).toBeTruthy();
     for (const name of ["Test & Save", "Remove key", "Done"]) {
       expect(sheet.getByRole("button", { name })).toBeTruthy();
     }
   });
 
   it("the keyboard stays inside; Esc closes it and drops what was typed", async () => {
-    backend.keys.groq = true;
+    backend.keys.openrouter = true;
     await open("speech");
     const opener = screen.getByRole("button", { name: "Change key…" });
     opener.focus();
@@ -820,7 +821,7 @@ describe("u12_criterion_4 the key sheet", () => {
     const done = screen.getByRole("button", { name: "Done" });
     done.focus();
     fireEvent.keyDown(done, { key: "Tab" });
-    expect(document.activeElement).toBe(screen.getByLabelText("Provider"));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "openrouter.ai" }));
     fireEvent.change(field, { target: { value: KEY } });
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -830,7 +831,7 @@ describe("u12_criterion_4 the key sheet", () => {
   });
 
   it("closing it during a test drops the test, so its key isn't saved", async () => {
-    backend.keys.groq = true;
+    backend.keys.openrouter = true;
     await open("speech");
     click("Change key…");
     const slow = gate();
@@ -848,103 +849,10 @@ describe("u12_criterion_4 the key sheet", () => {
     expect(backend.named("set_api_key")).toHaveLength(0);
   });
 
-  // Review round 1, finding 1: the popup is a draft while Groq works.
-  describe("changing the provider while the own key is the engine", () => {
-    const pickOpenAi = async () => {
-      backend.keys.groq = true;
-      await open("speech");
-      click("Change key…");
-      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
-      await screen.findByText("No key saved yet.");
-    };
-    const switches = () => backend.named("use_cloud_engine");
-
-    it("doesn't switch to a provider with no key", async () => {
-      await pickOpenAi();
-      expect(switches()).toHaveLength(0);
-      expect(backend.settings.provider).toBe("groq");
-    });
-
-    it("doesn't switch when its key is rejected", async () => {
-      await pickOpenAi();
-      backend.testResult = { kind: "invalid_key", message: "OpenAI rejected this key." };
-      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
-      click("Test & Save");
-      await screen.findByText("OpenAI rejected this key.");
-      expect(switches()).toHaveLength(0);
-      expect(backend.named("set_api_key")).toHaveLength(0);
-    });
-
-    it("Done goes back to the provider in use", async () => {
-      await pickOpenAi();
-      click("Done");
-      expect(switches()).toHaveLength(0);
-      expect(
-        await screen.findByText("Groq · about 100 languages · speech is sent to Groq"),
-      ).toBeTruthy();
-      expect(screen.queryByText("! Needs a key")).toBeNull();
-      expect(screen.getByRole("button", { name: "Change key…" })).toBeTruthy();
-    });
-
-    it("switches once a key for it works", async () => {
-      await pickOpenAi();
-      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
-      click("Test & Save");
-      expect(await screen.findByText(CONNECTED)).toBeTruthy();
-      await waitFor(() => {
-        expect(switches()[0]?.args).toEqual({ provider: "openai" });
-      });
-      expect(switches()).toHaveLength(1);
-    });
-
-    it("switches at once to a provider that has a saved key", async () => {
-      backend.keys.groq = true;
-      backend.keys.openai = true;
-      await open("speech");
-      click("Change key…");
-      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
-      await waitFor(() => {
-        expect(switches()[0]?.args).toEqual({ provider: "openai" });
-      });
-      expect(await screen.findByText("Saved")).toBeTruthy();
-    });
-
-    it("a slow lookup can't switch after the provider changed again", async () => {
-      backend.keys.groq = true;
-      backend.keys.openai = true;
-      await open("speech");
-      click("Change key…");
-      const slow = gate();
-      backend.holds.set("has_api_key", slow.closed);
-      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
-      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "groq" } });
-      backend.holds.delete("has_api_key");
-      slow.open();
-      await screen.findByText("A key is saved in your Keychain.");
-      expect(switches().filter((call) => call.args.provider === "openai")).toHaveLength(0);
-    });
-
-    it("a provider set up while on this Mac doesn't switch the engine", async () => {
-      onDevice();
-      await open("speech");
-      click("Add key…");
-      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "openai" } });
-      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
-      click("Test & Save");
-      expect(await screen.findByText(CONNECTED)).toBeTruthy();
-      expect(switches()).toHaveLength(0);
-      click("Done");
-      expect(
-        await screen.findByText("OpenAI · about 100 languages · speech is sent to OpenAI"),
-      ).toBeTruthy();
-      expect(radio(/^English/).checked).toBe(true);
-    });
-  });
-
   // Review round 1, finding 2.
   describe("Remove key is committed once it starts", () => {
     const removing = async () => {
-      backend.keys.groq = true;
+      backend.keys.openrouter = true;
       await open("speech");
       click("Change key…");
       await screen.findByText("A key is saved in your Keychain.");
@@ -970,7 +878,6 @@ describe("u12_criterion_4 the key sheet", () => {
 
     it("the field and popup wait too, and the outcome still shows", async () => {
       const slow = await removing();
-      expect(screen.getByLabelText<HTMLSelectElement>("Provider").disabled).toBe(true);
       expect(screen.getByLabelText<HTMLInputElement>(/API key/).readOnly).toBe(true);
       fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
       expect(screen.getByLabelText<HTMLInputElement>(/API key/).value).toBe("");
@@ -983,7 +890,7 @@ describe("u12_criterion_4 the key sheet", () => {
       const slow = await removing();
       slow.open();
       expect((await screen.findByRole("alert")).textContent).toContain("The keychain refused.");
-      expect(backend.keys.groq).toBe(true);
+      expect(backend.keys.openrouter).toBe(true);
       click("Done");
       click("Change key…");
       expect(await screen.findByText("A key is saved in your Keychain.")).toBeTruthy();
@@ -997,7 +904,9 @@ describe("u12_criterion_4 the key sheet", () => {
       await screen.findByRole("heading", { level: 1, name: "Speech" });
       slow.open();
       expect(await screen.findByRole("button", { name: "Add key…" })).toBeTruthy();
-      expect(screen.queryByText("Groq · about 100 languages · speech is sent to Groq")).toBeNull();
+      expect(
+        screen.queryByText("OpenRouter · about 100 languages · speech is sent to OpenRouter"),
+      ).toBeNull();
     });
   });
 
@@ -1007,7 +916,7 @@ describe("u12_criterion_4 the key sheet", () => {
     expect(await screen.findByRole("button", { name: "Add key…" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Change key…" })).toBeNull();
     cleanup();
-    backend.keys.groq = true;
+    backend.keys.openrouter = true;
     await open("speech");
     expect(await screen.findByRole("button", { name: "Change key…" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add key…" })).toBeNull();
@@ -1016,7 +925,7 @@ describe("u12_criterion_4 the key sheet", () => {
 
 describe("criterion_u6_5 own key: Test & Save", () => {
   const keyBox = () => screen.getByLabelText<HTMLInputElement>(/API key/);
-  const OLD = "gsk_dummy_OLDER_TEST_NOT_REAL_000000";
+  const OLD = "sk-or-dummy-OLDER-TEST-NOT-REAL-000000";
   const savedKeys = () => backend.named("set_api_key").map((call) => call.args.key);
 
   // Review round 1, finding 1: an obsolete test must not write its key.
@@ -1035,7 +944,7 @@ describe("criterion_u6_5 own key: Test & Save", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(savedKeys()).toEqual([]);
-    expect(backend.keys.groq).toBe(false);
+    expect(backend.keys.openrouter).toBe(false);
     expect(screen.queryByText(CONNECTED)).toBeNull();
   });
 
@@ -1049,7 +958,7 @@ describe("criterion_u6_5 own key: Test & Save", () => {
     await screen.findByText("A key is saved in your Keychain.");
   };
   const openWithKey = async () => {
-    backend.keys.groq = true;
+    backend.keys.openrouter = true;
     await open("speech");
     click("Change key…");
     await screen.findByText("A key is saved in your Keychain.");
@@ -1069,7 +978,7 @@ describe("criterion_u6_5 own key: Test & Save", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(savedKeys()).toEqual([]);
-    expect(backend.keys.groq).toBe(false);
+    expect(backend.keys.openrouter).toBe(false);
   });
 
   it("after leaving Speech and coming back, an old test can't replace a newer key", async () => {
@@ -1123,17 +1032,17 @@ describe("criterion_u6_5 own key: Test & Save", () => {
       .map((call) => call.command)
       .filter((c) => c === "test_api_key" || c === "set_api_key");
     expect(order).toEqual(["test_api_key", "set_api_key"]);
-    expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "groq", key: KEY });
+    expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "openrouter", key: KEY });
     expect(keyBox().value).toBe("");
     expect(document.body.innerHTML).not.toContain(KEY);
   });
 
   it("a key the provider rejects is not saved", async () => {
-    backend.testResult = { kind: "invalid_key", message: "Groq rejected this key." };
+    backend.testResult = { kind: "invalid_key", message: "OpenRouter rejected this key." };
     await open("speech");
     fireEvent.change(keyBox(), { target: { value: KEY } });
     click("Test & Save");
-    expect((await screen.findByRole("alert")).textContent).toBe("Groq rejected this key.");
+    expect((await screen.findByRole("alert")).textContent).toBe("OpenRouter rejected this key.");
     expect(backend.named("set_api_key")).toHaveLength(0);
     expect(screen.queryByText(CONNECTED)).toBeNull();
   });
@@ -1165,7 +1074,7 @@ describe("criterion_u6_5 own key: Test & Save", () => {
     await openWithKey();
     click("Remove key");
     expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
-    expect(backend.named("delete_api_key")[0]?.args).toEqual({ provider: "groq" });
+    expect(backend.named("delete_api_key")[0]?.args).toEqual({ provider: "openrouter" });
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
     });
@@ -1173,9 +1082,9 @@ describe("criterion_u6_5 own key: Test & Save", () => {
 
   it("the how-to links to the provider's key page through the app", async () => {
     await open("speech");
-    click("console.groq.com");
+    click("openrouter.ai");
     await waitFor(() => {
-      expect(backend.named("open_link")[0]?.args).toEqual({ link: "groq_keys" });
+      expect(backend.named("open_link")[0]?.args).toEqual({ link: "openrouter_keys" });
     });
   });
 
@@ -1300,21 +1209,21 @@ describe("Privacy", () => {
 
 describe("loading", () => {
   const KEYCHAIN_NOTICE =
-    "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to your speech provider (Groq or OpenAI).";
+    "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to OpenRouter.";
 
   it("U1: says what to expect from the Keychain on the first launch after the rename", async () => {
     backend.launchNotice = KEYCHAIN_NOTICE;
-    backend.keys.groq = true;
+    backend.keys.openrouter = true;
     await open("speech");
     const notice = await screen.findByTestId("launch-notice");
     expect(notice.textContent).toContain("Choose Always Allow");
-    expect(notice.textContent).toContain("sent only to your speech provider (Groq or OpenAI)");
+    expect(notice.textContent).toContain("sent only to OpenRouter");
   });
 
   // U12 criterion 11.
   it("the Keychain notice shows only in Speech, and isn't styled as a success", async () => {
     backend.launchNotice = KEYCHAIN_NOTICE;
-    backend.keys.groq = true;
+    backend.keys.openrouter = true;
     await open("speech");
     const notice = await screen.findByTestId("launch-notice");
     expect(notice.className).not.toMatch(/\bok\b/);
@@ -1334,7 +1243,7 @@ describe("loading", () => {
 
   it("Got it hides the Keychain notice for good", async () => {
     backend.launchNotice = KEYCHAIN_NOTICE;
-    backend.keys.groq = true;
+    backend.keys.openrouter = true;
     await open("speech");
     await screen.findByTestId("launch-notice");
     click("Got it");

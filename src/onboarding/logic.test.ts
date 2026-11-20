@@ -44,8 +44,8 @@ const BASE: DictationProgressView = {
 
 const SETTINGS = {
   version: 2,
-  provider: "groq" as const,
-  model: "whisper-large-v3-turbo",
+  provider: "openrouter" as const,
+  model: "openai/gpt-4o-mini-transcribe",
   language: null,
   hotkey: "RightAlt",
   launch_at_login: false,

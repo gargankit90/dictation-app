@@ -1284,12 +1284,13 @@ mod tests {
         )
         .unwrap();
         for provider in Provider::ALL {
-            let entry = format!(
-                "id: \"{provider}\", name: \"{}\", defaultModel: \"{}\"",
-                provider_name(provider),
-                provider.default_model()
-            );
-            assert!(providers.contains(&entry), "src/providers.ts lacks {entry}");
+            for entry in [
+                format!("id: \"{provider}\""),
+                format!("name: \"{}\"", provider_name(provider)),
+                format!("defaultModel: \"{}\"", provider.default_model()),
+            ] {
+                assert!(providers.contains(&entry), "src/providers.ts lacks {entry}");
+            }
         }
     }
 

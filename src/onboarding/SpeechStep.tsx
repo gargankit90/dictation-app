@@ -381,14 +381,14 @@ function SpeechForm({
         <input
           type="radio"
           name="ob-engine"
-          aria-label="Use my own Groq or OpenAI key"
+          aria-label="Use my own OpenRouter key"
           checked={choice === "key"}
           onChange={() => {
             pick("key");
           }}
         />
         <span className="ob-option-text">
-          <span className="ob-card-title">Use my own Groq or OpenAI key</span>
+          <span className="ob-card-title">Use my own OpenRouter key</span>
           <span className="ob-caption">{KEY_CARD_COPY}</span>
         </span>
       </label>

@@ -76,7 +76,7 @@ function useEngineLine(
 
   if (settings === null) return "Loading…";
   if (settings.transcription === "cloud") {
-    const name = providerInfo(settings.provider).name;
+    const name = providerInfo().name;
     if (keySaved === null) return `${name} · Checking…`;
     if (!keySaved) return `${name} · ! Needs a key`;
     return engine?.state === "failed"

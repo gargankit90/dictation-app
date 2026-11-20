@@ -39,9 +39,8 @@ pub const HISTORY_LIMITS: [u32; 5] = [0, 10, 25, 50, 100];
 /// How many recent dictations are kept unless the user chooses otherwise.
 pub const DEFAULT_HISTORY_LIMIT: u32 = 25;
 
-/// The cloud provider: `OpenRouter`, with the user's own key (Q2). Groq and
-/// `OpenAI` were removed; a file that names them (or any other value) loads
-/// as `OpenRouter` ([`from_json`]).
+/// The cloud provider: `OpenRouter`, with the user's own key (Q2). A file
+/// with any other value loads as `OpenRouter` ([`from_json`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "lowercase")]
