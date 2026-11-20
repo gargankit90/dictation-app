@@ -22,3 +22,10 @@ Adapted:
   between tags" framing became "one audio recording". The ASR-error rules ("Thank you." that nobody
   said, misheard words) became "never write words nobody said; spell technical terms correctly".
   The other rules are unchanged.
+- `../voicearena/score_gemini_cli.py` is `../voicearena/score_codex_cli.py` with the call routed through
+  the Antigravity CLI (`agy -p`, Gemini 4 Argon High) instead of `codex exec`. The prompt, schema,
+  parsing, cache and output columns are unchanged.
+- `closed_asr.py` reuses `audio_llm.py`'s `wav_bytes()`, guard step, ledger, cache and retry pattern,
+  with request builders for Google's Interactions API and OpenAI's `/v1/audio/transcriptions`
+  (both from the providers' docs, 2026-11-19).
+- `local/` (Gemma 4 E2B v3 via llama.cpp) is copied from `eval/local-cleanup` (local-cleanup-eval worktree).

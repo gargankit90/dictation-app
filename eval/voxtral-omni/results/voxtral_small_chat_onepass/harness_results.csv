@@ -1,0 +1,304 @@
+tool,clip_id,file,status,attempts,transcript,task_type,speaker_id,audio_duration_s,sent_s,finalize_s,error,model,provider,cost_usd,finish_reason,reasoning,run_at
+openrouter-chat,dict_0007,dict_0007.flac,ok,1,Write a docstring for this function that explains what it returns and what happens when the input list is empty. Keep it short and use Google style.,ai_prompt,37861,11.09,16.193,1.968,,mistralai/voxtral-small-24b-2507,Mistral,0.00184514,stop,null,2026-11-19T15:59:42-0800
+openrouter-chat,dict_0008,dict_0008.flac,ok,1,"I'm away until January 6th. For anything urgent, contact Priya Raman at priya.raman@northwind.io.",ai_prompt,74259,11.38,16.477,1.235,,mistralai/voxtral-small-24b-2507,Mistral,0.0016771,stop,null,2026-11-19T15:59:45-0800
+openrouter-chat,dict_0014,dict_0014.flac,ok,1,"I'm on the checkout v2 feature branch. How do I undo my last git commit but keep the changes staged? Actually, no, the last three commits, not just one.",ai_prompt,40358,15.97,21.069,1.362,,mistralai/voxtral-small-24b-2507,Mistral,0.0021795,stop,null,2026-11-19T15:59:49-0800
+openrouter-chat,dict_0023,dict_0023.flac,ok,1,"Marketing spent $62,000 against a budget of $58,000, resulting in a $4,000 variance. The majority of this variance was due to the trade show in Austin.",ai_prompt,37861,26.66,31.756,1.529,,mistralai/voxtral-small-24b-2507,Mistral,0.0031249,stop,null,2026-11-19T15:59:52-0800
+openrouter-chat,dict_0024,dict_0024.flac,ok,1,"So in billing.ts, the calculateProratedAmount function returns NaN whenever a subscription starts on the 31st. And I'm pretty sure it's the date math on plan.startDate. Can you rewrite it with dateFNS and add a unit test that goes from January 31st to February 28th? Oh, and we're on dateFNS version 3, so don't use the old imports.",ai_prompt,33469,27.52,32.615,3.126,,mistralai/voxtral-small-24b-2507,Mistral,0.00356158,stop,null,2026-11-19T15:59:57-0800
+openrouter-chat,dict_0039,dict_0039.flac,ok,1,The unit tests for the invoice parser started failing after I merged Priya's branch. Can you figure out which of her changes broke them and explain why?,code,79217,10.12,15.22,1.442,,mistralai/voxtral-small-24b-2507,Mistral,0.0015201,stop,null,2026-11-19T16:00:00-0800
+openrouter-chat,dict_0041,dict_0041.flac,ok,1,Pull the hard-coded feature flags out of the checkout page and read them from the config service like we do everywhere else.,code,61187,11.08,16.18,1.395,,mistralai/voxtral-small-24b-2507,Mistral,0.0016183,stop,null,2026-11-19T16:00:03-0800
+openrouter-chat,dict_0042,dict_0042.flac,ok,1,"For the comment form, trim the white space, block empty submissions, disable the button while it's posting, and clear the field when it succeeds.",code,14580,11.24,16.34,2.173,,mistralai/voxtral-small-24b-2507,Mistral,0.00178178,stop,null,2026-11-19T16:00:07-0800
+openrouter-chat,dict_0048,dict_0048.flac,ok,1,"Look at the flaky upload test, the one that times out on CI. Figure out why and fix it, and then run it a bunch of times in a row so we know it's actually stable.",code,33814,14.51,19.606,2.741,,mistralai/voxtral-small-24b-2507,Mistral,0.00211574,stop,null,2026-11-19T16:00:13-0800
+openrouter-chat,dict_0053,dict_0053.flac,ok,1,"Look at the Swift crash report I dropped in the chat. It's crashing in the feed view controller when the user scrolls really fast, and it looks like an index out of range. This started in build 4.2, wait, no, 4.3, when we added the prefetching. Can you find where we're reading from the array after it's been reloaded and make that safe? Don't rewrite the whole data source. Just fix the race.",code,74259,23.45,28.546,3.318,,mistralai/voxtral-small-24b-2507,Mistral,0.00312422,stop,null,2026-11-19T16:00:20-0800
+openrouter-chat,dict_0060,dict_0060.flac,ok,1,Move the budget section above the timeline.,docs_notes,66948,6.04,11.139,1.03,,mistralai/voxtral-small-24b-2507,Mistral,0.0011132,stop,null,2026-11-19T16:00:22-0800
+openrouter-chat,dict_0063,dict_0063.flac,ok,1,"Closing line for the newsletter. As always, if you have a story idea or just want to say hi, reply to this email and it'll come straight to me.",docs_notes,35092,10.72,15.819,1.248,,mistralai/voxtral-small-24b-2507,Mistral,0.001521,stop,null,2026-11-19T16:00:25-0800
+openrouter-chat,dict_0066,dict_0066.flac,ok,1,"Agenda for the parent volunteer meeting: introductions, review last year's fall festival, assign booth leads, and open floor for questions at the end.",docs_notes,58567,12.28,17.38,2.095,,mistralai/voxtral-small-24b-2507,Mistral,0.0017201,stop,null,2026-11-19T16:00:29-0800
+openrouter-chat,dict_0069,dict_0069.flac,ok,1,"Recipe from Aunt Rosa for the flan: 3 eggs, 1 can of condensed milk, 1 can of evaporated milk, 1 teaspoon of vanilla, and bake at 350 for 50 minutes in a water bath.",docs_notes,84105,13.82,18.915,1.395,,mistralai/voxtral-small-24b-2507,Mistral,0.0018258,stop,null,2026-11-19T16:00:33-0800
+openrouter-chat,dict_0077,dict_0077.flac,ok,1,"Q4 budget review. Marketing's at 62% of their annual spend and there's 10 weeks left. The Austin trade show booth came in at $14,200, which is about $3,000 over the estimate. Jordan Okafor wants to move $8,000 from events into paid search for December. And finance needs the revised forecast by Friday, November 6. Tracking sheets in the shared drive under budget/2026.",docs_notes,31500,26.86,31.959,4.425,,mistralai/voxtral-small-24b-2507,Mistral,0.00345554,stop,null,2026-11-19T16:00:39-0800
+openrouter-chat,dict_0083,dict_0083.flac,ok,1,"Hey, just wanted to say great job on the presentation today. The client clearly loved it and you handled their questions really well.",email,52246,7.52,12.617,1.976,,mistralai/voxtral-small-24b-2507,Mistral,0.00134046,stop,null,2026-11-19T16:00:43-0800
+openrouter-chat,dict_0087,dict_0087.flac,ok,1,"Hi, for the plumber visit, I'll leave the spare key at the front desk. Sorry, with my neighbors across the hall, the desk closes early on Sundays. Thanks.",email,66948,12.00,17.099,1.475,,mistralai/voxtral-small-24b-2507,Mistral,0.0017219,stop,null,2026-11-19T16:00:46-0800
+openrouter-chat,dict_0097,dict_0097.flac,ok,1,"Hi everyone, couple reminders for the tournament this weekend. Get the players there well before their first game and send them with a water bottle, sunscreen, and both jerseys. Parking at the complex fills up fast, so carpool if you can. Oh, and we're doing a team lunch between games, so pack something or bring cash for the food trucks. Thanks and go Hornets.",email,71862,21.36,26.459,1.775,,mistralai/voxtral-small-24b-2507,Mistral,0.002636,stop,null,2026-11-19T16:00:50-0800
+openrouter-chat,dict_0103,dict_0103.flac,ok,1,"Hi Owen, so the export feature we promised for this month is going to slip a bit. We found a problem with how large files get handled and we'd rather fix that properly than ship something that breaks on your biggest accounts. I'm thinking it's more like a two-week delay. I'll keep you posted as we get closer and sorry for the change.",email,33814,25.64,30.74,1.834,,mistralai/voxtral-small-24b-2507,Mistral,0.0030327,stop,null,2026-11-19T16:00:55-0800
+openrouter-chat,dict_0108,dict_0108.flac,ok,1,"Hey everyone, I want to say something about the last couple of weeks before we go into planning tomorrow. I know a lot of you have been working late and picking up weekend stuff to get the launch out, and I see it and I'm really grateful. But I also think I've let it go on too long. When I look at the board, we're basically treating every request from sales like it's urgent, and that's on me for not pushing back. So here's what I want to try. Tomorrow, I'm going to bring the full list of open asks, and we're going to sort them together into what has to ship this month and what can wait. Anything that doesn't make the first bucket, I'll go have the conversation with sales myself. You don't have to. I also want people to actually take the comp days for the weekends you worked. Like, please don't just let them disappear. Put them on the calendar in the next two weeks, and I'll make sure coverage is handled. If anyone wants to talk about workload one-on-one before tomorrow, my door's open, or just DM me. Thanks for everything, seriously.",long_form,13660,51.76,56.859,3.279,,mistralai/voxtral-small-24b-2507,Mistral,0.0056822,stop,null,2026-11-19T16:01:01-0800
+openrouter-chat,dict_0119,dict_0119.flac,error,6,,long_form,76491,85.76,90.859,6.832,HTTP 429,mistralai/voxtral-small-24b-2507,,,,null,2026-11-19T16:04:43-0800
+openrouter-chat,dict_0124,dict_0124.flac,ok,1,Did you feed the dog yet?,personal_messaging,55821,4.36,9.46,1.744,,mistralai/voxtral-small-24b-2507,Mistral,0.00100419,stop,null,2026-11-19T16:04:46-0800
+openrouter-chat,dict_0138,dict_0138.flac,ok,1,Did you take the trash out already? It's like totally overflowing and pickup is tomorrow morning.,personal_messaging,93152,10.65,15.746,1.813,,mistralai/voxtral-small-24b-2507,Mistral,0.00166848,stop,null,2026-11-19T16:04:50-0800
+openrouter-chat,dict_0152,dict_0152.flac,ok,1,Running like 10 minutes late to stand up.,work_chat,50959,3.13,8.228,1.078,,mistralai/voxtral-small-24b-2507,Mistral,0.0008141,stop,null,2026-11-19T16:04:53-0800
+openrouter-chat,dict_0161,dict_0161.flac,ok,1,I'm going to be out the rest of the afternoon for a family thing. I'll check messages tonight if anything is urgent.,work_chat,27138,7.25,12.348,1.728,,mistralai/voxtral-small-24b-2507,Mistral,0.00134046,stop,null,2026-11-19T16:04:56-0800
+openrouter-chat,dict_0168,dict_0168.flac,ok,1,"Thanks for jumping on that customer call with me. I was a little nervous, but having you there to answer the technical questions really helped.",work_chat,86695,9.35,14.446,1.151,,mistralai/voxtral-small-24b-2507,Mistral,0.0014192,stop,null,2026-11-19T16:04:59-0800
+openrouter-chat,dict_0170,dict_0170.flac,ok,1,"The staging environment is back up. Turns out it was an expired certificate, so I renewed it and set a reminder for next time.",work_chat,73292,9.75,14.852,1.863,,mistralai/voxtral-small-24b-2507,Mistral,0.00156112,stop,null,2026-11-19T16:05:03-0800
+openrouter-chat,dict_0173,dict_0173.flac,ok,1,Can you send me the login for the Northwind portal? The username should be ops@northwind.io.,work_chat,63550,10.93,16.03,1.89,,mistralai/voxtral-small-24b-2507,Mistral,0.00177947,stop,null,2026-11-19T16:05:06-0800
+openrouter-chat,dict_0177,dict_0177.flac,ok,1,"Our booth at the Austrian trade show is number 1124. Setup opens at 7 a.m. on the 12th, so plan to get there early.",work_chat,93152,14.30,19.403,1.491,,mistralai/voxtral-small-24b-2507,Mistral,0.0019219,stop,null,2026-11-19T16:05:10-0800
+openrouter-chat,dict_0179,dict_0179.flac,ok,1,"So I talked to the customer this morning and honestly they're not upset about the delay. They just want to know what's going on. I think if we send them a short update every couple of days, like even just a quick note saying where things are, that'll go a long way. Can you set a reminder on your end too so we don't drop it?",work_chat,72565,23.92,29.02,1.74,,mistralai/voxtral-small-24b-2507,Mistral,0.0029336,stop,null,2026-11-19T16:05:15-0800
+openrouter-chat,dict_0182,dict_0182.flac,ok,1,"To fix a squeaky door hinge, you can try a few simple methods. First, you can apply some lubricant to the hinge. You can use a silicone-based lubricant, WD-40, or even a bar of soap. Simply rub the lubricant onto the hinge and open and close the door a few times to distribute it evenly. If the hinge is very dirty or rusty, you may need to clean it first. You can use a wire brush or sandpaper to remove any rust or debris, then apply the lubricant. If the hinge is still squeaky after lubricating, you may need to tighten the screws. Use a screwdriver to tighten the screws on the hinge, being careful not to overtighten them. If the hinge is still squeaky after trying these methods, you may need to replace it. You can find replacement hinges at most hardware stores.",ai_prompt,70998,5.36,10.46,2.184,,mistralai/voxtral-small-24b-2507,Mistral,0.001066,stop,null,2026-11-19T16:05:20-0800
+openrouter-chat,dict_0183,dict_0183.flac,ok,1,"A race condition is a situation where the outcome of a program depends on the sequence or timing of uncontrollable events, such as the relative timing of multiple threads or processes. Here's a simple example to illustrate a race condition:
+
+Imagine two threads, Thread A and Thread B, both trying to update a shared variable `counter` which is initially set to 0. The goal is to increment the `counter` by 1 in each thread. Here's the pseudocode for each thread:
+
+**Thread A:**
+```
+read counter
+increment counter
+write counter back to memory
+```
+
+**Thread B:**
+```
+read counter
+increment counter
+write counter back to memory
+```
+
+Now, let's consider the following sequence of events:
+
+1. Thread A reads the `counter` (value is 0).
+2. Thread B reads the `counter` (value is still 0).
+3. Thread A increments the `counter` (value is now 1).
+4. Thread B increments the `counter` (value is now 1).
+5. Thread A writes the `counter` back to memory (value is 1).
+6. Thread B writes the `counter` back to memory (value is 1).
+
+In this scenario, the `counter` should have been incremented to 2, but due to the race condition, it was only incremented to 1. This is because both threads read the same initial value of the `counter` and overwrote each other's updates.
+
+To prevent race conditions, you can use synchronization mechanisms like locks, semaphores, or atomic operations to ensure that only one thread can access and modify the shared variable at a time.",ai_prompt,66948,6.28,11.38,3.343,,mistralai/voxtral-small-24b-2507,Mistral,0.0012122,stop,null,2026-11-19T16:05:26-0800
+openrouter-chat,dict_0185,dict_0185.flac,ok,1,"Starting next month, hourly employees will need to use the new time tracking system. This system will require you to clock in and out using the app on your phone. You will no longer be able to use the old punch cards. The new system will also track your breaks and lunches automatically. If you have any questions, please contact HR.",ai_prompt,16274,7.27,12.373,1.397,,mistralai/voxtral-small-24b-2507,Mistral,0.0012315,stop,null,2026-11-19T16:05:30-0800
+openrouter-chat,dict_0193,dict_0193.flac,ok,1,"**Takeaways:**
+
+1. **Project Deadline Extended:** The project deadline has been extended by two weeks to accommodate the additional features requested by the client.
+2. **Resource Allocation:** Two additional developers will be allocated to the project to ensure timely completion.
+3. **Client Communication:** A weekly update call with the client has been scheduled to keep them informed about the project's progress.
+
+**Open Questions:**
+
+1. What are the specific features that the client has requested?
+2. How will the additional developers be integrated into the existing team?
+3. What is the expected impact of the deadline extension on the project timeline?
+4. Who will be responsible for coordinating the weekly update calls with the client?",ai_prompt,79546,8.86,13.958,2.147,,mistralai/voxtral-small-24b-2507,Mistral,0.0013534,stop,null,2026-11-19T16:05:34-0800
+openrouter-chat,dict_0204,dict_0204.flac,ok,1,"For a crafty activity, you could try making homemade playdough. It's fun and easy to make with ingredients you probably already have at home. Just mix together flour, water, salt, and food coloring, and you'll have a great sensory activity for your kids.
+
+For an active indoor activity, consider setting up an obstacle course using furniture and household items. You can create a fun and challenging course that your kids can navigate through. This will help them burn off some energy and have a good time.
+
+For an educational activity, you could explore a new topic together, like learning about different animals or countries. You can find plenty of resources online, such as videos, games, and printables, to make the learning experience engaging and interactive.",ai_prompt,73356,10.16,15.258,1.92,,mistralai/voxtral-small-24b-2507,Mistral,0.0015564,stop,null,2026-11-19T16:05:41-0800
+openrouter-chat,dict_0215,dict_0215.flac,ok,1,"Sure, a closure in JavaScript is a function that has access to its own scope, the scope of the function it was defined in, and the global scope. This means that even after the outer function has finished executing, the inner function can still access and manipulate variables from the outer function's scope. This is why closures are often used to create private variables and functions, as well as to implement data encapsulation and information hiding.",ai_prompt,73506,12.52,17.615,1.637,,mistralai/voxtral-small-24b-2507,Mistral,0.0017369,stop,null,2026-11-19T16:05:46-0800
+openrouter-chat,dict_0218,dict_0218.flac,ok,1,"To set up a new Vite project with React and TypeScript, add Tailwind CSS, and configure path aliases, follow these steps:
+
+1. **Create a new Vite project with React and TypeScript:**
+
+```bash
+npm create vite@latest my-vite-app -- --template react-ts
+cd my-vite-app
+```
+
+2. **Install Tailwind CSS:**
+
+```bash
+npm install -D tailwindcss postcss autoprefixer
+npx tailwindcss init -p
+```
+
+3. **Configure Tailwind CSS:**
+
+Update the `tailwind.config.js` file:
+
+```javascript
+module.exports = {
+  content: [
+    ""./index.html"",
+    ""./src/**/*.{js,ts,jsx,tsx}"",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}
+```
+
+Update the `src/index.css` file:
+
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+```
+
+4. **Configure path aliases:**
+
+Create a `vite.config.ts` file in the root of your project if it doesn't already exist:
+
+```typescript
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import path from 'path'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+})
+```
+
+5. **Update TypeScript configuration:**
+
+Update the `tsconfig.json` file to include the path alias:
+
+```json
+{
+  ""compilerOptions"": {
+    ""baseUrl"": ""."",
+    ""paths"": {
+      ""@/*"": [""./src/*""]
+    }
+  }
+}
+```
+
+6. **Install necessary dependencies:**
+
+```bash
+npm install
+```
+
+Now you have a new Vite project with React, TypeScript, Tailwind CSS, and path aliases configured. You can start the development server with:
+
+```bash
+npm run dev
+```",ai_prompt,87525,13.28,18.38,3.574,,mistralai/voxtral-small-24b-2507,Mistral,0.0019344,stop,null,2026-11-19T16:05:53-0800
+openrouter-chat,dict_0228,dict_0228.flac,ok,1,"I have $150 to spend on a beginner telescope. Compare a refractor, a Dobsonian, and a decent pair of binoculars for looking at the moon and Saturn.",ai_prompt,55091,15.68,20.785,1.486,,mistralai/voxtral-small-24b-2507,Mistral,0.0020225,stop,null,2026-11-19T16:05:57-0800
+openrouter-chat,dict_0229,dict_0229.flac,ok,1,"I signed up for the Twin Cities Marathon on October 4th, and right now I'm running like 15 miles a week. Can you build me a 16-week plan that gets me there without, you know, wrecking my knees? I can only run four days a week, and Sundays have to be the long run.",ai_prompt,24101,16.54,21.638,1.607,,mistralai/voxtral-small-24b-2507,Mistral,0.0021318,stop,null,2026-11-19T16:06:00-0800
+openrouter-chat,dict_0231,dict_0231.flac,ok,1,"I signed up for the Twin Cities Marathon on October 4th, and right now I'm running like 15 miles a week. Can you build me a 16-week plan that gets me there without, you know, wrecking my knees? I can only run four days a week, and Sundays have to be the long run.",ai_prompt,10663,17.11,22.207,2.402,,mistralai/voxtral-small-24b-2507,Mistral,0.0022318,stop,null,2026-11-19T16:06:05-0800
+openrouter-chat,dict_0232,dict_0232.flac,ok,1,My Docker container keeps exiting with code 137 right after startup. The image is node 20 Alpine and the memory limit is 512 megs. What's going on?,ai_prompt,93152,17.35,22.451,1.333,,mistralai/voxtral-small-24b-2507,Mistral,0.0022225,stop,null,2026-11-19T16:06:07-0800
+openrouter-chat,dict_0235,dict_0235.flac,ok,1,"**Welcome to Our Food Bank!**
+
+**What to Wear:**
+- Comfortable, closed-toe shoes
+- Clothes you don't mind getting a little dirty
+- Layers, as it can get chilly in the warehouse
+
+**Where to Check In:**
+- Main entrance, look for the ""Volunteer Check-In"" sign
+- A staff member will greet you and provide further instructions
+
+**Typical Shift:**
+- Start with a brief orientation and safety instructions
+- Sort and organize food donations
+- Help pack food boxes for distribution
+- Assist with loading/unloading trucks or setting up for events
+- End with a quick cleanup and shift wrap-up
+
+**Who to Ask:**
+- If you're unsure about anything, please ask a staff member or a volunteer with a name tag
+- We're all here to help and make your experience enjoyable!
+
+**Thank you for volunteering!**",ai_prompt,29111,19.80,24.899,2.987,,mistralai/voxtral-small-24b-2507,Mistral,0.0024663,stop,null,2026-11-19T16:06:14-0800
+openrouter-chat,dict_0239,dict_0239.flac,ok,1,"We're sorry to hear you had a long wait on Friday night. We were short-staffed that evening, which led to delays. We appreciate your patience and hope you'll give us another chance to serve you.",ai_prompt,24101,21.94,27.042,1.721,,mistralai/voxtral-small-24b-2507,Mistral,0.002724,stop,null,2026-11-19T16:06:17-0800
+openrouter-chat,dict_0247,dict_0247.flac,ok,1,I'm a high school teacher and I'm trying to decide whether to take on the department chair role next year. It comes with a small stipend but a lot more meetings and I'm worried it'll eat into my lesson planning time. Can you help me think through the pros and cons in a structured way and ask me a few questions first so you understand my situation better?,ai_prompt,72565,23.64,28.739,1.706,,mistralai/voxtral-small-24b-2507,Mistral,0.0028336,stop,null,2026-11-19T16:06:23-0800
+openrouter-chat,dict_0255,dict_0255.flac,ok,1,"So I'm hosting a game night this weekend, eight adults, and I need to figure out food. I want one big main dish that can sit out for a few hours, two snacks that aren't messy since everyone's holding cards, something for my friend who's vegan, and then a dessert I can make the night before. Oh, and a shopping list grouped by store section too.",ai_prompt,72565,25.32,30.419,2.069,,mistralai/voxtral-small-24b-2507,Mistral,0.0030348,stop,null,2026-11-19T16:06:27-0800
+openrouter-chat,dict_0257,dict_0257.flac,ok,1,"Join us for our Fall Cleanup Day this Saturday at 10 AM at the Community Garden. We'll provide gloves, bags, and there will be coffee and donuts. Please sign up online so we know how many to expect.",ai_prompt,46797,25.60,30.7,1.47,,mistralai/voxtral-small-24b-2507,Mistral,0.0030252,stop,null,2026-11-19T16:06:30-0800
+openrouter-chat,dict_0258,dict_0258.flac,ok,1,"I need to write my self-review for this year, and I always undersell myself. I'll paste a rough list of what I did below. Turn it into a few short paragraphs that sound confident and specific. Focus on impact instead of just tasks. And please don't use words like synergy or leverage because my boss will literally roll her eyes.",ai_prompt,91632,25.92,31.02,2.985,,mistralai/voxtral-small-24b-2507,Mistral,0.00344531,stop,null,2026-11-19T16:06:35-0800
+openrouter-chat,dict_0277,dict_0277.flac,ok,1,What does this lock file conflict mean?,code,35092,5.08,10.18,1.414,,mistralai/voxtral-small-24b-2507,Mistral,0.00111452,stop,null,2026-11-19T16:06:37-0800
+openrouter-chat,dict_0279,dict_0279.flac,ok,1,"Just as like hanging after the auth tests, find the open handle.",code,80778,5.16,10.26,1.025,,mistralai/voxtral-small-24b-2507,Mistral,0.001015,stop,null,2026-11-19T16:06:40-0800
+openrouter-chat,dict_0285,dict_0285.flac,ok,1,Just make the button full width on mobile.,code,52246,6.42,11.52,1.086,,mistralai/voxtral-small-24b-2507,Mistral,0.0011135,stop,null,2026-11-19T16:06:44-0800
+openrouter-chat,dict_0292,dict_0292.flac,ok,1,Migrate the network layer in the Android app from Volley to Retrofit and set the connect timeout to 15 seconds.,code,16274,7.48,12.576,1.576,,mistralai/voxtral-small-24b-2507,Mistral,0.0012183,stop,null,2026-11-19T16:06:47-0800
+openrouter-chat,dict_0294,dict_0294.flac,ok,1,Something in the signup flow is sending the welcome email twice. Find where it's getting triggered from and make sure it only goes out once.,code,71862,7.72,12.819,2.002,,mistralai/voxtral-small-24b-2507,Mistral,0.00134112,stop,null,2026-11-19T16:06:50-0800
+openrouter-chat,dict_0295,dict_0295.flac,ok,1,Also update the README with the new command.,code,84546,7.84,12.94,1.627,,mistralai/voxtral-small-24b-2507,Mistral,0.00133485,stop,null,2026-11-19T16:06:53-0800
+openrouter-chat,dict_0302,dict_0302.flac,ok,1,Add a confirm password field to the reset password form and only enable the submit button when both fields match.,code,58567,8.80,13.899,1.896,,mistralai/voxtral-small-24b-2507,Mistral,0.00144881,stop,null,2026-11-19T16:06:57-0800
+openrouter-chat,dict_0308,dict_0308.flac,ok,1,Bump the connection pool size in the Prisma config from 10 to 25 and rerun the load test.,code,87525,9.32,14.419,1.886,,mistralai/voxtral-small-24b-2507,Mistral,0.00156046,stop,null,2026-11-19T16:07:01-0800
+openrouter-chat,dict_0310,dict_0310.flac,ok,1,Upgrade the project to Node 22 and update the Dockerfile and the CI config to match.,code,77388,9.64,14.739,1.227,,mistralai/voxtral-small-24b-2507,Mistral,0.0014168,stop,null,2026-11-19T16:07:04-0800
+openrouter-chat,dict_0312,dict_0312.flac,ok,1,Can you add a dark mode toggle to the header? Just store the choice in local storage for now. We'll sync it to the account later.,code,63931,9.76,14.86,1.369,,mistralai/voxtral-small-24b-2507,Mistral,0.0014198,stop,null,2026-11-19T16:07:07-0800
+openrouter-chat,dict_0320,dict_0320.flac,ok,1,Update the pricing cards to use Tailwind instead of the old CSS module and keep the max width at 1280 pixels.,code,96559,11.04,16.14,2.247,,mistralai/voxtral-small-24b-2507,Mistral,0.00178079,stop,null,2026-11-19T16:07:11-0800
+openrouter-chat,dict_0327,dict_0327.flac,ok,1,"Set the rate limit on the login route to 10 requests a minute, make that five per IP, and return a 429 when they hit it.",code,40358,12.88,17.981,1.363,,mistralai/voxtral-small-24b-2507,Mistral,0.001721,stop,null,2026-11-19T16:07:14-0800
+openrouter-chat,dict_0329,dict_0329.flac,ok,1,Add structured logging to the payments webhook handler using slog and include the event ID and the Stripe account on every line.,code,72565,13.20,18.299,2.1,,mistralai/voxtral-small-24b-2507,Mistral,0.00200013,stop,null,2026-11-19T16:07:18-0800
+openrouter-chat,dict_0333,dict_0333.flac,ok,1,"Clean up my local branches. Anything that's already merged into main, just delete it. Then rebase my current branch on main and push it, but don't force push anything that's shared.",code,86695,14.30,19.403,1.326,,mistralai/voxtral-small-24b-2507,Mistral,0.0019228,stop,null,2026-11-19T16:07:21-0800
+openrouter-chat,dict_0334,dict_0334.flac,ok,1,"In the Django admin, can you add search on the order number and a filter by status and show the created date in the list view too? 25 per page.",code,63550,14.30,19.403,2.295,,mistralai/voxtral-small-24b-2507,Mistral,0.00211343,stop,null,2026-11-19T16:07:25-0800
+openrouter-chat,dict_0335,dict_0335.flac,ok,1,"The Go worker is panicking with a nil map error in the rate limiter. It started with release 2.14, wait 2.15. Can you find which commit caused it?",code,60583,14.48,19.579,1.234,,mistralai/voxtral-small-24b-2507,Mistral,0.0019231,stop,null,2026-11-19T16:07:29-0800
+openrouter-chat,dict_0346,dict_0346.flac,ok,1,"Okay, so in the FastAPI service, the user search endpoint is doing a full table scan. Can you add a trigram index on the users table for the name and email columns with a new Alembic migration, and then switch the query to use ILIKE so it actually hits the index? Limit results to 25 per page. Don't change the response schema because the mobile app depends on it, and run the integration tests after.",code,31500,23.04,28.14,2.891,,mistralai/voxtral-small-24b-2507,Mistral,0.00312224,stop,null,2026-11-19T16:07:35-0800
+openrouter-chat,dict_0350,dict_0350.flac,ok,1,"Okay, so write a Rails migration that adds a nullable archive timestamp to the projects table plus an index on it, and then update the project model so the default scope hides archived projects. Actually, no, don't use a default scope. Add a named scope called active instead. We're on Rails 7.1, so use the newer migration syntax and add a model spec for the scope too.",code,10007,24.30,29.399,1.772,,mistralai/voxtral-small-24b-2507,Mistral,0.0029354,stop,null,2026-11-19T16:07:41-0800
+openrouter-chat,dict_0351,dict_0351.flac,ok,1,"Okay, so we're moving the FastAPIs app settings over to Pydantic version 2. Can you swap the old config class for settings model that reads from ENV vars, same names, and have it blow up on startup if the database URL or the Redis URL is missing? Pool size defaults to 10, request timeout 30 seconds, and then fix anywhere that imports the old configuration.",code,87525,25.72,30.82,1.677,,mistralai/voxtral-small-24b-2507,Mistral,0.0030357,stop,null,2026-11-19T16:07:46-0800
+openrouter-chat,dict_0356,dict_0356.flac,ok,1,"Okay, so a few things on the payment service. The Stripe webhook handler is timing out, so bump its timeout to 15 seconds. Actually, make it 20. Then add a retry with backoff when we call the ledger API, and write a test that sends the webhook twice so we know it's idempotent. Oh, and don't upgrade the Stripe library while you're in there. We're staying on version 12 for now.",code,11114,28.24,33.34,2.053,,mistralai/voxtral-small-24b-2507,Mistral,0.0033411,stop,null,2026-11-19T16:07:52-0800
+openrouter-chat,dict_0364,dict_0364.flac,ok,1,"The notifications dropdown refetches every time you open it, which feels slow. Can you cache the list for the session and only refetch when a new notification comes in over the web socket? Also, mark them as read when the dropdown closes, not when it opens, because people are complaining that they lose track of what was new. Keep the existing unread badge logic.",code,16270,36.84,41.94,3.957,,mistralai/voxtral-small-24b-2507,Mistral,0.00454696,stop,null,2026-11-19T16:07:58-0800
+openrouter-chat,dict_0371,dict_0371.flac,ok,1,"Lent the tent to my cousin. Actually, it was the camping stove, not the tent. He said he'd bring it back after Thanksgiving.",docs_notes,21192,7.16,12.259,1.715,,mistralai/voxtral-small-24b-2507,Mistral,0.0012198,stop,null,2026-11-19T16:08:01-0800
+openrouter-chat,dict_0377,dict_0377.flac,ok,1,Watched the sunrise from the roof of the parking garage this morning because I couldn't sleep. Weirdly peaceful. Might make it a once a month thing.,docs_notes,66948,9.24,14.339,1.596,,mistralai/voxtral-small-24b-2507,Mistral,0.001421,stop,null,2026-11-19T16:08:04-0800
+openrouter-chat,dict_0380,dict_0380.flac,ok,1,"Caption for the exhibit: These portraits were taken over one summer on the same street corner, asking strangers to tell me about the best day of their lives.",docs_notes,29111,9.48,14.579,2.153,,mistralai/voxtral-small-24b-2507,Mistral,0.00156211,stop,null,2026-11-19T16:08:07-0800
+openrouter-chat,dict_0381,dict_0381.flac,ok,1,"Goals for this week: finish the first draft of the grant section, clean out the garage, call Grimel, and get to bed before midnight at least four nights.",docs_notes,38844,9.91,15.014,1.984,,mistralai/voxtral-small-24b-2507,Mistral,0.0016731,stop,null,2026-11-19T16:08:11-0800
+openrouter-chat,dict_0382,dict_0382.flac,ok,1,Idea for the backyard. String some lights along the fence and put the old bench under the maple so there's somewhere to sit and read when it's warm out.,docs_notes,16274,9.91,15.014,2.203,,mistralai/voxtral-small-24b-2507,Mistral,0.00167343,stop,null,2026-11-19T16:08:15-0800
+openrouter-chat,dict_0384,dict_0384.flac,ok,1,Parking lot item from today's meeting: revisit whether we still need the approval step for small purchases since it's slowing everyone down.,docs_notes,73292,10.32,15.418,2.078,,mistralai/voxtral-small-24b-2507,Mistral,0.00167112,stop,null,2026-11-19T16:08:19-0800
+openrouter-chat,dict_0388,dict_0388.flac,ok,1,"Packing for the cabin: wool socks, the headlamp, board games, coffee filters, the cast iron pan, and bug spray, even though it's supposed to be cold.",docs_notes,68838,11.38,16.477,1.21,,mistralai/voxtral-small-24b-2507,Mistral,0.0016222,stop,null,2026-11-19T16:08:22-0800
+openrouter-chat,dict_0389,dict_0389.flac,ok,1,"Gift ideas for dad: a new reading lamp, those wool slippers he keeps looking at, a framed photo from the lake, and maybe a cooking class we could take together.",docs_notes,11114,11.48,16.579,2.08,,mistralai/voxtral-small-24b-2507,Mistral,0.00178409,stop,null,2026-11-19T16:08:26-0800
+openrouter-chat,dict_0391,dict_0391.flac,ok,1,Invoice from Clearwater Print is number 4420 for $615 due on the first.,docs_notes,71862,11.64,16.739,1.226,,mistralai/voxtral-small-24b-2507,Mistral,0.0016174,stop,null,2026-11-19T16:08:30-0800
+openrouter-chat,dict_0392,dict_0392.flac,ok,1,"Study plan for the certification exam: review networking basics, redo the practice tests I bombed, make flashcards for the port numbers, and schedule the real exam.",docs_notes,72305,11.91,17.006,1.227,,mistralai/voxtral-small-24b-2507,Mistral,0.001721,stop,null,2026-11-19T16:08:32-0800
+openrouter-chat,dict_0399,dict_0399.flac,ok,1,"Car stuff. The oil change is due at like 42,000 miles, and the shop on Delancey quoted $89 for synthetic.",docs_notes,95028,12.47,17.574,1.507,,mistralai/voxtral-small-24b-2507,Mistral,0.0017207,stop,null,2026-11-19T16:08:36-0800
+openrouter-chat,dict_0400,dict_0400.flac,ok,1,"Agenda for the one-on-one: check in on workload, talk through the promotion criteria, get feedback on how I ran the planning meeting, and ask about conference budget.",docs_notes,21072,12.60,17.696,1.555,,mistralai/voxtral-small-24b-2507,Mistral,0.0017213,stop,null,2026-11-19T16:08:40-0800
+openrouter-chat,dict_0407,dict_0407.flac,ok,1,"Stock check for the shop. We're down to eight bags of the house blend, like three tins of the Earl Grey, and maybe two cases of oat milk. Reorder from Ridgeline Coffee Supply.",docs_notes,58567,16.04,21.14,1.527,,mistralai/voxtral-small-24b-2507,Mistral,0.002124,stop,null,2026-11-19T16:08:44-0800
+openrouter-chat,dict_0408,dict_0408.flac,ok,1,"Realized today that I'm happiest on days when I start with something creative. Well, not happiest exactly. Calmer. I should protect mornings for that.",docs_notes,38494,16.42,21.516,2.421,,mistralai/voxtral-small-24b-2507,Mistral,0.00233343,stop,null,2026-11-19T16:08:49-0800
+openrouter-chat,dict_0414,dict_0414.flac,ok,1,"Passport renewal plan before the trip. Find the old passports first. I think they're in the fire safe. Then get new photos done at the pharmacy. Fill out the renewal forms online and print them, and mail everything with a check with tracking. And set a reminder to check the status in a few weeks so we're not cutting it close.",docs_notes,40358,20.72,25.823,1.668,,mistralai/voxtral-small-24b-2507,Mistral,0.0025324,stop,null,2026-11-19T16:08:52-0800
+openrouter-chat,dict_0428,dict_0428.flac,ok,1,"Draft intro for the neighborhood newsletter. This fall we're trying something new at the community garden. Instead of everyone hauling yard waste to the curb, we're setting up shared compost bins by the back gate. Anyone on the block can drop off leaves, coffee grounds, and vegetable scraps. We'll have a short how-to session on a Saturday morning, and if it goes well, we'll keep it running through the spring.",docs_notes,76491,25.88,30.98,1.628,,mistralai/voxtral-small-24b-2507,Mistral,0.0030369,stop,null,2026-11-19T16:08:57-0800
+openrouter-chat,dict_0430,dict_0430.flac,ok,1,"Launch sync. Fieldbook app version 2.4 goes to app store review November 2nd, sorry, November 3rd, because Monday's a freeze day. Pricing stays $4.99 a month, and the annual plan is $49.99. Press embargo lifts on the 10th at 9 a.m. Pacific. Owens Park doing the release notes, and the landing page is fieldbook.app/new.",docs_notes,29111,26.16,31.259,1.926,,mistralai/voxtral-small-24b-2507,Mistral,0.0031384,stop,null,2026-11-19T16:09:03-0800
+openrouter-chat,dict_0455,dict_0455.flac,ok,1,"Hi Dave, I think one of your packages got left on our porch by mistake. I brought it inside so it wouldn't get rained on. Just come by whenever.",email,80435,9.32,14.419,1.356,,mistralai/voxtral-small-24b-2507,Mistral,0.0014213,stop,null,2026-11-19T16:09:06-0800
+openrouter-chat,dict_0461,dict_0461.flac,ok,1,"Hey, for mom and dad's anniversary, I was going to, what if we split a dinner, some flowers, and like a framed photo from the old house? Let me know what you think.",email,74259,10.69,15.787,2.447,,mistralai/voxtral-small-24b-2507,Mistral,0.00167541,stop,null,2026-11-19T16:09:10-0800
+openrouter-chat,dict_0467,dict_0467.flac,ok,1,"Hi Mark, just following up on the kitchen faucet. It's still dripping pretty much nonstop. So could you, could someone come take a look this week? Thanks.",email,49995,12.80,17.899,1.622,,mistralai/voxtral-small-24b-2507,Mistral,0.0017219,stop,null,2026-11-19T16:09:14-0800
+openrouter-chat,dict_0469,dict_0469.flac,ok,1,"Hi Mia, I submitted the expense report for the Denver trip. It's report number ER-3312, totaling $618.40.",email,74259,13.00,18.103,2.277,,mistralai/voxtral-small-24b-2507,Mistral,0.0020031,stop,null,2026-11-19T16:09:19-0800
+openrouter-chat,dict_0471,dict_0471.flac,ok,1,"Hi, I'm following up on order NW-44729, which was supposed to arrive Monday. Tracking hasn't updated since the 20th. Can you check on it?",email,60583,14.12,19.22,2.496,,mistralai/voxtral-small-24b-2507,Mistral,0.00211508,stop,null,2026-11-19T16:09:23-0800
+openrouter-chat,dict_0474,dict_0474.flac,ok,1,"Hi Carlos, we got invoice number 8841, but it's, I think it's showing $2400 instead of the $2100 we agreed on. Can you send a corrected one?",email,68803,14.55,19.647,1.583,,mistralai/voxtral-small-24b-2507,Mistral,0.0019246,stop,null,2026-11-19T16:09:26-0800
+openrouter-chat,dict_0475,dict_0475.flac,ok,1,"Hi, I'm returning the modem, the router, and the power cords for account 882014. Can I just drop them at the Elm Street store?",email,64254,14.72,19.82,2.323,,mistralai/voxtral-small-24b-2507,Mistral,0.0019216,stop,null,2026-11-19T16:09:30-0800
+openrouter-chat,dict_0482,dict_0482.flac,ok,1,"Hi, starting next month, my husband's schedule is changing, so he'll be picking up our daughter every day instead of her taking the bus home. Is there a form we need to fill out for that, or is an email enough? Does she need one of those car tags for the pickup line, or can he just give her name at the window? Thanks for your help.",email,94104,18.72,23.82,1.828,,mistralai/voxtral-small-24b-2507,Mistral,0.0023342,stop,null,2026-11-19T16:09:34-0800
+openrouter-chat,dict_0487,dict_0487.flac,ok,1,"Hi coach, following up on what we talked about after practice. My son's been kind of discouraged about his playing time and I told him the best thing he can do is just ask you directly what to work on. So he might come find you this week. Just giving you a heads up. Thanks for all the time you put into the team.",email,21072,19.67,24.767,2.853,,mistralai/voxtral-small-24b-2507,Mistral,0.00267531,stop,null,2026-11-19T16:09:40-0800
+openrouter-chat,dict_0495,dict_0495.flac,ok,1,"Hi Tom, so I know we talked about starting the bathroom next week, but we're actually going to be out of town for a few days, so is there any chance we could push the start back? Like, even just a week would be great. Let me know what your schedule looks like and we'll make it work. Thanks, and sorry for the shuffle.",email,57588,21.32,26.419,2.895,,mistralai/voxtral-small-24b-2507,Mistral,0.00289663,stop,null,2026-11-19T16:09:46-0800
+openrouter-chat,dict_0496,dict_0496.flac,ok,1,"Hi, I'd like to sign my daughter up for the SAT prep course that starts January 8th. She'd be in the Tuesday and Thursday evening group from 6 to 7:30. I saw the cost is $450 for the full eight weeks. Is there a discount if her brother signs up for the spring session too? Her name is Zoe Ramirez and my email is d.ramirez@example.com.",email,68681,21.72,26.82,2.142,,mistralai/voxtral-small-24b-2507,Mistral,0.0026375,stop,null,2026-11-19T16:09:52-0800
+openrouter-chat,dict_0497,dict_0497.flac,ok,1,"Hey guys, so I've been thinking about doing a reunion this summer since it's been like almost 10 years since graduation. I was going to, I figured we could rent a cabin somewhere for a long weekend. If you're in, reply and let me know which months work best and I'll start looking at places.",email,72305,21.74,26.839,1.843,,mistralai/voxtral-small-24b-2507,Mistral,0.0026309,stop,null,2026-11-19T16:09:56-0800
+openrouter-chat,dict_0498,dict_0498.flac,ok,1,"Hi, so for the past couple weeks, there's been loud music coming from the unit above us late at night, usually way past midnight. We've tried knocking and we left a friendly note, but nothing's changed. Would you be able to reach out to them? We're really not trying to cause trouble, we just need to be able to sleep.",email,72565,21.76,26.86,3.022,,mistralai/voxtral-small-24b-2507,Mistral,0.00289597,stop,null,2026-11-19T16:10:01-0800
+openrouter-chat,dict_0501,dict_0501.flac,ok,1,"Hi, I'm looking at the winter break camp and had some questions before I sign up my son. What time does drop-off start in the morning? Can kids bring their own lunch or is it provided? And is there a discount if he only comes three days instead of the whole week? Also, do they go outside if it's cold so I know whether to pack snow gear? Thanks.",email,35092,22.76,27.86,1.691,,mistralai/voxtral-small-24b-2507,Mistral,0.0027348,stop,null,2026-11-19T16:10:05-0800
+openrouter-chat,dict_0504,dict_0504.flac,ok,1,"Hi Jordan, okay so I've attached the revised proposal for the spring campaign. It comes to $18,500 total. That covers the three videos plus the paid social setup. We'd need it signed by March 6th to hold the April production dates. And you can sign through the link or just reply here and I'll send a fresh one. Let me know if you have questions. Rachel.",email,10007,23.49,28.587,2.407,,mistralai/voxtral-small-24b-2507,Mistral,0.0028363,stop,null,2026-11-19T16:10:09-0800
+openrouter-chat,dict_0505,dict_0505.flac,ok,1,"Hey, thanks for walking me through the new onboarding flow this morning. I think the changes make a lot of sense, especially cutting that second verification step. My one concern is the welcome email going out before the account's fully set up because that's confused customers before. Can we talk through that sometime this week? I'm pretty open tomorrow afternoon if that works.",email,93465,23.60,28.7,1.745,,mistralai/voxtral-small-24b-2507,Mistral,0.002833,stop,null,2026-11-19T16:10:13-0800
+openrouter-chat,dict_0506,dict_0506.flac,ok,1,"Hi Priya, just confirming our walkthrough at the Fremont property, Tuesday the 12th at 10 a.m. Sorry, 10:30. The electrician can't get there before 10. Address is 4218 Mowry Avenue and you can park in the side lot. If anything changes, my cell is 415-555-0147. See you then, Dana.",email,14879,23.93,29.034,3.264,,mistralai/voxtral-small-24b-2507,Mistral,0.00323356,stop,null,2026-11-19T16:10:19-0800
+openrouter-chat,dict_0525,dict_0525.flac,ok,1,"Hi, I'm a former student and I need an official copy of my transcript sent to Lakeshore University. It's for a grad school application. I graduated in June of 2018 and my student ID was 440812. The deadline is December 15th, so if it could go out in the next two weeks, that'd be great. And let me know if there's a fee. Thank you, Andre Williams.",email,38494,33.97,39.07,1.838,,mistralai/voxtral-small-24b-2507,Mistral,0.0039396,stop,null,2026-11-19T16:10:25-0800
+openrouter-chat,dict_0533,dict_0533.flac,ok,1,"Update on the Regional Sales Summit. Since we're about six weeks out now, venue's locked in. We're at the Lakeshore Conference Center in Milwaukee, February 19th and 20th. Room block at the Harborview Hotel is 110 rooms at $169 a night, and the cutoff for that rate is January 29th. I just double-checked the contract. We've got 94 people registered so far out of about 130 invited. Budget's $85,000 total, and we've committed about $61,000 so far, mostly venue, catering, and AV. Keynotes confirmed. Dana Whitlock from ClearPath Consulting is opening the first morning at 9 a.m. We still need someone to lead the breakout on the new pricing model, and I'd really like that to be someone from product, not sales. Registration link is summit.northwind.io/register, so please nudge anyone on your team who hasn't signed up. Gabe's handling travel reimbursements. Per diem is $75 a day. I'll send the full agenda draft next Tuesday for comment.",long_form,68681,62.72,67.82,2.98,,mistralai/voxtral-small-24b-2507,Mistral,0.0067849,stop,null,2026-11-19T16:10:35-0800
+openrouter-chat,dict_0534,dict_0534.flac,ok,1,"Hi Denise, so quick update on the kitchen at 42 Maple Ridge Drive. The cabinets from Hartwell Millwork came in yesterday and honestly they look great, but two of the upper doors showed up in the wrong finish, so we reordered those and they're saying about 10 business days. And the crew's just going to keep going on everything else in the meantime. Marco Reyes, the electrician, he's coming out Wednesday the 15th to finish up the under cabinet lighting and move that outlet by the window like you wanted. Countertop templating is still the 22nd at 9 a.m., so somebody needs to be home to let the fabricator in. Oh, and on the budget, the pot filler change order came to $640, so that puts us at $31,820 total so far. And I'll send you the updated invoice tonight. If you've got questions or you want to come by and see it, just give me a call 415-555-0138. Otherwise, I'll check in Friday with photos. Thanks, Greg.",long_form,80778,63.02,68.124,3.133,,mistralai/voxtral-small-24b-2507,Mistral,0.0068816,stop,null,2026-11-19T16:10:41-0800
+openrouter-chat,dict_0536,dict_0536.flac,ok,1,"Hey Marcus, I've started this email probably five times, so I'm just going to say it. I'm sorry about how things went at mom's birthday dinner. I said some things about your job that weren't fair, and I... you know, I think I was taking out a bad week on you, which isn't an excuse. You've always been the one who shows up for the family, and I made it sound like you didn't care, and that's just not true. I've been thinking about why I get so defensive around you, and I think part of it is that I always felt like the screw-up brother, and when you give advice, it sounds like judgment to me, even when you don't mean it that way. That's my thing to work on, not yours. I miss talking to you. We used to text every day about basketball and dumb stuff, and it's been almost two months now. I'd really like to get lunch or a beer sometime soon if you're up for it. Just the two of us. No pressure if you need more time. Either way, I love you and I'm proud of you, and I should say that more often. Talk soon, I hope. Your brother.",long_form,38844,63.72,68.815,4.275,,mistralai/voxtral-small-24b-2507,Mistral,0.0068873,stop,null,2026-11-19T16:10:50-0800
+openrouter-chat,dict_0539,dict_0539.flac,ok,1,"Hey team, quick status on the billing migration since a few people asked in standup. So as of this morning, we've moved about 85% of active accounts off the old PayBridge setup and onto Stripe. That's roughly 14,200 customers. What's left is mostly annual plans with custom invoicing and Priya's working through those by hand. We did hit one real issue Monday. About 300 accounts got double charged because the webhook retry fired before the idempotency key got saved. That's bill-4417. Refunds went out yesterday afternoon, $11,650 total, and support has a macro ready if anyone writes in. Fix is merged and deployed and we added a Datadog alert so if it ever happens again, we'll catch it within five minutes. Next milestone is shutting off the old PayBridge cron jobs on November 3rd and after that, Jordan's team can start ripping out the legacy tables. So if you own anything that still reads from the payments legacy schema, please let me know by the end of next week so we don't break you. Full write-ups in the migration doc pinned in the channel.",long_form,79546,65.10,70.197,6.648,,mistralai/voxtral-small-24b-2507,Mistral,0.00779504,stop,null,2026-11-19T16:11:03-0800
+openrouter-chat,dict_0544,dict_0544.flac,ok,1,"Meeting recap for the fall food drive planning call. On the call were Lorraine Whitfield, Thomas Herrera, Kiera Bell, and me. So we confirmed the drive runs November 8th through November 22nd, and the main drop-off is the Eastside Community Center at 1710 Harmon Avenue. Last year we got about 4,200 pounds, sorry, no, 3,900 pounds, and this year we're aiming for 5,000. Thomas got Greenleaf Market to commit to a $50 gift card donation for every 100 pounds we collect, capped at $1,500. Kiera's handling volunteer sign-ups, and she's already got 28 people for the two weekend shifts, but we still need drivers for the pickup route on the 16th. Lorraine's going to reach out to the three elementary schools about doing the classroom competitions again, since that was almost a third of last year's total. Printed flyers were $240. That comes out of the general fund. Next check-in call is Thursday at 6:30 p.m., and if anything changes before then, email me at fooddrive@eastsidehelps.org.",long_form,50959,67.90,73.0,7.12,,mistralai/voxtral-small-24b-2507,Mistral,0.00812801,stop,null,2026-11-19T16:11:17-0800
+openrouter-chat,dict_0551,dict_0551.flac,ok,1,"Recap from tonight's PTA meeting so the people who couldn't make it are in the loop. We talked about a bunch of things so I'll go through them one at a time. The fall fundraiser did better than we expected and the board voted to put most of it toward new library books and the rest toward the playground shade structure. The teachers asked us for more volunteers at lunch duty especially on Fridays because they're stretched really thin. There is a sign-up sheet going around and they'd love even one shift a month. The carpool line is still a mess in the mornings. The principal is going to try a staggered drop-off by grade starting after the holidays so watch for an email about that. We also decided to bring back the family movie night in the gym probably once a month in the winter and we need someone to take the lead on organizing snacks. Last thing, a few parents raised concerns about how much homework the fourth graders are getting and the principal agreed to bring it up at the next staff meeting and report back to us. Next meeting is in four weeks, same time in the cafeteria.",long_form,55821,71.88,76.98,3.288,,mistralai/voxtral-small-24b-2507,Mistral,0.0076798,stop,null,2026-11-19T16:11:29-0800
+openrouter-chat,dict_0559,dict_0559.flac,error,6,,long_form,49995,78.32,83.419,5.93,HTTP 429,mistralai/voxtral-small-24b-2507,,,,null,2026-11-19T16:14:59-0800
+openrouter-chat,dict_0565,dict_0565.flac,missing,,,long_form,60535,90.25,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0572,dict_0572.flac,missing,,,personal_messaging,49995,3.40,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0578,dict_0578.flac,missing,,,personal_messaging,25801,3.88,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0579,dict_0579.flac,missing,,,personal_messaging,96559,4.00,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0583,dict_0583.flac,missing,,,personal_messaging,53485,4.51,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0593,dict_0593.flac,missing,,,personal_messaging,23161,5.44,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0595,dict_0595.flac,missing,,,personal_messaging,55577,5.73,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0598,dict_0598.flac,missing,,,personal_messaging,33469,6.01,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0606,dict_0606.flac,missing,,,personal_messaging,72565,7.04,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0614,dict_0614.flac,missing,,,personal_messaging,60535,8.36,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0616,dict_0616.flac,missing,,,personal_messaging,68681,8.44,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0618,dict_0618.flac,missing,,,personal_messaging,20289,8.72,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0619,dict_0619.flac,missing,,,personal_messaging,38844,8.98,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0620,dict_0620.flac,missing,,,personal_messaging,63931,9.00,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0621,dict_0621.flac,missing,,,personal_messaging,86695,9.06,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0624,dict_0624.flac,missing,,,personal_messaging,58567,9.44,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0629,dict_0629.flac,missing,,,personal_messaging,77388,9.88,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0635,dict_0635.flac,missing,,,personal_messaging,95028,10.61,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0641,dict_0641.flac,missing,,,personal_messaging,72565,11.60,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0644,dict_0644.flac,missing,,,personal_messaging,70998,12.52,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0650,dict_0650.flac,missing,,,personal_messaging,40358,19.99,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0651,dict_0651.flac,missing,,,personal_messaging,63550,20.44,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0653,dict_0653.flac,missing,,,personal_messaging,73292,20.68,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0663,dict_0663.flac,missing,,,personal_messaging,38844,30.92,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0676,dict_0676.flac,missing,,,work_chat,57324,4.24,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0677,dict_0677.flac,missing,,,work_chat,72305,4.59,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0680,dict_0680.flac,missing,,,work_chat,55091,5.20,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0683,dict_0683.flac,missing,,,work_chat,73506,5.89,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0687,dict_0687.flac,missing,,,work_chat,38844,6.79,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0689,dict_0689.flac,missing,,,work_chat,88839,6.91,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0693,dict_0693.flac,missing,,,work_chat,13660,7.44,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0696,dict_0696.flac,missing,,,work_chat,76491,7.88,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0711,dict_0711.flac,missing,,,work_chat,10007,9.22,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0721,dict_0721.flac,missing,,,work_chat,25801,10.48,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0725,dict_0725.flac,missing,,,work_chat,93465,10.84,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0726,dict_0726.flac,missing,,,work_chat,49815,10.84,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0728,dict_0728.flac,missing,,,work_chat,11114,11.00,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0729,dict_0729.flac,missing,,,work_chat,58567,11.08,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0737,dict_0737.flac,missing,,,work_chat,49995,12.76,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0743,dict_0743.flac,missing,,,work_chat,61187,14.80,,,,mistralai/voxtral-small-24b-2507,,,,,
+openrouter-chat,dict_0749,dict_0749.flac,missing,,,work_chat,52246,21.70,,,,mistralai/voxtral-small-24b-2507,,,,,
