@@ -133,4 +133,5 @@ The licence files of the vendored crates stay with them:
 third_party/handy-keys/LICENSE, third_party/coreaudio-rs/LICENSE-MIT and
 third_party/coreaudio-rs/LICENSE-APACHE.
 
-dictation-app's own code is MIT (see LICENSE).
+dictation-app's own code is under FSL-1.1-ALv2 (see LICENSE); versions up to 0.1.0 were
+released under MIT.
