@@ -18,10 +18,8 @@
 //!   from [`crate::local_models::CATALOGUE`]) the same way.
 //!   A1 added `share_usage_events` (default `true`) the same way. U7 added
 //!   `history_limit` (one of [`HISTORY_LIMITS`], default
-//!   [`DEFAULT_HISTORY_LIMIT`]) the same way. Q2 made `OpenRouter` the
-//!   only `provider` (`"openrouter"`): any other value, such as `"groq"` or
-//!   `"openai"`, loads as it, and a `model` the cloud catalog doesn't have
-//!   loads as the default speech model.
+//!   [`DEFAULT_HISTORY_LIMIT`]) the same way. Since Q2 `provider` is
+//!   `"openrouter"`; an unknown `provider` or `model` loads as its default.
 //!
 //! Fields this version doesn't know (from a newer build, or a hand edit) are
 //! ignored, and missing ones take their defaults, so an old or partial file
@@ -271,7 +269,7 @@ pub fn from_json(json: &str) -> Result<Settings, SettingsError> {
     if version < 2 {
         migrate_v1_to_v2(&mut object);
     }
-    migrate_to_openrouter(&mut object);
+    default_unknown_values(&mut object);
     let settings: Settings = serde_json::from_value(Value::Object(object))
         .map_err(|e| SettingsError::Malformed(e.to_string()))?;
     settings.validate()?;
@@ -289,13 +287,11 @@ pub fn to_json(settings: &Settings) -> Result<String, SettingsError> {
     serde_json::to_string_pretty(settings).map_err(|e| SettingsError::Malformed(e.to_string()))
 }
 
-/// Q2: `OpenRouter` is the only cloud provider. A saved `"groq"`, `"openai"`
-/// or any other provider value becomes `"openrouter"`, instead of failing
-/// the whole file (#328), and a speech model the catalog doesn't have
-/// (`whisper-large-v3-turbo`, or a model since shut down) becomes the
-/// default one. Every other field is left alone. Old keychain items are
-/// never read (the key name changed with the provider).
-fn migrate_to_openrouter(object: &mut Map<String, Value>) {
+/// A `provider` this build doesn't know (`OpenRouter` is the only one since
+/// Q2; an old file may say `"groq"` or `"openai"`) or a speech `model` the
+/// cloud catalog doesn't have loads as that field's default, so an old file
+/// still loads with every other field kept (#328).
+fn default_unknown_values(object: &mut Map<String, Value>) {
     let provider = Provider::OpenRouter.to_string();
     if object.get("provider").and_then(Value::as_str) != Some(provider.as_str())
         && object.contains_key("provider")
@@ -358,7 +354,7 @@ mod tests {
     fn criterion_1_round_trips_through_json() {
         let settings = Settings {
             provider: Provider::OpenRouter,
-            model: cloud_models::FALLBACK_SPEECH.into(),
+            model: cloud_models::DEFAULT_SPEECH.into(),
             language: Some("de".into()),
             hotkey: "Ctrl+Shift+Space".into(),
             ..Settings::default()
@@ -528,11 +524,10 @@ mod tests {
 
     #[test]
     fn criterion_1_a_v2_field_wins_over_its_v1_name() {
-        let mixed = r#"{"version": 1, "whisper_model": "whisper-1", "model": "mistralai/voxtral-mini-3b-2507"}"#;
-        assert_eq!(
-            from_json(mixed).unwrap().model,
-            cloud_models::FALLBACK_SPEECH
-        );
+        let mixed = r#"{"version": 1, "whisper_model": "whisper-1", "model": "openai/gpt-4o-mini-transcribe", "hotkey": "F5"}"#;
+        let settings = from_json(mixed).unwrap();
+        assert_eq!(settings.model, cloud_models::DEFAULT_SPEECH);
+        assert_eq!(settings.hotkey, "F5");
     }
 
     #[test]
@@ -674,11 +669,11 @@ mod tests {
         );
     }
 
-    /// Q2 criterion 1 (#328): a saved Groq, `OpenAI` or unknown provider
-    /// loads as `OpenRouter` with the default speech model, and every other
-    /// preference survives.
+    /// Q2 criterion 1 (#328): an old file whose provider or model this
+    /// build doesn't know still loads: those fields take their defaults and
+    /// every other preference survives.
     #[test]
-    fn q2_criterion_1_old_and_unknown_providers_migrate_to_openrouter() {
+    fn q2_criterion_1_unknown_provider_and_model_values_load_as_defaults() {
         for provider in [
             r#""groq""#,
             r#""openai""#,
@@ -724,26 +719,6 @@ mod tests {
             assert!(saved.contains(r#""provider": "openrouter""#), "{saved}");
             assert!(!saved.contains("groq") && !saved.contains("whisper-large"));
         }
-        // OpenAI's own model id is not a catalog id either.
-        let openai = from_json(r#"{"version": 2, "provider": "openai", "model": "whisper-1"}"#);
-        assert_eq!(openai.unwrap().model, cloud_models::DEFAULT_SPEECH);
-    }
-
-    #[test]
-    fn q2_a_catalog_model_is_kept_and_a_retired_one_becomes_the_default() {
-        let json = r#"{"version": 2, "provider": "openrouter", "model": "mistralai/voxtral-mini-3b-2507"}"#;
-        assert_eq!(
-            from_json(json).unwrap().model,
-            cloud_models::FALLBACK_SPEECH
-        );
-        let gone = r#"{"version": 2, "provider": "openrouter", "model": "openai/whisper-0"}"#;
-        assert_eq!(from_json(gone).unwrap().model, cloud_models::DEFAULT_SPEECH);
-        // The cleanup model is not a speech model.
-        let cleanup = r#"{"version": 2, "model": "z-ai/glm-5.3-flash"}"#;
-        assert_eq!(
-            from_json(cleanup).unwrap().model,
-            cloud_models::DEFAULT_SPEECH
-        );
         // A model of the wrong type is still a malformed file.
         assert!(matches!(
             from_json(r#"{"model": 7}"#),
@@ -773,14 +748,9 @@ mod tests {
 
         #[test]
         fn valid_settings_round_trip(
-            fallback in any::<bool>(),
             language in proptest::option::of("[a-z]{2,3}"),
         ) {
-            let model = if fallback {
-                cloud_models::FALLBACK_SPEECH
-            } else {
-                cloud_models::DEFAULT_SPEECH
-            };
+            let model = cloud_models::DEFAULT_SPEECH;
             let settings = Settings {
                 provider: Provider::OpenRouter,
                 model: model.to_owned(),

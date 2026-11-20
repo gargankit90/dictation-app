@@ -6,7 +6,7 @@
 
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
 use dictation_transcribe::check_key::check_key;
-use dictation_transcribe::openai_compat::{Config, GROQ, OpenAiCompat};
+use dictation_transcribe::openrouter::{Config, OpenRouter};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -36,7 +36,7 @@ async fn servers(status: u16) -> (MockServer, MockServer) {
 }
 
 fn config(provider: &MockServer) -> Config {
-    let mut config = Config::from_preset(GROQ);
+    let mut config = Config::openrouter();
     config.base_url = format!("{}/v1", provider.uri());
     config
 }
@@ -51,7 +51,7 @@ async fn assert_untouched(provider: &MockServer, other: &MockServer) {
 async fn transcribe_does_not_follow_redirects() {
     for status in STATUSES {
         let (provider, other) = servers(status).await;
-        let engine = OpenAiCompat::new(config(&provider), Secret::new(KEY)).unwrap();
+        let engine = OpenRouter::new(config(&provider), Secret::new(KEY)).unwrap();
         let audio = Audio {
             sample_rate: 16_000,
             samples: vec![0.0; 1_600],

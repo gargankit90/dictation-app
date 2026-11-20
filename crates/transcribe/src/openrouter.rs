@@ -1,34 +1,46 @@
-//! [`OpenAiCompat`]: speech to text through an OpenAI-compatible
-//! `POST {base_url}/audio/transcriptions` endpoint (Groq, OpenAI).
+//! [`OpenRouter`]: speech to text through `OpenRouter`'s OpenAI-compatible
+//! `POST {base_url}/audio/transcriptions` endpoint (Q2), with the user's own
+//! key.
 //!
-//! The audio goes up as a 16-bit mono WAV (`dictation_core::wav`) in a
-//! multipart form with the model, the language (if set) and
-//! `response_format=verbose_json`, so the reply carries per-segment
-//! `no_speech_prob` for the hallucination filter.
+//! The audio goes up as a 16-bit mono WAV (`dictation_core::wav`),
+//! base64-encoded in a JSON body (`input_audio: {data, format: "wav"}`, the
+//! route the hosted-ASR eval used), with the model, the language (if set),
+//! a `prompt` only for a model whose providers get it from `OpenRouter`
+//! ([`dictation_core::cloud_models::CloudModel::prompt`]), and the model's
+//! privacy filter as `provider: {data_collection: "deny"}` (plus
+//! `zdr: true` where the catalog asks for it). The filter is on every
+//! request and never dropped: if no provider matches, the request fails
+//! (closed). `HTTP-Referer` and `X-Title` attribute the requests to the app.
+//!
+//! The reply is `{"text": …}`; `segments` with `no_speech_prob` are read if
+//! a provider sends them (`verbose_json`), else the hallucination filter
+//! has no probability to go by.
 //!
 //! Rate limits (429), server errors (5xx), timeouts and network errors are
 //! retried under a [`RetryPolicy`]; a `Retry-After` header (delay seconds or
 //! an HTTP date) on a 429 or 5xx replaces the backoff, up to
-//! [`MAX_RETRY_AFTER`]. A rejected
-//! key (401, 403), any other 4xx and an unreadable reply are not retried.
+//! [`MAX_RETRY_AFTER`]. A rejected key (401, 403), no credits (402), any
+//! other 4xx and an unreadable reply are not retried; a 404 is `OpenRouter`'s
+//! "no eligible route" for the model with its privacy filter
+//! ([`TranscribeError::NoRoute`]). There is no fallback to another model:
+//! switching models is a catalog change.
 //!
 //! Privacy: the key is a [`Secret`] and goes only into the `Authorization`
 //! header (marked sensitive). Errors and logs never contain the key, the
-//! audio or the transcript; logs are at debug and hold statuses, sizes and
-//! lengths only.
+//! audio or the transcript; reply bodies of failed requests are never read;
+//! logs are at debug and hold statuses, sizes and lengths only.
 
 use std::future::Future;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
+use dictation_core::cloud_models::{self, PrivacyFilter};
 use dictation_core::retry::{RetryPolicy, SplitMix64};
-use dictation_core::settings::Provider;
 use dictation_core::text::{Transcript, mean_no_speech_prob};
 use dictation_core::upload_limits::{LONG_CLIP, may_retry_after_timeout, request_timeout};
 use dictation_core::wav;
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
-use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, RETRY_AFTER};
-use reqwest::multipart::{Form, Part};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, RETRY_AFTER};
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 
@@ -40,41 +52,65 @@ pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 /// [`Config::timeout_grows_with_audio`] adds time for a long clip.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// A provider's endpoint and default model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Preset {
-    /// For logs and settings.
-    pub name: &'static str,
-    /// The API root; `/audio/transcriptions` is appended.
-    pub base_url: &'static str,
-    /// The model sent with each request.
-    pub model: &'static str,
+/// `OpenRouter`'s API root; `/audio/transcriptions` and `/chat/completions`
+/// are appended.
+pub const BASE_URL: &str = "https://openrouter.ai/api/v1";
+
+/// The `HTTP-Referer` header: the app's site, for `OpenRouter`'s app
+/// attribution.
+pub const REFERER: &str = "https://vocetlabs.com";
+
+/// The `X-Title` header: the app's name, for `OpenRouter`'s app attribution.
+pub const TITLE: &str = "Vocet";
+
+/// The headers every `OpenRouter` request carries: the key (sensitive, never
+/// logged) and the app attribution.
+///
+/// # Errors
+///
+/// [`TranscribeError::InvalidKey`] if the key can't be a header value; the
+/// error never echoes it.
+pub(crate) fn headers(key: &Secret) -> Result<HeaderMap, TranscribeError> {
+    let mut value = HeaderValue::from_str(&format!("Bearer {}", key.expose()))
+        .map_err(|_| TranscribeError::InvalidKey)?;
+    value.set_sensitive(true);
+    let mut headers = HeaderMap::new();
+    headers.insert(AUTHORIZATION, value);
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert("http-referer", HeaderValue::from_static(REFERER));
+    headers.insert("x-title", HeaderValue::from_static(TITLE));
+    Ok(headers)
 }
 
-/// Groq: `whisper-large-v3-turbo`. Direct uploads up to 25 MB on the free
-/// tier (see `docs/ENGINEERING.md`).
-pub const GROQ: Preset = Preset {
-    name: "groq",
-    base_url: "https://api.groq.com/openai/v1",
-    model: "whisper-large-v3-turbo",
-};
+/// The `provider` object for `filter`.
+pub(crate) fn provider_filter(filter: PrivacyFilter) -> serde_json::Value {
+    if filter.zdr() {
+        serde_json::json!({ "zdr": true, "data_collection": "deny" })
+    } else {
+        serde_json::json!({ "data_collection": "deny" })
+    }
+}
 
-/// OpenAI: `whisper-1`, its model that supports `verbose_json`.
-pub const OPENAI: Preset = Preset {
-    name: "openai",
-    base_url: "https://api.openai.com/v1",
-    model: "whisper-1",
-};
-
-impl Preset {
-    /// The preset for `provider`.
-    #[must_use]
-    pub fn for_provider(provider: Provider) -> Self {
-        match provider {
-            Provider::Groq => GROQ,
-            Provider::OpenAi => OPENAI,
+/// Standard base64 with padding (RFC 4648), for the audio in the JSON body.
+pub(crate) fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for (i, shift) in [18u32, 12, 6, 0].into_iter().enumerate() {
+            if i <= chunk.len() {
+                out.push(char::from(ALPHABET[((n >> shift) & 63) as usize]));
+            } else {
+                out.push('=');
+            }
         }
     }
+    out
 }
 
 /// A transcript with the per-segment detail `verbose_json` returns.
@@ -129,16 +165,22 @@ impl Wait for TokioWait {
     }
 }
 
-/// Settings for an [`OpenAiCompat`] engine.
+/// Settings for an [`OpenRouter`] engine.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// The API root, e.g. [`GROQ`]`.base_url`.
+    /// The API root, [`BASE_URL`] unless a test points it elsewhere.
     pub base_url: String,
-    /// The model name.
+    /// The speech model's id.
     pub model: String,
+    /// Text that helps recognition (names, terms), sent as `prompt` only if
+    /// set. The engine builder sets it only for a model whose providers get
+    /// it ([`cloud_models::CloudModel::prompt`]); nothing sets one yet.
+    pub prompt: Option<String>,
     /// An ISO-639-1 language code (`"en"`), or `None` to let the model
     /// detect it.
     pub language: Option<String>,
+    /// The `provider` filter on every request.
+    pub privacy: PrivacyFilter,
     /// Per-request timeout, for a clip of no length.
     pub timeout: Duration,
     /// Whether each request gets extra time for the length of its clip
@@ -154,14 +196,25 @@ pub struct Config {
 }
 
 impl Config {
-    /// `preset`'s endpoint and model, no language, the default timeout and
-    /// retry policy.
+    /// The catalog's default speech model, at
+    /// [`BASE_URL`], no language, the default timeout and retry policy.
     #[must_use]
-    pub fn from_preset(preset: Preset) -> Self {
+    pub fn openrouter() -> Self {
+        Self::for_model(cloud_models::DEFAULT_SPEECH)
+    }
+
+    /// `model` (a catalog id, or any other id) with the catalog's privacy
+    /// filter for it (the stricter zero-retention filter for an id the
+    /// catalog doesn't have).
+    #[must_use]
+    pub fn for_model(model: &str) -> Self {
+        let entry = cloud_models::speech(model);
         Self {
-            base_url: preset.base_url.to_owned(),
-            model: preset.model.to_owned(),
+            base_url: BASE_URL.to_owned(),
+            model: model.to_owned(),
+            prompt: None,
             language: None,
+            privacy: entry.map_or(PrivacyFilter::ZeroDataRetention, |m| m.privacy),
             timeout: DEFAULT_TIMEOUT,
             timeout_grows_with_audio: true,
             long_clip: LONG_CLIP,
@@ -170,8 +223,8 @@ impl Config {
     }
 }
 
-/// An OpenAI-compatible transcription engine.
-pub struct OpenAiCompat<W = TokioWait> {
+/// The `OpenRouter` speech-to-text engine.
+pub struct OpenRouter<W = TokioWait> {
     client: Client,
     endpoint: String,
     config: Config,
@@ -180,7 +233,7 @@ pub struct OpenAiCompat<W = TokioWait> {
     rng: Arc<Mutex<SplitMix64>>,
 }
 
-impl OpenAiCompat<TokioWait> {
+impl OpenRouter<TokioWait> {
     /// An engine for `config` with the user's `key`.
     ///
     /// # Errors
@@ -194,7 +247,7 @@ impl OpenAiCompat<TokioWait> {
     }
 }
 
-impl<W: Wait> OpenAiCompat<W> {
+impl<W: Wait> OpenRouter<W> {
     /// An engine that waits between attempts with `wait` and draws jitter
     /// from a generator seeded with `seed`.
     ///
@@ -239,11 +292,13 @@ impl<W: Wait> OpenAiCompat<W> {
         } else {
             self.config.timeout
         };
+        // Encoded once; each attempt only changes the model.
+        let audio_b64 = base64(&wav);
         tracing::debug!(bytes = wav.len(), model = %self.config.model, ?timeout, "transcribing");
         let mut failures = 0u32;
         let mut timeouts = 0u32;
         loop {
-            let error = match self.attempt(&wav, timeout).await {
+            let error = match self.attempt(&audio_b64, timeout).await {
                 Ok(transcription) => {
                     tracing::debug!(
                         chars = transcription.text.chars().count(),
@@ -287,24 +342,14 @@ impl<W: Wait> OpenAiCompat<W> {
         }
     }
 
-    async fn attempt(&self, wav: &[u8], timeout: Duration) -> Result<Transcription, Failure> {
-        let file = Part::bytes(wav.to_vec())
-            .file_name("audio.wav")
-            .mime_str("audio/wav")
-            .map_err(|_| Failure::fatal(TranscribeError::Engine("bad MIME type".into())))?;
-        let mut form = Form::new()
-            .part("file", file)
-            .text("model", self.config.model.clone())
-            .text("response_format", "verbose_json");
-        if let Some(language) = &self.config.language {
-            form = form.text("language", language.clone());
-        }
+    async fn attempt(&self, audio_b64: &str, timeout: Duration) -> Result<Transcription, Failure> {
+        let body = self.request_body(audio_b64);
         let response = self
             .client
             .post(&self.endpoint)
             .headers(self.auth_header()?)
             .timeout(timeout)
-            .multipart(form)
+            .body(body.to_string())
             .send()
             .await
             .map_err(Failure::from_reqwest)?;
@@ -317,18 +362,30 @@ impl<W: Wait> OpenAiCompat<W> {
         parse(&body).map_err(Failure::fatal)
     }
 
+    /// The JSON body: the audio, the model, the privacy filter (always),
+    /// the language and the prompt if set.
+    fn request_body(&self, audio_b64: &str) -> serde_json::Value {
+        let mut body = serde_json::json!({
+            "model": self.config.model,
+            "input_audio": { "data": audio_b64, "format": "wav" },
+            "provider": provider_filter(self.config.privacy),
+        });
+        if let Some(language) = &self.config.language {
+            body["language"] = serde_json::json!(language);
+        }
+        if let Some(prompt) = &self.config.prompt {
+            body["prompt"] = serde_json::json!(prompt);
+        }
+        body
+    }
+
     fn auth_header(&self) -> Result<HeaderMap, Failure> {
-        let mut value = HeaderValue::from_str(&format!("Bearer {}", self.key.expose()))
-            // The message must not echo the key.
-            .map_err(|_| Failure::fatal(TranscribeError::InvalidKey))?;
-        value.set_sensitive(true);
-        let mut headers = HeaderMap::new();
-        headers.insert(AUTHORIZATION, value);
-        Ok(headers)
+        // The error never echoes the key.
+        headers(&self.key).map_err(Failure::fatal)
     }
 }
 
-impl<W: Wait> Transcriber for OpenAiCompat<W> {
+impl<W: Wait> Transcriber for OpenRouter<W> {
     async fn transcribe(&self, audio: &Audio) -> Result<String, TranscribeError> {
         self.transcribe_verbose(audio).await.map(|t| t.text)
     }
@@ -340,9 +397,9 @@ impl<W: Wait> Transcriber for OpenAiCompat<W> {
     }
 }
 
-impl<W> std::fmt::Debug for OpenAiCompat<W> {
+impl<W> std::fmt::Debug for OpenRouter<W> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpenAiCompat")
+        f.debug_struct("OpenRouter")
             .field("endpoint", &self.endpoint)
             .field("config", &self.config)
             .field("key", &self.key)
@@ -387,7 +444,7 @@ impl Failure {
     }
 
     fn from_status(status: StatusCode, headers: &HeaderMap) -> Self {
-        // The body isn't used: a 401 from OpenAI echoes part of the key.
+        // The body isn't used: it could echo part of the key or the request.
         let retry_after = headers
             .get(RETRY_AFTER)
             .and_then(|v| v.to_str().ok())
@@ -396,7 +453,11 @@ impl Failure {
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
                 Self::fatal(TranscribeError::InvalidKey)
             }
+            StatusCode::PAYMENT_REQUIRED => Self::fatal(TranscribeError::OutOfCredits),
             StatusCode::TOO_MANY_REQUESTS => Self::retry(TranscribeError::RateLimited, retry_after),
+            // OpenRouter's "no endpoints found" for the model with this
+            // filter. Not retried: the same request gets the same answer.
+            StatusCode::NOT_FOUND => Self::fatal(TranscribeError::NoRoute),
             // Never followed (issue #76) and never retried: the same request
             // gets the same answer. Its own error, so the UI can say so (#86).
             s if s.is_redirection() => Self::fatal(TranscribeError::Redirected(s.as_u16())),
@@ -487,14 +548,74 @@ mod tests {
     use super::*;
 
     #[test]
-    fn presets_point_at_the_providers() {
-        assert_eq!(GROQ.base_url, "https://api.groq.com/openai/v1");
-        assert_eq!(GROQ.model, "whisper-large-v3-turbo");
-        assert_eq!(OPENAI.model, "whisper-1");
-        let config = Config::from_preset(GROQ);
-        assert_eq!(config.base_url, GROQ.base_url);
+    fn the_config_points_at_openrouter_with_the_catalog_default() {
+        let config = Config::openrouter();
+        assert_eq!(config.base_url, "https://openrouter.ai/api/v1");
+        assert_eq!(config.model, "openai/gpt-4o-mini-transcribe");
+        assert_eq!(config.privacy, PrivacyFilter::DenyDataCollection);
         assert_eq!(config.timeout, DEFAULT_TIMEOUT);
         assert_eq!(config.language, None);
+        assert_eq!(config.prompt, None);
+        // An id the catalog doesn't know gets the strictest filter.
+        assert_eq!(
+            Config::for_model("someone/new-model").privacy,
+            PrivacyFilter::ZeroDataRetention
+        );
+    }
+
+    #[test]
+    fn base64_matches_rfc_4648() {
+        for (input, encoded) in [
+            (&b""[..], ""),
+            (b"f", "Zg=="),
+            (b"fo", "Zm8="),
+            (b"foo", "Zm9v"),
+            (b"foob", "Zm9vYg=="),
+            (b"fooba", "Zm9vYmE="),
+            (b"foobar", "Zm9vYmFy"),
+            (&[0xff, 0xfe, 0x00], "//4A"),
+        ] {
+            assert_eq!(base64(input), encoded, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn the_body_carries_the_filter_and_only_set_fields() {
+        let engine = OpenRouter::new(Config::openrouter(), Secret::new("k-1")).unwrap();
+        let body = engine.request_body("QUJD");
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "model": "openai/gpt-4o-mini-transcribe",
+                "input_audio": {"data": "QUJD", "format": "wav"},
+                "provider": {"data_collection": "deny"},
+            })
+        );
+        let config = Config {
+            language: Some("de".into()),
+            prompt: Some("Vocet".into()),
+            privacy: PrivacyFilter::ZeroDataRetention,
+            ..Config::openrouter()
+        };
+        let body = OpenRouter::new(config, Secret::new("k-1"))
+            .unwrap()
+            .request_body("QUJD");
+        assert_eq!(body["language"], "de");
+        assert_eq!(body["prompt"], "Vocet");
+        assert_eq!(
+            body["provider"],
+            serde_json::json!({"zdr": true, "data_collection": "deny"})
+        );
+    }
+
+    #[test]
+    fn every_request_carries_the_key_and_the_attribution() {
+        let headers = headers(&Secret::new("k-1234567890")).unwrap();
+        assert_eq!(headers["authorization"], "Bearer k-1234567890");
+        assert!(headers["authorization"].is_sensitive());
+        assert_eq!(headers["http-referer"], "https://vocetlabs.com");
+        assert_eq!(headers["x-title"], "Vocet");
+        assert_eq!(headers["content-type"], "application/json");
     }
 
     #[test]
@@ -510,15 +631,6 @@ mod tests {
         // No segments: nothing to judge by, so none.
         let t = parse(br#"{"text":"hi"}"#).unwrap().into_transcript();
         assert_eq!(t.no_speech_prob, None);
-    }
-
-    #[test]
-    fn each_provider_has_a_preset_with_its_default_model() {
-        for provider in Provider::ALL {
-            let preset = Preset::for_provider(provider);
-            assert_eq!(preset.name, provider.to_string());
-            assert_eq!(preset.model, provider.default_model());
-        }
     }
 
     #[test]
@@ -557,6 +669,13 @@ mod tests {
         assert_eq!((f.error, f.retryable), (TranscribeError::InvalidKey, false));
         let f = Failure::from_status(StatusCode::FORBIDDEN, &none);
         assert_eq!(f.error, TranscribeError::InvalidKey);
+        let f = Failure::from_status(StatusCode::PAYMENT_REQUIRED, &none);
+        assert_eq!(
+            (f.error, f.retryable),
+            (TranscribeError::OutOfCredits, false)
+        );
+        let f = Failure::from_status(StatusCode::NOT_FOUND, &none);
+        assert_eq!((f.error, f.retryable), (TranscribeError::NoRoute, false));
         let f = Failure::from_status(StatusCode::BAD_REQUEST, &none);
         assert!(!f.retryable);
         assert_eq!(
@@ -618,8 +737,7 @@ mod tests {
 
     #[test]
     fn debug_redacts_the_key() {
-        let engine =
-            OpenAiCompat::new(Config::from_preset(GROQ), Secret::new("k-1234567890")).unwrap();
+        let engine = OpenRouter::new(Config::openrouter(), Secret::new("k-1234567890")).unwrap();
         let shown = format!("{engine:?}");
         assert!(shown.contains("redacted"), "{shown}");
         assert!(!shown.contains("k-1234567890"));
@@ -627,7 +745,7 @@ mod tests {
 
     #[test]
     fn a_key_that_cant_be_a_header_is_invalid_and_not_echoed() {
-        let engine = OpenAiCompat::new(Config::from_preset(GROQ), Secret::new("bad\nkey")).unwrap();
+        let engine = OpenRouter::new(Config::openrouter(), Secret::new("bad\nkey")).unwrap();
         let failure = engine.auth_header().unwrap_err();
         assert_eq!(failure.error, TranscribeError::InvalidKey);
         assert!(!failure.retryable);

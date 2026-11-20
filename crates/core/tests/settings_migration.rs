@@ -95,7 +95,6 @@ fn known() -> impl Strategy<Value = Known> {
         prop_oneof![
             "[a-z0-9.-]{1,40}",
             Just(cloud_models::DEFAULT_SPEECH.to_owned()),
-            Just(cloud_models::FALLBACK_SPEECH.to_owned()),
         ],
         proptest::option::of("[a-z]{2,3}"),
         prop_oneof![Just("RightAlt"), Just("Ctrl+Space"), Just("F5")],

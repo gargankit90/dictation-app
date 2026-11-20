@@ -5,7 +5,7 @@
 #![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
 
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
-use dictation_transcribe::openai_compat::{Config, GROQ, OpenAiCompat};
+use dictation_transcribe::openrouter::{Config, OpenRouter};
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -18,11 +18,11 @@ async fn error_for(status: u16, body: &str) -> TranscribeError {
         .respond_with(ResponseTemplate::new(status).set_body_string(body))
         .mount(&server)
         .await;
-    let mut config = Config::from_preset(GROQ);
+    let mut config = Config::openrouter();
     config.base_url = format!("{}/v1", server.uri());
     // No retries to wait for.
     config.retry.max_attempts = 1;
-    let engine = OpenAiCompat::new(config, Secret::new(KEY)).unwrap();
+    let engine = OpenRouter::new(config, Secret::new(KEY)).unwrap();
     let audio = Audio {
         sample_rate: 16_000,
         samples: vec![0.0; 1_600],

@@ -3,9 +3,10 @@
 #![forbid(unsafe_code)]
 
 pub mod check_key;
+pub mod cleanup;
 pub mod engine;
 mod http;
 pub mod local;
 pub mod mock;
 pub mod models;
-pub mod openai_compat;
+pub mod openrouter;

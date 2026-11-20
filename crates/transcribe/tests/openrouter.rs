@@ -1,4 +1,4 @@
-//! M3.2: `OpenAiCompat` against a wiremock server. No real provider, no
+//! M3.2: `OpenRouter` against a wiremock server. No real provider, no
 //! real key, and no real sleeping between retries (`RecordWait`).
 
 #![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use dictation_core::retry::RetryPolicy;
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
-use dictation_transcribe::openai_compat::{Config, MAX_RETRY_AFTER, OpenAiCompat, Wait};
+use dictation_transcribe::openrouter::{Config, MAX_RETRY_AFTER, OpenRouter, Wait};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -52,9 +52,11 @@ fn ms(n: u64) -> Duration {
 
 fn config(server: &MockServer) -> Config {
     Config {
-        base_url: format!("{}/openai/v1/", server.uri()),
-        model: "whisper-large-v3-turbo".into(),
+        base_url: format!("{}/api/v1/", server.uri()),
+        model: "openai/gpt-4o-mini-transcribe".into(),
         language: Some("en".into()),
+        prompt: None,
+        privacy: dictation_core::cloud_models::PrivacyFilter::DenyDataCollection,
         timeout: Duration::from_secs(5),
         timeout_grows_with_audio: false,
         long_clip: dictation_core::upload_limits::LONG_CLIP,
@@ -68,9 +70,9 @@ fn config(server: &MockServer) -> Config {
     }
 }
 
-fn engine(config: Config) -> (OpenAiCompat<RecordWait>, RecordWait) {
+fn engine(config: Config) -> (OpenRouter<RecordWait>, RecordWait) {
     let wait = RecordWait::default();
-    let engine = OpenAiCompat::with_wait(config, Secret::new(KEY), wait.clone(), 7).unwrap();
+    let engine = OpenRouter::with_wait(config, Secret::new(KEY), wait.clone(), 7).unwrap();
     (engine, wait)
 }
 
@@ -81,7 +83,7 @@ fn audio() -> Audio {
     }
 }
 
-const ENDPOINT: &str = "/openai/v1/audio/transcriptions";
+const ENDPOINT: &str = "/api/v1/audio/transcriptions";
 
 async fn mount(server: &MockServer, response: ResponseTemplate, times: Option<u64>) {
     let mock = Mock::given(method("POST"))
@@ -97,9 +99,9 @@ async fn requests(server: &MockServer) -> usize {
     server.received_requests().await.unwrap().len()
 }
 
-// Criterion 1.
+// Criterion 1 (Q2: a JSON body with the WAV in base64).
 #[tokio::test]
-async fn request_carries_file_model_language_and_format() {
+async fn request_carries_audio_model_language_and_filter() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path(ENDPOINT))
@@ -117,32 +119,20 @@ async fn request_carries_file_model_language_and_format() {
         .unwrap()
         .to_str()
         .unwrap();
-    assert!(
-        content_type.starts_with("multipart/form-data; boundary="),
-        "{content_type}"
+    assert_eq!(content_type, "application/json");
+    let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+    assert_eq!(body["model"], "openai/gpt-4o-mini-transcribe");
+    assert_eq!(body["language"], "en");
+    assert_eq!(body["input_audio"]["format"], "wav");
+    assert_eq!(
+        body["provider"],
+        serde_json::json!({"data_collection": "deny"})
     );
-    let body = String::from_utf8_lossy(&request.body);
-    for expected in [
-        r#"name="file"; filename="audio.wav""#,
-        "Content-Type: audio/wav",
-        "RIFF",
-        "WAVE",
-        r#"name="model""#,
-        "whisper-large-v3-turbo",
-        r#"name="language""#,
-        r#"name="response_format""#,
-        "verbose_json",
-    ] {
-        assert!(body.contains(expected), "body lacks {expected:?}");
-    }
-    // 1600 samples of 16-bit PCM plus the 44-byte header.
-    let wav_start = request.body.windows(4).position(|w| w == b"RIFF").unwrap();
-    let size = u32::from_le_bytes(
-        request.body[wav_start + 4..wav_start + 8]
-            .try_into()
-            .unwrap(),
-    );
-    assert_eq!(size, 36 + 3_200);
+    // 1600 samples of 16-bit PCM plus the 44-byte header: 3,244 bytes, so
+    // 4 * ceil(3244 / 3) base64 characters, starting with "RIFF".
+    let data = body["input_audio"]["data"].as_str().unwrap();
+    assert_eq!(data.len(), 4 * 3_244_usize.div_ceil(3));
+    assert!(data.starts_with("UklGR"), "RIFF");
 }
 
 #[tokio::test]
@@ -160,7 +150,8 @@ async fn no_language_field_without_a_language() {
     });
     engine.transcribe(&audio()).await.unwrap();
     let body = server.received_requests().await.unwrap()[0].body.clone();
-    assert!(!String::from_utf8_lossy(&body).contains(r#"name="language""#));
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(body.get("language").is_none(), "{body}");
 }
 
 // Criterion 2.
@@ -189,7 +180,7 @@ async fn success_parses_text_and_no_speech_prob() {
 #[tokio::test]
 async fn unauthorized_is_invalid_key_without_retrying() {
     let server = MockServer::start().await;
-    // OpenAI echoes part of the key in its 401 body.
+    // A 401 body may echo part of the key.
     let body =
         serde_json::json!({"error": {"message": format!("Incorrect API key provided: {KEY}")}});
     mount(

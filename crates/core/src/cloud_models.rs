@@ -1,6 +1,8 @@
 //! The cloud models the app uses through `OpenRouter` (Q2): data, not code
 //! paths, so a model that shuts down (`openai/gpt-4o-mini-transcribe` does on
-//! 2027-02-26) is replaced by editing this table.
+//! 2027-02-26) is replaced by editing this table. The planned replacement is
+//! `mistralai/voxtral-mini-3b-2507` (84.1 ZER with GLM cleanup); there is no
+//! automatic fallback between models.
 //!
 //! Facts come from `OpenRouter`'s public model and endpoint lists and the
 //! vendors' docs, read 2026-11-20 (the owner's `model-features.md`); scores
@@ -66,10 +68,6 @@ pub struct CloudModel {
 /// The speech model a new user gets.
 pub const DEFAULT_SPEECH: &str = "openai/gpt-4o-mini-transcribe";
 
-/// The speech model tried when [`DEFAULT_SPEECH`] has no eligible route or
-/// its provider fails (5xx), and its planned replacement.
-pub const FALLBACK_SPEECH: &str = "mistralai/voxtral-mini-3b-2507";
-
 /// The cleanup model.
 pub const DEFAULT_CLEANUP: &str = "z-ai/glm-5.3-flash";
 
@@ -86,17 +84,6 @@ pub const CATALOG: &[CloudModel] = &[
         prompt: true,
         // OpenRouter has no zero-retention route for OpenAI's own speech
         // models; OpenAI doesn't train on API data.
-        privacy: PrivacyFilter::DenyDataCollection,
-        low_reasoning: false,
-    },
-    CloudModel {
-        id: FALLBACK_SPEECH,
-        role: Role::Speech,
-        display_name: "Voxtral Mini 3B (Mistral)",
-        price_note: "about $0.06 per hour of audio (DeepInfra)",
-        languages: "English, Spanish, French, Portuguese, Hindi, German, Dutch, Italian",
-        shutdown: None,
-        prompt: false,
         privacy: PrivacyFilter::DenyDataCollection,
         low_reasoning: false,
     },
@@ -124,16 +111,6 @@ pub fn find(id: &str) -> Option<&'static CloudModel> {
 #[must_use]
 pub fn speech(id: &str) -> Option<&'static CloudModel> {
     find(id).filter(|model| model.role == Role::Speech)
-}
-
-/// The model tried after `id` has no eligible route or a provider error:
-/// [`FALLBACK_SPEECH`] for any other speech model, none for the fallback
-/// itself.
-#[must_use]
-pub fn speech_fallback(id: &str) -> Option<&'static CloudModel> {
-    (id != FALLBACK_SPEECH)
-        .then(|| speech(FALLBACK_SPEECH))
-        .flatten()
 }
 
 /// The default speech model's entry.
@@ -168,21 +145,6 @@ mod tests {
         assert_eq!(cleanup.privacy, PrivacyFilter::ZeroDataRetention);
         assert!(cleanup.privacy.zdr());
         assert!(cleanup.low_reasoning, "GLM reasons at max by default");
-    }
-
-    #[test]
-    fn criterion_1_voxtral_is_the_speech_fallback() {
-        let fallback = speech_fallback(DEFAULT_SPEECH).unwrap();
-        assert_eq!(fallback.id, "mistralai/voxtral-mini-3b-2507");
-        assert_eq!(fallback.role, Role::Speech);
-        assert!(!fallback.prompt, "OpenRouter ignores prompts for DeepInfra");
-        // The fallback has none of its own, so there is no loop.
-        assert_eq!(speech_fallback(FALLBACK_SPEECH), None);
-        // A model the catalog doesn't have still falls back.
-        assert_eq!(
-            speech_fallback("someone/new-model").map(|m| m.id),
-            Some(FALLBACK_SPEECH)
-        );
     }
 
     #[test]

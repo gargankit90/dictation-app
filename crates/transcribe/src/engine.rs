@@ -1,8 +1,10 @@
 //! The engine the app dictates with, rebuilt from the user's settings.
 //!
-//! [`Engine::from_settings`] turns the saved [`Settings`] (provider, model,
-//! language) and the provider's API key into an [`OpenAiCompat`] engine with
-//! the default [`RetryPolicy`](dictation_core::retry::RetryPolicy). When there
+//! [`Engine::from_settings`] turns the saved [`Settings`] (speech model,
+//! language) and the `OpenRouter` API key into a [`Remote`] engine: the
+//! [`OpenRouter`] speech engine with the default
+//! [`RetryPolicy`](dictation_core::retry::RetryPolicy), and the
+//! [`OpenRouterCleanup`] pass after it (Q2). When there
 //! is no key (or the keychain can't be read) the engine is
 //! [`Engine::Unavailable`]: every dictation fails at once with the reason,
 //! which reaches the user, instead of the app failing to start or sending a
@@ -15,30 +17,45 @@
 //! [`Transcribers`] is the handle the pipeline owns: a [`Transcriber`] that
 //! forwards to whichever engine is current, so saving settings or a new key
 //! swaps the engine without restarting the pipeline. A transcription already
-//! running finishes with the engine it started with.
+//! running finishes with the engine it started with. It is also the
+//! pipeline's [`Cleaner`]: the current engine's cleanup, or
+//! [`CleanupError::Off`] for the mock and on-device engines.
 //!
 //! Privacy: the key is read from the [`SecretStore`] by the caller and only
-//! ever handed to [`OpenAiCompat`] (its `Authorization` header). Nothing here
-//! logs or returns it.
+//! ever handed to the `OpenRouter` clients (their `Authorization` header).
+//! Nothing here logs or returns it.
 
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use dictation_core::settings::Settings;
 use dictation_core::text::Transcript;
-use dictation_ports::{Audio, Secret, SecretError, TranscribeError, Transcriber};
+use dictation_ports::{
+    Audio, Cleaner, CleanupError, Secret, SecretError, TranscribeError, Transcriber,
+};
 
 use dictation_core::local_models::LocalModel;
 
+use crate::cleanup::OpenRouterCleanup;
 use crate::local::LocalTranscriber;
 use crate::mock::MockTranscriber;
-use crate::openai_compat::{Config, OpenAiCompat, Preset};
+use crate::openrouter::{BASE_URL, Config, OpenRouter};
+
+/// The cloud engine: speech, then cleanup.
+#[derive(Debug)]
+pub struct Remote {
+    /// Speech to text.
+    pub speech: OpenRouter,
+    /// The cleanup pass; `None` only if its HTTP client couldn't be built
+    /// (the raw transcript is pasted then).
+    pub cleanup: Option<OpenRouterCleanup>,
+}
 
 /// A speech-to-text engine the app can dictate with.
 pub enum Engine {
     /// Fixed text, no network (`--transcriber mock`).
     Mock(MockTranscriber),
-    /// Groq or OpenAI.
-    Remote(Box<OpenAiCompat>),
+    /// `OpenRouter`: speech and cleanup.
+    Remote(Box<Remote>),
     /// A downloaded model on this Mac (L1).
     Local(LocalTranscriber),
     /// No engine can be built; every dictation fails with this error.
@@ -78,14 +95,19 @@ impl Engine {
                 return Self::Unavailable(TranscribeError::KeychainUnavailable(error.to_string()));
             }
         };
-        let mut config = Config::from_preset(Preset::for_provider(settings.provider));
-        config.model.clone_from(&settings.model);
+        let mut config = Config::for_model(&settings.model);
         config.language.clone_from(&settings.language);
-        if let Some(base_url) = base_url {
-            base_url.clone_into(&mut config.base_url);
-        }
-        match OpenAiCompat::new(config, key) {
-            Ok(engine) => Self::Remote(Box::new(engine)),
+        let base_url = base_url.unwrap_or(BASE_URL);
+        base_url.clone_into(&mut config.base_url);
+        let cleanup = match OpenRouterCleanup::at(base_url, key.clone()) {
+            Ok(cleanup) => Some(cleanup),
+            Err(error) => {
+                tracing::warn!(%error, "cleanup is unavailable; pasting raw transcripts");
+                None
+            }
+        };
+        match OpenRouter::new(config, key) {
+            Ok(speech) => Self::Remote(Box::new(Remote { speech, cleanup })),
             Err(error) => Self::Unavailable(error),
         }
     }
@@ -118,7 +140,7 @@ impl Transcriber for Engine {
     async fn transcribe(&self, audio: &Audio) -> Result<String, TranscribeError> {
         match self {
             Self::Mock(engine) => engine.transcribe(audio).await,
-            Self::Remote(engine) => engine.transcribe(audio).await,
+            Self::Remote(engine) => engine.speech.transcribe(audio).await,
             Self::Local(engine) => engine.transcribe(audio).await,
             Self::Unavailable(error) => Err(error.clone()),
         }
@@ -129,9 +151,28 @@ impl Transcriber for Engine {
     async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
         match self {
             Self::Mock(engine) => engine.transcribe_detailed(audio).await,
-            Self::Remote(engine) => engine.transcribe_detailed(audio).await,
+            Self::Remote(engine) => engine.speech.transcribe_detailed(audio).await,
             Self::Local(engine) => engine.transcribe_detailed(audio).await,
             Self::Unavailable(error) => Err(error.clone()),
+        }
+    }
+}
+
+impl Cleaner for Engine {
+    async fn clean(&self, text: &str) -> Result<String, CleanupError> {
+        match self {
+            Self::Remote(engine) => match &engine.cleanup {
+                Some(cleanup) => cleanup.clean(text).await,
+                None => Err(CleanupError::Network),
+            },
+            // No key, or the keychain refused: the cloud engine is what
+            // would clean, and it can't.
+            Self::Unavailable(
+                TranscribeError::MissingKey
+                | TranscribeError::KeyPending
+                | TranscribeError::KeychainUnavailable(_),
+            ) => Err(CleanupError::NoKey),
+            Self::Mock(_) | Self::Local(_) | Self::Unavailable(_) => Err(CleanupError::Off),
         }
     }
 }
@@ -285,6 +326,16 @@ impl Transcriber for Transcribers {
     async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
         let engine = self.engine_for_dictation().await;
         engine.transcribe_detailed(audio).await
+    }
+}
+
+impl Cleaner for Transcribers {
+    async fn clean(&self, text: &str) -> Result<String, CleanupError> {
+        // The engine the dictation transcribed with is current, unless the
+        // settings changed in between; either way never a lock across the
+        // await.
+        let engine = self.snapshot();
+        engine.clean(text).await
     }
 }
 

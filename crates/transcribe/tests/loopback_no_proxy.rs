@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use dictation_ports::{Audio, Secret, Transcriber};
 use dictation_transcribe::check_key::check_key;
-use dictation_transcribe::openai_compat::{Config, GROQ, OpenAiCompat};
+use dictation_transcribe::openrouter::{Config, OpenRouter};
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -94,12 +94,12 @@ async fn child_sends_through_the_loopback_override() {
         )
         .mount(&provider)
         .await;
-    let mut config = Config::from_preset(GROQ);
+    let mut config = Config::openrouter();
     // MockServer::uri() is http://127.0.0.1:<port>, a loopback override.
     config.base_url = format!("{}/v1", provider.uri());
     config.timeout = Duration::from_secs(5);
 
-    let engine = OpenAiCompat::new(config.clone(), Secret::new(KEY)).unwrap();
+    let engine = OpenRouter::new(config.clone(), Secret::new(KEY)).unwrap();
     let audio = Audio {
         sample_rate: 16_000,
         samples: vec![0.0; 1_600],

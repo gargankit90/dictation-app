@@ -1,12 +1,10 @@
 //! [`check_key`]: does this API key work with this provider?
 //!
-//! The cheapest call that proves a key is the one dictation makes: a short
-//! silent clip sent through [`OpenAiCompat`]. Unlike `GET /models` it also
-//! shows that the key may use the transcription endpoint and the model
-//! (OpenAI keys can be restricted to some endpoints, which `/models`
-//! wouldn't notice). It costs next to nothing: 0.25 s of audio, which Groq
-//! bills as its 10 s minimum (a fraction of a cent) and OpenAI bills as a
-//! quarter of a second. Nothing is retried, so a button press gets its
+//! The call that proves a key is the one dictation makes: a short silent
+//! clip sent through [`OpenRouter`] with the dictation model and its privacy
+//! filter. Unlike `GET /key` it also shows that the account has credits and
+//! that a provider takes the request with the filter. It costs next to
+//! nothing: 0.25 s of audio. Nothing is retried, so a button press gets its
 //! answer in one round trip, not after three.
 //!
 //! The key goes only into the request's `Authorization` header, as for
@@ -18,7 +16,7 @@ use std::time::Duration;
 use dictation_core::retry::RetryPolicy;
 use dictation_ports::{Audio, Secret, TranscribeError};
 
-use crate::openai_compat::{Config, OpenAiCompat};
+use crate::openrouter::{Config, OpenRouter};
 
 /// How long the test clip lasts. Providers reject clips under 0.1 s.
 const CLIP: Duration = Duration::from_millis(250);
@@ -38,7 +36,9 @@ pub const TIMEOUT: Duration = Duration::from_secs(15);
 /// # Errors
 ///
 /// [`TranscribeError::InvalidKey`] if the provider rejects the key (401 or
-/// 403), [`TranscribeError::RateLimited`] for a 429,
+/// 403), [`TranscribeError::OutOfCredits`] for a 402,
+/// [`TranscribeError::NoRoute`] for a 404, [`TranscribeError::RateLimited`]
+/// for a 429,
 /// [`TranscribeError::Timeout`] or [`TranscribeError::Network`] if it can't
 /// be reached, and [`TranscribeError::Engine`] for a server error or any
 /// other reply.
@@ -57,7 +57,7 @@ pub async fn check_key_within(
     key: Secret,
     timeout: Duration,
 ) -> Result<(), TranscribeError> {
-    let engine = OpenAiCompat::new(check_config(config, timeout), key)?;
+    let engine = OpenRouter::new(check_config(config, timeout), key)?;
     engine.transcribe_verbose(&clip()).await.map(|_| ())
 }
 
@@ -93,22 +93,21 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
-    use crate::openai_compat::GROQ;
 
     /// Obviously fake.
     const KEY: &str = "test-key-NOT-REAL-check-1a2b3c";
 
     fn config(server: &MockServer) -> Config {
         Config {
-            base_url: format!("{}/openai/v1", server.uri()),
-            ..Config::from_preset(GROQ)
+            base_url: format!("{}/api/v1", server.uri()),
+            ..Config::openrouter()
         }
     }
 
     async fn serve(response: ResponseTemplate) -> MockServer {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/openai/v1/audio/transcriptions"))
+            .and(path("/api/v1/audio/transcriptions"))
             .and(header("authorization", format!("Bearer {KEY}").as_str()))
             .respond_with(response)
             .expect(1) // never retried
@@ -136,7 +135,7 @@ mod tests {
                 max_attempts: 5,
                 ..RetryPolicy::default()
             },
-            ..Config::from_preset(GROQ)
+            ..Config::openrouter()
         };
         let checked = check_config(dictation.clone(), TIMEOUT);
         assert_eq!(checked.language, None);
@@ -145,60 +144,38 @@ mod tests {
         // Everything else is the caller's.
         assert_eq!(checked.base_url, dictation.base_url);
         assert_eq!(checked.model, dictation.model);
+        assert_eq!(checked.privacy, dictation.privacy);
         assert_eq!(checked.retry.base_delay, dictation.retry.base_delay);
     }
 
     #[tokio::test]
     async fn a_good_key_succeeds_even_when_the_clip_has_no_words() {
-        let server = serve(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({"text": "", "segments": []})),
-        )
-        .await;
+        let server =
+            serve(ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": ""}))).await;
         assert_eq!(check_key(config(&server), Secret::new(KEY)).await, Ok(()));
     }
 
-    /// The parts of a multipart body: `(name, content)` in order.
-    fn parts(request: &wiremock::Request) -> Vec<(String, Vec<u8>)> {
-        let content_type = request
-            .headers
-            .get("content-type")
-            .unwrap()
-            .to_str()
-            .unwrap();
-        let boundary = content_type.split("boundary=").nth(1).unwrap();
-        let delimiter = format!("--{boundary}").into_bytes();
-        let body = &request.body;
-        let at = |from: usize, needle: &[u8]| {
-            body[from..]
-                .windows(needle.len())
-                .position(|w| w == needle)
-                .map(|i| from + i)
-        };
-        let mut parts = Vec::new();
-        let mut start = at(0, &delimiter).unwrap() + delimiter.len();
-        while let Some(next) = at(start, &delimiter) {
-            // `start` follows a delimiter: CRLF, headers, a blank line, then
-            // the content up to the CRLF before the next delimiter.
-            let part = &body[start + 2..next - 2];
-            let split = part.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-            let headers = String::from_utf8_lossy(&part[..split]);
-            let name = headers
-                .split("name=\"")
-                .nth(1)
-                .unwrap()
-                .split('"')
-                .next()
-                .unwrap();
-            parts.push((name.to_owned(), part[split + 4..].to_vec()));
-            start = next + delimiter.len();
+    /// Standard base64 back to bytes, for reading the upload.
+    fn unbase64(text: &str) -> Vec<u8> {
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut bits = 0u32;
+        let mut count = 0;
+        let mut out = Vec::new();
+        for c in text.bytes().filter(|&c| c != b'=') {
+            let value = ALPHABET.iter().position(|&a| a == c).unwrap() as u32;
+            bits = (bits << 6) | value;
+            count += 6;
+            if count >= 8 {
+                count -= 8;
+                out.push((bits >> count) as u8);
+            }
         }
-        parts
+        out
     }
 
     /// The upload is exactly what the provider needs to judge the key: 0.25 s
-    /// of 16 kHz mono 16-bit silence, the check's model and format, and no
-    /// language, even when the dictation is set to one.
+    /// of 16 kHz mono 16-bit silence, the check's model and privacy filter,
+    /// and no language, even when the dictation is set to one.
     #[tokio::test]
     async fn check_key_uploads_exactly_250ms_mono_silence() {
         let server =
@@ -211,17 +188,19 @@ mod tests {
         check_key(dictation, Secret::new(KEY)).await.unwrap();
         let requests = server.received_requests().await.unwrap();
         assert_eq!(requests.len(), 1);
-        let parts = parts(&requests[0]);
-        let names: Vec<&str> = parts.iter().map(|(name, _)| name.as_str()).collect();
-        assert_eq!(names, ["file", "model", "response_format"], "no language");
-        let text = |name: &str| {
-            let (_, content) = parts.iter().find(|(n, _)| n == name).unwrap();
-            String::from_utf8(content.clone()).unwrap()
-        };
-        assert_eq!(text("model"), "whisper-large-v3-turbo");
-        assert_eq!(text("response_format"), "verbose_json");
-
-        let (_, wav) = parts.iter().find(|(n, _)| n == "file").unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let mut fields: Vec<&str> = body
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        fields.sort_unstable();
+        assert_eq!(fields, ["input_audio", "model", "provider"], "no language");
+        assert_eq!(body["model"], "openai/gpt-4o-mini-transcribe");
+        assert_eq!(body["provider"]["data_collection"], "deny");
+        assert_eq!(body["input_audio"]["format"], "wav");
+        let wav = unbase64(body["input_audio"]["data"].as_str().unwrap());
         let mut reader = hound::WavReader::new(std::io::Cursor::new(wav)).unwrap();
         let spec = reader.spec();
         assert_eq!(spec.sample_rate, 16_000);
@@ -237,7 +216,9 @@ mod tests {
     async fn each_failure_maps_to_its_error_without_a_retry() {
         for (status, expected) in [
             (401, TranscribeError::InvalidKey),
+            (402, TranscribeError::OutOfCredits),
             (403, TranscribeError::InvalidKey),
+            (404, TranscribeError::NoRoute),
             (429, TranscribeError::RateLimited),
         ] {
             let server = serve(ResponseTemplate::new(status)).await;
@@ -263,8 +244,8 @@ mod tests {
             .unwrap()
             .port();
         let config = Config {
-            base_url: format!("http://127.0.0.1:{port}/openai/v1"),
-            ..Config::from_preset(GROQ)
+            base_url: format!("http://127.0.0.1:{port}/api/v1"),
+            ..Config::openrouter()
         };
         let result = check_key(config, Secret::new(KEY)).await;
         assert!(
@@ -276,7 +257,7 @@ mod tests {
     #[tokio::test]
     async fn errors_never_contain_the_key() {
         let server = serve(
-            // OpenAI's 401 body echoes part of the key; it must stay unread.
+            // A 401 body may echo part of the key; it must stay unread.
             ResponseTemplate::new(401).set_body_string(format!("bad key {KEY}")),
         )
         .await;
