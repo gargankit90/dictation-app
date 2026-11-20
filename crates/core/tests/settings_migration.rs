@@ -5,6 +5,7 @@
 
 #![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
 
+use dictation_core::cloud_models;
 use dictation_core::settings::{CURRENT_VERSION, Provider, Settings, SettingsError, from_json};
 use proptest::prelude::*;
 use serde_json::{Map, Value, json};
@@ -42,9 +43,10 @@ fn v2_does_not_apply_v1_alias_migration() {
 #[test]
 fn versions_below_two_are_migrated_and_newer_ones_refused() {
     // 0 is older than 2, so it is treated like v1 and comes out as v2.
+    // Q2: the old provider name loads as OpenRouter.
     let settings = from_json(r#"{"version": 0, "engine": "openai"}"#).unwrap();
     assert_eq!(settings.version, CURRENT_VERSION);
-    assert_eq!(settings.provider, Provider::OpenAi);
+    assert_eq!(settings.provider, Provider::OpenRouter);
     for version in [3_u64, 4, u64::from(u32::MAX), u64::MAX] {
         assert_eq!(
             from_json(&format!(r#"{{"version": {version}}}"#)),
@@ -64,16 +66,19 @@ fn junk() -> impl Strategy<Value = Value> {
     ]
 }
 
-fn provider_name(provider: Provider) -> &'static str {
-    match provider {
-        Provider::Groq => "groq",
-        Provider::OpenAi => "openai",
+/// The model a file's `model` loads as (Q2): a catalog speech model is
+/// kept, anything else becomes the default.
+fn loaded_model(saved: &str) -> String {
+    match cloud_models::speech(saved) {
+        Some(model) => model.id.to_owned(),
+        None => cloud_models::DEFAULT_SPEECH.to_owned(),
     }
 }
 
 #[derive(Debug, Clone)]
 struct Known {
-    provider: Provider,
+    /// The saved provider name; every one loads as OpenRouter (Q2).
+    provider: &'static str,
     model: String,
     language: Option<String>,
     hotkey: &'static str,
@@ -81,8 +86,17 @@ struct Known {
 
 fn known() -> impl Strategy<Value = Known> {
     (
-        prop_oneof![Just(Provider::Groq), Just(Provider::OpenAi)],
-        "[a-z0-9.-]{1,40}",
+        prop_oneof![
+            Just("groq"),
+            Just("openai"),
+            Just("openrouter"),
+            Just("whisper.cpp")
+        ],
+        prop_oneof![
+            "[a-z0-9.-]{1,40}",
+            Just(cloud_models::DEFAULT_SPEECH.to_owned()),
+            Just(cloud_models::FALLBACK_SPEECH.to_owned()),
+        ],
         proptest::option::of("[a-z]{2,3}"),
         prop_oneof![Just("RightAlt"), Just("Ctrl+Space"), Just("F5")],
     )
@@ -97,8 +111,8 @@ fn known() -> impl Strategy<Value = Known> {
 fn expected(known: &Known) -> Settings {
     Settings {
         version: CURRENT_VERSION,
-        provider: known.provider,
-        model: known.model.clone(),
+        provider: Provider::OpenRouter,
+        model: loaded_model(&known.model),
         language: known.language.clone(),
         hotkey: known.hotkey.to_owned(),
         launch_at_login: false,
@@ -125,16 +139,15 @@ proptest! {
         if versioned {
             object.insert("version".into(), json!(1));
         }
-        object.insert("engine".into(), json!(provider_name(legacy.provider)));
+        object.insert("engine".into(), json!(legacy.provider));
         object.insert("whisper_model".into(), json!(legacy.model));
         object.insert("language".into(), json!(legacy.language.clone().unwrap_or_default()));
         object.insert("hotkey".into(), json!(legacy.hotkey));
         let mut want = expected(&legacy);
         if both_names {
-            object.insert("provider".into(), json!(provider_name(current.provider)));
+            object.insert("provider".into(), json!(current.provider));
             object.insert("model".into(), json!(current.model));
-            want.provider = current.provider;
-            want.model = current.model.clone();
+            want.model = loaded_model(&current.model);
         }
         for (key, value) in extras {
             // Unknown means unknown: skip names the format uses.
@@ -156,7 +169,7 @@ proptest! {
     ) {
         let mut object = Map::new();
         object.insert("version".into(), json!(2));
-        object.insert("provider".into(), json!(provider_name(v2.provider)));
+        object.insert("provider".into(), json!(v2.provider));
         object.insert("model".into(), json!(v2.model));
         object.insert("hotkey".into(), json!(v2.hotkey));
         match &v2.language {
@@ -172,10 +185,11 @@ proptest! {
         prop_assert_eq!(from_json(&Value::Object(object).to_string()).unwrap(), expected(&v2));
     }
 
-    // A wrong-typed known field is an error, never a silent default.
+    // A wrong-typed known field is an error, never a silent default. Not
+    // `provider`: since Q2 any saved provider value loads as OpenRouter.
     #[test]
     fn wrong_typed_known_fields_are_malformed(
-        field in prop_oneof![Just("provider"), Just("model"), Just("hotkey")],
+        field in prop_oneof![Just("model"), Just("hotkey")],
         version in 1_u32..=2,
         wrong in prop_oneof![Just(json!(7)), Just(json!(["x"])), Just(json!({"a": 1})), Just(json!(true))],
     ) {

@@ -23,7 +23,7 @@ pub struct Entry {
     pub text: String,
     /// When it finished, in milliseconds since the Unix epoch.
     pub created_at: u64,
-    /// The engine's display name ("Groq", "On this Mac (Parakeet English)").
+    /// The engine's display name ("OpenRouter", "On this Mac (Parakeet English)").
     pub engine: String,
     /// Whether the paste worked.
     pub pasted: bool,
@@ -99,7 +99,7 @@ mod tests {
             id,
             text: text.to_owned(),
             created_at: id,
-            engine: "Groq".to_owned(),
+            engine: "OpenRouter".to_owned(),
             pasted: true,
         }
     }
@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn criterion_4_an_unknown_field_does_not_survive_a_rewrite() {
         let json = r#"{"version":1,"entries":[{"id":1,"text":"words","created_at":1,
-            "engine":"Groq","pasted":true,"app":"com.example.Mail"}]}"#;
+            "engine":"OpenRouter","pasted":true,"app":"com.example.Mail"}]}"#;
         let rewritten = to_json(&from_json(json).unwrap()).unwrap();
         assert!(!rewritten.contains("com.example.Mail"), "{rewritten}");
     }

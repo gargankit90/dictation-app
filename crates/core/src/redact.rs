@@ -37,8 +37,9 @@ impl fmt::Debug for Hidden<'_> {
     }
 }
 
-/// The prefixes of the API keys we know (Groq `gsk_…`, `OpenAI` `sk-…`,
-/// including `sk-proj-…`).
+/// The prefixes of the API keys we know: `OpenRouter`'s `sk-or-…` (and any
+/// other `sk-…`), plus `gsk_…`, the shape of keys earlier builds stored, in
+/// case one is pasted into a report.
 const KEY_PREFIXES: [&str; 2] = ["gsk_", "sk-"];
 
 /// A key has at least this many characters after its prefix; shorter
@@ -79,7 +80,7 @@ pub fn register_secret(secret: &str) {
 }
 
 /// `text` with every API key replaced by [`KEY_PLACEHOLDER`]: tokens that
-/// look like a Groq or `OpenAI` key, whatever follows `Bearer `, and any key
+/// look like an API key (see `KEY_PREFIXES`), whatever follows `Bearer `, and any key
 /// given to [`register_secret`]. Borrows when there is nothing to hide.
 #[must_use]
 pub fn secrets(text: &str) -> Cow<'_, str> {

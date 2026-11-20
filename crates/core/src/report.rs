@@ -216,7 +216,7 @@ mod tests {
             microphone: Access::Denied,
             accessibility: Access::Granted,
             hotkey: "RightAlt",
-            engine: EngineInfo::Cloud(Provider::Groq),
+            engine: EngineInfo::Cloud(Provider::OpenRouter),
             engine_ready: Some(true),
             errors,
             analytics_on: true,
@@ -295,7 +295,7 @@ mod tests {
             ]
         );
         assert!(text.contains("microphone: denied"), "{text}");
-        assert!(text.contains("engine: cloud (groq)"), "{text}");
+        assert!(text.contains("engine: cloud (openrouter)"), "{text}");
         assert!(text.contains("  - 2026-11-03T"), "{text}");
         assert!(text.contains("mic_denied"), "{text}");
     }
