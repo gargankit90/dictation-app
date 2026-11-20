@@ -115,7 +115,8 @@ class Runners(unittest.TestCase):
             self.assertNotIn(SECRET_BODY, stream)
 
     def rows(self, label):
-        return list(csv.DictReader(open(self.tmp / label / "harness_results.csv", newline="")))
+        with open(self.tmp / label / "harness_results.csv", newline="") as f:
+            return list(csv.DictReader(f))
 
     def test_part_b(self):
         p = self.run_b()
@@ -161,11 +162,11 @@ class Runners(unittest.TestCase):
         self.assertEqual(Fake.calls, [])
 
     def test_part_b_stops_before_cap(self):
-        (self.tmp / "budget.jsonl").write_text(json.dumps({"microdollars": 1_999_990, "tag": "x"}) + "\n")
+        (self.tmp / "budget.jsonl").write_text(json.dumps({"microdollars": 2_999_990, "tag": "x"}) + "\n")
         p = self.run_b("--model", "voxtral_small_chat")
         self.assertClean(p)
         self.assertEqual(Fake.calls, [])
-        self.assertIn("would pass the $2.00 cap", p.stdout)
+        self.assertIn("would pass the $3.00 cap", p.stdout)
 
     def test_part_b_bad_key_stops_everything(self):
         p = self.run_b("--model", "voxtral_small_chat", "--model", "mimo_v25", key="wrong-key-also-secret")
@@ -174,38 +175,51 @@ class Runners(unittest.TestCase):
         self.assertIn("HTTP 401", p.stdout)
         self.assertLessEqual(len(Fake.calls), 2)
 
+    def run_a(self, *extra):
+        return subprocess.run([sys.executable, str(HERE / "run_matrix.py"), "--base-url", self.base,
+                               "--results-dir", str(self.tmp), *extra], capture_output=True, text=True,
+                              env=self.env, timeout=300)
+
     def test_part_a(self):
-        p = subprocess.run([sys.executable, str(HERE / "run_two_pass.py"), "mini", "--base-url", self.base,
-                            "--results-dir", str(self.tmp)], capture_output=True, text=True, env=self.env,
-                           timeout=300)
+        p = self.run_a("--only", "oruk_dev__glm_v4", "--only", "voxtral_mini__sol_v4")
         self.assertClean(p)
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-        src = HERE / "input/mistralai__voxtral-mini-3b-2507/harness_results.csv"
-        distinct = len({r["transcript"] for r in csv.DictReader(open(src, newline=""))})
-        self.assertEqual(len(Fake.calls), distinct)  # one duplicate transcript is asked once
-        c = Fake.calls[0]
-        self.assertEqual((c["model"], c["reasoning"], c["usage"]),
-                         ("openai/gpt-6.2-sol", {"effort": "low", "exclude": True}, {"include": True}))
-        rows = list(csv.DictReader(open(self.tmp / "mini_sol_v4" / "results.csv", newline="")))
+        distinct = 0
+        for d in ("ondevice_oruk", "mistralai__voxtral-mini-3b-2507"):
+            src = HERE / "input" / d / "harness_results.csv"
+            distinct += len({r["transcript"] for r in csv.DictReader(open(src, newline=""))})
+        self.assertEqual(len(Fake.calls), distinct)  # a duplicate transcript is asked once
+        self.assertEqual({c["model"] for c in Fake.calls}, {"z-ai/glm-5.3-flash", "openai/gpt-6.2-sol"})
+        self.assertEqual({json.dumps(c["reasoning"]) for c in Fake.calls}, {json.dumps({"effort": "low", "exclude": True})})
+        self.assertEqual({json.dumps(c["usage"]) for c in Fake.calls}, {json.dumps({"include": True})})
+        with open(self.tmp / "oruk_dev__glm_v4" / "results.csv", newline="") as f:
+            rows = list(csv.DictReader(f))
         self.assertEqual(len(rows), 151)
-        self.assertEqual({r["cleanup_model"] for r in rows}, {"openai/gpt-6.2-sol"})
+        self.assertEqual({r["cleanup_model"] for r in rows}, {"z-ai/glm-5.3-flash"})
+        with open(self.tmp / "oruk_dev__glm_v4" / "cleanup.jsonl") as f:
+            self.assertEqual({json.loads(l)["served_by"] for l in f}, {"FakeProvider"})
         self.assertAlmostEqual(ledger_usd(self.tmp / "budget.jsonl"), distinct * COST, places=6)
-        # Rerun: all cached.
-        Fake.calls.clear()
-        p = subprocess.run([sys.executable, str(HERE / "run_two_pass.py"), "mini", "--base-url", self.base,
-                            "--results-dir", str(self.tmp)], capture_output=True, text=True, env=self.env,
-                           timeout=300)
+        Fake.calls.clear()  # rerun: all cached
+        p = self.run_a("--only", "oruk_dev__glm_v4", "--only", "voxtral_mini__sol_v4")
         self.assertEqual(p.returncode, 0)
         self.assertEqual(Fake.calls, [])
 
-    def test_part_a_sub_cap(self):
-        p = subprocess.run([sys.executable, str(HERE / "run_two_pass.py"), "mini", "--base-url", self.base,
-                            "--results-dir", str(self.tmp), "--run-cap", "0.05"], capture_output=True, text=True,
-                           env=self.env, timeout=300)
+    def test_part_a_lanes_cover_the_plan_once(self):
+        sys.path.insert(0, str(HERE))
+        import run_matrix
+        lanes = [[c for k, c in enumerate(run_matrix.PLAN) if k % 3 == i] for i in range(3)]
+        self.assertEqual(sorted(sum(lanes, [])), sorted(run_matrix.PLAN))
+        self.assertEqual(len(set(run_matrix.PLAN)), len(run_matrix.PLAN))
+        self.assertNotIn(("nemotron", "sol"), run_matrix.PLAN)
+        self.assertEqual(run_matrix.PLAN[0], ("nemotron", "glm"))
+
+    def test_part_a_stops_before_cap(self):
+        (self.tmp / "budget.jsonl").write_text(json.dumps({"microdollars": 2_999_999, "tag": "x"}) + "\n")
+        p = self.run_a("--only", "nemotron__glm_v4")
         self.assertClean(p)
         self.assertNotEqual(p.returncode, 0)
-        self.assertIn("sub-cap", p.stderr + p.stdout)
-        self.assertLess(len(Fake.calls), 151)
+        self.assertEqual(Fake.calls, [])
+        self.assertIn("cap", p.stderr + p.stdout)
 
 
 if __name__ == "__main__":

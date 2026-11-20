@@ -12,6 +12,10 @@ extend-exclude = [
     "THIRD-PARTY-LICENSES.txt",
     # Benchmark output: transcripts keep the speech engine's misheard words as data.
     "eval/voicearena/results/",
+    # The same, for the Voxtral / audio-LLM experiment (eval/voxtral-omni).
+    "eval/voxtral-omni/input/",
+    "eval/voxtral-omni/results/",
+    "eval/voxtral-omni/results-local/",
 ]
 
 [default]

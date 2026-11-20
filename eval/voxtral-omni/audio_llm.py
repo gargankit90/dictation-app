@@ -27,7 +27,7 @@ an error records only the HTTP status. From a reply only the text, finish reason
 usage numbers are kept. Audio is read from the git-ignored eval/voicearena/clips/ and never written.
 
 Budget: every request reserves a worst-case price in the shared ledger (budget.py, results/
-budget.jsonl, $2.00 for parts A and B together) before it is sent and settles to usage.cost after.
+budget.jsonl, $3.00 for parts A and B together) before it is sent and settles to usage.cost after.
 Each model also has a sub-cap; after 3 paid clips a model stops when its projected spend would pass
 it. HTTP 429 is retried with Retry-After or exponential backoff; a model stops after 3 clips in a row
 that still got 429, and on 404 (no route, e.g. the account's data policy excludes a free endpoint).
@@ -72,7 +72,7 @@ RATE = 16_000
 DEFAULT_BASE = "https://openrouter.ai/api/v1"
 CLIPS = HERE.parent / "voicearena" / "clips"
 RESULTS = HERE / "results"
-CAP_USD = 2.00
+CAP_USD = budget.CAP_USD
 MODES = {"plain": HERE / "prompts" / "audio_plain.txt", "onepass": HERE / "prompts" / "audio_onepass_v4.txt"}
 OFF = {"enabled": False}
 FALLBACK = {"effort": "low", "exclude": True}

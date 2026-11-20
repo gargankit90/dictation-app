@@ -1,4 +1,7 @@
-"""Offline LLM cleanup of saved Whisper text: raw text -> prompt + model -> the app's guard -> a
+"""(Copied from eval/cleanup-offline, PR #327; one change: OpenRouter replies also record the
+provider that served them, as `served_by`.)
+
+Offline LLM cleanup of saved Whisper text: raw text -> prompt + model -> the app's guard -> a
 harness-format results CSV that the judges (eval/voicearena/score_claude_cli.py, score_codex_cli.py)
 score unchanged.
 
@@ -179,9 +182,11 @@ def ask_chat(raw: str, model: str, prompt: str, base_url: str, key: str, timeout
     text = guard.parse_reply(body)
     if text is None:
         raise Failed("bad_reply")
-    usage = {}
+    usage, served_by = {}, ""
     try:
-        usage = json.loads(body).get("usage") or {}
+        parsed = json.loads(body)
+        usage = parsed.get("usage") or {}
+        served_by = parsed.get("provider") if isinstance(parsed.get("provider"), str) else ""
     except ValueError:
         pass
     kept = {k: usage.get(k) for k in ("prompt_tokens", "completion_tokens")}
@@ -189,6 +194,8 @@ def ask_chat(raw: str, model: str, prompt: str, base_url: str, key: str, timeout
         kept["cost"] = usage.get("cost")
         details = usage.get("completion_tokens_details") or {}
         kept["reasoning_tokens"] = details.get("reasoning_tokens")
+    if provider == "openrouter":  # eval/voxtral-omni addition: which provider OpenRouter routed to
+        return {"content": text, "usage": kept, "served_by": served_by}
     return {"content": text, "usage": kept}
 
 

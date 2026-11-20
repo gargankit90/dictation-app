@@ -19,6 +19,10 @@ import os
 import pathlib
 
 
+# The owner's cap for the whole task: parts A (the engine x cleanup matrix) and B together.
+CAP_USD = 3.00
+
+
 class OverBudget(RuntimeError):
     pass
 
