@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use dictation_core::coordinator::Phase;
 use dictation_ports::{
-    DurationBucket, EngineKind, ErrorReporter, ErrorType, Event, LatencyBucket, NoErrorReporter,
-    Telemetry,
+    CleanupOutcome, DurationBucket, EngineKind, ErrorReporter, ErrorType, Event, LatencyBucket,
+    NoErrorReporter, Telemetry,
 };
 
 use crate::pipeline::UiEvent;
@@ -67,6 +67,8 @@ pub struct UsageTracker {
     /// The transcription's latency, once it ended; set while a paste may
     /// still fail.
     transcribed: Option<Duration>,
+    /// What the cleanup did for this dictation, if one ran (Q2).
+    cleanup: Option<CleanupOutcome>,
 }
 
 impl UsageTracker {
@@ -81,6 +83,7 @@ impl UsageTracker {
             recorded: None,
             transcribing_since: None,
             transcribed: None,
+            cleanup: None,
         }
     }
 
@@ -122,6 +125,7 @@ impl UsageTracker {
                         engine_kind: self.engine,
                         duration_bucket: DurationBucket::of(recorded),
                         latency_bucket: LatencyBucket::of(latency),
+                        cleanup: self.cleanup,
                     });
                 }
                 self.reset();
@@ -133,6 +137,7 @@ impl UsageTracker {
                 self.reporter.report(error);
                 self.reset();
             }
+            UiEvent::Cleanup(outcome) => self.cleanup = Some(*outcome),
             // Not a failure and not a dictation: nothing to count (H2).
             UiEvent::HotkeyRestored | UiEvent::NoSound => {}
         }
@@ -143,6 +148,7 @@ impl UsageTracker {
         self.recorded = None;
         self.transcribing_since = None;
         self.transcribed = None;
+        self.cleanup = None;
     }
 }
 
@@ -224,8 +230,34 @@ mod tests {
                 engine_kind: EngineKind::Cloud,
                 duration_bucket: DurationBucket::From2To5s,
                 latency_bucket: LatencyBucket::From500To1000ms,
+                cleanup: None,
             }]
         );
+    }
+
+    /// Q2: the cleanup outcome rides on the dictation it belongs to, and
+    /// only that one.
+    #[test]
+    fn q2_the_cleanup_outcome_is_on_its_dictation_only() {
+        let (mut t, fake) = tracker();
+        for (outcome, at) in [(Some(CleanupOutcome::FallbackTimeout), 10), (None, 20)] {
+            phase(&mut t, Phase::Recording, secs(at));
+            phase(&mut t, Phase::Transcribing, secs(at + 1));
+            if let Some(outcome) = outcome {
+                t.on_event(&UiEvent::Cleanup(outcome), secs(at + 2));
+            }
+            phase(&mut t, Phase::Inserting, secs(at + 2));
+            phase(&mut t, Phase::Idle, secs(at + 3));
+        }
+        let cleanups: Vec<_> = fake
+            .events()
+            .into_iter()
+            .map(|event| match event {
+                Event::DictationFinished { cleanup, .. } => cleanup,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(cleanups, [Some(CleanupOutcome::FallbackTimeout), None]);
     }
 
     #[test]

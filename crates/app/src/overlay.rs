@@ -171,7 +171,8 @@ impl OverlayModel {
                 });
             }
             UiEvent::HotkeyRestored if self.hotkey_error => OverlayView::Hidden,
-            UiEvent::HotkeyRestored => return None,
+            // For the usage events only; the pill doesn't change.
+            UiEvent::HotkeyRestored | UiEvent::Cleanup(_) => return None,
             UiEvent::Error(error) => {
                 // Always a change, even with the same text: it restarts the
                 // timer.
@@ -742,7 +743,7 @@ mod tests {
     #[test]
     fn an_error_message_never_carries_a_key() {
         let mut model = OverlayModel::default();
-        let key = "gsk_abcdefghijklmnop1234567890";
+        let key = "sk-or-abcdefghijklmnop1234567890";
         let change = model
             .on_event(&UiEvent::Error(DictationError::TranscriptionFailed {
                 reason: format!("401 Unauthorized for key {key}"),

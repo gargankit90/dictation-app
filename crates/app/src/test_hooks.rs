@@ -10,7 +10,7 @@
 //! keys.
 //!
 //! `--debug-set-api-key-stdin` and `--debug-delete-api-key` store and remove
-//! the Groq API key through the same [`Config`] the Settings window uses
+//! the OpenRouter API key through the same [`Config`] the Settings window uses
 //! ([`KeyCommand`], [`run_key_command`]), so a test makes the app itself the
 //! keychain item's owner. An item made by another tool (`security`) isn't
 //! trusted by the app, and macOS asks the user before the app may read it.
@@ -39,10 +39,10 @@ pub const DEBUG_SAVE_AUDIO_FLAG: &str = "--debug-save-audio";
 /// `--debug-fail-paste`: every paste fails, for U7's "Not pasted" entries.
 pub const DEBUG_FAIL_PASTE_FLAG: &str = "--debug-fail-paste";
 
-/// `--debug-set-api-key-stdin`: store the Groq API key read from stdin (never
+/// `--debug-set-api-key-stdin`: store the OpenRouter API key read from stdin (never
 /// an argument, which any local process can read) and exit.
 pub const DEBUG_SET_API_KEY_FLAG: &str = "--debug-set-api-key-stdin";
-/// `--debug-delete-api-key`: remove the Groq API key and exit.
+/// `--debug-delete-api-key`: remove the OpenRouter API key and exit.
 pub const DEBUG_DELETE_API_KEY_FLAG: &str = "--debug-delete-api-key";
 
 /// `--debug-launch-at-login-on`, `-off` and `-status`: set or print the login
@@ -136,7 +136,7 @@ impl KeyCommand {
     }
 }
 
-/// Does `command` for [`Provider::Groq`] through `config`, the way the
+/// Does `command` for [`Provider::OpenRouter`] through `config`, the way the
 /// Settings window would: `Set` reads the key from `stdin` and stores it
 /// ([`Config::set_api_key`], which trims and validates it), `Delete` removes
 /// it. Returns what to tell the user, which never holds the key.
@@ -162,12 +162,12 @@ pub fn run_key_command<S: SecretStore>(
             let key = String::from_utf8(input)
                 .map_err(|_| "the key on stdin is not valid UTF-8".to_owned())?;
             config
-                .set_api_key(Provider::Groq, &key)
+                .set_api_key(Provider::OpenRouter, &key)
                 .map(|()| "API key stored")
                 .map_err(|error| error.to_string())
         }
         KeyCommand::Delete => config
-            .delete_api_key(Provider::Groq)
+            .delete_api_key(Provider::OpenRouter)
             .map(|()| "API key deleted")
             .map_err(|error| error.to_string()),
     }
@@ -754,7 +754,7 @@ mod tests {
         assert_eq!(rx.try_iter().collect::<Vec<_>>(), [Pressed]);
     }
 
-    const DUMMY_KEY: &str = "gsk_dummy_not_a_real_key_0123456789";
+    const DUMMY_KEY: &str = "sk-or-dummy-not-a-real-key-0123456789";
 
     fn key_config() -> (Config<MemSecretStore>, MemSecretStore) {
         let secrets = MemSecretStore::new();
@@ -763,7 +763,7 @@ mod tests {
 
     fn stored(secrets: &MemSecretStore) -> Option<String> {
         secrets
-            .get("groq-api-key")
+            .get("openrouter-api-key")
             .unwrap()
             .map(|secret| secret.expose().to_owned())
     }
@@ -797,7 +797,7 @@ mod tests {
     #[test]
     fn set_replaces_an_earlier_key() {
         let (config, secrets) = key_config();
-        run_key_command(KeyCommand::Set, &config, "gsk_first".as_bytes()).unwrap();
+        run_key_command(KeyCommand::Set, &config, "sk-or-first".as_bytes()).unwrap();
         run_key_command(KeyCommand::Set, &config, DUMMY_KEY.as_bytes()).unwrap();
         assert_eq!(stored(&secrets).as_deref(), Some(DUMMY_KEY));
     }

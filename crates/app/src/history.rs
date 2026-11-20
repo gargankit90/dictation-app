@@ -504,7 +504,7 @@ mod tests {
 
     fn fill(history: &History, count: usize) {
         for n in 0..count {
-            history.record(&format!("dictation {n}"), "Groq", true);
+            history.record(&format!("dictation {n}"), "OpenRouter", true);
         }
     }
 
@@ -538,11 +538,11 @@ mod tests {
     fn criterion_2_empty_text_is_not_stored_and_the_smart_space_is_dropped() {
         let store = MemHistoryStore::new();
         let history = open(&store, 25);
-        history.record("", "Groq", true);
-        history.record("   ", "Groq", true);
+        history.record("", "OpenRouter", true);
+        history.record("   ", "OpenRouter", true);
         assert!(!history.has_last());
         assert_eq!(store.contents(), None);
-        history.record(" and again", "Groq", true);
+        history.record(" and again", "OpenRouter", true);
         assert_eq!(history.last_text().as_deref(), Some("and again"));
     }
 
@@ -569,7 +569,9 @@ mod tests {
         let store = MemHistoryStore::new();
         let history = Arc::new(open(&store, 25));
         let fake = FakeInserter::new();
-        let inserter = Recording::new(fake.clone(), Arc::clone(&history), || "Groq".to_owned());
+        let inserter = Recording::new(fake.clone(), Arc::clone(&history), || {
+            "OpenRouter".to_owned()
+        });
         inserter.insert("worked").unwrap();
         for error in [
             InsertError::Failed("no focus".into()),
@@ -620,7 +622,7 @@ mod tests {
         // Raising it back brings nothing back and the next one is kept.
         history.set_limit(25).unwrap();
         assert_eq!(history.entries().len(), 10);
-        history.record("new", "Groq", true);
+        history.record("new", "OpenRouter", true);
         assert_eq!(history.entries().len(), 11);
     }
 
@@ -633,7 +635,7 @@ mod tests {
         assert!(history.entries().is_empty());
         assert_eq!(store.contents(), None);
         assert!(!history.has_last());
-        history.record("not kept", "Groq", true);
+        history.record("not kept", "OpenRouter", true);
         assert!(history.entries().is_empty());
         assert_eq!(store.contents(), None);
     }
@@ -657,7 +659,7 @@ mod tests {
         assert_eq!(store.contents(), None);
         assert_eq!(history.last_text(), None);
         // The next dictation is kept as usual.
-        history.record("next", "Groq", true);
+        history.record("next", "OpenRouter", true);
         assert_eq!(stored_texts(&store), ["next"]);
     }
 
@@ -684,7 +686,7 @@ mod tests {
         store.set_failing(true);
         assert!(history.set_limit(0).is_err());
         assert!(history.entries().is_empty());
-        history.record("not kept", "Groq", true);
+        history.record("not kept", "OpenRouter", true);
         store.set_failing(false);
         assert_eq!(stored_texts(&store), ["dictation 0"]);
         let _ = open(&store, 0);
@@ -713,7 +715,7 @@ mod tests {
         let store = MemHistoryStore::new();
         let history = open(&store, 25);
         let long = "line one\nline two\nline three ".repeat(50);
-        history.record(&long, "Groq", true);
+        history.record(&long, "OpenRouter", true);
         let id = history.entries()[0].id;
         assert_eq!(history.text_of(id).as_deref(), Some(long.as_str()));
         assert_eq!(history.text_of(id + 1), None);
@@ -724,8 +726,8 @@ mod tests {
         let store = MemHistoryStore::new();
         let history = open(&store, 25);
         assert!(!history.has_last());
-        history.record("first", "Groq", true);
-        history.record("second", "Groq", false);
+        history.record("first", "OpenRouter", true);
+        history.record("second", "OpenRouter", false);
         assert_eq!(history.last_text().as_deref(), Some("second"));
     }
 
@@ -754,11 +756,11 @@ mod tests {
     fn turning_history_on_after_off_keeps_the_text_in_memory_until_the_next_dictation() {
         let store = MemHistoryStore::new();
         let history = open(&store, 0);
-        history.record("from memory", "Groq", true);
+        history.record("from memory", "OpenRouter", true);
         history.set_limit(25).unwrap();
         assert_eq!(history.last_text().as_deref(), Some("from memory"));
         assert_eq!(store.contents(), None);
-        history.record("kept", "Groq", true);
+        history.record("kept", "OpenRouter", true);
         assert_eq!(history.last_text().as_deref(), Some("kept"));
         history.delete(history.entries()[0].id).unwrap();
         assert_eq!(history.last_text(), None);
@@ -768,7 +770,7 @@ mod tests {
     fn turning_history_off_forgets_the_text_it_deleted() {
         let store = MemHistoryStore::new();
         let history = open(&store, 25);
-        history.record("gone", "Groq", true);
+        history.record("gone", "OpenRouter", true);
         history.set_limit(0).unwrap();
         assert_eq!(history.last_text(), None);
     }
@@ -780,12 +782,12 @@ mod tests {
         let store = MemHistoryStore::new();
         fill(&open(&store, 25), 2);
         let history = History::with_clock(store.clone(), None, ticking());
-        history.record("not kept", "Groq", true);
+        history.record("not kept", "OpenRouter", true);
         assert_eq!(store.deletes(), 0);
         assert_eq!(stored_texts(&store).len(), 2);
         // Told later: the file's entries are read first, not overwritten.
         history.set_limit(25).unwrap();
-        history.record("kept", "Groq", true);
+        history.record("kept", "OpenRouter", true);
         assert_eq!(stored_texts(&store).len(), 3);
     }
 
@@ -800,8 +802,8 @@ mod tests {
             let store = MemHistoryStore::with_contents(original);
             let history = open(&store, 25);
             assert!(history.is_unreadable(), "{original}");
-            history.record("next", "Groq", true);
-            history.record("and next", "Groq", false);
+            history.record("next", "OpenRouter", true);
+            history.record("and next", "OpenRouter", false);
             assert_eq!(store.contents().as_deref(), Some(original));
             assert_eq!(store.deletes(), 0);
             // The new ones work for this run, Copy last dictation included.
@@ -824,11 +826,11 @@ mod tests {
         let history = open(&store, 25);
         assert!(history.is_unreadable());
         assert!(history.entries().is_empty());
-        history.record("while failing", "Groq", true);
+        history.record("while failing", "OpenRouter", true);
         assert_eq!(store.contents(), original);
         // It reads again: the file's entries and the new ones together.
         store.set_failing(false);
-        history.record("after", "Groq", true);
+        history.record("after", "OpenRouter", true);
         assert!(!history.is_unreadable());
         let want = ["after", "while failing", "dictation 1", "dictation 0"];
         assert_eq!(texts(&history), want);
@@ -843,9 +845,9 @@ mod tests {
         fill(&open(&store, 25), 1);
         store.set_failing(true);
         let history = open(&store, 25);
-        history.record("same id", "Groq", true);
+        history.record("same id", "OpenRouter", true);
         store.set_failing(false);
-        history.record("after", "Groq", true);
+        history.record("after", "OpenRouter", true);
         assert_eq!(texts(&history), ["after", "same id", "dictation 0"]);
         let ids: std::collections::BTreeSet<u64> =
             history.entries().iter().map(|entry| entry.id).collect();
@@ -859,7 +861,7 @@ mod tests {
         fill(&open(&store, 25), 11);
         store.set_failing(true);
         let history = open(&store, 25);
-        history.record("while failing", "Groq", true);
+        history.record("while failing", "OpenRouter", true);
         store.set_failing(false);
         history.set_limit(10).unwrap();
         assert!(!history.is_unreadable());
@@ -872,12 +874,12 @@ mod tests {
     fn clear_and_off_still_delete_a_file_that_cannot_be_read() {
         let store = MemHistoryStore::with_contents("not json");
         let history = open(&store, 25);
-        history.record("next", "Groq", true);
+        history.record("next", "OpenRouter", true);
         history.clear().unwrap();
         assert_eq!(store.contents(), None);
         assert!(!history.is_unreadable());
         // And saving works again.
-        history.record("saved", "Groq", true);
+        history.record("saved", "OpenRouter", true);
         assert_eq!(stored_texts(&store), ["saved"]);
 
         let store = MemHistoryStore::with_contents("not json");
@@ -941,7 +943,7 @@ mod tests {
         ));
         let writer = {
             let history = Arc::clone(&history);
-            std::thread::spawn(move || history.record("words", "Groq", true))
+            std::thread::spawn(move || history.record("words", "OpenRouter", true))
         };
         let wait = std::time::Duration::from_secs(10);
         started.recv_timeout(wait).unwrap();
@@ -973,10 +975,10 @@ mod tests {
         let store = MemHistoryStore::new();
         let history = open(&store, 25);
         store.set_failing(true);
-        history.record("one", "Groq", false);
+        history.record("one", "OpenRouter", false);
         assert_eq!(history.last_text().as_deref(), Some("one"));
         store.set_failing(false);
-        history.record("two", "Groq", true);
+        history.record("two", "OpenRouter", true);
         assert_eq!(stored_texts(&store), ["two", "one"]);
     }
 
@@ -984,10 +986,10 @@ mod tests {
     fn ids_stay_unique_when_the_clock_stands_still_or_after_a_clear() {
         let store = MemHistoryStore::new();
         let history = History::with_clock(store, Some(25), Box::new(|| 5));
-        history.record("one", "Groq", true);
+        history.record("one", "OpenRouter", true);
         let first = history.entries()[0].id;
         history.clear().unwrap();
-        history.record("two", "Groq", true);
+        history.record("two", "OpenRouter", true);
         assert!(history.entries()[0].id > first);
     }
 
@@ -1007,10 +1009,10 @@ mod tests {
     fn the_engine_name_is_the_one_at_the_time() {
         let history = Arc::new(open(&MemHistoryStore::new(), 25));
         let inserter = Recording::new(FakeInserter::new(), Arc::clone(&history), || {
-            "OpenAI".to_owned()
+            "On this Mac".to_owned()
         });
         inserter.insert("words").unwrap();
-        assert_eq!(history.entries()[0].engine, "OpenAI");
+        assert_eq!(history.entries()[0].engine, "On this Mac");
     }
 
     /// A log sink the test reads back.
@@ -1053,7 +1055,7 @@ mod tests {
             fake.fail_next(InsertError::SecureInput);
             let _ = inserter.insert(SECRET);
             store.set_failing(true);
-            history.record(SECRET, "Groq", true);
+            history.record(SECRET, "OpenRouter", true);
             let id = history.entries()[0].id;
             let _ = history.delete(id);
             let _ = history.clear();

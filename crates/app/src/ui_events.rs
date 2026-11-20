@@ -79,6 +79,7 @@ impl Queue {
         let newest_phase = newest(|event| matches!(event, UiEvent::StateChanged(_)));
         let newest_restored = newest(|event| matches!(event, UiEvent::HotkeyRestored));
         let newest_no_sound = newest(|event| matches!(event, UiEvent::NoSound));
+        let newest_cleanup = newest(|event| matches!(event, UiEvent::Cleanup(_)));
         // A recording after a notice clears it, even when coalescing drops
         // that recording's own event (H2): never show a stale notice.
         let newest_recording = newest(|event| {
@@ -93,6 +94,8 @@ impl Queue {
                 UiEvent::Error(_) => true,
                 UiEvent::StateChanged(_) => Some(index) == newest_phase,
                 UiEvent::HotkeyRestored => Some(index) == newest_restored,
+                // Only the usage count reads it; the newest is enough.
+                UiEvent::Cleanup(_) => Some(index) == newest_cleanup,
                 UiEvent::NoSound => {
                     Some(index) == newest_no_sound && newest_recording.is_none_or(|r| r < index)
                 }
