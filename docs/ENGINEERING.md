@@ -123,6 +123,8 @@ adapter. Tauri is a thin layer on top.
 
 ## Code reuse and licences
 
+- Our own licence is FSL-1.1-ALv2 (`LICENSE`). Versions up to 0.1.0 were
+  MIT. The rule below is about code we adapt from other projects.
 - Adapt code only from permissive repos: Handy, OpenWhispr, FreeFlow, Muesli,
   transcribe.cpp (MIT), FluidAudio (Apache-2.0). Credit each in `NOTICE`, and
   name the source file in a comment where the code came from.

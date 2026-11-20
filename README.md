@@ -148,5 +148,10 @@ described in [SECURITY.md](SECURITY.md).
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE). Third-party code and its licences are listed in
+Vocet is source available under the Functional Source License, version 1.1,
+with the Apache 2.0 future licence ([FSL-1.1-ALv2](LICENSE), a Fair Source
+licence). You can read, run, modify and self-host it; you may not use it to
+build a competing commercial product or service. Each release becomes
+Apache-2.0 two years after it is published. Versions up to 0.1.0 were released
+under MIT and stay MIT. Third-party code and its licences are listed in
 [NOTICE](NOTICE) and `THIRD-PARTY-LICENSES.txt`.
