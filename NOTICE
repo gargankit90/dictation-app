@@ -86,19 +86,79 @@ transcribe.cpp 0.4.1: transcribe-cpp and transcribe-cpp-sys
   the crate's THIRD-PARTY-LICENSES.md.
   MIT License, Copyright (c) 2026 The transcribe.cpp authors
 
+Blurt (https://github.com/AssemblyAI/blurt)
+  The on-device cleanup prompt (crates/core/src/local_cleanup/prompt_v3.txt)
+  adapts Blurt's cleanup instruction, Sources/BlurtEngine/STT/
+  CleanupInstruction.swift ("Smart" wording), to a chat prompt, with
+  Vocet's own additions (PR #326, prompt v3).
+  MIT License, Copyright (c) 2026 Alex Kroman (the MIT licence text is
+  below, with Handy's)
+
+llama.cpp b12359 (https://github.com/ggml-org/llama.cpp)
+  The on-device cleanup helper (crates/transcribe/src/llama.rs): its
+  llama-server, built from source by scripts/build-llama-server.sh and
+  shipped in the app bundle as Contents/MacOS/llama-server. No code copied.
+  MIT License, Copyright (c) 2023-2026 The ggml authors (the MIT licence
+  text is below, with Handy's). The binary also contains these vendored
+  components of llama.cpp:
+    cpp-httplib 0.66.0, MIT License, Copyright (c) 2026 Yuji Hirose
+    nlohmann/json, MIT License, Copyright (c) 2013-2025 Niels Lohmann
+    rotate-bits, MIT License, Copyright (c) 2021 William Casarin
+    xxHash, BSD 2-Clause License, Copyright (C) 2012-2023 Yann Collet
+      (its licence text is below)
+    miniaudio (David Reid), public domain or MIT-0
+    stb_image (Sean Barrett), public domain
+    SHA-1 (Steve Reid) and SHA-256 (Igor Pavlov), public domain
+    subprocess.h (sheredom), the Unlicense (public domain)
+  Each MIT component above is under the same MIT licence text as Handy's
+  below, with its own copyright line.
+
+xxHash is used under this licence:
+
+  BSD 2-Clause License
+
+  Copyright (C) 2012-2023 Yann Collet
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions are
+  met:
+
+     * Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+     * Redistributions in binary form must reproduce the above
+       copyright notice, this list of conditions and the following disclaimer
+       in the documentation and/or other materials provided with the
+       distribution.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 Ideas only, no code: Handy (MIT), src-tauri/src/managers/model.rs and
 catalog.json at commit 9e57a0d, for a pinned, SHA-256-checked model
 catalogue with Range-resumed downloads into the app's data folder, and for
 running every model through transcribe-cpp.
 
 On-device models the app offers to download (not shipped with it; the user
-downloads them from Hugging Face, handy-computer/*-gguf, GGUF conversions
-by the transcribe.cpp authors):
-  Parakeet Unified EN 0.6B (NVIDIA, nvidia/parakeet-unified-en-0.6b),
-  CC-BY-4.0.
-  Qwen3-ASR 0.6B (Qwen, Qwen/Qwen3-ASR-0.6B), Apache-2.0.
+downloads them from Hugging Face; Q4):
+  OrukQwen ASR 1.7B (oruk, oruk/orukqwen-asr-1.7b), Apache-2.0: speech to
+  text. A fine-tune of Qwen3-ASR 1.7B (Qwen), Apache-2.0. The GGUF is a
+  Q4_K_M conversion made with transcribe.cpp's converter and hosted by the
+  owner with its licence and a notice.
+  Gemma 4 E2B instruct (Google, google/gemma-4-E2B-it), Apache-2.0: the
+  cleanup model. GGUF quantisation by Unsloth (unsloth/gemma-4-E2B-it-GGUF).
 
-The code adapted from Handy (above) is used under this licence:
+The code adapted from Handy (above) is used under this licence, and
+Blurt's text, llama.cpp and its MIT components under the same text with
+their own copyright lines:
 
   MIT License
 

@@ -20,3 +20,5 @@ extend-ignore-re = ["U\\+[0-9A-Fa-f]{4}(-[0-9A-Fa-f]{4})?"]
 [default.extend-words]
 fo = "fo"
 ba = "ba"
+# Yann Collet, xxHash's author, credited in NOTICE.
+Collet = "Collet"
