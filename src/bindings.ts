@@ -74,7 +74,12 @@ export const commands = {
 	relaunchApp: () => typedError<null, string>(__TAURI_INVOKE("relaunch_app")),
 	/**  Every on-device model with its status and download progress. */
 	listLocalModels: () => typedError<LocalModelInfo_Serialize[], string>(__TAURI_INVOKE("list_local_models")),
-	/**  Starts downloading model `id`; poll [`list_local_models`] for progress. */
+	/**  Every on-device cleanup model (Q4) with its status and download progress. */
+	listCleanupModels: () => typedError<LocalModelInfo_Serialize[], string>(__TAURI_INVOKE("list_cleanup_models")),
+	/**
+	 *  Starts downloading model `id` (speech or cleanup); poll
+	 *  [`list_local_models`] or [`list_cleanup_models`] for progress.
+	 */
 	downloadLocalModel: (id: string) => typedError<null, string>(__TAURI_INVOKE("download_local_model", { id })),
 	/**  Cancels model `id`'s download; what was fetched is kept. */
 	cancelLocalModelDownload: (id: string) => typedError<null, string>(__TAURI_INVOKE("cancel_local_model_download", { id })),

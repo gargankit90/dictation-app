@@ -54,7 +54,11 @@ mod tests {
         // computed with Python from that file on 2026-11-20.
         use sha2::{Digest, Sha256};
         let digest = Sha256::digest(SYSTEM_PROMPT.as_bytes());
-        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        let hex = digest.iter().fold(String::new(), |mut hex, b| {
+            use std::fmt::Write as _;
+            let _ = write!(hex, "{b:02x}");
+            hex
+        });
         assert_eq!(
             hex,
             "7b791b1cfc3d40d71fc6f73c5ceac5c1893d8696e34194f53186e56773ce9585"

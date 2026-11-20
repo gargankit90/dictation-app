@@ -57,18 +57,23 @@ fn criterion_4_lists_the_catalogue_with_statuses() {
     let live = live(&dir.0);
     let downloads = ModelDownloads::default();
     let list = downloads.list(&live);
-    assert_eq!(list.len(), 2);
+    assert_eq!(list.len(), 1);
     assert_eq!(list[0].id, DEFAULT);
-    assert!(list[0].default && !list[1].default);
+    assert!(list[0].default);
     assert_eq!(list[0].languages, "English only");
     // The language picker (U2) filters by these codes.
     assert_eq!(list[0].language_codes, ["en"]);
-    assert!(list[1].language_codes.iter().any(|c| c == "hi"));
     for (info, model) in list.iter().zip(local_models::CATALOGUE) {
         assert_eq!(info.language_codes, model.languages);
     }
     assert!(list.iter().all(|m| m.state == ModelState::Missing));
-    assert_eq!(list[0].size_bytes, 477_274_496.0);
+    assert_eq!(list[0].size_bytes, 1_319_830_656.0);
+    // Cleanup models are listed on their own (Q4), never as speech.
+    let cleanup = downloads.list_cleanup(&live);
+    assert_eq!(cleanup.len(), 1);
+    assert_eq!(cleanup[0].id, local_models::DEFAULT_CLEANUP_MODEL);
+    assert!(cleanup[0].default);
+    assert_eq!(cleanup[0].size_bytes, 3_106_738_272.0);
 
     // A part, then a full file of the right size.
     let model = local_models::find(DEFAULT).unwrap();
@@ -191,7 +196,11 @@ async fn criterion_3_a_running_download_shows_progress_starts_once_and_cancels_q
     let list = downloads.list(&live);
     assert_eq!(info(&list, DEFAULT).state, ModelState::Downloading);
     assert_eq!(
-        info(&list, "qwen3-asr-0.6b-q4_k_m").state,
+        info(
+            &downloads.list_cleanup(&live),
+            local_models::DEFAULT_CLEANUP_MODEL
+        )
+        .state,
         ModelState::Missing
     );
 
@@ -212,7 +221,7 @@ async fn criterion_3_a_running_download_shows_progress_starts_once_and_cancels_q
 /// second download is refused before it sends a request or writes a byte.
 #[tokio::test(flavor = "multi_thread")]
 async fn only_one_model_downloads_at_a_time() {
-    const QWEN: &str = "qwen3-asr-0.6b-q4_k_m";
+    const GEMMA: &str = local_models::DEFAULT_CLEANUP_MODEL;
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(
@@ -223,8 +232,9 @@ async fn only_one_model_downloads_at_a_time() {
         .mount(&server)
         .await;
     let dir = TempDir::new("one-at-a-time");
-    // Enough for Qwen (the larger) plus headroom, not for both.
-    let free = 589_560_480 + dictation_transcribe::models::SPACE_HEADROOM + 1;
+    // Enough for Gemma (the larger) plus headroom, not for both.
+    let free =
+        local_models::GEMMA_4_E2B.size_bytes + dictation_transcribe::models::SPACE_HEADROOM + 1;
     let store = ModelStore::new(dir.0.clone(), Arc::new(move |_| Ok(free))).unwrap();
     let live = LiveEngine::fixed().with_local(LocalModels::trusting(
         store,
@@ -244,14 +254,14 @@ async fn only_one_model_downloads_at_a_time() {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let refused = downloads.start(&live, QWEN, Some(server.uri()), |_| {
+    let refused = downloads.start(&live, GEMMA, Some(server.uri()), |_| {
         panic!("a second download started")
     });
     assert_eq!(refused, Err(ONE_AT_A_TIME.to_owned()));
-    assert!(!downloads.is_running(QWEN));
+    assert!(!downloads.is_running(GEMMA));
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
-    assert!(!dir.0.join("Qwen3-ASR-0.6B-Q4_K_M.gguf.part").exists());
+    assert!(!dir.0.join("gemma-4-E2B-it-Q4_K_M.gguf.part").exists());
 
     // Once the first is cancelled, the other may start.
     downloads.cancel(DEFAULT);
@@ -259,8 +269,8 @@ async fn only_one_model_downloads_at_a_time() {
         .await
         .unwrap();
     downloads
-        .start(&live, QWEN, Some(server.uri()), |_| {})
+        .start(&live, GEMMA, Some(server.uri()), |_| {})
         .unwrap();
-    assert!(downloads.is_running(QWEN));
-    downloads.cancel(QWEN);
+    assert!(downloads.is_running(GEMMA));
+    downloads.cancel(GEMMA);
 }

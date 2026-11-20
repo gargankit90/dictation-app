@@ -16,6 +16,7 @@
     "allow-finish-onboarding",
     "allow-relaunch-app",
     "allow-list-local-models",
+    "allow-list-cleanup-models",
     "allow-download-local-model",
     "allow-cancel-local-model-download",
     "allow-delete-local-model",

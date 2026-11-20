@@ -20,6 +20,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "finish_onboarding",
     "relaunch_app",
     "list_local_models",
+    "list_cleanup_models",
     "download_local_model",
     "cancel_local_model_download",
     "delete_local_model",

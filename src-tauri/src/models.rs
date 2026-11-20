@@ -101,7 +101,7 @@ pub const ONE_AT_A_TIME: &str =
     "Another model is downloading. Wait for it to finish, or cancel it, then try again.";
 
 fn find(id: &str) -> Result<&'static LocalModel, String> {
-    local_models::find(id).ok_or_else(|| format!("there is no on-device model {id:?}"))
+    local_models::find_any(id).ok_or_else(|| format!("there is no on-device model {id:?}"))
 }
 
 fn no_local() -> String {
@@ -117,11 +117,30 @@ impl ModelDownloads {
         self
     }
 
-    /// Every catalogue model with its status.
+    /// Every speech model with its status.
     #[must_use]
     pub fn list(&self, live: &LiveEngine) -> Vec<LocalModelInfo> {
+        self.list_of(live, local_models::CATALOGUE, local_models::DEFAULT_MODEL)
+    }
+
+    /// Every cleanup model with its status (Q4).
+    #[must_use]
+    pub fn list_cleanup(&self, live: &LiveEngine) -> Vec<LocalModelInfo> {
+        self.list_of(
+            live,
+            local_models::CLEANUP_CATALOGUE,
+            local_models::DEFAULT_CLEANUP_MODEL,
+        )
+    }
+
+    fn list_of(
+        &self,
+        live: &LiveEngine,
+        catalogue: &'static [LocalModel],
+        default: &str,
+    ) -> Vec<LocalModelInfo> {
         let downloads = lock(&self.inner);
-        local_models::CATALOGUE
+        catalogue
             .iter()
             .map(|model| {
                 let (state, downloaded) = match downloads.running.get(model.id) {
@@ -156,7 +175,7 @@ impl ModelDownloads {
                     },
                     restarted: resume == Resume::Restarted,
                     error: downloads.failed.get(model.id).cloned(),
-                    default: model.id == local_models::DEFAULT_MODEL,
+                    default: model.id == default,
                 }
             })
             .collect()
@@ -287,7 +306,18 @@ pub async fn list_local_models(
     Ok(downloads.list(engine.inner()))
 }
 
-/// Starts downloading model `id`; poll [`list_local_models`] for progress.
+/// Every on-device cleanup model (Q4) with its status and download progress.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_cleanup_models(
+    engine: State<'_, LiveEngine>,
+    downloads: State<'_, ModelDownloads>,
+) -> Result<Vec<LocalModelInfo>, String> {
+    Ok(downloads.list_cleanup(engine.inner()))
+}
+
+/// Starts downloading model `id` (speech or cleanup); poll
+/// [`list_local_models`] or [`list_cleanup_models`] for progress.
 #[tauri::command]
 #[specta::specta]
 pub async fn download_local_model(

@@ -47,7 +47,7 @@ pub struct LocalModel {
     pub licence: &'static str,
 }
 
-/// OrukQwen ASR 1.7B, Q4_K_M: Qwen3-ASR 1.7B fine-tuned for English by
+/// OrukQwen ASR 1.7B, `Q4_K_M`: Qwen3-ASR 1.7B fine-tuned for English by
 /// oruk (Apache-2.0, <https://huggingface.co/oruk/orukqwen-asr-1.7b>).
 ///
 /// oruk publishes only a Transformers checkpoint. This GGUF is the exact
@@ -70,7 +70,7 @@ pub const ORUKQWEN_1_7B: LocalModel = LocalModel {
     licence: "Apache-2.0 (oruk; based on Qwen3-ASR by Qwen)",
 };
 
-/// Gemma 4 E2B instruct, Q4_K_M (Apache-2.0, Google), as quantised by
+/// Gemma 4 E2B instruct, `Q4_K_M` (Apache-2.0, Google), as quantised by
 /// Unsloth: the exact file PR #326 evaluated (its `meta.json` records this
 /// size and SHA-256), pinned to the repository's commit of 2026-07-17.
 /// Size and SHA-256 match Hugging Face's `x-linked-size` and
@@ -105,6 +105,15 @@ pub const DEFAULT_CLEANUP_MODEL: &str = CLEANUP_CATALOGUE[0].id;
 #[must_use]
 pub fn find(id: &str) -> Option<&'static LocalModel> {
     CATALOGUE.iter().find(|model| model.id == id)
+}
+
+/// The speech model to run for a saved `id`: that model, or the default
+/// when the catalogue no longer has it (a file saved before Q4 removed
+/// Parakeet and Qwen3-ASR). No migration: the file keeps the old id until
+/// the user next saves.
+#[must_use]
+pub fn resolve(id: &str) -> &'static LocalModel {
+    find(id).unwrap_or(&ORUKQWEN_1_7B)
 }
 
 /// The cleanup model with `id`, if the catalogue has it.
@@ -219,7 +228,7 @@ mod tests {
             );
             assert!(model.size_bytes > 100_000_000, "{}", model.id);
             assert!(!model.languages.is_empty() && !model.languages_label.is_empty());
-            assert!(!model.licence.is_empty());
+            assert_ne!(model.licence, "");
             // The id is a valid settings value.
             assert!(model.id.len() <= crate::settings::MAX_MODEL_LEN);
             assert!(!model.id.contains(char::is_whitespace));
@@ -229,14 +238,16 @@ mod tests {
     #[test]
     fn a_settings_file_with_a_removed_model_still_loads() {
         // Q4 removed Parakeet; a file that saved it must not break loading.
-        // The id loads as it is and finds no model, so the engine says to
-        // download one in Settings; every other preference survives.
+        // The id loads as it is, runs as OrukQwen, and every other
+        // preference survives.
         let json = r#"{"version": 2, "transcription": "local",
             "local_model": "parakeet-unified-en-0.6b-q4_k_m", "hotkey": "RightCmd"}"#;
         let settings = crate::settings::from_json(json).unwrap();
         assert_eq!(settings.local_model, "parakeet-unified-en-0.6b-q4_k_m");
         assert_eq!(settings.hotkey, "RightCmd");
         assert_eq!(find(&settings.local_model), None);
+        assert_eq!(resolve(&settings.local_model), &ORUKQWEN_1_7B);
+        assert_eq!(resolve(DEFAULT_MODEL), &ORUKQWEN_1_7B);
         // A fresh install gets OrukQwen.
         assert_eq!(
             crate::settings::Settings::default().local_model,

@@ -1064,6 +1064,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         finish_onboarding,
         relaunch_app,
         crate::models::list_local_models,
+        crate::models::list_cleanup_models,
         crate::models::download_local_model,
         crate::models::cancel_local_model_download,
         crate::models::delete_local_model,
@@ -1247,7 +1248,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 54,
+            commands, 55,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -3580,6 +3581,7 @@ mod capability_tests {
                 | "finish_onboarding"
                 | "relaunch_app"
                 | "list_local_models"
+                | "list_cleanup_models"
                 | "practice_paste_missed" => invoke(main, command, args(command)).map(|_| ()),
                 _ => match invoke(main, command, unusable_args()) {
                     Err(error) if error.to_string().contains("invalid args") => Ok(()),
@@ -3595,7 +3597,7 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 54);
+        assert_eq!(COMMAND_NAMES.len(), 55);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         let urls = fixture.opener.urls();
         assert_eq!(urls.len(), 1, "{urls:?}");
