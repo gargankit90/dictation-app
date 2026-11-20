@@ -5,7 +5,7 @@
 # by the sha256 of the full judge prompt (intended + draft + spoken), so only a byte-identical draft
 # reuses a verdict. Adapted from eval/hosted-asr/score.sh (PR #330).
 #
-#   eval/voxtral-omni/score.sh <run dir> claude|codex
+#   eval/voxtral-omni/score.sh <run dir> claude|codex|gemini
 #   (reads results.csv if present, else harness_results.csv; writes scored[_codex].csv; appends the number
 #    of new verdicts to judge-usage.log)
 set -euo pipefail
@@ -13,12 +13,13 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 VA=$HERE/../voicearena
 WS=$(cd "$HERE/../../.." && pwd)
 out=$(cd "${1:?run dir}" && pwd)
-judge=${2:?claude or codex}
+judge=${2:?claude, codex or gemini}
 label=$(basename "$out")
 case "$judge" in
   claude) name=scored; other=_claude ;;
   codex) name=scored_codex; other=_codex ;;
-  *) echo "judge: claude or codex" >&2; exit 2 ;;
+  gemini) name=scored_gemini; other=_gemini ;;
+  *) echo "judge: claude, codex or gemini" >&2; exit 2 ;;
 esac
 input=$out/harness_results.csv
 [ -f "$out/results.csv" ] && input=$out/results.csv
@@ -36,7 +37,7 @@ done >"$seed" || true
 # Keep only verdicts from this judge (the input/ folders hold both judges' caches).
 python3 -I -c '
 import json, sys
-want = "claude" if sys.argv[3] == "claude" else "gpt"
+want = {"claude": "claude", "codex": "gpt", "gemini": "gemini"}[sys.argv[3]]
 seen, out = set(), []
 for line in open(sys.argv[1], encoding="utf-8"):
     if not line.strip():
@@ -55,7 +56,11 @@ before=$(wc -l <"$cache")
 cd "$VA"
 status=0
 if [ "$judge" = claude ]; then
-  uv run --quiet score_claude_cli.py "$input" clips/manifest.csv -o "$out/scored.csv" --label "$label" || status=$?
+  uv run --quiet score_claude_cli.py "$input" clips/manifest.csv -o "$out/scored.csv" --label "$label" \
+    --workers "${CLAUDE_WORKERS:-4}" || status=$?
+elif [ "$judge" = gemini ]; then
+  uv run --quiet score_gemini_cli.py "$input" clips/manifest.csv -o "$out/scored_gemini.csv" --label "$label" \
+    --workers "${GEMINI_WORKERS:-6}" --max-calls "${GEMINI_MAX_CALLS:-160}" || status=$?
 else
   uv run --quiet score_codex_cli.py "$input" clips/manifest.csv -o "$out/scored_codex.csv" \
     --label "$label" --max-calls "${CODEX_MAX_CALLS:-160}" || status=$?

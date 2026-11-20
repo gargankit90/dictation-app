@@ -41,10 +41,12 @@ DIGITS = re.compile(r"\d+")
 IN = HERE / "input"
 ENGINE_DIR = {"nemotron": "nvidia__nemotron-3.5-transcribe", "voxtral_mini": "mistralai__voxtral-mini-3b-2507",
               "voxtral_mini_dev": "ondevice_voxtral3", "oruk_dev": "ondevice_oruk",
-              "voxtral_small": "mistralai__voxtral-small-24b-2507-stt"}
+              "voxtral_small": "mistralai__voxtral-small-24b-2507-stt",
+              "openai_transcribe": "../results/openai_transcribe_plain"}
 ENGINE_NAME = {"nemotron": "Nemotron 3.5 (hosted)", "voxtral_mini": "Voxtral Mini 3B (hosted)",
                "voxtral_mini_dev": "Voxtral Mini 3B (on-device)", "oruk_dev": "OrukQwen-ASR 1.7B (on-device)",
-               "voxtral_small": "Voxtral Small 24B (hosted)"}
+               "voxtral_small": "Voxtral Small 24B (hosted)",
+              "openai_transcribe": "OpenAI gpt-transcribe (closed model)"}
 CLEAN_NAME = {"raw": "raw", "sol": "GPT-6.2-sol", "luna": "GPT-6-luna", "glm": "GLM-5.3 Flash",
               "oss": "gpt-oss-120b", "gemma": "Gemma 4 E2B v3 (on-device)"}
 BASELINE = IN / "nemotron_sol_v4"
@@ -175,12 +177,13 @@ def input_csv(run: pathlib.Path) -> pathlib.Path:
     return run / "results.csv" if (run / "results.csv").exists() else run / "harness_results.csv"
 
 
+SCORED = {"claude": "scored.csv", "codex": "scored_codex.csv", "gemini": "scored_gemini.csv"}
+
+
 def scored(run: pathlib.Path, judge: str) -> pathlib.Path | None:
-    if run.name == "nemotron_sol_v4":
-        return run / ("scored.csv" if judge == "claude" else "scored_codex.csv")
     if run.name.startswith("raw__"):
         return run / f"{judge}.csv"
-    p = run / ("scored.csv" if judge == "claude" else "scored_codex.csv")
+    p = run / SCORED[judge]
     return p if p.exists() else None
 
 
@@ -205,8 +208,10 @@ def summarise(run: pathlib.Path) -> dict:
     info["lat_median"], info["lat_p90"] = pct(lat, 0.5), pct(lat, 0.9)
     usd = list(info.pop("usd").values())
     info["usd_per_1000"] = 1000 * sum(usd) / 151 if usd else None
-    for judge in ("claude", "codex"):
+    allv = {}
+    for judge in ("claude", "codex", "gemini"):
         v = verdicts(scored(run, judge))
+        allv[judge] = v
         base = verdicts(scored(BASELINE, judge))
         j = {"n": len(v)}
         for half in ("tune", "check", "all"):
@@ -218,6 +223,15 @@ def summarise(run: pathlib.Path) -> dict:
         lo = sum(int(v[c]["edits"]) > 0 and int(base[c]["edits"]) == 0 for c in common)
         j["vs_base"] = (w, lo, len(common) - w - lo)
         info[judge] = j
+    # 2-of-3 majority (Voice Arena's panel is 3-of-5): a clip is zero-edit if at least two of the three
+    # judges found nothing to fix; only clips all three judged, and only when all three judged all 151.
+    full = all(len(allv[j]) == len(MANIFEST) for j in allv)
+    if full:
+        maj = {c: sum(int(allv[j][c]["edits"]) == 0 for j in allv) >= 2 for c in MANIFEST}
+        info["majority"] = {h: 100 * sum(maj[c] for c in maj if h == "all" or SPLIT.get(c) == h) /
+                            sum(1 for c in maj if h == "all" or SPLIT.get(c) == h) for h in ("tune", "check", "all")}
+    else:
+        info["majority"] = None
     return info
 
 
@@ -234,15 +248,15 @@ def missing(run: pathlib.Path, judge: str, known: set) -> set:
 
 
 def known_verdicts(judge: str) -> set:
-    name = "scored" if judge == "claude" else "scored_codex"
-    other = "_claude" if judge == "claude" else "_codex"
+    name = SCORED[judge][:-4]
+    other = f"_{judge}"
     pats = [f"{VA}/results/*/{name}.judge.jsonl", f"{HERE}/results*/*/{name}.judge.jsonl", f"{HERE}/input/*/*.judge.jsonl",
             f"{WS}/hosted-asr-eval/eval/hosted-asr/results/*/{name}.judge.jsonl",
             f"{WS}/cleanup-offline-eval/eval/cleanup-offline/results/*/{name}.judge.jsonl",
             f"{WS}/cleanup-offline-eval/eval/cleanup-offline/paired-results/*/{name}.judge.jsonl",
             f"{WS}/local-cleanup-eval/eval/local-cleanup/judge_cache/{judge}.jsonl",
             f"/tmp/vocet-asr-screen/runs/*{other}.judge.jsonl", f"/tmp/vocet-asr-screen/allcache-{judge}"]
-    want = "claude" if judge == "claude" else "gpt"
+    want = {"claude": "claude", "codex": "gpt", "gemini": "gemini"}[judge]
     out = set()
     for p in pats:
         for f in glob.glob(p):
@@ -273,7 +287,7 @@ def main():
     a = ap.parse_args()
     todo = [pathlib.Path(x).resolve() for x in a.only] or runs()
     if a.missing:
-        for judge in ("codex", "claude"):
+        for judge in ("codex", "claude", "gemini"):
             known = known_verdicts(judge)
             print(f"{judge}: {len(known)} known verdicts")
             for r in todo:
@@ -281,19 +295,23 @@ def main():
         return
     out = [summarise(r) for r in todo]
     f = lambda x, n=1: "–" if x is None else f"{x:.{n}f}"  # noqa: E731
-    print("| Pipeline | Codex ZER tune / check / **all** (n) | Claude ZER tune / check / **all** (n) | AMEND X / C | "
-          "vs Nemotron+Sol W/L/T (Codex; Claude) | WER spoken / intended % | s median / p90 | USD/1k | fallbacks | "
-          "short / long / numbers |")
-    print("|---|---|---|---|---|---|---|---:|---|---|")
+    print("| Pipeline | Claude ZER tune / check / **all** | Codex ZER tune / check / **all** | Gemini ZER all (n) | "
+          "2-of-3 ZER check / **all** | AMEND C / X | vs Nemotron+Sol W/L/T (Claude; Codex) | WER spoken % | "
+          "s median / p90 | USD/1k | fallbacks | short / long / numbers |")
+    print("|---|---|---|---|---|---|---|---:|---|---:|---|---|")
+
+    def zz(j):
+        return f"{f(j['tune'])} / {f(j['check'])} / **{f(j['all'])}**" + ("" if j["n"] in (0, 151) else f" ({j['n']})") \
+            if j["n"] else "–"
     for s in out:
-        x, c = s["codex"], s["claude"]
-        zx = f"{f(x['tune'])} / {f(x['check'])} / **{f(x['all'])}** ({x['n']})" if x["n"] else "–"
-        zc = f"{f(c['tune'])} / {f(c['check'])} / **{f(c['all'])}** ({c['n']})" if c["n"] else "–"
-        vs = f"{'/'.join(map(str, x['vs_base'])) if x['n'] else '–'}; {'/'.join(map(str, c['vs_base'])) if c['n'] else '–'}"
+        x, c, g, m = s["codex"], s["claude"], s["gemini"], s["majority"]
+        zg = f"{f(g['all'])} ({g['n']})" if g["n"] else "–"
+        zm = f"{f(m['check'])} / **{f(m['all'])}**" if m else "–"
+        vs = f"{'/'.join(map(str, c['vs_base'])) if c['n'] else '–'}; {'/'.join(map(str, x['vs_base'])) if x['n'] else '–'}"
         fb = ", ".join(f"{k} {v}" for k, v in sorted(s["fallbacks"].items())) or "–"
         h = s["harms"]
-        print(f"| {s['pipeline']} | {zx} | {zc} | {f(x['amend_all'], 2)} / {f(c['amend_all'], 2)} | {vs} | "
-              f"{f(s['wer_spoken'], 2)} / {f(s['wer_intended'], 2)} | {f(s['lat_median'], 2)} / {f(s['lat_p90'], 2)} | "
+        print(f"| {s['pipeline']} | {zz(c)} | {zz(x)} | {zg} | {zm} | {f(c['amend_all'], 2)} / {f(x['amend_all'], 2)} | "
+              f"{vs} | {f(s['wer_spoken'], 1)} | {f(s['lat_median'], 2)} / {f(s['lat_p90'], 2)} | "
               f"{f(s['usd_per_1000'], 2)} | {fb} | {h['short']} / {h['long']} / {h['numbers']} |")
     if a.json:
         a.json.write_text(json.dumps(out, indent=1, default=str))

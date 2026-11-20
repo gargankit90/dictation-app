@@ -45,6 +45,8 @@ ENGINES = {  # name: (input dir, expected `model` column or None for on-device d
     "voxtral_mini_dev": ("ondevice_voxtral3", None),
     "oruk_dev": ("ondevice_oruk", None),
     "voxtral_small": ("mistralai__voxtral-small-24b-2507-stt", "mistralai/voxtral-small-24b-2507-stt"),
+    # closed_asr.py's output (OpenAI gpt-transcribe, a closed model), cleaned only on request (EXTRA)
+    "openai_transcribe": ("@results/openai_transcribe_plain", "gpt-transcribe"),
 }
 # model, worst-case USD per input token, per output token (list price x 2 for routes with several
 # providers; sol: the $2.5/M cache-write tariff), sub-cap USD.
@@ -65,13 +67,18 @@ PLAN = [("nemotron", "glm"),
         ("voxtral_small", "sol"), ("voxtral_small", "glm"), ("voxtral_small", "luna"), ("voxtral_small", "oss")]
 
 
+# Not in the default lanes: they need closed_asr.py's OpenAI transcripts first (run_all_closed.sh).
+EXTRA = [("openai_transcribe", "luna"), ("openai_transcribe", "glm"), ("openai_transcribe", "sol")]
+
+
 def label(engine: str, clean: str) -> str:
     return f"{engine}__{clean}_v4"
 
 
-def load_source(engine: str) -> pathlib.Path:
+def load_source(engine: str, results: pathlib.Path = RESULTS) -> pathlib.Path:
     d, model = ENGINES[engine]
-    source = HERE / "input" / d / "harness_results.csv"
+    base = results / d[len("@results/"):] if d.startswith("@results/") else HERE / "input" / d
+    source = base / "harness_results.csv"
     with source.open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
     if len(rows) != 151 or len({r["clip_id"] for r in rows}) != 151 or any(
@@ -89,7 +96,7 @@ def spent(path: pathlib.Path) -> float:
 
 def run(engine: str, clean: str, base_url: str | None, ledger: budget.Ledger, results: pathlib.Path) -> int:
     model, in_tok, out_tok, cap = CLEANUPS[clean]
-    source = load_source(engine)
+    source = load_source(engine, results)
     name = label(engine, clean)
     run_spent = [spent(results / name / "cleanup.jsonl")]
 
@@ -143,7 +150,8 @@ def main() -> int:
     ap.add_argument("--ledger", type=pathlib.Path, help="default: <results-dir>/budget.jsonl")
     a = ap.parse_args()
     i, n = (int(x) for x in a.lane.split("/"))
-    cells = [c for k, c in enumerate(PLAN) if k % n == i and (not a.only or label(*c) in a.only)]
+    pool = PLAN + EXTRA if a.only else PLAN
+    cells = [c for k, c in enumerate(pool) if k % n == i and (not a.only or label(*c) in a.only)]
     if a.plan:
         for k, c in enumerate(PLAN, 1):
             print(f"{k:2}. {label(*c)}  ({CLEANUPS[c[1]][0]} on {ENGINES[c[0]][0]})")
