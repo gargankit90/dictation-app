@@ -123,6 +123,9 @@ gate_run_full() {
 
   # Spelling and guards
   step typos
+  # The eval harness's offline tests and the e2e latency parser (Q1): standard
+  # library only, no network or key, about 15 s.
+  step eval/test.sh
   step scripts/test-guards.sh
   # The receipt and prose-shortcut rules (G2), with the checks stubbed.
   step scripts/test-gate.sh
