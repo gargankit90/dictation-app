@@ -5,7 +5,7 @@
 //! print them (`Secret`, `redact::Hidden`) and error strings are summarised
 //! (`redact::summary`). This catches what slips through, such as a
 //! dependency logging a request header at debug level: anything that looks
-//! like a Groq or `OpenAI` key or follows `Bearer `
+//! like an API key (`sk-…`, or the `gsk_…` shape of keys earlier builds stored) or follows `Bearer `
 //! ([`dictation_core::redact::secrets`]), and the exact value of every key
 //! the app has read or been given ([`dictation_core::redact::register_secret`]).
 

@@ -5,21 +5,12 @@
 //! app reads and writes the file. The API key is never part of the
 //! settings: it lives in the OS keychain (`docs/ENGINEERING.md`).
 //!
-//! Versions:
-//!
-//! - **v1** (M3.0 drafts): `{"version": 1, "engine": "groq",
-//!   "whisper_model": "…", "language": "en" | "", "hotkey": "RightAlt"}`,
-//!   with `""` meaning "detect the language".
-//! - **v2** (current): `engine` is renamed `provider`, `whisper_model` is
-//!   renamed `model`, and "detect" is `null` instead of `""`. M5.3 added
-//!   `launch_at_login` (default `false`) without a version bump: a file
-//!   without it loads with the default. L1 added `transcription`
-//!   (`"cloud"` or `"local"`, default `"cloud"`) and `local_model` (an id
-//!   from [`crate::local_models::CATALOGUE`]) the same way.
-//!   A1 added `share_usage_events` (default `true`) the same way. U7 added
-//!   `history_limit` (one of [`HISTORY_LIMITS`], default
-//!   [`DEFAULT_HISTORY_LIMIT`]) the same way. Since Q2 `provider` is
-//!   `"openrouter"`; an unknown `provider` or `model` loads as its default.
+//! The file is `{"version": 2, …}`. M5.3 added `launch_at_login`, L1
+//! `transcription` and `local_model`, A1 `share_usage_events`, U7
+//! `history_limit`, all without a version bump: a file without one loads
+//! with its default. Since Q2 `provider` is `"openrouter"`; an unknown
+//! `provider` or `model` loads as its default. There are no migrations: an
+//! older (or unversioned) file is read as the current version.
 //!
 //! Fields this version doesn't know (from a newer build, or a hand edit) are
 //! ignored, and missing ones take their defaults, so an old or partial file
@@ -256,9 +247,8 @@ pub fn from_json(json: &str) -> Result<Settings, SettingsError> {
     let Value::Object(mut object) = value else {
         return Err(SettingsError::Malformed("not a JSON object".to_owned()));
     };
-    // No version: the first format, before it had one.
     let version = match object.get("version") {
-        None => 1,
+        None => u64::from(CURRENT_VERSION),
         Some(version) => version
             .as_u64()
             .ok_or_else(|| SettingsError::Malformed("version is not a number".to_owned()))?,
@@ -266,9 +256,8 @@ pub fn from_json(json: &str) -> Result<Settings, SettingsError> {
     if version > u64::from(CURRENT_VERSION) {
         return Err(SettingsError::TooNew(version));
     }
-    if version < 2 {
-        migrate_v1_to_v2(&mut object);
-    }
+    // An older file is read as this version: there are no migrations.
+    object.insert("version".to_owned(), Value::from(CURRENT_VERSION));
     default_unknown_values(&mut object);
     let settings: Settings = serde_json::from_value(Value::Object(object))
         .map_err(|e| SettingsError::Malformed(e.to_string()))?;
@@ -311,21 +300,6 @@ fn default_unknown_values(object: &mut Map<String, Value>) {
     }
 }
 
-/// v1 → v2: `engine` → `provider`, `whisper_model` → `model`, and an empty
-/// `language` (detect) → `null`. Fields v2 already has win over renamed
-/// ones; anything else is left alone.
-fn migrate_v1_to_v2(object: &mut Map<String, Value>) {
-    for (old, new) in [("engine", "provider"), ("whisper_model", "model")] {
-        if let Some(value) = object.remove(old) {
-            object.entry(new).or_insert(value);
-        }
-    }
-    if object.get("language").and_then(Value::as_str) == Some("") {
-        object.insert("language".to_owned(), Value::Null);
-    }
-    object.insert("version".to_owned(), Value::from(2));
-}
-
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
@@ -345,7 +319,7 @@ mod tests {
 
     #[test]
     fn criterion_1_an_empty_object_loads_as_the_defaults() {
-        // No version means v1; every field is missing, so all default.
+        // No version is the current one; every field is missing, so all default.
         assert_eq!(from_json("{}").unwrap(), Settings::default());
         assert_eq!(from_json(r#"{"version": 2}"#).unwrap(), Settings::default());
     }
@@ -362,34 +336,6 @@ mod tests {
         let json = to_json(&settings).unwrap();
         assert!(json.contains(r#""provider": "openrouter""#), "{json}");
         assert_eq!(from_json(&json).unwrap(), settings);
-    }
-
-    #[test]
-    fn criterion_1_v1_is_migrated_to_v2() {
-        let v1 = r#"{
-            "version": 1,
-            "engine": "openai",
-            "whisper_model": "whisper-1",
-            "language": "",
-            "hotkey": "Ctrl+Space"
-        }"#;
-        assert_eq!(
-            from_json(v1).unwrap(),
-            Settings {
-                version: 2,
-                provider: Provider::OpenRouter,
-                model: cloud_models::DEFAULT_SPEECH.into(),
-                language: None,
-                hotkey: "Ctrl+Space".into(),
-                ..Settings::default()
-            }
-        );
-        // A language stays a language; no version at all is v1 too.
-        let v1 = r#"{"engine": "groq", "whisper_model": "whisper-large-v3", "language": "fr"}"#;
-        let settings = from_json(v1).unwrap();
-        assert_eq!(settings.model, cloud_models::DEFAULT_SPEECH);
-        assert_eq!(settings.language.as_deref(), Some("fr"));
-        assert_eq!(settings.hotkey, "RightAlt");
     }
 
     #[test]
@@ -411,9 +357,6 @@ mod tests {
         assert_eq!(Settings::default().history_limit, 25);
         let old = r#"{"version": 2, "provider": "openai", "model": "whisper-1"}"#;
         assert_eq!(from_json(old).unwrap().history_limit, 25);
-        // v1 migrates to v2 and gets it too.
-        let v1 = r#"{"version": 1, "engine": "groq", "whisper_model": "whisper-1"}"#;
-        assert_eq!(from_json(v1).unwrap().history_limit, 25);
     }
 
     #[test]
@@ -520,14 +463,6 @@ mod tests {
                 "{bad:?}"
             );
         }
-    }
-
-    #[test]
-    fn criterion_1_a_v2_field_wins_over_its_v1_name() {
-        let mixed = r#"{"version": 1, "whisper_model": "whisper-1", "model": "openai/gpt-4o-mini-transcribe", "hotkey": "F5"}"#;
-        let settings = from_json(mixed).unwrap();
-        assert_eq!(settings.model, cloud_models::DEFAULT_SPEECH);
-        assert_eq!(settings.hotkey, "F5");
     }
 
     #[test]

@@ -33,7 +33,7 @@ use dictation_pipeline::launch::LoginSync;
 use dictation_platform::secrets::KeychainSecretStore;
 use dictation_ports::{LaunchAtLogin, Permission, SecretStore, SetupProblem, TranscribeError};
 use dictation_transcribe::check_key::check_key;
-use dictation_transcribe::openai_compat::{self, Preset};
+use dictation_transcribe::openrouter;
 use serde::Serialize;
 use tauri::State;
 
@@ -632,8 +632,7 @@ impl KeyTestError {
 /// The provider's name for messages.
 fn provider_name(provider: Provider) -> &'static str {
     match provider {
-        Provider::Groq => "Groq",
-        Provider::OpenAi => "OpenAI",
+        Provider::OpenRouter => "OpenRouter",
     }
 }
 
@@ -651,6 +650,18 @@ fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
             KeyTestKind::InvalidKey,
             format!(
                 "{name} rejected this API key. Check that you copied the whole key from {name}."
+            ),
+        ),
+        TranscribeError::OutOfCredits => KeyTestError::new(
+            KeyTestKind::Server,
+            format!(
+                "The key works, but your {name} account has no credits. Add credits on {name}, then test again."
+            ),
+        ),
+        TranscribeError::NoRoute => KeyTestError::new(
+            KeyTestKind::Server,
+            format!(
+                "{name} has no provider for the speech model with Vocet's privacy settings right now, so the key couldn't be checked. Try again in a few minutes."
             ),
         ),
         TranscribeError::RateLimited => KeyTestError::new(
@@ -738,9 +749,9 @@ async fn key_test<S: SecretStore + 'static>(
             (key, "stored")
         }
     };
-    let engine = openai_compat::Config {
+    let engine = openrouter::Config {
         base_url: base_url.to_owned(),
-        ..openai_compat::Config::from_preset(Preset::for_provider(provider))
+        ..openrouter::Config::openrouter()
     };
     let result = check_key(engine, key).await;
     match &result {
@@ -2147,7 +2158,7 @@ mod tests {
 
             fn stored(&self) -> Option<String> {
                 self.inner
-                    .get(Provider::Groq.key_name())
+                    .get(Provider::OpenRouter.key_name())
                     .unwrap()
                     .map(|key| key.expose().to_owned())
             }
@@ -2200,7 +2211,7 @@ mod tests {
             for attempt in 1..=3 {
                 let error = tokio::time::timeout(
                     LIMIT,
-                    save_key(&config, &quick, Provider::Groq, FIRST.into()),
+                    save_key(&config, &quick, Provider::OpenRouter, FIRST.into()),
                 )
                 .await
                 .expect("the save never returned")
@@ -2211,7 +2222,10 @@ mod tests {
                 );
                 assert!(error.contains("may not be saved"), "{error}");
                 assert!(!error.contains(FIRST));
-                assert_eq!(has_key(&config, &live, Provider::Groq).await, Ok(false));
+                assert_eq!(
+                    has_key(&config, &live, Provider::OpenRouter).await,
+                    Ok(false)
+                );
             }
             assert_eq!(
                 store.asked(),
@@ -2224,9 +2238,12 @@ mod tests {
             landed
                 .recv_timeout(LIMIT)
                 .expect("the late write never landed");
-            assert_eq!(has_key(&config, &live, Provider::Groq).await, Ok(true));
             assert_eq!(
-                save_key(&config, &live, Provider::Groq, NEWER.into()).await,
+                has_key(&config, &live, Provider::OpenRouter).await,
+                Ok(true)
+            );
+            assert_eq!(
+                save_key(&config, &live, Provider::OpenRouter, NEWER.into()).await,
                 Ok(())
             );
             assert_eq!(store.stored().as_deref(), Some(NEWER));
@@ -2241,14 +2258,14 @@ mod tests {
             let live = LiveEngine::fixed();
             let quick = live.clone().with_key_timeout(SHORT);
             assert!(
-                save_key(&config, &quick, Provider::Groq, FIRST.into())
+                save_key(&config, &quick, Provider::OpenRouter, FIRST.into())
                     .await
                     .is_err()
             );
 
             let newer = tokio::spawn({
                 let (config, live) = (Arc::clone(&config), live.clone());
-                async move { save_key(&config, &live, Provider::Groq, NEWER.into()).await }
+                async move { save_key(&config, &live, Provider::OpenRouter, NEWER.into()).await }
             });
             let writes = live.writes().clone();
             let queued = tokio::task::spawn_blocking(move || writes.wait_queued(1, LIMIT))
@@ -2279,11 +2296,11 @@ mod tests {
             let (config, store, _landed) = rig();
             let live = LiveEngine::fixed().with_key_timeout(SHORT);
             assert!(
-                save_key(&config, &live, Provider::Groq, FIRST.into())
+                save_key(&config, &live, Provider::OpenRouter, FIRST.into())
                     .await
                     .is_err()
             );
-            let error = save_key(&config, &live, Provider::Groq, "two words".into())
+            let error = save_key(&config, &live, Provider::OpenRouter, "two words".into())
                 .await
                 .unwrap_err();
             assert!(error.contains("contains spaces"), "{error}");
@@ -2581,12 +2598,12 @@ mod tests {
         ) -> (Result<(), KeyTestError>, MemSecretStore) {
             let (config, store) = config(&temp());
             if let Some(key) = secrets {
-                config.set_api_key(Provider::Groq, key).unwrap();
+                config.set_api_key(Provider::OpenRouter, key).unwrap();
             }
             let result = key_test(
                 &config,
                 &LiveEngine::fixed(),
-                Provider::Groq,
+                Provider::OpenRouter,
                 typed.map(str::to_owned),
                 &server.uri(),
             )
@@ -2608,14 +2625,14 @@ mod tests {
             let (result, store) = run(Some(&format!("  {TYPED}\n")), Some(STORED), &server).await;
             assert_eq!(result, Ok(()));
             assert_eq!(
-                store.get("groq-api-key").unwrap().unwrap().expose(),
+                store.get("openrouter-api-key").unwrap().unwrap().expose(),
                 STORED,
                 "testing doesn't overwrite the saved key"
             );
             // Nothing stored beforehand: still nothing afterwards.
             let (result, store) = run(Some(TYPED), None, &server).await;
             assert_eq!(result, Ok(()));
-            assert_eq!(store.get("groq-api-key").unwrap(), None);
+            assert_eq!(store.get("openrouter-api-key").unwrap(), None);
         }
 
         #[tokio::test]
@@ -2623,6 +2640,8 @@ mod tests {
             for (status, kind, words) in [
                 (401, KeyTestKind::InvalidKey, "rejected this API key"),
                 (403, KeyTestKind::InvalidKey, "rejected this API key"),
+                (402, KeyTestKind::Server, "Add credits on OpenRouter"),
+                (404, KeyTestKind::Server, "privacy settings"),
                 (429, KeyTestKind::RateLimited, "limiting requests"),
                 (503, KeyTestKind::Server, "HTTP 503"),
                 (400, KeyTestKind::Server, "HTTP 400"),
@@ -2632,7 +2651,7 @@ mod tests {
                 let error = result.unwrap_err();
                 assert_eq!(error.kind, kind, "HTTP {status}");
                 assert!(error.message.contains(words), "{}", error.message);
-                assert!(error.message.contains("Groq"), "{}", error.message);
+                assert!(error.message.contains("OpenRouter"), "{}", error.message);
                 assert!(!error.message.contains(TYPED));
             }
         }
@@ -2648,7 +2667,7 @@ mod tests {
                 assert!(
                     error.message
                         == format!(
-                            "Groq answered with a redirect (HTTP {status}), which isn't followed, so the key couldn't be checked. Check the provider selected in Settings, then test the key again."
+                            "OpenRouter answered with a redirect (HTTP {status}), which isn't followed, so the key couldn't be checked. Check the provider selected in Settings, then test the key again."
                         ),
                     "{}",
                     error.message
@@ -2670,7 +2689,7 @@ mod tests {
             let error = key_test(
                 &config,
                 &LiveEngine::fixed(),
-                Provider::Groq,
+                Provider::OpenRouter,
                 Some(TYPED.to_owned()),
                 &format!("http://127.0.0.1:{port}"),
             )
@@ -2678,7 +2697,7 @@ mod tests {
             .unwrap_err();
             assert_eq!(error.kind, KeyTestKind::Network);
             assert!(
-                error.message.contains("Couldn't reach Groq"),
+                error.message.contains("Couldn't reach OpenRouter"),
                 "{}",
                 error.message
             );
@@ -2692,7 +2711,7 @@ mod tests {
             let error = result.unwrap_err();
             assert_eq!(error.kind, KeyTestKind::NoKey);
             assert!(
-                error.message.contains("No Groq API key"),
+                error.message.contains("No OpenRouter API key"),
                 "{}",
                 error.message
             );
@@ -2726,7 +2745,7 @@ mod tests {
             let error = key_test(
                 &config,
                 &LiveEngine::fixed(),
-                Provider::Groq,
+                Provider::OpenRouter,
                 None,
                 &server.uri(),
             )
@@ -2792,13 +2811,13 @@ mod tests {
                 gets: Arc::default(),
             };
             let config = Arc::new(Config::new(temp(), store.clone()));
-            config.set_api_key(Provider::Groq, STORED).unwrap();
+            config.set_api_key(Provider::OpenRouter, STORED).unwrap();
             let live = LiveEngine::fixed().with_key_timeout(Duration::from_millis(150));
 
             for attempt in 1..=3 {
                 let error = tokio::time::timeout(
                     Duration::from_secs(20),
-                    key_test(&config, &live, Provider::Groq, None, &server.uri()),
+                    key_test(&config, &live, Provider::OpenRouter, None, &server.uri()),
                 )
                 .await
                 .expect("the test never returned")
@@ -2813,7 +2832,7 @@ mod tests {
 
                 let status = tokio::time::timeout(
                     Duration::from_secs(20),
-                    has_key(&config, &live, Provider::Groq),
+                    has_key(&config, &live, Provider::OpenRouter),
                 )
                 .await
                 .expect("the status never returned")
@@ -2829,35 +2848,18 @@ mod tests {
 
             // The keychain answers: the same calls now work.
             store.open();
-            assert_eq!(has_key(&config, &live, Provider::Groq).await, Ok(true));
             assert_eq!(
-                key_test(&config, &live, Provider::Groq, None, &server.uri()).await,
+                has_key(&config, &live, Provider::OpenRouter).await,
+                Ok(true)
+            );
+            assert_eq!(
+                key_test(&config, &live, Provider::OpenRouter, None, &server.uri()).await,
                 Ok(())
             );
         }
 
-        #[tokio::test]
-        async fn openai_errors_name_openai() {
-            let (config, _) = config(&temp());
-            let server = provider(401, TYPED).await;
-            let error = key_test(
-                &config,
-                &LiveEngine::fixed(),
-                Provider::OpenAi,
-                Some(TYPED.to_owned()),
-                &server.uri(),
-            )
-            .await
-            .unwrap_err();
-            assert!(
-                error.message.contains("OpenAI rejected"),
-                "{}",
-                error.message
-            );
-        }
-
         #[test]
-        fn each_provider_tests_against_its_own_base_url() {
+        fn keys_are_tested_against_openrouter() {
             for live in [
                 LiveEngine::fixed(),
                 LiveEngine::follow(dictation_transcribe::engine::Transcribers::new(
@@ -2865,32 +2867,26 @@ mod tests {
                 )),
             ] {
                 assert_eq!(
-                    live.provider_base_url(Provider::Groq),
-                    "https://api.groq.com/openai/v1"
-                );
-                assert_eq!(
-                    live.provider_base_url(Provider::OpenAi),
-                    "https://api.openai.com/v1"
+                    live.provider_base_url(Provider::OpenRouter),
+                    "https://openrouter.ai/api/v1"
                 );
             }
         }
 
         /// T4a: a test build pointed at a local provider tests keys there
-        /// too, for either provider, so Test key and dictation agree.
+        /// too, so Test key and dictation agree.
         #[tokio::test]
         async fn a_test_build_tests_the_key_where_it_dictates() {
             let server = provider(200, TYPED).await;
             let live = LiveEngine::fixed().at(&server.uri());
-            for provider in [Provider::Groq, Provider::OpenAi] {
-                assert_eq!(live.provider_base_url(provider), server.uri());
-            }
+            assert_eq!(live.provider_base_url(Provider::OpenRouter), server.uri());
             let (config, _) = config(&temp());
             key_test(
                 &config,
                 &live,
-                Provider::Groq,
+                Provider::OpenRouter,
                 Some(TYPED.to_owned()),
-                &live.provider_base_url(Provider::Groq),
+                &live.provider_base_url(Provider::OpenRouter),
             )
             .await
             .unwrap();
@@ -3301,7 +3297,10 @@ mod capability_tests {
                     "set_onboarding_step",
                     serde_json::json!({ "step": "speech" }),
                 ),
-                ("test_api_key", serde_json::json!({ "provider": "groq" })),
+                (
+                    "test_api_key",
+                    serde_json::json!({ "provider": "openrouter" }),
+                ),
                 ("set_download_paused", serde_json::json!({ "paused": true })),
                 (
                     "set_try_outcome",
@@ -3462,8 +3461,10 @@ mod capability_tests {
             "save_settings" => {
                 serde_json::json!({ "settings": dictation_core::settings::Settings::default() })
             }
-            "set_api_key" => serde_json::json!({ "provider": "groq", "key": "gsk_not_a_real_key" }),
-            "has_api_key" | "test_api_key" => serde_json::json!({ "provider": "groq" }),
+            "set_api_key" => {
+                serde_json::json!({ "provider": "openrouter", "key": "sk-or-not-a-real-key" })
+            }
+            "has_api_key" | "test_api_key" => serde_json::json!({ "provider": "openrouter" }),
             "request_permission" => serde_json::json!({ "permission": "microphone" }),
             "set_onboarding_step" => serde_json::json!({ "step": "welcome" }),
             "set_share_usage_events" => serde_json::json!({ "share": true }),
@@ -3663,7 +3664,7 @@ mod capability_tests {
         assert!(opener.open_url("https://example.com").is_err());
         assert!(opener.reveal_folder(std::path::Path::new("/tmp")).is_err());
         let store = dictation_platform::secrets::KeychainSecretStore::new();
-        assert!(store.get("groq-api-key").is_err());
+        assert!(store.get("openrouter-api-key").is_err());
     }
 
     #[test]

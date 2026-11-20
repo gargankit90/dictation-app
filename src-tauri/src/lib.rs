@@ -71,7 +71,9 @@ use anyhow::Context as _;
 use dictation_pipeline::debug_audio::SavingAudio;
 use dictation_pipeline::history::{History, Recording};
 use dictation_pipeline::hotkey_setting::{self, ConfigurableHotkey, HotkeyControl};
-use dictation_pipeline::pipeline::{Config, CursorReader, Pipeline, Ports, UiEvent};
+use dictation_pipeline::pipeline::{
+    CleanupStep, Config, CursorReader, Extras, Pipeline, Ports, UiEvent,
+};
 use dictation_pipeline::stand_ins::{GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
 #[cfg(debug_assertions)]
@@ -213,7 +215,7 @@ fn shell_hotkey(
 }
 
 /// The commands that run in a process of their own (debug builds): the API
-/// key commands store the Groq API key from stdin and/or remove it; the
+/// key commands store the OpenRouter API key from stdin and/or remove it; the
 /// launch-at-login commands set or print the login item. Each says what it
 /// did on stderr. `None` when `argv` has none, so the app starts normally;
 /// otherwise the exit code. The key is never logged or printed.
@@ -470,9 +472,15 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     // The character before the cursor gives the smart leading space (#93);
     // it is read for one dictation at a time and never logged.
     let cursor = CursorReader::new(SystemTextBeforeCursor::new());
+    // Each cloud transcript is cleaned before the paste (Q2); the engine
+    // handle says "off" for the mock and on-device engines.
+    let extras = Extras {
+        cursor: Some(cursor),
+        cleanup: Some(CleanupStep::new(transcribers.clone())),
+    };
     // Pipeline::spawn needs to run inside the tokio runtime Tauri owns.
     let (pipeline, ui_events) = tauri::async_runtime::block_on(async {
-        Pipeline::spawn_with_cursor(ports, cursor, Config::default())
+        Pipeline::spawn_with(ports, extras, Config::default())
     })
     .context("could not start the pipeline")?;
     // The input level for the overlay's meter (U4).
@@ -888,6 +896,8 @@ async fn show_ui_events(
             }
             // A one-off notice (H2): no error code, no report entry.
             UiEvent::NoSound => tracing::info!("no sound in the last recording; shown to the user"),
+            // The outcome only, never a text (Q2).
+            UiEvent::Cleanup(outcome) => tracing::debug!(?outcome, "cleanup"),
             // This line's text is what the e2e scenario waits for.
             UiEvent::HotkeyRestored => {
                 diagnostics.hotkey_restored();

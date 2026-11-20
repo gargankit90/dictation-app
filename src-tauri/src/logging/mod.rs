@@ -281,7 +281,7 @@ mod tests {
 
     /// Obviously fake.
     const KEY: &str = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
-    const OPENAI_KEY: &str = "sk-proj-NOTAREALKEY0123456789abcdef";
+    const OPENROUTER_KEY: &str = "sk-or-v1-NOTAREALKEY0123456789abcdef";
     const TRANSCRIPT: &str = "my secret transcript about the merger";
 
     #[derive(Clone, Default)]
@@ -322,7 +322,7 @@ mod tests {
         let command = Command::Insert(TRANSCRIPT.into());
         let failed = Event::TranscriptionFailed(format!("rejected {KEY}"));
         let errors = [
-            TranscribeError::Network(format!("{KEY} {OPENAI_KEY}")),
+            TranscribeError::Network(format!("{KEY} {OPENROUTER_KEY}")),
             TranscribeError::Engine(format!("body: {{\"key\": \"{KEY}\"}}")),
             TranscribeError::KeychainUnavailable(format!("locked {KEY}")),
         ];
@@ -341,7 +341,7 @@ mod tests {
                 }
                 // A dependency that logs a header, which no type protects.
                 tracing::$level!("sending Authorization: Bearer {KEY}");
-                tracing::$level!(request = format!("key={OPENAI_KEY}"), "request");
+                tracing::$level!(request = format!("key={OPENROUTER_KEY}"), "request");
             };
         }
         at!(error);
@@ -362,7 +362,7 @@ mod tests {
         ] {
             let log = captured(level, log_everything);
             assert!(!log.is_empty(), "{level}: something was logged");
-            for key in [KEY, OPENAI_KEY, "NOT_A_REAL_KEY", "NOTAREALKEY"] {
+            for key in [KEY, OPENROUTER_KEY, "NOT_A_REAL_KEY", "NOTAREALKEY"] {
                 assert!(!log.contains(key), "{level}: {key} in\n{log}");
             }
         }

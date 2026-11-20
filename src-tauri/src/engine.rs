@@ -283,11 +283,12 @@ impl LiveEngine {
     /// uses it, so a key is tested where dictation sends it.
     #[must_use]
     pub fn provider_base_url(&self, provider: Provider) -> String {
-        self.base_url.clone().unwrap_or_else(|| {
-            dictation_transcribe::openai_compat::Preset::for_provider(provider)
+        match provider {
+            Provider::OpenRouter => self
                 .base_url
-                .to_owned()
-        })
+                .clone()
+                .unwrap_or_else(|| dictation_transcribe::openrouter::BASE_URL.to_owned()),
+        }
     }
 
     /// `provider`'s saved key, for the settings commands (`has_api_key`, a
@@ -772,9 +773,9 @@ mod tests {
     use super::*;
 
     /// Obviously fake; every test checks it never reaches the UI.
-    const KEY: &str = "gsk_wiring-key-NOT-REAL-3b8f";
-    const WRONG_KEY: &str = "gsk_invalid_test_key";
-    const TRANSCRIPT: &str = "hello from groq";
+    const KEY: &str = "sk-or-wiring-key-NOT-REAL-3b8f";
+    const WRONG_KEY: &str = "sk-or-invalid-test-key";
+    const TRANSCRIPT: &str = "hello from openrouter";
     const WAIT: Duration = Duration::from_secs(10);
 
     /// A fresh directory in the temp dir, removed on drop.
@@ -799,7 +800,7 @@ mod tests {
     }
 
     /// The whole wiring around a real pipeline: settings and keychain in
-    /// memory, a wiremock server standing in for Groq, a fake hotkey and
+    /// memory, a wiremock server standing in for OpenRouter, a fake hotkey and
     /// inserter.
     struct Rig {
         dir: TempDir,
@@ -816,7 +817,7 @@ mod tests {
 
     impl Rig {
         /// `status` is what the provider answers with for `key`; any other
-        /// key gets a 401 (as Groq does).
+        /// key gets a 401 (as OpenRouter does).
         async fn start(key_status: u16) -> Self {
             let dir = TempDir::new(&format!("rig{key_status}"));
             let secrets = MemSecretStore::new();
@@ -899,7 +900,7 @@ mod tests {
 
         fn save_key(&self, key: &str) {
             changed(&self.config, &self.live, |c| {
-                c.set_api_key(Provider::Groq, key)
+                c.set_api_key(Provider::OpenRouter, key)
             })
             .unwrap();
         }
@@ -956,7 +957,7 @@ mod tests {
         let dir = TempDir::new("startup");
         let secrets = MemSecretStore::new();
         let config = Arc::new(Config::new(dir.0.join("config"), secrets.clone()));
-        config.set_api_key(Provider::Groq, KEY).unwrap();
+        config.set_api_key(Provider::OpenRouter, KEY).unwrap();
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/audio/transcriptions"))
@@ -1048,7 +1049,10 @@ mod tests {
             writes: rig.live.writes.clone(),
             local: None,
         };
-        changed(&rig.config, &dead, |c| c.set_api_key(Provider::Groq, KEY)).unwrap();
+        changed(&rig.config, &dead, |c| {
+            c.set_api_key(Provider::OpenRouter, KEY)
+        })
+        .unwrap();
         assert_eq!(
             rig.dictate().await,
             failed("Couldn't reach the provider. Check your internet connection.")
@@ -1061,12 +1065,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn saving_settings_rebuilds_the_engine_with_the_new_model_and_language() {
+    async fn saving_settings_rebuilds_the_engine_with_the_new_language() {
         let mut rig = Rig::start(200).await;
         rig.save_key(KEY);
         rig.dictate().await;
         let settings = Settings {
-            model: "whisper-large-v3".into(),
             language: Some("fr".into()),
             ..Settings::default()
         };
@@ -1074,27 +1077,12 @@ mod tests {
         assert_eq!(rig.dictate().await, pasted());
 
         let requests = rig.server.received_requests().await.unwrap();
-        let body = |n: usize| String::from_utf8_lossy(&requests[n].body).into_owned();
-        assert!(body(0).contains("whisper-large-v3-turbo"), "the default");
-        assert!(!body(0).contains("name=\"language\""));
-        assert!(body(1).contains("whisper-large-v3\r\n"), "the saved model");
-        assert!(body(1).contains("name=\"language\""));
-        assert!(body(1).contains("\r\n\r\nfr\r\n"));
-        rig.finish().await;
-    }
-
-    #[tokio::test]
-    async fn switching_provider_looks_for_that_providers_key() {
-        let mut rig = Rig::start(200).await;
-        rig.save_key(KEY); // a Groq key only
-        let openai = Settings {
-            provider: Provider::OpenAi,
-            model: Provider::OpenAi.default_model().to_owned(),
-            ..Settings::default()
-        };
-        changed(&rig.config, &rig.live, |c| c.save_settings(&openai)).unwrap();
-        assert_eq!(rig.dictate().await, failed("Add your API key in Settings."));
-        assert_eq!(rig.requests().await, 0);
+        let body =
+            |n: usize| -> serde_json::Value { serde_json::from_slice(&requests[n].body).unwrap() };
+        assert_eq!(body(0)["model"], "openai/gpt-4o-mini-transcribe");
+        assert!(body(0).get("language").is_none());
+        assert_eq!(body(1)["model"], "openai/gpt-4o-mini-transcribe");
+        assert_eq!(body(1)["language"], "fr");
         rig.finish().await;
     }
 
@@ -1109,7 +1097,7 @@ mod tests {
         assert!(changed(&rig.config, &rig.live, |c| c.save_settings(&invalid)).is_err());
         assert!(
             changed(&rig.config, &rig.live, |c| c
-                .set_api_key(Provider::Groq, "  "))
+                .set_api_key(Provider::OpenRouter, "  "))
             .is_err()
         );
         assert_eq!(rig.dictate().await, pasted(), "still the saved key");
@@ -1147,7 +1135,7 @@ mod tests {
         let config = Arc::new(Config::new(dir.0.join("config"), MemSecretStore::new()));
         let live = LiveEngine::fixed();
         // Nothing to rebuild: no engine, no keychain read, no panic.
-        changed(&config, &live, |c| c.set_api_key(Provider::Groq, KEY)).unwrap();
+        changed(&config, &live, |c| c.set_api_key(Provider::OpenRouter, KEY)).unwrap();
         live.rebuild(&config);
     }
 
@@ -1160,7 +1148,7 @@ mod tests {
         rig
     }
 
-    const KEY_NAME: &str = "groq-api-key";
+    const KEY_NAME: &str = "openrouter-api-key";
 
     fn message(events: &[UiEvent]) -> String {
         let Some(UiEvent::Error(DictationError::TranscriptionFailed { reason })) = events.get(2)
@@ -1317,7 +1305,7 @@ mod tests {
                 assert!(crate::onboarding::key_saved(&rig.config, &rig.live));
             } else {
                 // What the key test and has_api_key call.
-                let key = rig.live.read_key(&rig.config, Provider::Groq);
+                let key = rig.live.read_key(&rig.config, Provider::OpenRouter);
                 assert_eq!(key, Ok(Some(Secret::new(KEY))));
             }
             assert_eq!(transcribers.name(), "remote", "key_saved: {via_key_saved}");
@@ -1488,7 +1476,7 @@ mod tests {
             let answers = Arc::clone(&answers);
             std::thread::spawn(move || {
                 at_once(6, move |_| {
-                    let answer = reads.read(&config, Provider::Groq, WAIT);
+                    let answer = reads.read(&config, Provider::OpenRouter, WAIT);
                     answers.lock().unwrap().push(answer);
                 });
             })
@@ -1559,7 +1547,7 @@ mod tests {
             gets: Arc::default(),
         };
         let config = Arc::new(Config::new(dir.0.join("config"), store.clone()));
-        config.set_api_key(Provider::Groq, WRONG_KEY).unwrap();
+        config.set_api_key(Provider::OpenRouter, WRONG_KEY).unwrap();
 
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -1596,7 +1584,7 @@ mod tests {
         let saved = {
             let (config, live) = (config.clone(), live.clone());
             std::thread::spawn(move || {
-                changed(&config, &live, |c| c.set_api_key(Provider::Groq, KEY)).unwrap();
+                changed(&config, &live, |c| c.set_api_key(Provider::OpenRouter, KEY)).unwrap();
             })
         };
         std::thread::sleep(Duration::from_millis(100));
@@ -1622,7 +1610,7 @@ mod tests {
 
     // ---- quitting during a real request (#115) ----
     //
-    // T1 aborts an OpenAiCompat future directly; these go through the real
+    // T1 aborts an OpenRouter future directly; these go through the real
     // pipeline and its `shutdown`, with the engine the settings build,
     // against a raw local listener that reports what the client did. No
     // sleep is a proof: each step waits on a fence with an upper bound.
@@ -1807,7 +1795,7 @@ mod tests {
             let live = LiveEngine::follow(transcribers.clone())
                 .at(&provider.url)
                 .with_key_timeout(WAIT);
-            changed(&config, &live, |c| c.set_api_key(Provider::Groq, KEY)).unwrap();
+            changed(&config, &live, |c| c.set_api_key(Provider::OpenRouter, KEY)).unwrap();
             assert_eq!(transcribers.name(), "remote");
             let wav = dir.0.join("speech.wav");
             let wav_bytes = dictation_core::wav::encode_f32(&vec![0.25; 8_000], 16_000).unwrap();

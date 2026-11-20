@@ -1100,7 +1100,7 @@ mod tests {
     // with a secret or private text, and none of it may appear.
     #[test]
     fn criterion_4_planted_secrets_and_text_never_reach_the_report() {
-        let key = "gsk_PLANTED_KEY_0123456789abcdef";
+        let key = "sk-or-PLANTED_KEY_0123456789abcdef";
         let registered = "registered-secret-value-9f8e7d";
         let transcript = "my password is hunter2 and the launch code is 4815162342";
         let clipboard = "clipboard: wire the money to account 99887766";

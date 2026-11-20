@@ -350,21 +350,6 @@ mod tests {
     }
 
     #[test]
-    fn a_v1_file_is_migrated_on_load() {
-        let dir = TempDir::new();
-        let (config, _) = config(&dir);
-        std::fs::create_dir_all(config.path().parent().unwrap()).unwrap();
-        std::fs::write(
-            config.path(),
-            r#"{"version": 1, "engine": "openai", "whisper_model": "whisper-1", "language": ""}"#,
-        )
-        .unwrap();
-        let settings = config.settings().unwrap();
-        assert_eq!(settings.provider, Provider::OpenRouter);
-        assert_eq!(settings.language, None);
-    }
-
-    #[test]
     fn a_corrupt_or_unreadable_file_is_an_error() {
         let dir = TempDir::new();
         let (config, _) = config(&dir);
