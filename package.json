@@ -1,7 +1,7 @@
 {
   "name": "dictation-app",
   "private": true,
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "version": "0.1.0",
   "type": "module",
   "engines": {

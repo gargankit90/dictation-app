@@ -146,7 +146,7 @@ record of approval.
   `Event` enum in `crates/ports`, from Rust, never audio, transcripts, typed
   text, keys, app names, paths, hostnames, usernames or IPs, and never put a
   real PostHog key in the repo (`DICTATION_POSTHOG_KEY` at build time).
-- **Licences:** adapt code only from MIT/Apache repos (Handy, OpenWhispr,
+- **Licences:** our own licence is FSL-1.1-ALv2 (`LICENSE`). Adapt code only from MIT/Apache repos (Handy, OpenWhispr,
   FreeFlow, Muesli, transcribe.cpp, FluidAudio) and credit them in `NOTICE`.
   FluidVoice and VoiceInk are GPLv3: read for ideas, never copy.
 - Ask the Lead before anything outward-facing beyond pushing your branch,

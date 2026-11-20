@@ -128,7 +128,10 @@ export function About() {
   return (
     <Group>
       <Row label="Vocet" caption={version === null ? "Version…" : `Version ${version}`} />
-      <Row label="Licence" caption="Free and open source under the MIT licence.">
+      <Row
+        label="Licence"
+        caption="Source available under the FSL-1.1-ALv2 licence (Fair Source). Apache 2.0 after two years."
+      >
         <LinkButton link="licence">Read the licence</LinkButton>
       </Row>
       <Row label="Source code" caption="github.com/gargankit90/dictation-app">

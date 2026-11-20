@@ -374,7 +374,7 @@ pub enum Link {
     Privacy,
     /// The source code.
     Repository,
-    /// The MIT licence.
+    /// The FSL-1.1-ALv2 licence.
     Licence,
     /// The credits for adapted code.
     Notice,

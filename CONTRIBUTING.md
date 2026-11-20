@@ -36,10 +36,10 @@ everything; CI always does.
 
 ## Licensing: no copying from GPL code
 
-The project is MIT. Only adapt code from MIT or Apache-2.0 projects, and credit
+The project is source available under FSL-1.1-ALv2 (see `LICENSE`). Only adapt code from MIT or Apache-2.0 projects, and credit
 it in `NOTICE`. Do not copy code from GPL projects, in particular FluidVoice
 and VoiceInk (both GPLv3). Reading them for ideas is fine; copying their code
-is not. By contributing you agree your work is released under the MIT licence.
+is not. By contributing you agree your work is licensed under FSL-1.1-ALv2.
 
 ## The maintainer's AI-agent workflow
 

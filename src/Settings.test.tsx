@@ -1271,6 +1271,8 @@ describe("General and About", () => {
   it("About shows the version and opens the licence, source and credits", async () => {
     await open("about");
     expect(await screen.findByText("Version 0.1.0")).toBeTruthy();
+    expect(screen.getByText(/FSL-1\.1-ALv2/)).toBeTruthy();
+    expect(screen.queryByText(/MIT/)).toBeNull();
     click("Read the licence");
     click("Open on GitHub");
     click("Show credits");
