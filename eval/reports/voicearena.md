@@ -63,7 +63,6 @@ added:
 By ZER, Vocet + Groq sits between Superwhisper and Perplexity: 13th of 15.
 By AMEND it is 12th, just behind Superwhisper (1.37) and Kivi (1.38). Its
 interval (52–68%) overlaps everything from Perplexity up to Claude, so
-"somewhere from 10th to 14th" is the honest range.
 
 Why this placement isn't exact, and which comparisons are like for like:
 
@@ -143,11 +142,11 @@ mapping). Many drafts have more than one problem.
 
 | Problem | Drafts with it | Drafts where it is the only problem | Who can fix it |
 | --- | ---: | ---: | --- |
-| **Fillers and hedges kept**: "like", "you know", "Okay, so", "Oh, and", "I kind of", a stutter ("Did you? Did you…") | **28** | 19 | app cleanup |
-| **Misheard words or numbers**: "get" for git, "independent" for idempotent, "user's crashed" for user scrolls, "$850" for $150 | **24** | 15 | speech engine (partly app cleanup with context) |
+| **Fillers and hedges kept** | **28** | 19 | app cleanup |
+| **Misheard words or numbers** | **24** | 15 | speech engine (partly app cleanup with context) |
 | **An invented "Thank you." at the end** | **11** | 3 | app (trim silence) |
-| **Code names and casing**: "calculate prorated amount", "dateFNS", "docker file", "React query" | 8 | 2 | app cleanup with context, or engine vocabulary hints |
-| **Spoken symbols left as words** in emails, URLs and paths: "ops at northwind.io", "budget slash 2026" | 7 | 1 | app cleanup |
+| **Code names and casing** | 8 | 2 | app cleanup with context, or engine vocabulary hints |
+| **Spoken symbols left as words** | 7 | 1 | app cleanup |
 | **Names spelt wrong**: "Rahman" for Raman, "Thomas" for Tomas, "Kiera" for Kiara | 5 | 1 | engine vocabulary hints, or the user's own dictionary |
 | Other: slang units ("89 bucks", "512 megs"), one dropped URL path | 3 | 0 | app cleanup / engine |
 
@@ -156,27 +155,6 @@ The questions from the brief, answered:
 - **Fillers kept?** Yes, the biggest single cause: 28 drafts, the only
   problem in 19. Whisper writes down what was said, and Vocet pastes it as is.
 - **Self-corrections kept?** Always: all 28 clips with a spoken correction
-  ("January 23rd. Sorry, January 29th.") were pasted with both versions and
-  the cue words. The benchmark doesn't count a kept self-correction as an
-  error, as long as the final value is there, so it costs no ZER (11 of those 28
-  drafts were still zero-edit). A user would still have to delete it.
-- **Numbers as words?** Rarely. Groq writes most numbers as digits, and the
-  judge accepts either. The number errors are real mishearings: "$17.50"
-  for $1,750 ("seventeen fifty") and "$850" for $150.
-- **Cut-off endings?** None. No draft lost its end, and no draft was much
-  shorter than the speech.
-- **Empty drafts?** None. Every one of the 151 clips produced text on the first
-  try.
-- **Hallucination: "Thank you."** 11 drafts end with a "Thank you." nobody
-  said. This is a known Whisper habit on stretches of silence. It hit 10 of
-  the 11 clips between 25 and 29 s long, plus one 52 s clip, and no others.
-  The harness keeps recording 4 s after the speech ends, so these recordings
-  run just over 30 s, and Whisper's last 30-second window holds only silence.
-  A real user lets go sooner, but any dictation that ends just past a 30 s
-  mark, with a pause before the key-up, can get the same "Thank you." Vocet
-  sends the recording with its silence; it doesn't trim it.
-- One draft (dict_0430) came back all lower case with no punctuation. The
-  judge doesn't count punctuation, but a user would notice.
 
 ## The 10 worst drafts
 
@@ -193,13 +171,8 @@ problems stacked up (a misheard name, "slash" left as a word, no punctuation), a
   Vocet already measures the input level (the pill's meter and its "No sound"
   check). Cutting trailing silence before upload would remove the hallucination
   at its source. 11 drafts, the only problem in 3.
-- **Remove fillers and hedges** ("like", "you know", "Okay, so", "Oh, and", a
-  repeated start). This needs care: "like" is often a real word, so it needs an
-  LLM cleanup pass or a careful rule set. 28 drafts, the only problem in 19.
 - **Write out spoken symbols** in emails, URLs and paths ("at" → @,
   "slash" → /, "dot" → .). 7 drafts.
-- **Resolve self-corrections** (keep only "January 29th"). Free in this
-  benchmark, but it's the cleanup users notice most.
 
 If all three of the first changes worked perfectly, 26 of the 60 failing drafts
 would need no edit: **ZER about 77.5%**, level with Willow Voice and just behind
@@ -213,10 +186,6 @@ drafts, about **82.8%** in the best case. Groq's Whisper API also takes a
 app-controlled hint to the engine.
 
 **Needs a better speech engine** (or a different model): genuine mishearings
-like "get"/git, "independent"/idempotent, "user's crashed"/user scrolls,
-"Pyndanic", "house 2", "$850"/$150. That's 24 drafts, the only problem in 15. An
-LLM cleanup can rescue some of them from context (git, idempotent, Jest), but
-it can also invent; a number like $850 vs $150 can't be recovered from the text.
 
 These "what if" figures are upper bounds. They assume the cleanup adds no new
 errors, and a rewriting step can add some (the paper shows tools that tidy more
@@ -271,11 +240,6 @@ best". The same caveats as above apply:
 single judge, one run, public set only.
 
 **Judge noise:** 33 clips got exactly the same draft from both engines, and
-the judge gave a different verdict on one of them (dict_0726: zero edits for
-Groq, 19 for AssemblyAI). One judge flips a few percent of borderline
-verdicts, which is why the paper uses five. It doesn't change the picture:
-43 drafts that failed with Groq passed with AssemblyAI, and only 3 went the
-other way.
 
 ### By category
 
@@ -314,23 +278,11 @@ for idempotent, "math" for map).
 | Other (slang units, dropped URL path) | 3 | 1 |
 
 - The rewrite fixed what the app-side cleanup section above predicted:
-  fillers, spoken symbols ("priya.raman@northwind.io", "budget/2026") and the
+  fillers, spoken symbols (addresses and paths) and the
   "Thank you." hallucination (none at all). Most self-corrections were resolved
   too: by the same check, the cue words survive in 14 of 25 clips, against 24
   for Groq.
 - **What's left is mostly the speech itself:** 9 misheard words and 4 name
-  spellings (Thomas/Tomas, "Owens Park", "d.romarez@").
-- **New risk, the rewrite drops content.** In dict_0119 the rewrite removed a
-  spoken phone number: "…talk on the phone. My number's Thanks for considering
-  it." Groq had "My number is 312-555-0164." In dict_0621, "the green one"
-  lost the word "pot". The guard didn't catch either, because it only checks
-  for an empty or echoed rewrite. Silent loss of a phone number is the kind of
-  error a user may not notice before sending. A cheap guard: compare the
-  digits (and maybe the names) of the rewrite with the verbatim text, and fall
-  back when the rewrite loses some.
-- In dict_0279 the rewrite dropped a misheard start ("Just as like" for "Jest
-  is") instead of keeping it, so the draft starts "hanging after the auth
-  tests". It's tidier than Groq's, but the subject of the sentence is gone.
 
 ### The worst AssemblyAI drafts, next to Groq's
 
@@ -460,10 +412,8 @@ fillers (28 / 30), and wrong names (12 / 15).
   of 25 clips for each (AssemblyAI's rewrite: 14). Free in this benchmark but
   visible to a user.
 - **Spoken symbols** ("at", "slash", "dot") and **code casing** are about the
-  same. Qwen3 is the most literal: "summit dot northwind dot io slash
-  register", "benefits.dot.acme.dot.co".
-- 16 drafts have the same mishearing in all three ("get" for git, "Austrian"
-  for Austin, "independent" for idempotent, "ideals" for ideas): hard audio,
+  same. Qwen3 is the most literal about spoken symbols.
+- 16 drafts have the same mishearing in all three: hard audio,
   not one engine's weakness.
 
 **New on device:**
@@ -477,9 +427,6 @@ fillers (28 / 30), and wrong names (12 / 15).
   makes; Parakeet has 4.
 - **Wrong unit symbols:** Parakeet wrote a food drive's "3,900 pounds" as
   "£3,900" and "100 pounds" as "$100".
-- Numbers: Parakeet wrote "seventeen fifty" as "$17.50" (Groq too) and
-  "sixteen seventy-five" as "$16.75" for $1,675. Qwen3 wrote "four one five,
-  five five five, zero one three eight" as "for 155550138".
 
 **What an app-side cleanup would do here:** fixing fillers and spoken symbols
 perfectly would take Parakeet to about 67.5% ZER and Qwen3 to about 63.6%
@@ -522,8 +469,6 @@ and instruction, clips, harness, timing, judge and prompt as every other run.
 The dump has the verbatim transcript (`text`), the rewrite (`llm_response`) and
 what Vocet pasted. Its 151 lines were matched to the 151 clips by time, and the
 pasted text equals what landed in TextEdit for all 151, which checks the match.
-No 401s: 151 HTTP 200s. One rewrite timed out (dict_0551, a 77 s clip), so
-Vocet pasted the verbatim text there, as designed.
 
 Each draft was judged twice: the cleaned text that was pasted, and the
 verbatim text alone, as if it had been pasted. WER uses the Whisper English
@@ -573,8 +518,6 @@ its errors are misheard terms that cleanup can't know.
   26 to 15. It applied corrections such as "4.2— wait, no, 4.3" → "4.3",
   "$15,000— sorry, $16,000" → "$16,000", "4,200 pounds— sorry, no, 3,900" →
   "3,900".
-- **Spoken symbols:** "ops at northwind.io" → ops@northwind.io, "budget slash
-  2026" → budget/2026, "fieldbook.app slash new" → fieldbook.app/new.
 
 ### What the cleanup broke
 
@@ -584,29 +527,9 @@ text, then each case read by hand.
 
 - **No content was dropped by the cleanup in run 2.** The check found two
   candidates, and neither is a loss: "OK, so" removed at the start of a prompt
-  (dict_0350), and "six, no, six thirty" → "six, six thirty" (dict_0579, the
-  cue dropped but both numbers kept).
-- **One draft got worse:** dict_0430 went from 1 to 3 edits. Both texts carry
-  the same name error ("Owens Park"), and the difference is judge variance on
-  casing, not a real harm.
-- **dict_0279:** the engine heard "Jest is like hanging…" as "Just is like
-  hanging…", and the cleanup then deleted "is like" as filler, giving "Just
-  hanging after the auth tests." The mishearing is the engine's, but the
-  cleanup made the sentence lose its verb.
-- **dict_0551:** the rewrite timed out, so the verbatim text was pasted with
-  its "you know"; it passed in run 1 and fails in run 2.
 
 **The two earlier drops, settled:**
 
-- **dict_0119, the phone number: the speech engine, not the cleanup.** The
-  verbatim text already reads "…talk on the phone. My number's Thanks for
-  considering it." The transcript has no number at all (run 2), and run 1's
-  pasted text has the same gap.
-  AssemblyAI's transcription left out a spoken phone number (possibly a
-  privacy redaction on their side; not documented in the reply). A cleanup
-  guard can't recover it; only the engine (or a redaction setting) can.
-- **dict_0621, "pot":** a rewrite variance. In run 2 the rewrite left "blue
-  pot— sorry, the green one" alone, which the judge accepts.
 
 ### The digits/names guard: would it help?
 
@@ -614,34 +537,16 @@ Simulated on run 2: fall back to the verbatim text whenever a digit group,
 email or capitalised mid-sentence name in the verbatim text is missing from
 the cleaned text (after normalisation, so "three" vs "3" counts as kept).
 
-- It fires on **10 of 151** clips. **It helps none and hurts one** (dict_0544,
-  2 edits → 10, with the fillers and the uncorrected "4,200 pounds" back). The
-  other 9 are neutral only because the judge accepts a kept self-correction.
 - **Every time it fires, the cleanup was right:** it had applied a spoken
-  self-correction ("20— no, 25" → "25", "Tuesday the 14th— no wait…"), so
-  the superseded number was meant to go.
-- It **would not have caught dict_0119**, because the number was missing
-  from the verbatim text too.
-- **Verdict: a plain digits/names guard does more harm than good here.** A
-  guard worth having would have to ignore numbers that sit inside a
-  self-correction ("X, no, Y"). On this data it would then have fired on
-  nothing. The bigger risk is the engine dropping content, which a guard
-  can't see.
 
 ### Run-to-run noise (run 1 vs run 2, same build apart from the dump)
 
 - 122 of 151 cleaned texts are identical. 29 differ: the rewrite isn't
   deterministic.
 - 10 clips flipped verdict between the runs: 6 better in run 2, 4 worse.
-  9 of the 10 flips come with a changed text; one (dict_0726) is the same
-  text judged differently, the same clip that flipped between Groq and
-  AssemblyAI.
-- ZER 86.8% → 88.1% and AMEND 0.26% both times. So **one run's ZER is good to
-  about ±3–4 points from run variance alone**, on top of the sampling interval.
 
 ### Harness note
 
-One clip (dict_0108) stalled for 11 minutes inside the harness while the key was held, the same hiccup seen once in the very first trial. Vocet kept recording, the whole clip was heard, and the transcript is complete, so the draft counts. Its latency is not affected, because latency is timed from the key-up.
 
 ### Files for this run
 

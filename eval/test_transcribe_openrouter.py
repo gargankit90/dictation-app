@@ -28,8 +28,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 try:
     import numpy as np
     import soundfile as sf
+    import soxr  # noqa: F401  (the script needs it)
 except ImportError as e:  # the gate's plain python3 has neither; `uv run pytest eval` does
-    raise unittest.SkipTest(f"needs numpy and soundfile: {e}")
+    raise unittest.SkipTest(f"needs numpy, soundfile and soxr: {e}")
 
 HERE = pathlib.Path(__file__).resolve().parent
 SCRIPT = HERE / "transcribe_openrouter.py"
@@ -152,7 +153,7 @@ class E2E(unittest.TestCase):
 
     def run_script(self, *extra, models=("nvidia/nemotron-3.5-transcribe", "qwen/qwen3-asr-1.7b"),
                    env_key=KEY):
-        cmd = ["uv", "run", "--quiet", str(SCRIPT), "--clips", str(self.clips), "--out", str(self.out),
+        cmd = [sys.executable, str(SCRIPT), "--clips", str(self.clips), "--out", str(self.out),
                "--base-url", self.base, "--backoff", "0.01", "--gen-delay-scale", "0.01", *extra]
         for m in models:
             cmd += ["--model", m]

@@ -41,6 +41,8 @@ from report import paired, percentile, read_csv, zer_amend  # noqa: E402
 WORK = HERE / "work"
 CLIPS = EVAL / "clips"
 MANIFEST = CLIPS / "manifest.csv"
+OFFLINE_CLEANUP = EVAL / "offline_cleanup.py"
+SCRIPTS = [EVAL / "fetch_dataset.py", EVAL / "transcribe_openrouter.py", OFFLINE_CLEANUP, EVAL / "judge.py"]
 SPEECH_MODEL = "openai/gpt-4o-mini-transcribe"  # what the baseline's raw text came from
 RAW = WORK / "asr" / SPEECH_MODEL.replace("/", "__") / "harness_results.csv"
 # Measured over these 40 clips in PR #332: $0.0217 for 40 speech requests.
@@ -145,6 +147,13 @@ def main() -> int:
     if not os.environ.get("OPENROUTER_API_KEY"):
         print("OPENROUTER_API_KEY is not set in the environment", file=sys.stderr)
         return 2
+    missing = [str(x) for x in SCRIPTS if not x.is_file()]
+    if missing:  # before anything is spent
+        print("missing scripts: " + ", ".join(missing), file=sys.stderr)
+        return 2
+    if not pathlib.Path(p["prompt"]).is_file():
+        print(f"cleanup prompt not found: {p['prompt']}", file=sys.stderr)
+        return 2
     print_plan(p)
     py = sys.executable
     if not MANIFEST.exists():
@@ -160,7 +169,7 @@ def main() -> int:
         run(["uv", "run", "--quiet", str(EVAL / "transcribe_openrouter.py"), "--model", SPEECH_MODEL, "--clips", str(CLIPS),
              "--out", str(WORK / "asr"), "--ids-file", str(HERE / "clips.txt"), "--max-usd", "0.25"])
     py = sys.executable
-    run([py, str(EVAL / "cleanup" / "offline_cleanup.py"), "--provider", "openrouter", "--model", a.model,
+    run([py, str(OFFLINE_CLEANUP), "--provider", "openrouter", "--model", a.model,
          "--prompt", p["prompt"], "--label", "current", "--input", str(RAW),
          "--results-dir", str(WORK), "--max-cost", str(a.max_cost)])
     run(["uv", "run", "--quiet", str(EVAL / "judge.py"), "--judge", a.judge, str(WORK / "current" / "results.csv"),

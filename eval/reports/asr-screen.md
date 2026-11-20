@@ -163,14 +163,11 @@ Gemma 4 E2B Q4_K_M adds **3.11 GB** of weights. All cleanup rows reused the loca
 
 ## What the errors look like
 
-- Qwen 1.7B and Oruk had the lowest spoken WER, yet still rendered a spoken registration URL as prose, split “Lakeshore,” and heard “nudge” as “note” (0533). Both missed the temperature unit in a recipe (0069). Text cleanup can repair formatting but has no audio to recover a missing unit.
-- Voxtral Mini 3B had more spoken word errors than either Qwen while yielding more sendable raw drafts. Its remaining edits included “some days” for “Sundays” (0229), the identifier “idempotency” (0539), and retained filler phrases (0229, 0231, 0551). The larger real-time Voxtral matched Mini 3B's held-out raw ZER on both judges, but scored lower across the whole corpus.
 - Granite 2B's written prompt improved intended-text WER relative to verbatim. Codex judged the written version sendable on 82 clips and verbatim on 83, with five wins and six losses. Rumble's decoder returned all 151 drafts without leaking EOS, but its small aggregate gain over Parakeet reversed on check. Granite TurboCTC produced the fastest drafts and the fewest Codex passes of the judged engines.
 - Failure counts include short/long output, differing digit groups, terminal question marks and missed dictionary occurrences for every complete run. These are diagnostic flags. Written digits, number words, dates and abbreviations can give different counts while preserving meaning.
 
 ## What Fluid clean mode deletes
 
-Comparing the same 8-bit MLX weights with the 55 MB adapter switched on and off, a word alignment found four removals of the filler “you know” (0103, 0229, 0231, 0551). One repeated “like” was collapsed in 0103, preserving the comparison “more like a two-week delay.” No meaningful “like” was deleted. Clean mode also removed ordinary stutters, including doubled “did you” in 0124 and 0138.
 
 **Six identifiers that were correct with the adapter off lost repeated digits with it on.** The invoice 8841 became 841 (0474), ticket 8832 became 832 (0737), and the same error affected phone numbers (0119 and 0663), an order ID (0471) and a payment reference (0629). A separate invoice was already incorrect in the raw draft (0391). The clean adapter also dropped part of an email address (0008) and changed Vite to VIP (0218). Those changes matter to someone pasting a draft even when normalized corpus WER moves little.
 
@@ -183,7 +180,6 @@ Qwen accepted the vocabulary through the existing Rust `RunOptions::vocabulary` 
 | Qwen 1.7B | 15 → 18 | 6 → 6 | **Zillow** for Zelle (0629), **Amaya** in a benefits URL (0729) |
 | Granite 2B written | 16 → 18 | 6 → 6 | **Zillow** for Zelle (0629) |
 
-Whole-word case-insensitive counting also flagged “Docker file” for “Dockerfile” on 0310. That spacing difference is excluded from the wrong-term column. A separate 12-term generic engineering list had just one target occurrence, TypeScript, already correct with and without Qwen bias. The larger list was Priya Raman, Carlos, Hannah, Lakeshore, Castellano, Moreno, Zillow, JavaScript, Docker, Tailwind, Stripe, WebSocket, Delancey, Clearwater, TypeScript, GraphQL, Vitest, Grafana, Datadog, Twilio, Amaya, Lakehurst, Costello and Alina.
 
 Keep #215 opt-in. Bias recovered names on clips containing tune-selected terms. On check there was no remaining target error to fix, and bias introduced unrelated entities. Before enabling it by default, use fresh speakers with actual user dictionaries and include clips where none of their words should appear.
 

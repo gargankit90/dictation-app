@@ -75,7 +75,7 @@ Guard counterfactuals (no new model calls; same replies, a different guard, scor
 | Run | Claude ZER all | Codex ZER all | What changed |
 | --- | ---: | ---: | --- |
 | gpt-6-luna + v1, relaxed guard | 69.5 | 67.5 | 7 resolved self-corrections pasted ("9, sorry, 10" → "10") |
-| gpt-6-luna + v1, no guard | 69.5 | 67.5 | + dict_0024, where luna dropped a whole sentence (the guard was right) |
+| gpt-6-luna + v1, no guard | 69.5 | 67.5 | one clip where luna dropped a whole sentence (the guard was right) |
 | gpt-6.2-sol + v1, relaxed guard | 71.5 | 69.5 | 3 resolved self-corrections pasted |
 | gpt-6.2-sol + v4, no guard | 84.8 | 83.4 | 7 replies the guard refused, all good fixes (below) |
 
@@ -95,29 +95,16 @@ neither judge: the Voice Arena intended text keeps self-corrections, or the clip
    10 on sol (71.5 → 82.1), and halves AMEND. The Groq worker's v3 rules (keep meaning-carrying
    sentences, keep self-corrections, symbols in addresses, drop a phantom final "Thank you.") give
    most of it: luna + g3 76.8 / 74.8 with **zero** guard fallbacks. The misheard-words rule adds little
-   on luna (g3 vs g4 within noise) but is where sol pulls ahead (sol fixes `billing.tease` →
-   `billing.ts`, `Pyndanic` → `Pydantic`, `dateFNS` → `date-fns`, `idipotency` → `idempotency`).
+   on luna (g3 vs g4 within noise) but is where sol pulls ahead (sol fixes misheard code names and casing).
    The dangling-comma sentence (g4 vs my v4) is neutral to slightly worse (−2 points ≈ 3 clips, noise).
 3. **sol + v4 is the best on every measure:** highest ZER on both halves and both judges (check half
    85.3 / 81.3, so not tuned to the tune half), lowest AMEND, most clips fixed (33 / 35) and **none
    broken by either judge**. luna + v4 is 4–5 points behind at ~1/20 of the price.
 4. **With v4, the strict guard now blocks good fixes.** All 7 sol + v4 fallbacks were correct
-   corrections the guard read as dropped content: `billing.tease` → `billing.ts` (link), `Pyndanic` →
-   `Pydantic`, `Connect Timeout` → `` `connectTimeout` ``, `El Pastor` → `al pastor`, `Road J` → `Row J`
-   (names), `$17.50 a month` rent → `$1,750` and `house 2 session` → `how-to session` (numbers).
+   corrections the guard read as dropped content (a code name, a name, a number).
    Without the guard sol + v4 scores 84.8 / 83.4. The guard still earns its keep on v1: luna + v1
-   dropped a whole sentence ("Oh, and we're on dateFNS version 3, so don't use the old imports.") and
-   the dropped-number check caught it.
 
 5. **What is left on the tune half (sol + v4, 16 clips with edits, Claude judge):** 5 are the guard
-   refusing a good fix (dict_0024, 0119, 0428, 0614, 0616: the raw text with its errors was pasted);
-   6 are sound-alike recognition errors the prompt does not cover and a cleanup can only guess
-   (`Austrian` → `Austin`, `boat` → `board`, `tent` → `temp`, `two` → `too`, `megs` → `MB`,
-   `Rahman` → `Raman` in a name and an email); 1 is the dict_0399 loss below; the rest are single
-   words (a kept filler "like", "refreshes" vs "refetches", a sign-off). So the next gain is in the
-   guard (accept a dropped token when the reply has a close spelling of it, e.g. edit distance or
-   same sound, or when the prompt asked for that kind of fix), not in more prompt text. Prompt
-   changes from these clips would mean guessing homophones, which risks changing meaning.
 
 ## Harms (content dropped or meaning changed)
 
@@ -127,26 +114,7 @@ Read by hand from `results/<run>/harms.md` (clips a judge says the cleanup broke
 - **v1 prompt, all models: deletes too much.** Its "remove openers aggressively" and "delete false
   starts" rules drop real content, and the guard cannot see dropped words that aren't numbers or
   names:
-  - luna + v1, dict_0235: the last sentence vanished ("Write it in plain, friendly language,
-    something I can print on one page and hand out at the door."). Pasted.
-  - luna + v1, dict_0335: "It started with release 2.14, wait 2.15. Can you find which commit caused
-    this?" → "It started with release 2.14, 2.15." (the actual request is gone). Pasted.
-  - luna + v1, dict_0350: "update the project model so the default scope hides archive projects.
-    Actually no, don't use a default scope." → "Update the project model." Pasted.
-  - luna / reserve + v1, dict_0621: "Keys under the blue pot, sorry, the green one" → "Keys under the
-    green one" ("pot" lost).
-  - reserve + v1, dict_0414: "I think they're in the fire safe" → "They're in the fire safe" (hedge
-    turned into a fact).
-  - sol + v1 and reserve + v1, dict_0346: "Ok, so in the FastAPI service" → "in the FastAPI service"
-    (lower-case start; cosmetic).
 - **v4 prompt: far fewer.** luna + v4 / g3 / g4 break 2 clips for the Claude judge only, both small
-  (dict_0474 "but it's I think it's" → "but it's": a hedge dropped with the stammer; dict_0350 a
-  capitalisation). sol + v4 breaks none for either judge; `word_loss.py` finds one real loss the judges
-  did not count (the raw draft already had edits there): **dict_0399** "The oil change is it's due at
-  like 42,000 miles" → "It's due at 42,000 miles" (the subject treated as a false start). Its other
-  flagged clip, dict_0539, is all good fixes (`paybridge` → `PayBridge`, `idipotency` → `idempotency`,
-  "asked didn't stand up" → "asked in stand-up").
-- No reply was an answer to the transcript, an echo or much longer than the raw text, in any run.
 
 ## Price (API list price per 1M tokens, 2026-11-19)
 
@@ -217,11 +185,9 @@ Both judges now cover all 151 pairs (Claude Opus 5.5 max, amend-va 0.2.1 prompt 
 
 Nemotron + sol trails AssemblyAI Smart by 3.3 (Claude) and 2.7 (Astra) points overall, and by 5.4 and 5.3 on the held-out check half. One clip is 0.66 points and the speaker-bootstrap interval is about ±8, so neither gap is significant. The check half is where it falls behind. AssemblyAI's row is a single VM run whose ZER moved 86.8 → 88.1 between runs under Claude, and its latency is key-up to text, which this offline pairing does not measure.
 
-Dropped-name fallbacks: dict_0346, dict_0351, dict_0498, dict_0559.
 
 Paired fixes and regressions.
 
-One already imperfect clip, dict_0399, worsened from 11 to 25 edits under both judges (the subject treated as a false start, as with Groq + sol). It falls outside the zero-edit regression count.
 
 ## Open-weight cleanup on the same Groq Whisper drafts
 
@@ -241,6 +207,5 @@ Costs and times cover recorded parseable replies. The API may bill malformed rep
 For context, GPT-6.2-sol via Codex with v4 scored 80.8% overall and 81.3% on check under GPT-6 Astra. The separate on-device Gemma 4 E2B + v3 evaluation on Groq Whisper scored 72.2% overall under Astra and 73.5% under Claude; its raw baseline and prompt differed slightly.
 **GLM-5.3-Flash + v4 is the strongest open candidate for an app trial on these drafts.** Counting all 151 clips as the app would paste them, including raw fallback for malformed replies, GPT-6 Astra gives GLM, Gemma 31B and DeepSeek Pro 76.2% ZER, DeepSeek Flash 75.5%, and Mistral 69.5%. GLM returned a usable reply for every clip and its guarded output never increased the judge’s edit count. Its $0.01833 recorded cost and 0.91 s median are the lowest of the five finished runs. GPT-6.2-sol + v4 still leads on the same Whisper drafts (80.8%). Its Codex CLI latency is unsuitable for this comparison.
 
-**Long-draft failures change the ranking.** On dict_0255, Gemma ended a game-night food request after “eight adults, and”. GPT-6 Astra’s edits rose from 4 to 267. DeepSeek Flash and Pro also truncated long drafts. Mistral increased the edit count on nine drafts, including four that were already perfect. GLM fixed 28 imperfect drafts to zero edits.
 
 Qwen’s owner batch ended with 31 usable replies, 24 malformed replies and 96 clips without a completed result. Even its check score covers only a small subset; keep Qwen out of the ranking. The completed runs and the partial Qwen scores required no additional owner-paid cleanup.

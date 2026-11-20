@@ -1,7 +1,9 @@
 """Tests for eval/report.py, eval/evalcommon.py and eval/regress/: the numbers, the split, the dry run.
 No network, no key, no CLI.
 """
+import contextlib
 import csv
+import io
 import hashlib
 import json
 import os
@@ -174,6 +176,37 @@ class RegressTests(unittest.TestCase):
             p = self.run_cli("--dry-run", env={"EVAL_APP_PROMPT": str(f)})
             self.assertIn(str(f), p.stdout)
             self.assertNotIn("c530a8a410f1", p.stdout.split("prompt")[1].split("\n")[0])
+
+    def test_a_real_run_calls_scripts_that_exist_in_order(self):
+        calls = []
+        regress.run = lambda cmd: calls.append(cmd)
+        old_argv, old_env = sys.argv, dict(os.environ)
+        with tempfile.TemporaryDirectory() as d:
+            work = pathlib.Path(d)
+            old = (regress.WORK, regress.RAW, regress.MANIFEST, regress.CLIPS, regress.compare)
+            regress.WORK, regress.CLIPS = work, work / "clips"
+            regress.RAW, regress.MANIFEST = work / "raw.csv", work / "clips" / "manifest.csv"
+            regress.compare = lambda *a: 0
+            (work / "clips").mkdir()
+            with open(regress.MANIFEST, "w", newline="") as fh:
+                w = csv.writer(fh)
+                w.writerow(["clip_id", "intended_text"])
+                w.writerow([(HERE / "regress" / "clips.txt").read_text().split()[0], "x"])
+            os.environ["OPENROUTER_API_KEY"] = "fake-" + "key"
+            sys.argv = ["regress.py"]
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(regress.main(), 0)
+            finally:
+                sys.argv = old_argv
+                os.environ.clear()
+                os.environ.update(old_env)
+                regress.WORK, regress.RAW, regress.MANIFEST, regress.CLIPS, regress.compare = old
+        scripts = [next(a for a in c if a.endswith(".py")) for c in calls]
+        self.assertEqual([pathlib.Path(s).name for s in scripts],
+                         ["transcribe_openrouter.py", "offline_cleanup.py", "judge.py"])
+        self.assertTrue(all(pathlib.Path(s).is_file() for s in scripts))
+        self.assertIn(str(evalcommon.app_prompt_path()), calls[1])
 
     def compare(self, edits_by_clip, threshold="5"):
         base = list(csv.DictReader(open(HERE / "regress" / "baseline.csv", newline="")))

@@ -53,7 +53,6 @@ Groq had 11 unmatched “thank you” endings. Nemotron had zero, two digit mism
 
 The judges use amend-va 0.2.1 prompt v1 at max effort: Claude Opus 5.5 through `claude -p` and GPT-6 Astra through `codex exec`. Groq with GPT-6.2-sol v4 cleanup scored 82.1 / 80.8 ZER. Nemotron with the same cleanup through the Codex CLI scored **85.4 (Claude) / 84.8 (Astra) ZER and 0.32 / 0.39% AMEND**. It fixed 29 / 30 imperfect raw drafts and broke none. On the check half it scored 82.7 / 80.0. The guard accepted 147 cleanups and kept four raw drafts after detecting dropped names. CLI time was 4.75 s median and 13.03 s p90, on top of ASR. The OpenRouter API run of the same model and prompt (#327) scored 84.8 / 84.1, with 0.97 s median cleanup time.
 
-Two Nemotron number errors changed meaning. In dict_0228 a $150 budget became $850. In dict_0721 it dropped one of three consecutive fives from a clinic fax number. Its only short-draft flag, dict_0578, removed a repeated “I'm so” while preserving the message.
 
 | Hosted model | Open ASR WER | Highest listed USD/audio hour | Observed USD/1,000 dictations |
 |---|---:|---:|---:|
@@ -71,7 +70,6 @@ The Open ASR WER column is the external leaderboard used for candidate selection
 
 The catalog scan found no OpenRouter STT route for Canary-Qwen, Cohere Transcribe, Granite Speech, Musci or SOV-Transcribe-1. The prior provider scan found Cohere on fal and no managed SOV endpoint. SOV's documented BF16 self-hosting setup uses roughly 53 GB of weights plus runtime memory and reports about 0.15 seconds for a 10–30 second clip with speculative decoding on an RTX PRO 6000 Blackwell. That figure excludes network and queue time. A continuously rented $1–3.30/hour GPU would cost about $730–2,409 per 730-hour month. [SOV model card](https://huggingface.co/salesforce-sovereign-intelligence/SOV-Transcribe-1)
 
-Names remain a failure mode. Nemotron changed Austin to “Austrian” in dict_0177, Tomas to “Thomas” in dict_0544 and Okafor to “Oakivore” in dict_0620. These are spot checks.
 
 Voxtral Small had the lowest first-round raw Codex AMEND (1.00%) and higher check-half ZER (65.3%) than raw Nemotron (60.0%). Voxtral Mini later matched it (0.97%) at a third of the price. It required 2.20 seconds median and 4.71 seconds p90. Qwen 1.7B had six unusually long drafts and a 42.71-second p90. All seven first-round routes returned 151 transcripts.
 
