@@ -620,7 +620,7 @@ export type Link =
 "privacy" | 
 /**  The source code. */
 "repository" | 
-/**  The MIT licence. */
+/**  The FSL-1.1-ALv2 licence. */
 "licence" | 
 /**  The credits for adapted code. */
 "notice";
