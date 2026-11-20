@@ -32,6 +32,13 @@ pub enum TranscribeError {
     /// The provider is rate limiting us; retrying later may work.
     #[error("rate limited by the provider")]
     RateLimited,
+    /// The `OpenRouter` account has no credits left (402).
+    #[error("the account is out of credits")]
+    OutOfCredits,
+    /// No provider can serve the model with the privacy filters the request
+    /// carries (Q2). The filters are never dropped to find one.
+    #[error("no provider can take the request with its privacy filters")]
+    NoRoute,
     /// The request took too long.
     #[error("transcription timed out")]
     Timeout,
@@ -75,6 +82,8 @@ impl fmt::Debug for TranscribeError {
                 .finish(),
             Self::InvalidKey => f.write_str("InvalidKey"),
             Self::RateLimited => f.write_str("RateLimited"),
+            Self::OutOfCredits => f.write_str("OutOfCredits"),
+            Self::NoRoute => f.write_str("NoRoute"),
             Self::Timeout => f.write_str("Timeout"),
             Self::Network(text) => f
                 .debug_tuple("Network")
@@ -113,6 +122,10 @@ impl TranscribeError {
             Self::RateLimited => {
                 "The provider is limiting requests right now. Try again in a minute.".to_owned()
             }
+            Self::OutOfCredits => "Add credits on OpenRouter, then try again.".to_owned(),
+            Self::NoRoute => "No provider can take this dictation with Vocet's privacy settings \
+                 right now. Try again in a few minutes."
+                .to_owned(),
             Self::Timeout => {
                 "The provider didn't answer in time. Check your internet connection.".to_owned()
             }
@@ -133,7 +146,7 @@ impl TranscribeError {
     }
 }
 
-/// A speech-to-text engine (Groq, OpenAI, a mock, a local model).
+/// A speech-to-text engine (`OpenRouter`, a mock, a local model).
 ///
 /// Threading: `&self`, so one engine can serve overlapping calls. The future
 /// is `Send` and runs on the pipeline's tokio runtime; it must not block the
@@ -199,6 +212,14 @@ mod tests {
                 "The provider didn't answer in time. Check your internet connection.",
             ),
             (
+                TranscribeError::OutOfCredits,
+                "Add credits on OpenRouter, then try again.",
+            ),
+            (
+                TranscribeError::NoRoute,
+                "No provider can take this dictation with Vocet's privacy settings right now. Try again in a few minutes.",
+            ),
+            (
                 TranscribeError::Network("dns error".into()),
                 "Couldn't reach the provider. Check your internet connection.",
             ),
@@ -248,6 +269,8 @@ mod tests {
             ),
             (TranscribeError::InvalidKey, ErrorCode::KeyRejected),
             (TranscribeError::RateLimited, ErrorCode::ProviderQuota),
+            (TranscribeError::OutOfCredits, ErrorCode::ProviderQuota),
+            (TranscribeError::NoRoute, ErrorCode::EngineFailed),
             (TranscribeError::Timeout, ErrorCode::NetworkUnreachable),
             (
                 TranscribeError::Network("dns".into()),
