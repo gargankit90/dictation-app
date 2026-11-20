@@ -18,6 +18,7 @@ import {
   ownKeyCaption,
 } from "./modelRow";
 import type { ModelAction } from "./modelRow";
+import { CleanupModel } from "./CleanupModel";
 import { OwnKeySheet, useOwnKey } from "./ownKey";
 import { Chip, Group, Row, SaveStatus, useSave } from "./ui";
 
@@ -463,6 +464,7 @@ export function Speech({
           {actionError}
         </p>
       )}
+      {onDevice && <CleanupModel />}
       {models?.some((model) => model.state === "downloading") && (
         <p className="hint">
           One model downloads at a time. Downloads go on while Settings is closed.
