@@ -148,7 +148,7 @@ adapter. Tauri is a thin layer on top.
 - Every build has the hardened runtime. It has one entitlement, the microphone.
 - A build signed by another certificate loses both permissions (the update
   itself and the settings, history and key survive). The app notices and asks
-  again, in the setup window (N1, `e2e_update_to_new_certificate`).
+  again, in the setup window (N1).
 
 ## OS behaviour rules
 

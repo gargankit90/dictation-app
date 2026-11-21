@@ -170,24 +170,6 @@ export function Settings({ open = null, onOpened, ...help }: Props) {
   const [section, setSection] = useState<SectionId>(rememberedSection);
   const { models, error: modelsError, refresh: refreshModels } = useModels();
   const { engine, refresh: refreshEngine } = useEngineStatus();
-  // The first launch after the rename says something about the Keychain (U1);
-  // Speech shows it, and only with a key saved.
-  const [launchNotice, setLaunchNotice] = useState<string | null>(null);
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const result = await commands.launchNotice();
-          if (result.status === "ok") setLaunchNotice(result.data);
-        } catch {
-          // No notice is the same as nothing to say.
-        }
-      })();
-    }, 0);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, []);
   const [sheetOffered, setSheetOffered] = useState(false);
   const offerSheet = useCallback(() => {
     setSheetOffered(true);
@@ -302,7 +284,6 @@ export function Settings({ open = null, onOpened, ...help }: Props) {
             refreshModels={refreshModels}
             engine={engine}
             refreshEngine={refreshEngine}
-            launchNotice={launchNotice}
             sheetOffered={sheetOffered}
             onSheetOffered={offerSheet}
           />

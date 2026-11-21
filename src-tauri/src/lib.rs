@@ -493,15 +493,6 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         Arc::new(SystemLaunchAtLogin::new()),
         Arc::clone(&config),
     ));
-    let app_name = app
-        .config()
-        .product_name
-        .clone()
-        .unwrap_or_else(|| "Vocet".to_owned());
-    app.manage(commands::LaunchNotice(
-        dictation_pipeline::rename::first_launch_after_rename(&config_dir, &app_name)
-            .then_some(dictation_pipeline::rename::KEYCHAIN_NOTICE),
-    ));
     app.manage(commands::ActiveHotkey(hotkey_control.clone()));
     app.manage(commands::ConfigDir(config_dir.clone()));
     app.manage(commands::AppShell(Arc::new(TauriShell(

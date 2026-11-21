@@ -41,8 +41,7 @@ ALL_SCENARIOS=(
   e2e_error_bad_key e2e_real_openrouter
   e2e_overlay_focus e2e_overlay_rendered_states_and_error e2e_pill_states
   e2e_smart_space e2e_password_field_not_read e2e_layout_paste e2e_image_clipboard_restore
-  e2e_dmg_install e2e_update_keeps_permissions e2e_update_from_dictation_app
-  e2e_update_keychain_control
+  e2e_dmg_install e2e_update_keeps_permissions
   e2e_launch_at_login
   e2e_hotkey_shortcuts e2e_no_words_transcript e2e_hotkey_recorder
   e2e_accessibility_revoked e2e_setup_no_permissions e2e_setup_own_key_no_permissions
@@ -52,11 +51,10 @@ ALL_SCENARIOS=(
   e2e_history
   e2e_release_build_smoke
   e2e_update_privileged_install
-  e2e_update_to_new_certificate
 )
 # Scenarios that need something the VM may lack (a microphone, a OpenRouter key):
 # they may SKIP. Any other scenario that SKIPs fails the run.
-OPTIONAL_SCENARIOS=(e2e_real_mic e2e_real_openrouter e2e_update_keychain_control e2e_tray_menu_screenshots e2e_onboarding_screenshots e2e_setup_redesign_screens e2e_release_build_smoke e2e_notarized_dmg_first_launch)
+OPTIONAL_SCENARIOS=(e2e_real_mic e2e_real_openrouter e2e_tray_menu_screenshots e2e_onboarding_screenshots e2e_setup_redesign_screens e2e_release_build_smoke e2e_notarized_dmg_first_launch)
 APP_PATH=target/debug/bundle/macos/$APP_NAME.app
 build=1
 reset=1

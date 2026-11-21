@@ -17,17 +17,6 @@ import { Chip, Group, Row, SaveStatus, useSave } from "./ui";
 
 export { CONNECTED, KEY_NOT_SAVED } from "./connection";
 
-/** Where "Got it" on the Keychain notice is remembered (this window's storage). */
-export const NOTICE_DISMISSED_KEY = "vocet.settings.keychainNoticeDismissed";
-
-function noticeDismissed(): boolean {
-  try {
-    return window.localStorage.getItem(NOTICE_DISMISSED_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
 interface Props {
   settings: Settings_Serialize;
   onStored: (settings: Settings_Serialize) => void;
@@ -38,8 +27,6 @@ interface Props {
   engine: EngineStatus | null;
   /** Reads the engine's status again. */
   refreshEngine: () => Promise<void>;
-  /** The first launch after the rename says something about the Keychain (U1). */
-  launchNotice?: string | null;
   /** The sheet already opened by itself since Settings opened. */
   sheetOffered?: boolean;
   onSheetOffered?: () => void;
@@ -138,7 +125,6 @@ export function Speech({
   refreshModels,
   engine,
   refreshEngine,
-  launchNotice = null,
   sheetOffered = false,
   onSheetOffered,
 }: Props) {
@@ -149,7 +135,6 @@ export function Speech({
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const cloud = useSave();
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [dismissed, setDismissed] = useState(noticeDismissed);
   // Selecting OpenRouter with no key waits here for a connection that works.
   const switchOnceConnected = useRef(false);
   // Whatever gets the sheet's focus back when it closes.
@@ -282,28 +267,9 @@ export function Speech({
   const switchingName = models?.find((model) => model.id === switching);
   const waitReason =
     switchingName === undefined ? null : `Wait until ${modelTitle(switchingName)} has loaded.`;
-  const showNotice = launchNotice !== null && !dismissed && status.state === "connected";
 
   return (
     <>
-      {showNotice && (
-        <div role="status" className="notice-info" data-testid="launch-notice">
-          <p>{launchNotice}</p>
-          <button
-            type="button"
-            onClick={() => {
-              try {
-                window.localStorage.setItem(NOTICE_DISMISSED_KEY, "1");
-              } catch {
-                // Hidden for now; it only ever shows on one launch anyway.
-              }
-              setDismissed(true);
-            }}
-          >
-            Got it
-          </button>
-        </div>
-      )}
       <Group title="Speech engine">
         <div role="radiogroup" aria-label="Speech engine">
           {models === null ? (

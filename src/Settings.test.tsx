@@ -16,7 +16,7 @@ import type {
 import { SECTION_KEY, Settings } from "./Settings";
 import type { SectionId } from "./Settings";
 import { HOTKEY_NOTICE_POLL_MS } from "./settings/Dictation";
-import { CONNECTED, KEY_NOT_SAVED, NOTICE_DISMISSED_KEY } from "./settings/Speech";
+import { CONNECTED, KEY_NOT_SAVED } from "./settings/Speech";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
 const KEY = "sk-or-dummy-NOT-A-REAL-KEY-0123456789";
@@ -64,8 +64,6 @@ class Backend {
   engine: EngineStatus = { state: "ready", message: null };
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
   testResult: KeyTestError | null = null;
-  /** What `launch_notice` says: the first launch after the rename (U1). */
-  launchNotice: string | null = null;
   /** The levels the microphone test reads, in order (then the last again). */
   micLevels: number[] = [-90];
   micRunning = false;
@@ -91,8 +89,6 @@ class Backend {
     switch (command) {
       case "get_settings":
         return this.settings;
-      case "launch_notice":
-        return this.launchNotice;
       case "list_history":
         return { rows: [], unreadable: false };
       case "set_hotkey":
@@ -1128,59 +1124,6 @@ describe("Privacy", () => {
 });
 
 describe("loading", () => {
-  const KEYCHAIN_NOTICE =
-    "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to OpenRouter.";
-
-  it("U1: says what to expect from the Keychain on the first launch after the rename", async () => {
-    backend.launchNotice = KEYCHAIN_NOTICE;
-    backend.keys.openrouter = true;
-    await open("speech");
-    const notice = await screen.findByTestId("launch-notice");
-    expect(notice.textContent).toContain("Choose Always Allow");
-    expect(notice.textContent).toContain("sent only to OpenRouter");
-  });
-
-  // U12 criterion 11.
-  it("the Keychain notice shows only in Speech, and isn't styled as a success", async () => {
-    backend.launchNotice = KEYCHAIN_NOTICE;
-    backend.keys.openrouter = true;
-    await open("speech");
-    const notice = await screen.findByTestId("launch-notice");
-    expect(notice.className).not.toMatch(/\bok\b/);
-    for (const name of ["General", "Dictation", "Privacy", "History", "Help", "About"]) {
-      fireEvent.click(screen.getByRole("tab", { name }));
-      await screen.findByRole("heading", { level: 1, name });
-      expect(screen.queryByTestId("launch-notice"), name).toBeNull();
-    }
-  });
-
-  it("the Keychain notice doesn't show with no key saved", async () => {
-    backend.launchNotice = KEYCHAIN_NOTICE;
-    await open("speech");
-    await screen.findByText("! Not connected");
-    expect(screen.queryByTestId("launch-notice")).toBeNull();
-  });
-
-  it("Got it hides the Keychain notice for good", async () => {
-    backend.launchNotice = KEYCHAIN_NOTICE;
-    backend.keys.openrouter = true;
-    await open("speech");
-    await screen.findByTestId("launch-notice");
-    click("Got it");
-    expect(screen.queryByTestId("launch-notice")).toBeNull();
-    expect(window.localStorage.getItem(NOTICE_DISMISSED_KEY)).toBe("1");
-    cleanup();
-    await open("speech");
-    await screen.findByRole("button", { name: "Manage…" });
-    expect(screen.queryByTestId("launch-notice")).toBeNull();
-    window.localStorage.removeItem(NOTICE_DISMISSED_KEY);
-  });
-
-  it("U1: says nothing about the Keychain on any other launch", async () => {
-    await open();
-    expect(screen.queryByTestId("launch-notice")).toBeNull();
-  });
-
   it("shows why the settings couldn't load", async () => {
     backend.failing.set("get_settings", "The settings file is damaged.");
     render(<Settings />);

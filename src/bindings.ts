@@ -172,11 +172,6 @@ export const commands = {
 	 */
 	dictationProgress: () => typedError<DictationProgressView_Serialize, string>(__TAURI_INVOKE("dictation_progress")),
 	/**
-	 *  The notice for this launch only: macOS may ask once to let Vocet use the
-	 *  saved key. `None` on every other launch.
-	 */
-	launchNotice: () => typedError<string | null, string>(__TAURI_INVOKE("launch_notice")),
-	/**
 	 *  Sets the language and nothing else (`None` or empty: detect it). The
 	 *  engine follows at once.
 	 */

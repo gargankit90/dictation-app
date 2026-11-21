@@ -92,18 +92,6 @@ pub struct ActiveHotkey(pub HotkeyControl);
 /// The app's config directory, where Relaunch leaves its marker (M5.2).
 pub struct ConfigDir(pub std::path::PathBuf);
 
-/// What Settings says about this launch, if anything (U1: the first launch
-/// after the rename from dictation-app). Managed Tauri state.
-pub struct LaunchNotice(pub Option<&'static str>);
-
-/// The notice for this launch only: macOS may ask once to let Vocet use the
-/// saved key. `None` on every other launch.
-#[tauri::command]
-#[specta::specta]
-pub async fn launch_notice(state: State<'_, LaunchNotice>) -> Result<Option<String>, String> {
-    Ok(state.0.map(str::to_owned))
-}
-
 /// What the onboarding commands ask of the app itself (M5.2).
 pub trait Shell: Send + Sync {
     /// Hides the settings window.
@@ -1094,7 +1082,6 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::take_window_request,
         crate::diagnostics::reveal_log_file,
         crate::diagnostics::dictation_progress,
-        launch_notice,
         crate::preferences::set_language,
         crate::preferences::use_cloud_engine,
         crate::preferences::use_local_model,
@@ -1231,7 +1218,6 @@ mod tests {
             "takeWindowRequest",
             "revealLogFile",
             "dictationProgress",
-            "launchNotice",
             "setLanguage",
             "useCloudEngine",
             "useLocalModel",
@@ -1264,7 +1250,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 57,
+            commands, 56,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -3259,7 +3245,6 @@ mod capability_tests {
         app.manage(usage);
         app.manage(crate::diagnostics::Diagnostics::default());
         app.manage(crate::LogDir(dir.join("logs")));
-        app.manage(super::LaunchNotice(None));
         app.manage(crate::overlay::OverlayLevel::default());
         app.manage(crate::history::AppHistory(std::sync::Arc::new(
             dictation_pipeline::history::History::open(
