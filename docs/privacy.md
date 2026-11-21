@@ -14,6 +14,13 @@
   don't collect data (`zdr: true`, `data_collection: deny`). If no such host
   answers in 1.5 seconds, nothing is cleaned and the transcript is pasted as it
   came. Your key stays in your macOS Keychain and is sent only to OpenRouter.
+- **Connect OpenRouter:** the button sends you to `openrouter.ai` in your
+  browser to sign in. Vocet sends nothing about you in that flow: the
+  address carries only a one-time challenge, a fixed key label ("Vocet on this
+  Mac") and a callback to a short-lived listener on your own Mac (`127.0.0.1`,
+  closed as soon as the sign-in ends). The key OpenRouter makes goes straight
+  to your Keychain and is never shown in full or logged. **Add credits** opens
+  `openrouter.ai` in your browser; nothing is sent from Vocet.
 
 Vocet can share anonymous usage events and error reports so we can see
 what works and what breaks. This page lists everything it sends. The list is

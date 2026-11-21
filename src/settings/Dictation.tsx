@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "../bindings";
 import type { Settings_Serialize } from "../bindings";
 import { HotkeyRecorder } from "../HotkeyRecorder";
-import { BROKEN, messageOf } from "../keyTest";
+import { BROKEN, messageOf } from "../messages";
 import { LanguagePicker } from "../LanguagePicker";
 import { SILENT_LEVELS, pushLevel } from "../overlay/view";
 import { saveHotkey, setHotkeyRecording } from "../saveHotkey";

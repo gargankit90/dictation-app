@@ -7,12 +7,11 @@ import type {
   Settings_Serialize,
 } from "../bindings";
 import { keycapLabel } from "../hotkeyKeys";
-import { BROKEN, messageOf } from "../keyTest";
-import { providerInfo } from "../providers";
+import { BROKEN, messageOf } from "../messages";
 import { WhatsSent } from "../settings/Privacy";
 import type { SharingSwitch } from "../settings/Privacy";
 import { SaveStatus, Switch, useSave } from "../settings/ui";
-import { modelTitle } from "../settings/modelRow";
+import { PROVIDER_NAME, modelTitle } from "../settings/modelRow";
 import { chosenModel, modelWait } from "./logic";
 import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";
@@ -76,9 +75,9 @@ function useEngineLine(
 
   if (settings === null) return "Loading…";
   if (settings.transcription === "cloud") {
-    const name = providerInfo().name;
+    const name = PROVIDER_NAME;
     if (keySaved === null) return `${name} · Checking…`;
-    if (!keySaved) return `${name} · ! Needs a key`;
+    if (!keySaved) return `${name} · ! Not connected`;
     return engine?.state === "failed"
       ? `${name} · ! ${engine.message ?? "Not working"}`
       : `${name} · ✓ Connected`;

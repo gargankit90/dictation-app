@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { BROKEN } from "../keyTest";
+import { BROKEN } from "../messages";
 import type { ChipTone } from "./modelRow";
 
 /** How long "Saved" stays next to a control. */

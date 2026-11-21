@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "../bindings";
 import type { AppInfo } from "../bindings";
-import { BROKEN, messageOf } from "../keyTest";
+import { BROKEN, messageOf } from "../messages";
 import { Group, Row, Switch } from "./ui";
 
 /** When updates were last checked, in words. */
