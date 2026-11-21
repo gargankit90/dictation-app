@@ -1,7 +1,7 @@
 # MWEB1 test report, run 1
 
 PR: #339 at b8d80f3
-Result: FAIL
+Result: PASS (after re-check at bee7ccd; run 1 at b8d80f3 was FAIL)
 
 Served `site/` with `python3 -m http.server` on 127.0.0.1 and drove it with headless Chromium (Playwright) at 1280 and 390 px.
 
@@ -27,3 +27,16 @@ Served `site/` with `python3 -m http.server` on 127.0.0.1 and drove it with head
 
 ## Untested
 The Download link was not fetched, and the og.png and JSON-LD were not inspected. The visual comparison was by screenshot only.
+
+## Re-check at bee7ccd (headless Chromium, 1280 px; mobile 390 px dark)
+
+| Item | Result | Notes |
+| ---- | ------ | ----- |
+| Closing Download uses `DOWNLOAD_URL` | PASS | Both buttons resolve to the releases page. The earlier failure is fixed. |
+| Pause/Play control | PASS | Two toggles, one in the hero and one in the tabs. Click sets "Play animation" and `aria-pressed=true`. The hero stayed on Slack and `pasted` for 11 s. Play resumed it (Mail, listening). Enter and Space both work from the keyboard. |
+| Hold on hover | PASS | With the pointer over the hero, the scene stayed on Slack for 21 s; after unhover it advanced to Mail. Over the tabs it stayed on t-ai for 21 s and moved on after unhover. |
+| Keyboard focus | PASS | The toggle sits inside `.hero-demo`, which `held()` treats as focus. Arrow keys move between tab radios. I did not separately time a focus-only hold. |
+| Auto-advance stops after a tab click | PASS | After clicking Docs / Notion it stayed on t-doc for 30 s. |
+| Reduced motion / JS off | PASS | Toggles hidden in both cases, and the final state is shown. |
+| `privacy.html` links | n/a | 2 links (data section, footer); a 404 is expected until PR #343. |
+| Console errors, 390 px overflow | PASS | None; no overflow. |
