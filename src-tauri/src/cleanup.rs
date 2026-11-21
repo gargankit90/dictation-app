@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use dictation_core::local_models::{self, LocalModel};
 use dictation_core::settings::{Settings, Transcription};
+use dictation_ports::{Cleaner, CleanupError};
 use dictation_transcribe::llama::{ChatRunner, LlamaError, LlamaServer, LocalCleaner};
 use dictation_transcribe::models::{DownloadError, ModelStore};
 
@@ -235,19 +236,81 @@ impl<R: ChatRunner + 'static> LocalCleanup<R> {
         }
     }
 
-    /// A cleaner for the next dictation, while the helper is running.
+    /// A cleaner for the next dictation, while the helper is running. A
+    /// helper that died after it started is started again (that dictation
+    /// pastes the raw text).
     #[must_use]
     pub fn cleaner(&self) -> Option<LocalCleaner<Arc<R>>> {
-        lock(&self.state)
-            .running
-            .as_ref()
-            .map(|server| LocalCleaner::new(Arc::clone(server)))
+        let restart = {
+            let mut state = lock(&self.state);
+            match (&state.running, &state.wanted) {
+                (Some(server), _) if server.alive() => {
+                    return Some(LocalCleaner::new(Arc::clone(server)));
+                }
+                (Some(_), Some(path)) => {
+                    tracing::warn!(
+                        model = self.model.id,
+                        "on-device cleanup stopped; restarting it"
+                    );
+                    let path = path.clone();
+                    state.running = None;
+                    state.generation += 1;
+                    Some((state.generation, path))
+                }
+                _ => None,
+            }
+        };
+        if let Some((generation, path)) = restart {
+            let this = self.clone();
+            (self.spawn)(Box::pin(async move { this.start(generation, path).await }));
+        }
+        None
     }
 
     /// The models folder.
     #[must_use]
     pub fn store(&self) -> &ModelStore {
         &self.store
+    }
+}
+
+/// The pipeline's [`Cleaner`] (Q4): the on-device cleaner while its helper
+/// runs (only while on-device speech is selected), otherwise `cloud` (the
+/// engine handle, which says off for the on-device engine). The pipeline's
+/// cleanup step judges either reply the same way.
+pub struct AppCleaner<C, R = LlamaServer> {
+    cloud: C,
+    local: Option<LocalCleanup<R>>,
+}
+
+impl<C: Cleaner, R: ChatRunner + 'static> AppCleaner<C, R> {
+    /// Cleans with `local` when it runs, else with `cloud`.
+    #[must_use]
+    pub fn new(cloud: C, local: Option<LocalCleanup<R>>) -> Self {
+        Self { cloud, local }
+    }
+
+    fn local(&self) -> Option<LocalCleaner<Arc<R>>> {
+        self.local.as_ref().and_then(LocalCleanup::cleaner)
+    }
+}
+
+impl<C: Cleaner, R: ChatRunner + 'static> Cleaner for AppCleaner<C, R> {
+    async fn clean(&self, text: &str) -> Result<String, CleanupError> {
+        match self.local() {
+            Some(local) => local.clean(text).await,
+            None => self.cloud.clean(text).await,
+        }
+    }
+
+    fn deadline(&self) -> Option<std::time::Duration> {
+        self.local()
+            .map_or_else(|| self.cloud.deadline(), |local| local.deadline())
+    }
+
+    fn prompt(&self) -> Option<&'static str> {
+        self.local()
+            .map_or_else(|| self.cloud.prompt(), |local| local.prompt())
     }
 }
 

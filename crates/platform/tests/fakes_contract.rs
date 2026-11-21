@@ -282,21 +282,24 @@ fn clipboard_recovers_after_being_unavailable() {
 #[test]
 fn secrets_are_kept_per_name() {
     let store = MemSecretStore::new();
-    store.set("groq", &Secret::new("test-key-a")).unwrap();
-    store.set("openai", &Secret::new("test-key-b")).unwrap();
-    store.delete("groq").unwrap();
-    assert_eq!(store.get("groq"), Ok(None));
-    assert_eq!(store.get("openai"), Ok(Some(Secret::new("test-key-b"))));
+    store.set("openrouter", &Secret::new("test-key-a")).unwrap();
+    store.set("other", &Secret::new("test-key-b")).unwrap();
+    store.delete("openrouter").unwrap();
+    assert_eq!(store.get("openrouter"), Ok(None));
+    assert_eq!(store.get("other"), Ok(Some(Secret::new("test-key-b"))));
 }
 
 #[test]
 fn secret_store_clones_share_state_across_threads() {
     let store = MemSecretStore::new();
     let other = store.clone();
-    thread::spawn(move || other.set("groq", &Secret::new("test-key")).unwrap())
+    thread::spawn(move || other.set("openrouter", &Secret::new("test-key")).unwrap())
         .join()
         .unwrap();
-    assert_eq!(store.get("groq").unwrap().unwrap().expose(), "test-key");
+    assert_eq!(
+        store.get("openrouter").unwrap().unwrap().expose(),
+        "test-key"
+    );
 }
 
 #[test]

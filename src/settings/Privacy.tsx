@@ -22,7 +22,7 @@ export function WhatsSent() {
           permission that was refused (which one), a paste that missed, a skipped practice. Never
           the details.
         </li>
-        <li>Which speech engine you chose (for example Groq or OpenAI).</li>
+        <li>Which speech engine you chose (OpenRouter or On this Mac).</li>
         <li>That a dictation worked, with its length and speed in rough ranges (not the words).</li>
         <li>That a dictation failed, and the kind of failure (not the message).</li>
         <li>

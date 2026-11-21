@@ -17,7 +17,7 @@ dictation-ports.workspace = true
 # dictation-telemetry's.
 getrandom = "0.3.4"
 httpdate.workspace = true
-reqwest = { workspace = true, features = ["multipart", "rustls-no-provider"] }
+reqwest = { workspace = true, features = ["rustls-no-provider"] }
 rustls.workspace = true
 rustls-platform-verifier.workspace = true
 serde.workspace = true

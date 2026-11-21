@@ -41,7 +41,7 @@ pub enum ErrorCode {
     KeyUnreadable,
     /// The provider couldn't be reached.
     NetworkUnreachable,
-    /// The provider is limiting requests.
+    /// The provider is limiting requests, or the account is out of credits.
     ProviderQuota,
     /// The provider answered with a redirect.
     ProviderRedirect,
@@ -179,8 +179,8 @@ const TABLE: [CodeInfo; 17] = [
     ),
     row(
         ErrorCode::ProviderQuota,
-        "The provider is limiting requests.",
-        "Wait a minute and try again.",
+        "The provider is limiting requests, or your credits ran out.",
+        "Wait a minute, or add credits on OpenRouter.",
         FixAction::TryAgain,
     ),
     row(
@@ -320,12 +320,13 @@ impl ErrorCode {
     pub fn from_reason(reason: &str) -> Self {
         let reason = reason.to_ascii_lowercase();
         // Most specific first.
-        let table: [(&str, Self); 12] = [
+        let table: [(&str, Self); 13] = [
             ("add your api key", Self::KeyMissing),
             ("still reading your api key", Self::KeyUnreadable),
             ("read your api key from the keychain", Self::KeyUnreadable),
             ("rejected your api key", Self::KeyRejected),
             ("limiting requests", Self::ProviderQuota),
+            ("add credits on openrouter", Self::ProviderQuota),
             ("answered with a redirect", Self::ProviderRedirect),
             ("didn't answer in time", Self::NetworkUnreachable),
             ("couldn't reach the provider", Self::NetworkUnreachable),

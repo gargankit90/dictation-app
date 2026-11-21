@@ -26,7 +26,7 @@ e2e_onboarding_first_run() {
   expect "the local provider starts" provider_start "$PROVIDER_GOOD_KEY"
 
   expect "the app starts on the local provider" launch_on_provider --debug-onboarding
-  expect "with no key saved" wait_for_log 'engine settings provider=groq .*has_key=false'
+  expect "with no key saved" wait_for_log 'engine settings provider=openrouter .*has_key=false'
   expect "onboarding shows at launch, at Welcome" \
     wait_for_log 'onboarding shown at launch step=Welcome' 20
   expect "its window is on screen" ax_ok wait-window "$APP_NAME" "$ONBOARDING_WINDOW" 10
@@ -40,7 +40,7 @@ e2e_onboarding_first_run() {
   expect "the local model is offered" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "English · 1320 MB" 10
   expect "choose my own key" \
-    ax_ok radio-press "$APP_NAME" "$ONBOARDING_WINDOW" "Use my own Groq or OpenAI key"
+    ax_ok radio-press "$APP_NAME" "$ONBOARDING_WINDOW" "Use my own OpenRouter key"
   expect "selecting it opens no form" \
     ax_ok wait-no-text "$APP_NAME" "$ONBOARDING_WINDOW" "Test & Save" 2
   expect "press Continue" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" Continue
@@ -71,10 +71,10 @@ e2e_onboarding_first_run() {
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Key saved" 15
   expect "the test reached the provider with the typed key" provider_request_has 2 auth=good
   # Saved to the keychain; the cleanup removes it.
-  GROQ_KEY_STORED=1
+  API_KEY_STORED=1
   expect "the key was saved and the engine rebuilt from it" \
     wait_for_log_count 'engine rebuilt' $((rebuilt + 1)) 10
-  expect "with the key" wait_for_log 'engine settings provider=groq .*has_key=true'
+  expect "with the key" wait_for_log 'engine settings provider=openrouter .*has_key=true'
   expect "press Continue" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" Continue
 
   # The golden image has both permissions.
@@ -99,8 +99,8 @@ e2e_onboarding_first_run() {
 
   expect "Ready shows the key" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "(hold)" 10
-  expect "and that Groq is connected" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Groq · ✓ Connected" 10
+  expect "and that OpenRouter is connected" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "OpenRouter · ✓ Connected" 10
   expect "and the history limit" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Keeps your last 25 dictations on this Mac" 10
   expect "the events switch is there, on" \

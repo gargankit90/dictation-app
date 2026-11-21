@@ -534,7 +534,7 @@ export type ErrorCode =
 "key_unreadable" | 
 /**  The provider couldn't be reached. */
 "network_unreachable" | 
-/**  The provider is limiting requests. */
+/**  The provider is limiting requests, or the account is out of credits. */
 "provider_quota" | 
 /**  The provider answered with a redirect. */
 "provider_redirect" | 
@@ -617,10 +617,8 @@ export type KeyTestKind =
  *  other URL.
  */
 export type Link = 
-/**  Groq's page for creating an API key. */
-"groq_keys" | 
-/**  `OpenAI`'s page for creating an API key. */
-"openai_keys" | 
+/**  `OpenRouter`'s page for creating an API key. */
+"openrouter_keys" | 
 /**  The privacy notice: what the app sends. */
 "privacy" | 
 /**  The source code. */
@@ -810,12 +808,16 @@ export type PermissionState =
  */
 "not_determined";
 
-/**  The cloud speech-to-text provider. */
+/**
+ *  The cloud provider: `OpenRouter`, with the user's own key (Q2). A file
+ *  with any other value loads as `OpenRouter` ([`from_json`]).
+ */
 export type Provider = 
-/**  Groq's `OpenAI`-compatible Whisper API. */
-"groq" | 
-/**  The `OpenAI` Whisper API. */
-"openai";
+/**
+ *  `OpenRouter`'s API: speech and cleanup models from
+ *  [`crate::cloud_models`].
+ */
+"openrouter";
 
 /**  What the user can set. Never holds the API key. */
 export type Settings = Settings_Serialize | Settings_Deserialize;
@@ -826,7 +828,11 @@ export type Settings_Deserialize = {
 	version?: number,
 	/**  Which cloud API transcribes. */
 	provider?: Provider,
-	/**  The provider's model name, e.g. `whisper-large-v3-turbo`. */
+	/**
+	 *  The speech model's id in [`crate::cloud_models::CATALOG`], e.g.
+	 *  `openai/gpt-4o-mini-transcribe`. An id the catalog no longer has
+	 *  (a model shut down, or one from before Q2) loads as the default.
+	 */
 	model?: string,
 	/**
 	 *  An ISO 639-1 (or 639-3) language code such as `en`, or `None` to let
@@ -867,7 +873,11 @@ export type Settings_Serialize = {
 	version: number,
 	/**  Which cloud API transcribes. */
 	provider: Provider,
-	/**  The provider's model name, e.g. `whisper-large-v3-turbo`. */
+	/**
+	 *  The speech model's id in [`crate::cloud_models::CATALOG`], e.g.
+	 *  `openai/gpt-4o-mini-transcribe`. An id the catalog no longer has
+	 *  (a model shut down, or one from before Q2) loads as the default.
+	 */
 	model: string,
 	/**
 	 *  An ISO 639-1 (or 639-3) language code such as `en`, or `None` to let

@@ -9,7 +9,7 @@ each merge" below). Run them locally:
 tests/e2e/run.sh                                   # build, reset the VM, run all scenarios
 E2E_VM=dictation-vm-2 tests/e2e/run.sh             # the same, in the second VM
 tests/e2e/run.sh e2e_startup                       # one scenario
-tests/e2e/run.sh --exclude e2e_real_groq           # all but that one (repeatable)
+tests/e2e/run.sh --exclude e2e_real_openrouter           # all but that one (repeatable)
 tests/e2e/run.sh --no-build --no-reset e2e_press_release   # reuse the build and the running VM
 ```
 
@@ -18,7 +18,7 @@ scenario was skipped. The summary (and `results.txt`) gives one line per
 scenario, `PASS`, `FAIL` or `SKIP`, and a total such as `8 passed, 0 failed, 1
 skipped`. A skipped scenario never passes silently: the optional ones
 (`OPTIONAL_SCENARIOS` in `run.sh`: `e2e_real_mic`, which `E2E_REAL_MIC=0` skips,
-and `e2e_real_groq`) may skip and the run still exits 0, but it says what was
+and `e2e_real_openrouter`) may skip and the run still exits 0, but it says what was
 skipped; any other scenario that skips fails the run. Each run
 writes to `tests/e2e/out/<timestamp>/` (git-ignored): `build.log`,
 `results.txt` and, per scenario, the
@@ -131,7 +131,7 @@ workflow may reach it.
 - **How:** it checks the commit out into a fresh temporary worktree (never
   your working tree), runs `npm ci` and then `tests/e2e/ci-run.sh` there, and
   removes the worktree at the end, also after a failure or Ctrl-C.
-- **What runs:** every scenario except `e2e_real_groq` and `e2e_real_mic`
+- **What runs:** every scenario except `e2e_real_openrouter` and `e2e_real_mic`
   (no API key and no real microphone); the rest use the local provider.
 - **The pool:** `ci-run.sh` builds once, then starts `run.sh --no-build` on
   `dictation-vm-2` and, if its lock is taken (or stale), on `dictation-vm`.
@@ -218,9 +218,9 @@ workflow may reach it.
 | `e2e_quit_right_after_paste` | P1 round 4 (#241) | A clipboard sentinel, then a dictation into TextEdit while a Terminal job armed beforehand clicks Quit in the tray as soon as the log shows Inserting (inside the app's 1.5 s `RESTORE_DELAY`). TextEdit got the transcript; after the app is gone the clipboard holds the sentinel again, and the log says `restored the clipboard before quitting`. |
 | `e2e_held_at_launch` | #90, M1.6 B1 | Right Option down, then the app starts and stays up 5 s with the key still held: no Recording. The key goes up: still nothing. Then a normal hold: exactly one `Recording … Idle` sequence. |
 | `e2e_overlay_focus` | M5.1 #3, #102 M1 | The full app with the tone and the mock transcriber, TextEdit in front. Once started, the log's `overlay native window` line must say the overlay is still the non-activating panel (`non_activating_panel=true`: an `NSPanel` subclass, `canBecomeKeyWindow` and `canBecomeMainWindow` false, the non-activating style mask, and backing the overlay's webview window), read back by the app on the main thread. `--press`: the log shows `overlay shown state=recording` and the app has a 420x72 window at the status level (25) on screen, read with `CGWindowListCopyWindowInfo` through JXA over ssh (`cua-driver list_windows` leaves such windows out); a screenshot is saved as `e2e_overlay_focus.recording.png`. `--release`: `overlay shown state=transcribing`, back to Idle, `overlay hidden`, and the window is off screen again. The frontmost app, sampled with `lsappinfo` every 0.2 s from before the press until after Idle, is always TextEdit, and TextEdit holds exactly `hello world`. This is also the only guard of the launch itself (`menu_bar::builder` not activating the app, #138): Tauri's builder can't be inspected outside a real launch, so the unit test in `menu_bar.rs` only pins that the call is in the source. |
-| `e2e_error_bad_key` | M4.4 #2 | The VM's login keychain gets the invalid key `gsk_invalid_test_key`; the app starts on the real engine (`--transcriber settings`) and dictates the tone fixture. Groq's 401 shows as `The provider rejected your API key…` in the log (`shown to the user`), the phases are `Recording Transcribing Idle` (nothing inserted), TextEdit stays empty, and a second dictation fails the same way (the app is still usable). Then the app restarts on the mock and a dictation pastes `This is a test dictation.`. Real request to Groq, so the VM needs internet; needs no key from you. |
+| `e2e_error_bad_key` | M4.4 #2 | The VM's login keychain gets the invalid key `sk-or-invalid-test-key`; the app starts on the real engine (`--transcriber settings`) and dictates the tone fixture. OpenRouter's 401 shows as `The provider rejected your API key…` in the log (`shown to the user`), the phases are `Recording Transcribing Idle` (nothing inserted), TextEdit stays empty, and a second dictation fails the same way (the app is still usable). Then the app restarts on the mock and a dictation pastes `This is a test dictation.`. Real request to OpenRouter, so the VM needs internet; needs no key from you. |
 | `e2e_local_model` | L1 #8 | Settings → **Speech**, **Download** the default model (the real ~1.3 GB Hugging Face file; progress, then _Downloaded_), **Use this** (applied once the model has loaded; U6 has no Save); three dictations of `fixtures/speech-16k.wav` (a `say` clip, `--debug-audio-file`) with the real on-device engine each paste text containing "dictation test", with the time from press to Idle logged as `LATENCY`. Then the same offline, if the VM allows passwordless sudo to switch its network off (#222); otherwise a NOTE. Uses `ax.js radio-press`. |
-| `e2e_real_groq` | M4.4 #1 | Skipped unless `GROQ_API_KEY` is set in the environment of the run. The VM makes a WAV of a sentence with `say`, the key goes into the VM's keychain for the dictation only, and the text pasted into TextEdit must contain at least 80% of the sentence's words. See "Real Groq" below. |
+| `e2e_real_openrouter` | M4.4 #1 | Skipped unless `OPENROUTER_API_KEY` is set in the environment of the run. The VM makes a WAV of a sentence with `say`, the key goes into the VM's keychain for the dictation only, and the text pasted into TextEdit must contain at least 80% of the sentence's words. See "Real OpenRouter" below. |
 | `e2e_overlay_rendered_states_and_error` | T4b (#119) | The overlay's rendered text, read from its WebView's AX tree (`ax.js overlay`: `hidden`, or `shown: ` and the text), on the local provider with replies held. A `--press` on the first launch (delivered at `ready`) renders Listening (`Recording` before U4; an event sent before the page listens was lost; the page now says when it listens), the reply held renders `Transcribing…`, and after the paste (and U4's `Done`) it is `hidden` and the panel off screen; a second dictation the same. The provider then takes another key: the 401's `Transcription failed: The provider rejected your API key. Check it in Settings.` is rendered, watched every 0.1 s (`ax.js overlay-watch`, started while recording): it stays up 6 s (±0.6 s, also by the log) with nothing in between, then hides and leaves the screen. Another failed dictation, and a press right after its error shows: Recording replaces it and stays up past the error's 6 s; with the key accepted again that dictation pastes. |
 | `e2e_pill_states` | U4 | The recording pill v2, read from the overlay's AX tree and the log, with a screenshot of each state. The file source plays its level in real time, looping: with the tone the pill renders `Listening Release to paste · Esc to cancel` and stays Listening after 2.5 s; the mock's paste renders `Done` for 800 ms (±0.3 s, by the log) and then hides. With the silence fixture it renders Listening, then `No sound Check your microphone` about 2.5 s (±0.3 s) after the press; nothing is pasted, so it hides without `Done`. H2: after the release it renders `No sound · Check your microphone` (error look, hides after 6 s); `silence-short-16k.wav` (0.5 s) ends with no message. |
 | `e2e_dmg_install` | M5.4 #3 | `docs/TESTERS.md`, scripted: the debug build's DMG passes `scripts/check-dmg.sh`; it goes into the VM with the quarantine flag a browser sets, is mounted, the app is copied out and quarantined, and the scenario's own `xattr -dr` clears it (the debug build isn't notarized, and the guide has no such step since N2; `e2e_notarized_dmg_first_launch` covers the notarized path); the app has its licence notice and a valid signature; a first dictation (tone + mock) pastes `hello world` into TextEdit. Then the guide's sections 3–5: Microphone and Accessibility hold (`permissions_hold`: hotkey on, a paste, a recording with no WAV and no permission error or prompt), the made-up key typed into Settings, **Test & Save** (Speech section) reaches the local provider and says **✓ Connected · saved in Keychain**, and a dictation pastes the provider's transcript (2 requests in all). The key is removed again however it ends. The Gatekeeper dialog and the permission prompts themselves are not scripted (the golden image has both granted). |
@@ -241,7 +241,7 @@ workflow may reach it.
 | `e2e_tray_error_clears_on_next_recording` | T2 #7 (P2-01) | No key in the keychain and the real engine (`--transcriber settings`): a dictation fails offline with `Transcription failed: Add your API key in Settings.`: the tray's title becomes `⚠ Dictation failed` (the same short text for every error, so the status item always fits in the menu bar, #151) and its tooltip `Vocet: ` and the message (`ax.js tray-info`, the status item's AXTitle and AXHelp). The next `--press` clears both while it records; its release shows the error again. Then Quit from the tray, a relaunch on the mock: the dictation pastes and the tray stays clear. |
 | `e2e_settings_save_reopen` | T2 #1, #7 (P1-03, P2-01) | Settings… in the tray opens the window (on screen, by the window server's list); in its Dictation section (U6: changes apply at once, no Save button) it shows `Right ⌥` and "Detect automatically". German is picked in the Language popup (`ax.js combo-pick`: focus, type `german`, Return) and is saved at once (the log and `settings.json`); Left Option is recorded as the shortcut (Record a different key, a real key from `post-key.js`), the app logs `hotkey applied … hotkey=LeftAlt`, the keycap shows `Left ⌥`, and `settings.json` has both (`de`). The close button hides the window; Settings… shows it again on Dictation with the saved values ("German (Deutsch)"). A real Left Option hold (`post-key.js`) then dictates into TextEdit with no restart, and a Right Option hold starts nothing. Quit from the tray and relaunch: `ready … hotkey=LeftAlt`, Left Option dictates, Right Option doesn't. The key cleanup releases both keys and removes `settings.json` (the defaults). |
 | `e2e_update_from_dictation_app` | U1 round 2 | The build from before the rename (`E2E_TRANSITION_OLD_REF`, default `b7ae67e`; `Vocet.app`) is installed with a saved key, non-default settings and launch at login on; the new build is Vocet. The tray's update installs it (`Vocet.app` stays, Vocet inside), then Vocet.app replaces it as the DMG guide says. Each time: the settings file and engine settings, the key in the keychain, the login item enabled and one entry in Background Task Management at the right path, and Microphone and Accessibility holding. The updater still offers a newer version. Evidence file lists the BTM dump; screenshots of the keychain prompt macOS shows after an update and of the first-run window. `E2E_TRANSITION_KEEP_OLD=1` reuses the old build. |
-| `e2e_onboarding_first_run` | U8 #8 (M5.2 #3) | A first run with no saved key on the local provider, launched with `--debug-onboarding`, down the own-key path: onboarding shows at launch at Welcome. In Speech, Test & Save refuses a key the provider rejects (`ax.js secret-set`), saving nothing with Continue still locked, and accepts one it takes. Permissions shows both allowed; the practice dictation lands in the box; Ready shows the key, Groq connected and launch at login off; Start dictating hides the window and takes Resume setup off the tray. Run setup again in Settings, Help reopens it at Welcome, with Resume setup still off the tray. Neither key nor the transcript is in the log. |
+| `e2e_onboarding_first_run` | U8 #8 (M5.2 #3) | A first run with no saved key on the local provider, launched with `--debug-onboarding`, down the own-key path: onboarding shows at launch at Welcome. In Speech, Test & Save refuses a key the provider rejects (`ax.js secret-set`), saving nothing with Continue still locked, and accepts one it takes. Permissions shows both allowed; the practice dictation lands in the box; Ready shows the key, OpenRouter connected and launch at login off; Start dictating hides the window and takes Resume setup off the tray. Run setup again in Settings, Help reopens it at Welcome, with Resume setup still off the tray. Neither key nor the transcript is in the log. |
 | `e2e_onboarding_layout` | U8 #1 | The real onboarding at its minimum content size with every text made pseudo-long (`src/onboarding/layoutHarness.tsx`, on a fake backend, in the VM's Safari), for each step in light and dark. Also Ready at the usual size with its real text and the download strip, where the sharing switch's row must be in view without scrolling (U10). Reads the page's verdict: the primary action and its reason unclipped and uncovered, no overlapping footer parts, nothing sticking out sideways, and the content scrolls to its end. |
 | `e2e_onboarding_five_steps` | U8 #7, #8 | All five steps with the real local model, from the stand-in model server (no internet; see below), and a `say` clip. Download and continue starts the download and moves on; the strip shows it on later steps; a quit mid-download comes back at Permissions with the download picked up. Try it waits for the model; a dictation that lands in TextEdit shows the words with Copy and doesn't count; one that lands in the practice box does. Ready says the engine is ready, and Start dictating ends setup. |
 
@@ -365,7 +365,7 @@ one. It serves the real model, as the app checks its SHA-256: the file a run of
 the app on this Mac downloaded, or `E2E_MODEL_FILE`, copied into the VM once per
 reset. Without one those scenarios fail and say so; they never fetch it.
 
-The scenarios that need the real engine without Groq (a wrong key, a reply
+The scenarios that need the real engine without OpenRouter (a wrong key, a reply
 that is late, a transcript with every kind of character) use
 `fixtures/local-provider.pl`, a small OpenAI-compatible transcription server
 on the VM's loopback, in plain Perl (the VM has no Python). The debug build
@@ -382,9 +382,9 @@ the VM:
 
 - **Keys:** it accepts one made-up key (lowercase letters and digits, so
   `ax.js` can type it into Settings) and answers any other with a 401, as
-  Groq does. Only the key's SHA-256 is on disk, so a scenario can check that
+  OpenRouter does. Only the key's SHA-256 is on disk, so a scenario can check that
   no file holds a key. The key reaches the app's keychain through the app
-  itself (`groq_key_store`, as for Groq).
+  itself (`apikey_key_store`, as for OpenRouter).
 - **The gate:** `provider_gate_close` makes it hold each reply once the
   request is read whole; `provider_release` lets them go. A held reply keeps
   the text it came with. Holds stay well under the app's 30 s request
@@ -402,17 +402,17 @@ Each provider scenario arms the key cleanup with `provider_cleanup` as its
 hook: however it ends, the reply is released, the provider stopped, the key
 removed from the keychain and the settings reset.
 
-## Real Groq (opt-in)
+## Real OpenRouter (opt-in)
 
 The scenarios run on the mock engine: `launch` passes `--transcriber mock` to
 a first launch (the engine is chosen when the app starts; a forwarded second
-launch can't change it). `e2e_error_bad_key` and `e2e_real_groq` set
+launch can't change it). `e2e_error_bad_key` and `e2e_real_openrouter` set
 `E2E_TRANSCRIBER=settings` for their first launch instead, which is the
 app's default: the provider, model and language from the settings and the
 provider's key from the keychain.
 
 ```sh
-GROQ_API_KEY=gsk_... tests/e2e/run.sh e2e_real_groq        # a real key, a real request
+OPENROUTER_API_KEY=sk-or-... tests/e2e/run.sh e2e_real_openrouter        # a real key, a real request
 tests/e2e/run.sh e2e_error_bad_key                         # a wrong key; no key needed
 ```
 
@@ -421,8 +421,8 @@ way a user's Settings window leaves it, so the test has the app put it
 there. The debug build takes two flags that run in a process of their own,
 then exit: `--debug-set-api-key-stdin` (the key is read from stdin, never an
 argument) and `--debug-delete-api-key`; both go through the same code as the
-Settings window (`groq_key_store` and `groq_key_remove` in
-`scenarios/_groq_helpers.sh`). The app has to create the item itself: an item
+Settings window (`apikey_key_store` and `apikey_key_remove` in
+`scenarios/_key_helpers.sh`). The app has to create the item itself: an item
 made by the `security` tool doesn't list the app in its access list, so
 macOS prompts when the app reads it and nobody is there to click. A release
 build ignores both flags. The key is sent on the stdin of ssh, so it is never
@@ -430,8 +430,8 @@ in a process list (host or VM), a file, the app's log or a report; the
 scenario also checks that the app's log doesn't hold it. The helpers turn
 `bash -x` tracing off while they handle the key (and put it back), so a
 trace of a run doesn't hold it either; a scenario never expands
-`$GROQ_API_KEY` itself. The key is removed again however the
-run ends (`groq_guard_start`: an EXIT/INT/TERM/HUP trap that keeps the run's
+`$OPENROUTER_API_KEY` itself. The key is removed again however the
+run ends (`apikey_guard_start`: an EXIT/INT/TERM/HUP trap that keeps the run's
 exit status), and a removal that fails is reported as a failure with a
 warning that the key may still be in the VM's keychain; reset the VM then.
 `tests/e2e/test-key-handling.sh` (part of the gate, no VM needed) checks all
@@ -442,7 +442,7 @@ keychain command unlocks it first with the VM user's password: `lume`, the
 throwaway VM user's, or `VM_PASSWORD` if you set it. It travels on stdin too
 and is never logged. The app reads no environment variable for a key, so a
 release and a debug build have the same one way to get a key. Without
-`GROQ_API_KEY` the scenario is skipped, not failed.
+`OPENROUTER_API_KEY` the scenario is skipped, not failed.
 
 The paste is read back from TextEdit with `osascript`, so these two need the
 golden image to have Accessibility granted to the app and Automation allowed

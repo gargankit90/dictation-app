@@ -107,10 +107,10 @@ e2e_dmg_guide_steps() {
   # Section 4: the key, typed into Settings (no key saved before).
   fresh_app_state
   settings_reset
-  groq_key_remove
+  apikey_key_remove
   expect "the local provider starts" provider_start "$PROVIDER_GOOD_KEY"
   expect "the app starts on the local provider" launch_on_provider
-  expect "with no key saved yet" wait_for_log 'engine settings provider=groq .*has_key=false'
+  expect "with no key saved yet" wait_for_log 'engine settings provider=openrouter .*has_key=false'
   expect "section 4: Settings… opens from the tray" open_settings
   expect "the Speech section opens" ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Speech
   expect "the key is typed into the key field" \
@@ -119,8 +119,8 @@ e2e_dmg_guide_steps() {
   expect "says it is connected and saved" \
     ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "✓ Connected · saved in Keychain" 15
   expect "the test reached the local provider with the typed key" provider_request_has 1 auth=good
-  GROQ_KEY_STORED=1
-  expect "the engine is rebuilt with the key" wait_for_log 'engine settings provider=groq .*has_key=true'
+  API_KEY_STORED=1
+  expect "the engine is rebuilt with the key" wait_for_log 'engine settings provider=openrouter .*has_key=true'
   expect "closing the window hides it" close_settings
 
   # Section 5: dictate.

@@ -20,8 +20,8 @@
 #    The running app usually takes the grant by itself; if macOS doesn't hand it
 #    over, the card's Relaunch and resume brings the window back with Done unlocked.
 # 5. Dictation works with the real hotkey and the real paste, and a recording from
-#    the microphone meets no permission error. Settings, history and the key are
-#    as they were; the login item's state is recorded as evidence.
+#    the microphone meets no permission error. Settings and history are
+#    as they were (Q2: no Groq key or provider is kept); the login item's state is recorded as evidence.
 #
 # What the real Developer ID may do differently: docs/releasing.md.
 #
@@ -332,7 +332,7 @@ e2e_update_to_new_certificate() {
 
   # 1. A tester's state, before the update.
   nc_seed_state
-  groq_key_store "$NC_KEY"
+  apikey_key_store "$NC_KEY"
   expect "launch at login is on" test "$(login_item on 2>&1)" = "launch at login: enabled"
   settings_before=$(nc_checksum "$NC_SETTINGS_VM")
   history_before=$(nc_checksum "$VM_HISTORY_FILE")
@@ -344,7 +344,6 @@ e2e_update_to_new_certificate() {
   # 2. As a person: no test flags, so the launch check runs by itself.
   vm "open -n $(q "$VM_APP")"
   expect "0.1.0 starts" wait_for_log "INFO .*starting version=\"$UPD_OLD\""
-  expect "0.1.0 reads the key it saved" wait_for_log 'engine settings provider=groq .*has_key=true'
   expect "the launch check offers $UPD_NEW" upd_dialog "$UPD_NEW is available; you have $UPD_OLD" "Install and restart"
   expect "the app restarts as $UPD_NEW by itself" wait_for_log "INFO .*starting version=\"$UPD_NEW\""
   sleep 3
@@ -402,8 +401,6 @@ e2e_update_to_new_certificate() {
   # 5. Everything else stayed.
   expect "the settings file is byte for byte the same" test "$(nc_checksum "$NC_SETTINGS_VM")" = "$settings_before"
   expect "the history file is byte for byte the same" test "$(nc_checksum "$VM_HISTORY_FILE")" = "$history_before"
-  expect "the key is still in the login keychain" tr_key_in_keychain
-  expect "the new build reads the key" wait_for_log 'engine settings provider=groq .*has_key=true' 30
   nc_note "login item after the update, as the OS says: $(login_item status 2>&1)"
   nc_note "$(tr_btm | head -30)"
   expect "a dictation and a microphone recording work" permissions_hold "$UPD_NEW"

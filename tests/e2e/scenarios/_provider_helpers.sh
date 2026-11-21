@@ -1,6 +1,6 @@
 # Helpers for the scenarios on the local provider (T4a): the app's real
 # engine, keychain key, HTTP client and JSON parsing, talking to
-# fixtures/local-provider.pl on the VM's loopback instead of Groq. Sourced by
+# fixtures/local-provider.pl on the VM's loopback instead of OpenRouter. Sourced by
 # run.sh with the scenarios (every scenarios/*.sh), but defines no scenario.
 #
 # The test build is pointed at the provider with --debug-provider-url (debug
@@ -115,11 +115,11 @@ provider_request_has() {
   return 1
 }
 
-# provider_key_store <key>: saves <key> as the Groq key in the VM's
-# keychain, through the app (_groq_helpers.sh), so the app reads it with no
+# provider_key_store <key>: saves <key> as the OpenRouter key in the VM's
+# keychain, through the app (_key_helpers.sh), so the app reads it with no
 # prompt. provider_cleanup removes it.
 provider_key_store() {
-  groq_key_store "$1"
+  apikey_key_store "$1"
 }
 
 # The first launch of a scenario on the local provider: the real engine
@@ -143,7 +143,7 @@ provider_cleanup() {
     log "  cleanup: the local provider is still running"
     ok=1
   }
-  if [ "$GROQ_KEY_STORED" = 1 ] && ! groq_key_remove; then
+  if [ "$API_KEY_STORED" = 1 ] && ! apikey_key_remove; then
     ok=1
   fi
   settings_reset || ok=1

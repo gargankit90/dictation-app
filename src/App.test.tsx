@@ -26,8 +26,8 @@ describe("App", () => {
       if (command === "get_settings") {
         return {
           version: 2,
-          provider: "groq",
-          model: "whisper-large-v3-turbo",
+          provider: "openrouter",
+          model: "openai/gpt-4o-mini-transcribe",
           language: null,
           hotkey: "RightAlt",
           launch_at_login: false,
@@ -68,8 +68,8 @@ describe("App", () => {
       if (command === "get_settings") {
         return {
           version: 2,
-          provider: "groq",
-          model: "whisper-large-v3-turbo",
+          provider: "openrouter",
+          model: "openai/gpt-4o-mini-transcribe",
           language: null,
           hotkey: "RightAlt",
           launch_at_login: false,
@@ -127,8 +127,8 @@ describe("App", () => {
         case "get_settings":
           return {
             version: 2,
-            provider: "groq",
-            model: "whisper-large-v3-turbo",
+            provider: "openrouter",
+            model: "openai/gpt-4o-mini-transcribe",
             language: null,
             hotkey: "RightAlt",
             launch_at_login: false,
@@ -324,8 +324,8 @@ describe("App", () => {
         case "get_settings":
           return {
             version: 2,
-            provider: "groq",
-            model: "whisper-large-v3-turbo",
+            provider: "openrouter",
+            model: "openai/gpt-4o-mini-transcribe",
             language: null,
             hotkey: "RightAlt",
             launch_at_login: false,

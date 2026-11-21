@@ -22,8 +22,8 @@
 //! any reason including a crash, the pipe closes, the supervisor's `read`
 //! returns and it kills the server.
 //!
-//! [`ChatRunner`] is the seam for tests; [`LocalCleaner`] runs one cleanup
-//! with [`local_cleanup::TIMEOUT`]. A request that runs out of time is
+//! [`ChatRunner`] is the seam for tests; [`LocalCleaner`] is the port's
+//! [`Cleaner`]. A request that runs past the pipeline's deadline is
 //! dropped, which closes its connection, and llama-server stops a
 //! non-streamed generation whose client has gone (`wait_for_all` with the
 //! request's `should_stop`), so the next dictation isn't queued behind it.
@@ -38,8 +38,9 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use dictation_core::local_cleanup;
 use dictation_core::redact;
+use dictation_core::{cleanup, local_cleanup};
+use dictation_ports::{Cleaner, CleanupError};
 use reqwest::Client;
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -85,16 +86,14 @@ pub enum LlamaError {
     /// The helper didn't become ready within [`STARTUP_TIMEOUT`].
     #[error("the on-device cleanup took too long to start")]
     StartTimeout,
-    /// The cleanup ran out of time.
-    #[error("the on-device cleanup timed out")]
-    Timeout,
     /// The request failed (the helper exited, or the connection broke).
     #[error("the on-device cleanup failed: {}", redact::summary(.0))]
     Request(String),
     /// The helper answered with an HTTP error.
     #[error("the on-device cleanup answered HTTP {0}")]
     Status(u16),
-    /// The answer wasn't a chat completion.
+    /// The answer wasn't a finished chat completion with text (any
+    /// `finish_reason` but `stop` counts as unfinished).
     #[error("the on-device cleanup sent an unexpected answer")]
     Reply,
 }
@@ -116,6 +115,12 @@ pub trait ChatRunner: Send + Sync {
         user: &str,
         max_tokens: u32,
     ) -> impl Future<Output = Result<String, LlamaError>> + Send;
+
+    /// Whether the runner can still answer; a helper that died after it
+    /// started can't, and is started again.
+    fn alive(&self) -> bool {
+        true
+    }
 }
 
 impl<R: ChatRunner> ChatRunner for Arc<R> {
@@ -127,49 +132,55 @@ impl<R: ChatRunner> ChatRunner for Arc<R> {
     ) -> impl Future<Output = Result<String, LlamaError>> + Send {
         (**self).complete(system, user, max_tokens)
     }
+
+    fn alive(&self) -> bool {
+        (**self).alive()
+    }
 }
 
-/// Cleans transcripts with a chat model, prompt v3 and a time limit.
+/// The on-device [`Cleaner`] (Q4): Gemma with prompt v3, through a
+/// [`ChatRunner`]. The pipeline's cleanup step adds the rest, as for the
+/// cloud cleaner: the deadline ([`local_cleanup::TIMEOUT`], from
+/// [`Cleaner::deadline`]), the guard (which checks the reply doesn't echo
+/// prompt v3) and the raw-text fallback.
 #[derive(Debug, Clone)]
 pub struct LocalCleaner<R> {
     runner: R,
-    timeout: Duration,
 }
 
 impl<R: ChatRunner> LocalCleaner<R> {
-    /// Cleans with `runner` and [`local_cleanup::TIMEOUT`].
+    /// Cleans with `runner`.
     #[must_use]
     pub fn new(runner: R) -> Self {
-        Self::with_timeout(runner, local_cleanup::TIMEOUT)
+        Self { runner }
     }
+}
 
-    /// Cleans with `runner`, giving each cleanup `timeout`.
-    #[must_use]
-    pub fn with_timeout(runner: R, timeout: Duration) -> Self {
-        Self { runner, timeout }
-    }
-
-    /// The model's reply for `raw`, unchecked: the caller runs the guard
-    /// and pastes `raw` on any error or rejection. Whitespace-only input is
-    /// returned as it is, without asking the model.
-    ///
-    /// # Errors
-    ///
-    /// [`LlamaError::Timeout`] when the model takes longer than the time
-    /// limit (the request is cancelled), or the runner's error.
-    pub async fn clean(&self, raw: &str) -> Result<String, LlamaError> {
-        if raw.trim().is_empty() {
-            return Ok(raw.to_owned());
-        }
-        let user = local_cleanup::user_message(raw);
-        let request = self.runner.complete(
-            local_cleanup::SYSTEM_PROMPT,
-            &user,
-            local_cleanup::max_tokens(raw),
-        );
-        tokio::time::timeout(self.timeout, request)
+impl<R: ChatRunner> Cleaner for LocalCleaner<R> {
+    async fn clean(&self, text: &str) -> Result<String, CleanupError> {
+        self.runner
+            .complete(
+                local_cleanup::SYSTEM_PROMPT,
+                &cleanup::user_message(text),
+                local_cleanup::max_tokens(text),
+            )
             .await
-            .map_err(|_| LlamaError::Timeout)?
+            .map_err(|error| match error {
+                LlamaError::Status(status) => CleanupError::Provider(status),
+                LlamaError::Reply => CleanupError::BadReply,
+                LlamaError::HelperMissing
+                | LlamaError::Start(_)
+                | LlamaError::StartTimeout
+                | LlamaError::Request(_) => CleanupError::Network,
+            })
+    }
+
+    fn deadline(&self) -> Option<Duration> {
+        Some(local_cleanup::TIMEOUT)
+    }
+
+    fn prompt(&self) -> Option<&'static str> {
+        Some(local_cleanup::SYSTEM_PROMPT)
     }
 }
 
@@ -466,11 +477,8 @@ async fn complete_at(
         .bytes()
         .await
         .map_err(|e| LlamaError::Request(e.without_url().to_string()))?;
-    let body: Value = serde_json::from_slice(&bytes).map_err(|_| LlamaError::Reply)?;
-    body.pointer("/choices/0/message/content")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or(LlamaError::Reply)
+    // The cloud cleaner's reading: a finished reply only, without the tags.
+    crate::cleanup::parse_reply(&bytes).ok_or(LlamaError::Reply)
 }
 
 impl ChatRunner for LlamaServer {
@@ -482,6 +490,10 @@ impl ChatRunner for LlamaServer {
     ) -> Result<String, LlamaError> {
         let body = request_body(system, user, max_tokens);
         complete_at(&self.client, &self.base_url, &self.key, &body).await
+    }
+
+    fn alive(&self) -> bool {
+        self.is_running()
     }
 }
 

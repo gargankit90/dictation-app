@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn builds_a_client_with_rustls_and_ring() {
-        assert!(client("https://api.groq.com/openai/v1").is_ok());
+        assert!(client("https://openrouter.ai/api/v1").is_ok());
         assert!(client("http://127.0.0.1:9/v1").is_ok());
     }
 
@@ -149,7 +149,7 @@ mod tests {
             assert!(is_loopback_http(url), "{url}");
         }
         for url in [
-            "https://api.groq.com/openai/v1",
+            "https://openrouter.ai/api/v1",
             "https://127.0.0.1/v1",
             "http://example.com/v1",
             "http://10.0.0.1/v1",

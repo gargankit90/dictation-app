@@ -1,6 +1,7 @@
-//! M3.2 edge cases for `OpenAiCompat` (Tester, run 1): `Retry-After` at the
+//! M3.2 edge cases for `OpenRouter` (Tester, run 1): `Retry-After` at the
 //! limit, on 503 and on every reply, empty replies, and a TLS smoke test
-//! against the real Groq endpoint (ignored by default: it uses the network).
+//! against the real `OpenRouter` endpoint (ignored by default: it uses the
+//! network).
 //! No real key anywhere: the keys here are obviously fake.
 
 #![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
@@ -10,7 +11,7 @@ use std::time::Duration;
 
 use dictation_core::retry::RetryPolicy;
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
-use dictation_transcribe::openai_compat::{Config, GROQ, MAX_RETRY_AFTER, OpenAiCompat, Wait};
+use dictation_transcribe::openrouter::{Config, MAX_RETRY_AFTER, OpenRouter, Wait};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -31,6 +32,8 @@ fn config(server: &MockServer, max_attempts: u32) -> Config {
         base_url: format!("{}/v1", server.uri()),
         model: "m".into(),
         language: None,
+        prompt: None,
+        privacy: dictation_core::cloud_models::PrivacyFilter::DenyDataCollection,
         timeout: Duration::from_secs(5),
         timeout_grows_with_audio: false,
         long_clip: dictation_core::upload_limits::LONG_CLIP,
@@ -44,9 +47,9 @@ fn config(server: &MockServer, max_attempts: u32) -> Config {
     }
 }
 
-fn engine(config: Config) -> (OpenAiCompat<RecordWait>, RecordWait) {
+fn engine(config: Config) -> (OpenRouter<RecordWait>, RecordWait) {
     let wait = RecordWait::default();
-    let engine = OpenAiCompat::with_wait(config, Secret::new(KEY), wait.clone(), 1).unwrap();
+    let engine = OpenRouter::with_wait(config, Secret::new(KEY), wait.clone(), 1).unwrap();
     (engine, wait)
 }
 
@@ -178,7 +181,7 @@ async fn empty_audio_is_still_sent() {
 async fn a_non_ascii_key_rejected_by_the_provider_is_not_echoed() {
     let server = MockServer::start().await;
     mount(&server, ResponseTemplate::new(401), None).await;
-    let engine = OpenAiCompat::with_wait(
+    let engine = OpenRouter::with_wait(
         config(&server, 3),
         Secret::new("ключ-fake"),
         RecordWait::default(),
@@ -191,16 +194,17 @@ async fn a_non_ascii_key_rejected_by_the_provider_is_not_echoed() {
     assert_eq!(requests(&server).await, 1);
 }
 
-/// TLS smoke test: the real Groq endpoint with a dummy key. Proves the
-/// rustls + ring + OS trust store setup completes a handshake and that the
-/// real 401 maps to `InvalidKey`. Uses the network, so ignored by default:
-/// `cargo nextest run -p dictation-transcribe --run-ignored only groq_tls`.
+/// TLS smoke test: the real `OpenRouter` endpoint with a dummy key. Proves
+/// the rustls + ring + OS trust store setup completes a handshake and that
+/// the real 401 maps to `InvalidKey`. Uses the network, so ignored by
+/// default: `cargo nextest run -p dictation-transcribe --run-ignored only
+/// openrouter_tls`.
 #[tokio::test]
-#[ignore = "network: calls https://api.groq.com with a dummy key"]
-async fn groq_tls_handshake_and_dummy_key_is_invalid_key() {
-    let mut config = Config::from_preset(GROQ);
+#[ignore = "network: calls https://openrouter.ai with a dummy key"]
+async fn openrouter_tls_handshake_and_dummy_key_is_invalid_key() {
+    let mut config = Config::openrouter();
     config.retry.max_attempts = 1;
-    let engine = OpenAiCompat::new(config, Secret::new("invalid-test-key")).unwrap();
+    let engine = OpenRouter::new(config, Secret::new("invalid-test-key")).unwrap();
     let audio = Audio {
         sample_rate: 16_000,
         samples: vec![0.0; 1_600],

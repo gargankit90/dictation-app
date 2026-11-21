@@ -109,7 +109,7 @@ e2e_update_keychain_control() {
   tr_install "$KC_DIR/old/dictation-app.app" "$KC_APP"
   tr_use_app "$KC_APP"
 
-  groq_key_store "$KC_KEY"
+  apikey_key_store "$KC_KEY"
   upd_serve good
   expect "the update server starts" upd_server_start
   clear_app_log

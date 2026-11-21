@@ -116,8 +116,8 @@ const multilingual: LocalModelInfo_Serialize = {
 
 const settings: Settings_Serialize = {
   version: 2,
-  provider: "groq",
-  model: "whisper-large-v3-turbo",
+  provider: "openrouter",
+  model: "openai/gpt-4o-mini-transcribe",
   language: isMore ? "fr" : "hi",
   // The owner's state on Try it: a recorded two-key shortcut.
   hotkey: isTry || view === "welcome-plain" ? "RightAlt+RightCmd" : "RightAlt",

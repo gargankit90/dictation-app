@@ -1,0 +1,12 @@
+# Never committed: the dataset's audio, references and transcripts are CC BY-NC (eval/README.md), and a judge's
+# cache, a run's scratch output and the python environment are local.
+clips/
+work/
+.judge-cache/
+*.flac
+*.wav
+*.mp3
+*.m4a
+*.parquet
+__pycache__/
+.venv/

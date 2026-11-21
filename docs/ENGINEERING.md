@@ -15,7 +15,7 @@ adapter. Tauri is a thin layer on top.
 | `crates/core` | `dictation-core` | coordinator state machine, events, text cleanup, audio maths, WAV, settings, hotkey specs, retry policy, errors | nothing in the workspace |
 | `crates/ports` | `dictation-ports` | traits: `HotkeySource`, `AudioSource`, `Transcriber`, `TextInserter`, `Clipboard`, `SecretStore`, `Permissions`, `Clock` | `core` |
 | `crates/platform` | `dictation-platform` | OS adapters; fakes behind feature `testing` | `core`, `ports` |
-| `crates/transcribe` | `dictation-transcribe` | `Transcriber` implementations: OpenAI-compatible (Groq/OpenAI), mock, on-device (transcribe.cpp); the on-device cleanup helper's runner (Q4) | `core`, `ports` |
+| `crates/transcribe` | `dictation-transcribe` | `Transcriber` and `Cleaner` implementations: OpenRouter speech and cleanup, the on-device engine and cleaner (llama.cpp helper, Q4), mock | `core`, `ports` |
 | `crates/telemetry` | `dictation-telemetry` | PostHog adapter for the `Telemetry` port, Sentry adapter for `ErrorReporter`, and the install ID | `ports` |
 | `crates/app` | `dictation-pipeline` | async pipeline that runs the coordinator against the ports; no Tauri types | `core`, `ports` |
 | `src-tauri` | `dictation-app` | Tauri commands, events, tray, windows, plugins, CLI flags | everything above |
@@ -148,10 +148,17 @@ the helper also can't take the app down.
   cleanup model is downloaded, with the model loaded (warm); switching away,
   deleting the model or quitting stops it. It runs under a `/bin/sh`
   supervisor that holds a pipe from the app and kills it when the pipe
-  closes, so it never outlives the app, even after a crash.
-- **Time limit:** a cleanup that takes longer than
-  `local_cleanup::TIMEOUT` is dropped, which closes its connection and stops
-  the generation; the raw transcript is pasted.
+  closes, so it never outlives the app, even after a crash. A helper that
+  dies after starting is started again at the next dictation (which pastes
+  the raw text).
+- **In the pipeline:** `LocalCleaner` is one more `Cleaner` on Q2's port,
+  sending prompt v3 (the prompt behind the 76.8 eval result). The app's
+  cleaner uses it while the helper runs, else the cloud engine's. Q2's
+  cleanup step does the rest for both: the guard (here against prompt v3),
+  the finished-reply check, and the deadline, which is the cleaner's own
+  `local_cleanup::TIMEOUT` (slower Macs need more than the cloud's): a
+  late request is dropped, which closes its connection and stops the
+  generation, and the raw transcript is pasted.
 
 ## Code reuse and licences
 
@@ -250,12 +257,21 @@ the helper also can't take the app down.
   windows (the overlay, Settings) takes focus on the way. Checked by
   `e2e_focus_switch_during_transcription` (T4a, #117).
 - **Recording length:** maximum 5 minutes (16 kHz mono WAV ≈ 1.9 MB/min, so
-  about 9.6 MB, under Groq's upload limit).
-- **Groq upload limit** (checked 2026-10-31 at
-  <https://console.groq.com/docs/speech-to-text>): a direct file upload may
-  be up to 25 MB on the free tier and 100 MB on the dev (paid) tier; larger
-  files must be passed by URL instead. Requests shorter than 10 s are billed
-  as 10 s. We upload directly, so we plan for the 25 MB free-tier limit.
+  about 9.6 MB, 12.8 MB once base64-encoded).
+- **OpenRouter upload limit** (the owner's model notes, 2026-11-20):
+  `/audio/transcriptions` takes 25 MB, with a 60 s upstream timeout per
+  request. The audio goes as base64 in a JSON body (`input_audio`).
+- **Cloud models are data** (`crates/core/src/cloud_models.rs`): speech
+  `openai/gpt-4o-mini-transcribe` (shuts down 2027-02-26), cleanup
+  `z-ai/glm-5.3-flash`. Every request carries the model's OpenRouter privacy
+  filter (`data_collection: deny`, plus `zdr: true` for cleanup) and is never
+  retried without it.
+- **Cleanup** (Q2): after transcription and before the paste, the text goes
+  to the cleanup model with the prompt in `crates/core/prompts/cleanup.txt`
+  (the eval harness reads the same file). The reply is pasted only if the
+  guard (`dictation_core::cleanup::judge`) accepts it; a timeout (1.5 s,
+  `dictation_core::cleanup::TIMEOUT`, the request is cancelled), an error or
+  a refused reply pastes the raw transcript.
 
 ## Tests
 
@@ -266,6 +282,7 @@ Every testable behaviour gets a test, at the cheapest level that catches it.
 | Unit | next to the code (`#[cfg(test)]`), Vitest for UI | milliseconds, no OS or network |
 | Integration | `crates/*/tests/` with fakes and `wiremock` | seconds, no real OS or network |
 | End-to-end | `tests/e2e/`, the built app inside the Lume VM | minutes, scripted |
+| Eval harness | `eval/test_*.py`, Python standard library | seconds, no network, no key (`eval/test.sh`) |
 
 - Tests go in the same commit as the code, or the commit before it (red, then
   green).
@@ -274,6 +291,20 @@ Every testable behaviour gets a test, at the cheapest level that catches it.
 - No sleeps for timing in unit tests: inject a `Clock`.
 - Only these stay manual: real key timing, real mic quality, macOS permission
   prompts, and pasting into other apps (Slack, Chrome, VS Code, Terminal).
+
+### Evaluation harness and the prompt regression check (Q1)
+
+`eval/` measures speech engines, cleanup prompts and models on Voice Arena's public dictation set
+(`eval/README.md`: what is in it, which result supports which product default). The gate runs only its
+offline tests (`eval/test.sh`: no network, no key, under 30 s); `uv run pytest eval` runs them with every
+dependency. The dataset is CC BY-NC: its audio, reference texts and transcripts are never committed (the
+`eval/` tests check that, and for API keys).
+
+**Before merging any change to the cleanup prompt or to a model default**, run `eval/regress.sh` (the Lead
+or the Developer, with `OPENROUTER_API_KEY` in the environment) and put its ZER line in the PR. It runs the
+app's current cleanup prompt on a fixed 40-clip subset and compares ZER with the stored baseline; it fails
+if ZER drops by more than 5 points. It costs about $0.03 and some judge calls, so it is not in the gate:
+`eval/regress.sh --dry-run` prints the plan and the estimate first.
 
 ## Quality gate
 
@@ -289,6 +320,7 @@ every finding is fixed. Locally it skips work it has already done, see below.
 | Coverage | `cargo llvm-cov` | thresholds above |
 | TS | `tsc --noEmit`, `eslint --max-warnings 0`, `vitest run` | all green |
 | Spelling | `typos` | must pass |
+| Eval harness | `eval/test.sh` (Python, offline) | all green |
 
 A suppression (`#[allow]`, `eslint-disable`) needs a comment explaining why,
 and the Code Reviewer must agree.

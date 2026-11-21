@@ -211,8 +211,7 @@ fn native_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Menu<Wry>> {
 pub fn engine_name(settings: &Settings) -> String {
     match settings.transcription {
         Transcription::Cloud => match settings.provider {
-            Provider::Groq => "Groq".to_owned(),
-            Provider::OpenAi => "OpenAI".to_owned(),
+            Provider::OpenRouter => "OpenRouter".to_owned(),
         },
         Transcription::Local => local_models::find(&settings.local_model).map_or_else(
             || "On this Mac".to_owned(),

@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use dictation_ports::Cleaner;
 use dictation_transcribe::llama::{LlamaServer, LocalCleaner};
 
 #[tokio::test(flavor = "multi_thread")]
@@ -28,7 +29,7 @@ async fn the_real_helper_cleans_a_transcript() {
     let server = Arc::new(LlamaServer::start(&helper, &model).await.unwrap());
     eprintln!("ready in {:?}", started.elapsed());
     let pid = server.server_pid().unwrap();
-    let cleaner = LocalCleaner::with_timeout(Arc::clone(&server), Duration::from_secs(30));
+    let cleaner = LocalCleaner::new(Arc::clone(&server));
     let raw = "um so can you uh send me the the budget by friday";
     let started = Instant::now();
     let cleaned = cleaner.clean(raw).await.unwrap();

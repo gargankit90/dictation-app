@@ -11,7 +11,7 @@
 #    CI_VM_WAIT seconds (default 2700) and then ends as "skipped: no VM free"
 #    with exit 0: a busy VM is not a broken main.
 # 3. Runs every scenario except the ones that need a real key or a real
-#    microphone (CI has no API key): e2e_real_groq, e2e_real_mic.
+#    microphone (CI has no API key): e2e_real_openrouter, e2e_real_mic.
 # 4. Collects the evidence in $CI_EVIDENCE_DIR (default target/e2e-evidence):
 #    about.txt (SHA, VM, status), results.txt (PASS/FAIL/SKIP per scenario)
 #    and the run's logs, with anything shaped like a key hidden. Exit 1 only
@@ -44,7 +44,7 @@ if [ -n "${CI_VM_POOL:-}" ]; then
     esac
   done
 fi
-EXCLUDE=(e2e_real_groq e2e_real_mic)
+EXCLUDE=(e2e_real_openrouter e2e_real_mic)
 
 log() { printf '[e2e-ci %s] %s\n' "$(date +%T)" "$*" >&2; }
 hide_keys() { sed -E 's/(gsk_|sk-)[A-Za-z0-9_-]{8,}/[key hidden]/g'; }

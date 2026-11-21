@@ -27,7 +27,7 @@ export async function testKey(provider: Provider, typed: string | null): Promise
   try {
     const result = await commands.testApiKey(provider, typed);
     return result.status === "ok"
-      ? { kind: "ok", text: `The key works. ${providerInfo(provider).name} accepted it.` }
+      ? { kind: "ok", text: `The key works. ${providerInfo().name} accepted it.` }
       : { kind: "error", text: result.error.message };
   } catch {
     return { kind: "error", text: BROKEN };

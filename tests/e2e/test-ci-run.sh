@@ -84,7 +84,7 @@ check "free: doesn't touch dictation-vm" lacks "dictation-vm --no-build" "$tmp/f
 check "free: records the VM" has "vm: dictation-vm-2" "$tmp/free/ev/about.txt"
 check "free: records the SHA" has "commit: 0123456789abcdef" "$tmp/free/ev/about.txt"
 check "free: keeps results.txt" has "1 passed" "$tmp/free/ev/results.txt"
-check "free: excludes the real-key scenario" has "--exclude e2e_real_groq" "$tmp/free/calls"
+check "free: excludes the real-key scenario" has "--exclude e2e_real_openrouter" "$tmp/free/calls"
 check "free: excludes the real-mic scenario" has "--exclude e2e_real_mic" "$tmp/free/calls"
 check "free: reuses the build" has "--no-build" "$tmp/free/calls"
 check "free: the step summary has the result" has "PASSED" "$tmp/free/summary"

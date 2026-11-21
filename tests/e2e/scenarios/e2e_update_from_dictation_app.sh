@@ -51,7 +51,7 @@ tr_use_app() {
   # The executable is named by the bundle: dictation-app in the old build,
   # Vocet in the new one (also inside dictation-app.app after an update).
   exe=$(vm "defaults read $(q "$VM_APP/Contents/Info") CFBundleExecutable" 2>/dev/null) || exe=$PROC_NAME
-  GROQ_VM_APP_BINARY="$VM_APP/Contents/MacOS/${exe:-$PROC_NAME}"
+  API_VM_APP_BINARY="$VM_APP/Contents/MacOS/${exe:-$PROC_NAME}"
 }
 
 # --- Host ------------------------------------------------------------------------
@@ -141,26 +141,6 @@ tr_dismiss_keychain_prompt() {
   vm "pkill -x SecurityAgent" >/dev/null 2>&1 || true
 }
 
-# U12 put the Keychain notice on Settings, Speech, and it shows only once the
-# key status is "saved", i.e. after the pane has read the key. On the first
-# launch after the update that read raises macOS's own Keychain prompt (the
-# VM can't answer it: it asks for the login password), so the notice can't
-# appear before the prompt is answered. That is an app finding, not a failure
-# of the update: it is recorded in the evidence and the scenario goes on, as
-# the question here is whether the update keeps permissions, key and settings.
-# When no prompt appears the notice must be there.
-tr_keychain_notice() {
-  local prompts
-  sleep 5
-  prompts=$(ax alert-count SecurityAgent "wants to access" 2>&1) || prompts=0
-  if [ "$prompts" != 0 ]; then
-    tr_note "FINDING: Settings, Speech raised the Keychain prompt on the first launch after the update; the notice (\"Choose Always Allow\") only shows after the key is read, so it can't be seen before the prompt"
-    return 0
-  fi
-  expect "the notice is there" \
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Choose Always Allow" 15
-}
-
 tr_one_login_item() {
   local dump name
   dump=$(printf '%s\n' "${VM_PASSWORD:-lume}" | vm "sudo -S -p '' sfltool dumpbtm 2>&1")
@@ -196,30 +176,12 @@ tr_settings_kept() {
     grep -q '"launch_at_login":true' <<<"$text"
 }
 
-# The running app built its engine from the saved settings, with the key.
-# The engine was built from the saved settings (model and language), whatever
-# the keychain said about the key.
-tr_engine_settings_kept() {
-  wait_for_log "engine settings provider=groq model=$TR_MODEL language=Some\\(\"en\"\\) has_key="
-}
-
-# The saved key is still in the login keychain (its metadata, never its
-# value), put there by the old build. Whether the NEW build may read it
-# without macOS asking is a separate question (the log says): after an
-# update macOS can ask once for access to the keychain item.
-tr_key_in_keychain() {
-  local out
-  out=$(printf '%s\n' "${VM_PASSWORD:-lume}" |
-    vm "read -r pw && security unlock-keychain -p \"\$pw\" \"$GROQ_KEYCHAIN_FILE\" && unset pw && security find-generic-password -s $TR_BUNDLE_ID -a groq-api-key 2>&1 | grep -c 'class: \"genp\"'") || true
-  [ "$out" = 1 ]
-}
-
 # Removes the key the scenario stored, with the security tool (the app that
 # made it may be gone or a different build).
 tr_key_remove() {
   printf '%s\n' "${VM_PASSWORD:-lume}" |
-    vm "read -r pw && security unlock-keychain -p \"\$pw\" \"$GROQ_KEYCHAIN_FILE\" && unset pw && (security delete-generic-password -s $TR_BUNDLE_ID -a groq-api-key >/dev/null 2>&1 || true)"
-  GROQ_KEY_STORED=0
+    vm "read -r pw && security unlock-keychain -p \"\$pw\" \"$API_KEYCHAIN_FILE\" && unset pw && (security delete-generic-password -s $TR_BUNDLE_ID -a groq-api-key >/dev/null 2>&1 || true)"
+  API_KEY_STORED=0
 }
 
 tr_engine_from_settings() {
@@ -317,7 +279,7 @@ e2e_update_from_dictation_app() {
   expect "the old build has Microphone and Accessibility" permissions_hold "$TR_OLD"
   fresh_app_state
   tr_write_settings
-  groq_key_store "$TR_KEY"
+  apikey_key_store "$TR_KEY"
   expect "launch at login is turned on in the old build" test "$(login_item on 2>&1)" = "launch at login: enabled"
   tr_note "BTM before the update:"
   tr_note "$(tr_btm)"
@@ -342,7 +304,6 @@ e2e_update_from_dictation_app() {
     ax_ok tray-click "$APP_NAME" "Settings"
   # U12 moved the notice to Settings, Speech.
   expect "Settings opens its Speech section" upd_section Speech
-  tr_keychain_notice
   screenshot u1-settings-keychain-notice
   tr_dismiss_keychain_prompt u1-keychain-prompt-on-speech-pane
   ax_ok close "$APP_NAME" "$SETTINGS_WINDOW" || true
@@ -362,8 +323,6 @@ EOF' _ "$(vm "codesign -dvv $(q "$(tr_copies | head -1)") 2>&1")"
   clear_app_log
   E2E_TRANSCRIBER=settings launch_full "$VM_TONE"
   expect "the updated app starts" wait_for_log "INFO .*starting version=\"$TR_NEW\""
-  expect "its engine has the same settings" tr_engine_settings_kept
-  expect "the key is still in the keychain" tr_key_in_keychain
   tr_note "reading the key after the update: $(app_log | grep -E 'API key|has_key' | cut -c1-260 | tail -3)"
   expect "the OS still says launch at login is on" tr_login_is_enabled
   tr_note "BTM after the in-app update:"
@@ -394,12 +353,10 @@ EOF' _ "$(vm "codesign -dvv $(q "$(tr_copies | head -1)") 2>&1")"
   tr_note "after the DMG-style move, ~/Applications holds: $(tr_copies | tr '\n' ' ')"
   expect "exactly one bundle with this id is left, Vocet.app" \
     test "$(tr_copies | tr -d '\n')" = "$TR_VM_NEW_APP"
-  groq_key_store "$TR_KEY"
   clear_app_log
   E2E_TRANSCRIBER=settings launch_full "$VM_TONE"
   expect "Vocet.app starts" wait_for_log "INFO .*starting version=\"$TR_NEW\""
-  expect "its engine has the same settings, and reads a key it saved itself" tr_engine_from_settings
-  expect "the key is in the keychain" tr_key_in_keychain
+  # Q2: no migration; the update keeps neither the Groq key nor its provider.
   expect "the settings file is as it was" tr_settings_kept
   expect "the OS says launch at login is on for Vocet.app" tr_login_is_enabled
   tr_note "BTM after the DMG-style move:"

@@ -1,7 +1,7 @@
 //! [`KeychainSecretStore`]: API keys in the OS keychain through the
 //! `keyring` crate (MIT OR Apache-2.0). macOS: the login keychain, as
 //! generic passwords with service [`SERVICE`] and the secret's name as the
-//! account (`groq-api-key`, `openai-api-key`; see
+//! account (`openrouter-api-key`; see
 //! `dictation_core::settings::Provider::key_name`).
 //!
 //! Never logs a secret, and no error carries one.
@@ -161,11 +161,15 @@ mod tests {
     #[test]
     fn a_disabled_store_and_test_builds_refuse_without_asking_the_os() {
         let store = KeychainSecretStore::disabled();
-        assert!(store.get("groq-api-key").is_err());
-        assert!(store.set("groq-api-key", &Secret::new("x")).is_err());
-        assert!(store.delete("groq-api-key").is_err());
+        assert!(store.get("openrouter-api-key").is_err());
+        assert!(store.set("openrouter-api-key", &Secret::new("x")).is_err());
+        assert!(store.delete("openrouter-api-key").is_err());
         // cfg(test) refuses even a store that wasn't disabled.
-        assert!(KeychainSecretStore::new().get("groq-api-key").is_err());
+        assert!(
+            KeychainSecretStore::new()
+                .get("openrouter-api-key")
+                .is_err()
+        );
     }
 
     #[cfg(target_os = "macos")]

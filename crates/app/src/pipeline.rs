@@ -31,15 +31,18 @@ use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
 use dictation_core::audio_math::{self, Verdict};
+use dictation_core::cleanup::{self as cleanup_rules, Judgement};
 use dictation_core::coordinator::{Phase, State, step};
 use dictation_core::error::DictationError;
 use dictation_core::events::{Command, Event};
 use dictation_core::text::{Cleaned, Transcript, clean};
 use dictation_ports::{
-    Audio, AudioError, AudioSource, Clock, HotkeyError, HotkeyEvent, HotkeySource, InsertError,
-    LevelMeter, Permission, PermissionStatus, Permissions, TextBeforeCursor, TextInserter,
-    TranscribeError, Transcriber,
+    Audio, AudioError, AudioSource, Cleaner, CleanupError, CleanupOutcome, Clock, HotkeyError,
+    HotkeyEvent, HotkeySource, InsertError, LevelMeter, Permission, PermissionStatus, Permissions,
+    TextBeforeCursor, TextInserter, TranscribeError, Transcriber,
 };
+use std::future::Future;
+use std::pin::Pin;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::{self, JoinError, JoinHandle, JoinSet};
@@ -60,6 +63,9 @@ pub enum UiEvent {
     /// The recording that just ended had no sound and lasted long enough to
     /// say so (H2). Not an error: only the overlay shows it.
     NoSound,
+    /// What the cleanup pass did for the transcript about to be pasted
+    /// (Q2), for the usage events; sent only when a cleanup ran.
+    Cleanup(CleanupOutcome),
 }
 
 /// The input level while recording (U4): what [`Pipeline::levels`]
@@ -184,6 +190,111 @@ impl std::fmt::Debug for CursorReader {
     }
 }
 
+/// The cleanup pass after transcription (Q2): the cleaner and its
+/// deadline. The cleaner's reply is pasted only if the guard
+/// ([`dictation_core::cleanup::judge`]) accepts it; a timeout (the request is
+/// dropped, which cancels it), an error or a refused reply pastes the raw
+/// transcript. Reasons are logged at debug level, never a text.
+#[derive(Clone)]
+pub struct CleanupStep {
+    cleaner: Arc<dyn BoxedCleaner>,
+    timeout: Duration,
+}
+
+impl CleanupStep {
+    /// Cleans with `cleaner` within [`dictation_core::cleanup::TIMEOUT`].
+    pub fn new(cleaner: impl Cleaner + 'static) -> Self {
+        Self {
+            cleaner: Arc::new(cleaner),
+            timeout: cleanup_rules::TIMEOUT,
+        }
+    }
+
+    /// Uses `timeout` for cleaners without their own deadline (tests).
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// The text to paste for `raw`, and what happened (`None` when cleanup
+    /// is off).
+    async fn run(&self, raw: &str) -> (Option<String>, Option<CleanupOutcome>) {
+        let timeout = self.cleaner.deadline_boxed().unwrap_or(self.timeout);
+        let prompt = self
+            .cleaner
+            .prompt_boxed()
+            .unwrap_or_else(cleanup_rules::prompt);
+        let reply = tokio::time::timeout(timeout, self.cleaner.clean_boxed(raw)).await;
+        let outcome = match reply {
+            Ok(Ok(reply)) => match cleanup_rules::judge(raw, &reply, prompt) {
+                Judgement::Accepted => {
+                    tracing::debug!("cleanup applied");
+                    return (Some(reply), Some(CleanupOutcome::Applied));
+                }
+                refused => {
+                    tracing::debug!(
+                        reason = refused.name(),
+                        "cleanup refused; pasting the raw text"
+                    );
+                    CleanupOutcome::FallbackGuard
+                }
+            },
+            Ok(Err(CleanupError::Off)) => return (None, None),
+            Ok(Err(CleanupError::Timeout)) | Err(_) => {
+                tracing::debug!(?timeout, "cleanup timed out; pasting the raw text");
+                CleanupOutcome::FallbackTimeout
+            }
+            Ok(Err(error)) => {
+                tracing::debug!(%error, "cleanup failed; pasting the raw text");
+                CleanupOutcome::FallbackError
+            }
+        };
+        (None, Some(outcome))
+    }
+}
+
+impl std::fmt::Debug for CleanupStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CleanupStep")
+            .field("timeout", &self.timeout)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A future of a cleanup reply.
+type CleanupFuture<'a> = Pin<Box<dyn Future<Output = Result<String, CleanupError>> + Send + 'a>>;
+
+/// [`Cleaner`] behind a pointer: the port's `impl Future` isn't
+/// dyn-compatible, so the step boxes each call (one allocation per
+/// dictation).
+trait BoxedCleaner: Send + Sync {
+    fn clean_boxed<'a>(&'a self, text: &'a str) -> CleanupFuture<'a>;
+    fn deadline_boxed(&self) -> Option<Duration>;
+    fn prompt_boxed(&self) -> Option<&'static str>;
+}
+
+impl<C: Cleaner> BoxedCleaner for C {
+    fn clean_boxed<'a>(&'a self, text: &'a str) -> CleanupFuture<'a> {
+        Box::pin(self.clean(text))
+    }
+    fn deadline_boxed(&self) -> Option<Duration> {
+        self.deadline()
+    }
+    fn prompt_boxed(&self) -> Option<&'static str> {
+        self.prompt()
+    }
+}
+
+/// What a pipeline may have besides its ports.
+#[derive(Debug, Clone, Default)]
+pub struct Extras {
+    /// Reads the character before the cursor (the smart leading space).
+    pub cursor: Option<CursorReader>,
+    /// Cleans each transcript before it is pasted (Q2).
+    pub cleanup: Option<CleanupStep>,
+}
+
 /// Controls a running pipeline.
 #[derive(Debug)]
 pub struct Pipeline {
@@ -217,7 +328,7 @@ impl Pipeline {
         P: Permissions + 'static,
         C: Clock + 'static,
     {
-        Self::start(ports, None, config)
+        Self::spawn_with(ports, Extras::default(), config)
     }
 
     /// Like [`spawn`](Self::spawn), and each transcript gets a smart leading
@@ -243,12 +354,26 @@ impl Pipeline {
         P: Permissions + 'static,
         C: Clock + 'static,
     {
-        Self::start(ports, Some(cursor), config)
+        let extras = Extras {
+            cursor: Some(cursor),
+            cleanup: None,
+        };
+        Self::spawn_with(ports, extras, config)
     }
 
-    fn start<H, A, T, I, P, C>(
+    /// Like [`spawn`](Self::spawn), with a smart leading space and a
+    /// cleanup pass if `extras` has them.
+    ///
+    /// # Errors
+    ///
+    /// The hotkey source's error if it can't start; nothing runs then.
+    ///
+    /// # Panics
+    ///
+    /// Outside a tokio runtime.
+    pub fn spawn_with<H, A, T, I, P, C>(
         ports: Ports<H, A, T, I, P, C>,
-        cursor: Option<CursorReader>,
+        extras: Extras,
         config: Config,
     ) -> Result<(Self, UiReceiver), HotkeyError>
     where
@@ -306,7 +431,8 @@ impl Pipeline {
             shutdown_rx,
             ticks,
         );
-        runner.cursor = cursor;
+        runner.cursor = extras.cursor;
+        runner.cleanup = extras.cleanup;
         runner.meter = meter;
         runner.levels = levels_tx;
         let task = tokio::spawn(runner.run(keys, audio_failures));
@@ -391,9 +517,15 @@ struct Overflow {
 
 /// A finished background job, tagged with the job it belongs to.
 enum JobResult {
-    /// The transcription's result and, if there is text to paste and a
-    /// [`CursorReader`], the character before the cursor right after it.
-    Transcribed(u64, Result<Transcript, TranscribeError>, Option<char>),
+    /// The transcription's result (cleaned up, if a cleanup ran), if there
+    /// is text to paste and a [`CursorReader`] the character before the
+    /// cursor right after it, and what the cleanup did.
+    Transcribed(
+        u64,
+        Result<Transcript, TranscribeError>,
+        Option<char>,
+        Option<CleanupOutcome>,
+    ),
     /// The audio was empty, too short or silent, so nothing was sent to the
     /// transcriber (#69, #72).
     NotTranscribed(u64),
@@ -692,6 +824,8 @@ struct Runner<H, T, I, P, C> {
     /// Reads the character before the cursor, if set (the smart leading
     /// space).
     cursor: Option<CursorReader>,
+    /// Cleans each transcript, if set (Q2).
+    cleanup: Option<CleanupStep>,
     permissions: P,
     clock: Arc<C>,
     ui: UiSender,
@@ -760,6 +894,7 @@ where
             transcriber: Arc::new(transcriber),
             inserter: Arc::new(inserter),
             cursor: None,
+            cleanup: None,
             permissions,
             clock,
             ui,
@@ -966,7 +1101,10 @@ where
             Err(error) => return self.job_crashed(&error),
         };
         match result {
-            JobResult::Transcribed(job, result, preceding) if job == self.job => {
+            JobResult::Transcribed(job, result, preceding, cleanup) if job == self.job => {
+                if let (Ok(_), Some(outcome)) = (&result, cleanup) {
+                    self.ui.send(UiEvent::Cleanup(outcome));
+                }
                 Some(match result {
                     Ok(transcript) => cleaned_event(&transcript, preceding),
                     Err(error) => Event::TranscriptionFailed(error.user_message()),
@@ -1084,8 +1222,9 @@ where
         let job = self.job;
         let transcriber = Arc::clone(&self.transcriber);
         let cursor = self.cursor.clone();
-        // The job waits for the audio worker's stop, then transcribes, then
-        // reads the character before the cursor.
+        let cleanup = self.cleanup.clone();
+        // The job waits for the audio worker's stop, then transcribes,
+        // cleans up, then reads the character before the cursor.
         let task = self.jobs.spawn(async move {
             let audio = match captured.await {
                 Ok(Ok(audio)) => audio,
@@ -1113,7 +1252,18 @@ where
                 };
             }
             tracing::debug!(job, duration = ?audio.duration(), "transcribing");
-            let result = transcriber.transcribe_detailed(&audio).await;
+            let mut result = transcriber.transcribe_detailed(&audio).await;
+            let mut outcome = None;
+            if let (Ok(transcript), Some(cleanup)) = (&mut result, cleanup)
+                // Only text that would be pasted: never a dropped one.
+                && matches!(clean(transcript, None), Cleaned::Text(_))
+            {
+                let (cleaned, done) = cleanup.run(&transcript.text).await;
+                if let Some(cleaned) = cleaned {
+                    transcript.text = cleaned;
+                }
+                outcome = done;
+            }
             let preceding = match (&result, cursor) {
                 // Only when there is text to paste: nothing is read for a
                 // failure or a dropped transcript.
@@ -1124,7 +1274,7 @@ where
                 }
                 _ => None,
             };
-            JobResult::Transcribed(job, result, preceding)
+            JobResult::Transcribed(job, result, preceding, outcome)
         });
         self.running = Some((task.id(), Job::Transcribe));
     }
@@ -1362,7 +1512,7 @@ mod tests {
     #[tokio::test]
     async fn criterion_1_the_step_log_and_error_logs_hold_no_transcript_or_key() {
         const SECRET_WORDS: &str = "private words about the merger";
-        const KEY: &str = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
+        const KEY: &str = "sk-or-dummy-NOT-A-REAL-KEY-0123456789";
         let buffer = LogBuffer::default();
         let writer = buffer.clone();
         let subscriber = tracing_subscriber::fmt()
@@ -1380,7 +1530,7 @@ mod tests {
         key(&mut runner, HotkeyEvent::Released, 500);
         deliver(
             &mut runner,
-            JobResult::Transcribed(1, Ok(SECRET_WORDS.into()), None),
+            JobResult::Transcribed(1, Ok(SECRET_WORDS.into()), None, None),
         );
         let inserted = next_insert(&mut runner).await;
         deliver(&mut runner, inserted);
@@ -1393,7 +1543,7 @@ mod tests {
         let reply = format!("Invalid key {KEY}");
         deliver(
             &mut runner,
-            JobResult::Transcribed(3, Err(TranscribeError::Engine(reply)), None),
+            JobResult::Transcribed(3, Err(TranscribeError::Engine(reply)), None, None),
         );
         assert_eq!(runner.state, State::Idle);
 
@@ -1423,7 +1573,7 @@ mod tests {
         assert_eq!(runner.job, 1);
         deliver(
             &mut runner,
-            JobResult::Transcribed(1, Ok("first".into()), None),
+            JobResult::Transcribed(1, Ok("first".into()), None, None),
         );
         let inserted = next_insert(&mut runner).await;
         deliver(&mut runner, inserted);
@@ -1441,7 +1591,7 @@ mod tests {
         // would accept a transcript: the job id drops it.
         deliver(
             &mut runner,
-            JobResult::Transcribed(1, Ok("stale".into()), None),
+            JobResult::Transcribed(1, Ok("stale".into()), None, None),
         );
         assert_eq!(runner.state, State::Transcribing);
 
@@ -1454,7 +1604,7 @@ mod tests {
 
         deliver(
             &mut runner,
-            JobResult::Transcribed(3, Ok("third".into()), None),
+            JobResult::Transcribed(3, Ok("third".into()), None, None),
         );
         let inserted = next_insert(&mut runner).await;
         deliver(&mut runner, inserted);
@@ -1478,7 +1628,7 @@ mod tests {
         key(&mut runner, HotkeyEvent::Released, 500);
         deliver(
             &mut runner,
-            JobResult::Transcribed(1, Ok("  ".into()), None),
+            JobResult::Transcribed(1, Ok("  ".into()), None, None),
         );
         assert_eq!(runner.state, State::Idle);
         assert_eq!(
@@ -1493,7 +1643,7 @@ mod tests {
         key(&mut runner, HotkeyEvent::Released, 1_500);
         deliver(
             &mut runner,
-            JobResult::Transcribed(2, Ok("hello".into()), None),
+            JobResult::Transcribed(2, Ok("hello".into()), None, None),
         );
         assert_eq!(runner.state, State::Inserting);
         deliver(
@@ -1529,7 +1679,7 @@ mod tests {
         shutdown.send(true).unwrap();
         deliver(
             &mut runner,
-            JobResult::Transcribed(1, Ok("late".into()), None),
+            JobResult::Transcribed(1, Ok("late".into()), None, None),
         );
         assert_eq!(runner.state, State::Inserting);
         // Only the (never-ending) transcription; no insert was started.
@@ -1598,7 +1748,7 @@ mod tests {
             let job = runner.job;
             deliver(
                 &mut runner,
-                JobResult::Transcribed(job, Ok(Transcript::from_text(text)), Some('a')),
+                JobResult::Transcribed(job, Ok(Transcript::from_text(text)), Some('a'), None),
             );
             assert_eq!(runner.state, State::Idle, "{text:?}");
         }
@@ -1619,12 +1769,12 @@ mod tests {
         vec![
             (
                 "transcribed",
-                |n| JobResult::Transcribed(n, Ok(Transcript::from_text("hello")), None),
+                |n| JobResult::Transcribed(n, Ok(Transcript::from_text("hello")), None, None),
                 Event::TranscriptReady("hello".into()),
             ),
             (
                 "transcription failed",
-                |n| JobResult::Transcribed(n, Err(TranscribeError::Timeout), None),
+                |n| JobResult::Transcribed(n, Err(TranscribeError::Timeout), None, None),
                 Event::TranscriptionFailed(TranscribeError::Timeout.user_message()),
             ),
             (
@@ -1712,7 +1862,7 @@ mod tests {
         // Job 2 is inserting.
         deliver(
             &mut runner,
-            JobResult::Transcribed(1, Ok("hello".into()), None),
+            JobResult::Transcribed(1, Ok("hello".into()), None, None),
         );
         assert_eq!((runner.state, runner.job), (State::Inserting, 2));
         while ui_events.try_recv().is_ok() {}
@@ -1745,7 +1895,7 @@ mod tests {
             assert_eq!((runner.state, runner.job), (State::Transcribing, n));
             deliver(
                 &mut runner,
-                JobResult::Transcribed(n, Err(TranscribeError::Timeout), None),
+                JobResult::Transcribed(n, Err(TranscribeError::Timeout), None, None),
             );
             assert_eq!(runner.state, State::Idle);
             assert!(
@@ -1779,7 +1929,7 @@ mod tests {
         key(&mut runner, HotkeyEvent::Released, n * 1_000 + 500);
         deliver(
             &mut runner,
-            JobResult::Transcribed(n, Err(TranscribeError::Timeout), None),
+            JobResult::Transcribed(n, Err(TranscribeError::Timeout), None, None),
         );
         let mut after = Vec::new();
         while let Ok(event) = ui_events.try_recv() {

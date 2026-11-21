@@ -222,7 +222,7 @@ pub struct Download {
 pub struct Ambient {
     /// The saved hotkey, as the settings write it (`RightAlt`).
     pub hotkey: String,
-    /// The engine's display name ("Groq", "On this Mac (OrukQwen 1.7B)").
+    /// The engine's display name (`"OpenRouter"`, `"On this Mac (OrukQwen 1.7B)"`).
     pub engine: String,
     /// A model downloading now.
     pub download: Option<Download>,
@@ -358,8 +358,9 @@ impl TrayStatus {
                 }
                 self.error = Some(code);
             }
-            // A one-off notice, not a problem to fix: no attention (H2).
-            UiEvent::NoSound => {}
+            // A one-off notice, not a problem to fix: no attention (H2). The
+            // cleanup outcome is for the usage events only.
+            UiEvent::NoSound | UiEvent::Cleanup(_) => {}
             UiEvent::HotkeyRestored => {
                 // The listener runs again: every hotkey problem is over.
                 self.hotkey_down = false;
@@ -646,12 +647,12 @@ mod tests {
     /// Check for updates, in any state but a fix row of its own.
     #[test]
     fn u12_criterion_7_the_old_items_are_gone() {
-        let mut problem = ready("RightAlt", "Groq");
+        let mut problem = ready("RightAlt", "OpenRouter");
         problem.on_event(&transcription_failed("The provider rejected your API key."));
-        for tray in [ready("RightAlt", "Groq"), problem] {
+        for tray in [ready("RightAlt", "OpenRouter"), problem] {
             for (item, label) in tray.menu().outline() {
                 assert_ne!(item, "engine");
-                assert_ne!(label, "Groq");
+                assert_ne!(label, "OpenRouter");
                 for gone in ["Troubleshoot", "Report a problem", "Check for updates"] {
                     assert!(!label.contains(gone), "{label}");
                 }
@@ -701,9 +702,9 @@ mod tests {
                 percent: 42,
                 chosen,
             }),
-            ..ambient("RightAlt", "Groq")
+            ..ambient("RightAlt", "OpenRouter")
         };
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         tray.set_ambient(downloading(false));
         tray.on_event(&transcription_failed("The provider rejected your API key."));
         assert!(label_of(&tray.menu(), id::STATUS).unwrap().starts_with('!'));
@@ -714,15 +715,15 @@ mod tests {
             label_of(&tray.menu(), id::FIX_MICROPHONE).as_deref(),
             Some("Open Microphone settings…")
         );
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         tray.set_ambient(downloading(true));
         tray.on_event(&error(DictationError::HotkeyFailed));
         assert!(label_of(&tray.menu(), id::STATUS).unwrap().starts_with('!'));
     }
 
     #[test]
-    fn criterion_1_ready_with_groq() {
-        let menu = ready("Ctrl+Shift+Space", "Groq").menu();
+    fn criterion_1_ready_with_openrouter() {
+        let menu = ready("Ctrl+Shift+Space", "OpenRouter").menu();
         assert_eq!(
             label_of(&menu, id::STATUS).as_deref(),
             Some("✓ Ready · Hold ⌃⇧Space")
@@ -754,16 +755,16 @@ mod tests {
 
     #[test]
     fn criterion_1_setup_incomplete_adds_resume_setup_after_help() {
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         tray.set_ambient(Ambient {
             setup_incomplete: true,
-            ..ambient("RightAlt", "Groq")
+            ..ambient("RightAlt", "OpenRouter")
         });
         let listed = ids(&tray.menu());
         let help = listed.iter().position(|id| id == "help").unwrap();
         assert_eq!(listed[help + 1], "onboarding");
         assert_eq!(listed[help + 2], "-");
-        let complete = ids(&ready("RightAlt", "Groq").menu());
+        let complete = ids(&ready("RightAlt", "OpenRouter").menu());
         assert!(!complete.contains(&"onboarding".to_owned()));
     }
 
@@ -842,10 +843,10 @@ mod tests {
         let codes: Vec<_> = expected.iter().map(|(code, _, _)| *code).collect();
         assert_eq!(codes, ErrorCode::ALL);
         for (code, fix_id, label) in expected {
-            let mut tray = ready("RightAlt", "Groq");
+            let mut tray = ready("RightAlt", "OpenRouter");
             tray.set_ambient(Ambient {
                 problem: Some(code),
-                ..ambient("RightAlt", "Groq")
+                ..ambient("RightAlt", "OpenRouter")
             });
             let menu = tray.menu();
             let outline = menu.outline();
@@ -880,7 +881,7 @@ mod tests {
     /// The two real-world sources of a problem, from the pipeline.
     #[test]
     fn criterion_2_events_raise_and_clear_the_problem() {
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         assert_eq!(tray.problem(), None);
         assert!(tray.on_event(&transcription_failed("The provider rejected your API key.")));
         let menu = tray.menu();
@@ -903,9 +904,9 @@ mod tests {
 
     #[test]
     fn the_status_follows_a_changed_key_and_engine() {
-        let mut tray = ready("RightAlt", "Groq");
-        assert!(!tray.set_ambient(ambient("RightAlt", "Groq")));
-        assert!(tray.set_ambient(ambient("LeftCmd", "OpenAI")));
+        let mut tray = ready("RightAlt", "OpenRouter");
+        assert!(!tray.set_ambient(ambient("RightAlt", "OpenRouter")));
+        assert!(tray.set_ambient(ambient("LeftCmd", "On this Mac")));
         let menu = tray.menu();
         assert_eq!(
             label_of(&menu, id::STATUS).as_deref(),
@@ -915,7 +916,7 @@ mod tests {
 
     #[test]
     fn the_hotkey_outage_is_a_problem_until_restored() {
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         assert!(tray.on_event(&error(DictationError::HotkeyFailed)));
         assert_eq!(tray.fix(), Some(Fix::ChooseAnotherKey));
         // A newer dictation error shows over it, and the outage returns
@@ -932,7 +933,7 @@ mod tests {
     /// Design Lead: the dead-hotkey fix depends on Accessibility.
     #[test]
     fn the_hotkey_fix_is_the_grant_when_accessibility_is_missing() {
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         tray.on_event(&error(DictationError::HotkeyFailed));
         let menu = tray.menu();
         assert_eq!(
@@ -945,7 +946,7 @@ mod tests {
         );
         tray.set_ambient(Ambient {
             problem: Some(ErrorCode::AccessibilityMissing),
-            ..ambient("RightAlt", "Groq")
+            ..ambient("RightAlt", "OpenRouter")
         });
         let menu = tray.menu();
         assert_eq!(tray.fix(), Some(Fix::OpenAccessibilitySettings));
@@ -971,10 +972,10 @@ mod tests {
     /// Design Lead: recording beats the dot, and the dot returns after.
     #[test]
     fn the_recording_icon_wins_over_the_attention_dot() {
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         tray.set_ambient(Ambient {
             problem: Some(ErrorCode::KeyMissing),
-            ..ambient("RightAlt", "Groq")
+            ..ambient("RightAlt", "OpenRouter")
         });
         assert_eq!(tray.menu().icon, TrayIcon::Attention);
         tray.on_event(&UiEvent::StateChanged(Phase::Recording));
@@ -992,7 +993,7 @@ mod tests {
     fn a_rejected_key_clears_when_the_engine_is_switched_or_the_key_replaced() {
         let rejected = || transcription_failed("The provider rejected your API key.");
         // Switched to the local engine.
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         tray.on_event(&rejected());
         assert_eq!(tray.problem(), Some(ErrorCode::KeyRejected));
         tray.set_ambient(Ambient {
@@ -1005,7 +1006,7 @@ mod tests {
         let mut tray = TrayStatus::default();
         tray.set_ambient(Ambient {
             engine_generation: 1,
-            ..ambient("RightAlt", "Groq")
+            ..ambient("RightAlt", "OpenRouter")
         });
         tray.on_event(&rejected());
         assert!(tray.problem().is_some());
@@ -1013,12 +1014,12 @@ mod tests {
         tray.set_ambient(Ambient {
             engine_generation: 1,
             hotkey: "LeftAlt".to_owned(),
-            ..ambient("RightAlt", "Groq")
+            ..ambient("RightAlt", "OpenRouter")
         });
         assert!(tray.problem().is_some());
         tray.set_ambient(Ambient {
             engine_generation: 2,
-            ..ambient("RightAlt", "Groq")
+            ..ambient("RightAlt", "OpenRouter")
         });
         assert_eq!(tray.problem(), None);
     }
@@ -1033,14 +1034,14 @@ mod tests {
             let mut tray = TrayStatus::default();
             tray.set_ambient(Ambient {
                 engine_generation: 1,
-                ..ambient("RightAlt", "Groq")
+                ..ambient("RightAlt", "OpenRouter")
             });
             tray.on_event(&event);
             let before = tray.problem();
             assert!(before.is_some());
             tray.set_ambient(Ambient {
                 engine_generation: 2,
-                ..ambient("RightAlt", "Groq")
+                ..ambient("RightAlt", "OpenRouter")
             });
             assert_eq!(tray.problem(), before, "{event:?}");
         }
@@ -1091,8 +1092,8 @@ mod tests {
     /// own row, and the restore returns to Ready at once, no dot.
     #[test]
     fn a_hotkey_failure_without_an_accessibility_cause_is_restored_to_ready() {
-        let mut tray = ready("RightAlt", "Groq");
-        tray.set_ambient(ambient("RightAlt", "Groq"));
+        let mut tray = ready("RightAlt", "OpenRouter");
+        tray.set_ambient(ambient("RightAlt", "OpenRouter"));
         tray.on_event(&error(DictationError::HotkeyFailed));
         let menu = tray.menu();
         assert_eq!(
@@ -1112,15 +1113,15 @@ mod tests {
     /// menu asks for a relaunch.
     #[test]
     fn a_regrant_with_the_tap_not_live_asks_for_a_relaunch() {
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         tray.on_event(&error(DictationError::HotkeyFailed));
         tray.set_ambient(Ambient {
             problem: Some(ErrorCode::AccessibilityMissing),
-            ..ambient("RightAlt", "Groq")
+            ..ambient("RightAlt", "OpenRouter")
         });
         assert_eq!(tray.fix(), Some(Fix::OpenAccessibilitySettings));
         // Granted again; the hotkey is still down.
-        tray.set_ambient(ambient("RightAlt", "Groq"));
+        tray.set_ambient(ambient("RightAlt", "OpenRouter"));
         let menu = tray.menu();
         assert_eq!(
             label_of(&menu, id::STATUS).as_deref(),
@@ -1141,13 +1142,13 @@ mod tests {
     /// Re-granted and the tap restarted: Ready at once.
     #[test]
     fn a_regrant_with_the_tap_restarted_is_ready() {
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         tray.on_event(&error(DictationError::HotkeyFailed));
         tray.set_ambient(Ambient {
             problem: Some(ErrorCode::AccessibilityMissing),
-            ..ambient("RightAlt", "Groq")
+            ..ambient("RightAlt", "OpenRouter")
         });
-        tray.set_ambient(ambient("RightAlt", "Groq"));
+        tray.set_ambient(ambient("RightAlt", "OpenRouter"));
         tray.on_event(&UiEvent::HotkeyRestored);
         let menu = tray.menu();
         assert!(label_of(&menu, id::STATUS).unwrap().starts_with("✓ Ready"));
@@ -1157,7 +1158,7 @@ mod tests {
 
     #[test]
     fn a_grant_that_was_never_missing_needs_no_relaunch() {
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         tray.on_event(&UiEvent::StateChanged(Phase::Recording));
         tray.on_event(&UiEvent::StateChanged(Phase::Idle));
         assert!(!tray.relaunch_needed());
@@ -1203,7 +1204,7 @@ mod tests {
         assert_eq!(tray.fix(), None);
         assert!(!ids(&tray.menu()).contains(&"fix-relaunch".to_owned()));
         // A fix that isn't a grant stays itself.
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         tray.on_event(&transcription_failed("Add your API key in Settings."));
         tray.grant_opened();
         assert_eq!(tray.fix(), Some(Fix::OpenSpeechSettings));
@@ -1211,7 +1212,7 @@ mod tests {
 
     #[test]
     fn criterion_5_copy_last_is_disabled_until_a_dictation_succeeded() {
-        let mut tray = ready("RightAlt", "Groq");
+        let mut tray = ready("RightAlt", "OpenRouter");
         assert_eq!(enabled(&tray.menu(), id::COPY_LAST), Some(false));
         assert!(tray.set_has_last(true));
         assert!(!tray.set_has_last(true));
@@ -1222,9 +1223,13 @@ mod tests {
     /// every state, and no item shows dictation text: their labels are fixed.
     #[test]
     fn u7_criterion_6_history_is_below_copy_last_in_every_state() {
-        let mut problem = ready("RightAlt", "Groq");
+        let mut problem = ready("RightAlt", "OpenRouter");
         problem.on_event(&transcription_failed("Add your API key in Settings."));
-        for tray in [ready("RightAlt", "Groq"), problem, TrayStatus::new(true)] {
+        for tray in [
+            ready("RightAlt", "OpenRouter"),
+            problem,
+            TrayStatus::new(true),
+        ] {
             let listed = ids(&tray.menu());
             let copy = listed.iter().position(|id| id == id::COPY_LAST).unwrap();
             assert_eq!(listed[copy + 1], id::HISTORY);
@@ -1238,7 +1243,7 @@ mod tests {
 
     #[test]
     fn criterion_6_the_menu_has_no_reveal_log() {
-        let tray = ready("RightAlt", "Groq");
+        let tray = ready("RightAlt", "OpenRouter");
         let all = tray.menu().outline();
         assert!(!all.iter().any(|(id, label)| {
             id.contains("reveal") || label.to_lowercase().contains("reveal")

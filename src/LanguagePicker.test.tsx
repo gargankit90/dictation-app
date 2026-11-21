@@ -126,19 +126,15 @@ describe("LanguagePicker", () => {
   });
 
   it("names every cloud language", () => {
-    for (const code of cloudLanguages("groq"))
+    for (const code of cloudLanguages("openrouter"))
       expect(languageLabel(code)).not.toMatch(/Unrecognised/);
   });
 
-  it("covers the 99 Whisper languages for Groq, including Bengali and Telugu", () => {
-    const groq = cloudLanguages("groq");
-    expect(groq.length).toBeGreaterThanOrEqual(99);
-    expect(new Set(groq).size).toBe(groq.length);
-    for (const code of ["bn", "te", "yue", "haw", "su"]) expect(groq).toContain(code);
-    // OpenAI's whisper-1 is large-v2: no Cantonese, otherwise the same.
-    const openai = cloudLanguages("openai");
-    expect(openai).not.toContain("yue");
-    expect(groq.filter((code) => code !== "yue")).toEqual(openai);
+  it("covers the 99 Whisper languages, including Bengali and Telugu", () => {
+    const codes = cloudLanguages("openrouter");
+    expect(codes.length).toBeGreaterThanOrEqual(99);
+    expect(new Set(codes).size).toBe(codes.length);
+    for (const code of ["bn", "te", "haw", "su"]) expect(codes).toContain(code);
   });
 
   it("finds Hindi by its full native name, a prefix with vowel signs, and either Unicode form", () => {
@@ -167,7 +163,7 @@ describe("LanguagePicker", () => {
       vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(20),
       vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(100),
     ];
-    render(<Harness initial="hi" supported={cloudLanguages("groq")} />);
+    render(<Harness initial="hi" supported={cloudLanguages("openrouter")} />);
     fireEvent.keyDown(box(), { key: "ArrowDown" });
     const list = screen.getByRole("listbox");
     const inView = () => {
@@ -199,7 +195,7 @@ describe("LanguagePicker", () => {
       const spy = vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(areaHeight);
       const { unmount } = render(
         <div className="ob-content">
-          <Harness initial="hi" supported={cloudLanguages("groq")} />
+          <Harness initial="hi" supported={cloudLanguages("openrouter")} />
         </div>,
       );
       fireEvent.keyDown(box(), { key: "ArrowDown" });
@@ -214,7 +210,7 @@ describe("LanguagePicker", () => {
   });
 
   it("reads as a picker: a chevron, hidden from screen readers, that turns when open", () => {
-    render(<Harness initial="hi" supported={cloudLanguages("groq")} />);
+    render(<Harness initial="hi" supported={cloudLanguages("openrouter")} />);
     const chevron = document.querySelector(".language-chevron");
     expect(chevron?.getAttribute("aria-hidden")).toBe("true");
     expect(chevron?.classList.contains("open")).toBe(false);
@@ -223,7 +219,7 @@ describe("LanguagePicker", () => {
   });
 
   it("typing into the closed field searches for what was typed, not the name plus it", () => {
-    render(<Harness initial="hi" supported={cloudLanguages("groq")} />);
+    render(<Harness initial="hi" supported={cloudLanguages("openrouter")} />);
     expect(box().value).toBe("Hindi (हिन्दी)");
     fireEvent.change(box(), { target: { value: "Hindi (हिन्दी)fr" } });
     expect(box().value).toBe("fr");

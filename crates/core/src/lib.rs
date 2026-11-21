@@ -4,6 +4,8 @@
 #![warn(clippy::pedantic)]
 
 pub mod audio_math;
+pub mod cleanup;
+pub mod cloud_models;
 pub mod coordinator;
 pub mod diagnostics;
 pub mod error;

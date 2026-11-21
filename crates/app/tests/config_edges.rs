@@ -30,21 +30,21 @@ fn whitespace_and_control_keys_are_refused_without_echo() {
         "ab\u{0}cd-secret",
     ] {
         let err = config
-            .set_api_key(Provider::Groq, bad)
+            .set_api_key(Provider::OpenRouter, bad)
             .unwrap_err()
             .to_string();
         assert!(!err.contains("secret"), "error echoed the key: {err}");
-        assert!(store.get("groq-api-key").unwrap().is_none());
+        assert!(store.get("openrouter-api-key").unwrap().is_none());
     }
     let long = "k".repeat(513);
     let err = config
-        .set_api_key(Provider::Groq, &long)
+        .set_api_key(Provider::OpenRouter, &long)
         .unwrap_err()
         .to_string();
     assert!(!err.contains(&long));
     // exactly the max is accepted
     config
-        .set_api_key(Provider::Groq, &"k".repeat(512))
+        .set_api_key(Provider::OpenRouter, &"k".repeat(512))
         .unwrap();
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -55,10 +55,9 @@ fn key_never_reaches_the_settings_file_or_errors_and_providers_are_separate() {
     let store = MemSecretStore::default();
     let config = Config::new(&d, store.clone());
     config
-        .set_api_key(Provider::Groq, &format!("  {KEY}\n"))
+        .set_api_key(Provider::OpenRouter, &format!("  {KEY}\n"))
         .unwrap();
-    assert!(config.has_api_key(Provider::Groq).unwrap());
-    assert!(!config.has_api_key(Provider::OpenAi).unwrap());
+    assert!(config.has_api_key(Provider::OpenRouter).unwrap());
     config.save_settings(&Settings::default()).unwrap();
     let file = std::fs::read_to_string(config.path()).unwrap();
     assert!(!file.contains(KEY) && !file.contains("gsk_"));
@@ -67,9 +66,9 @@ fn key_never_reaches_the_settings_file_or_errors_and_providers_are_separate() {
         let text = std::fs::read_to_string(e.unwrap().path()).unwrap_or_default();
         assert!(!text.contains(KEY));
     }
-    config.delete_api_key(Provider::Groq).unwrap();
-    assert!(!config.has_api_key(Provider::Groq).unwrap());
-    config.delete_api_key(Provider::Groq).unwrap(); // idempotent
+    config.delete_api_key(Provider::OpenRouter).unwrap();
+    assert!(!config.has_api_key(Provider::OpenRouter).unwrap());
+    config.delete_api_key(Provider::OpenRouter).unwrap(); // idempotent
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -79,11 +78,11 @@ fn unknown_fields_load_but_are_dropped_on_the_next_save() {
     let config = Config::new(&d, MemSecretStore::default());
     std::fs::write(
         config.path(),
-        r#"{"version":2,"provider":"openai","model":"whisper-1","language":"de","hotkey":"RightAlt","future":{"x":1}}"#,
+        r#"{"version":2,"provider":"openrouter","model":"openai/gpt-4o-mini-transcribe","language":"de","hotkey":"RightAlt","future":{"x":1}}"#,
     )
     .unwrap();
     let s = config.settings().unwrap();
-    assert_eq!(s.provider, Provider::OpenAi);
+    assert_eq!(s.provider, Provider::OpenRouter);
     assert_eq!(s.language.as_deref(), Some("de"));
     config.save_settings(&s).unwrap();
     let file = std::fs::read_to_string(config.path()).unwrap();
@@ -138,7 +137,7 @@ fn stress_concurrent_saves_with_a_concurrent_reader() {
     let d = dir("stress");
     let config = Arc::new(Config::new(&d, MemSecretStore::default()));
     let variant = |t: usize| Settings {
-        model: "m".repeat(1 + t * 37 % 100),
+        local_model: "m".repeat(1 + t * 37 % 100),
         ..Settings::default()
     };
     config.save_settings(&variant(0)).unwrap();

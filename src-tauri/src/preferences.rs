@@ -366,10 +366,8 @@ pub fn stop_microphone_test(test: State<'_, AppMicTest>) -> Result<(), String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum Link {
-    /// Groq's page for creating an API key.
-    GroqKeys,
-    /// `OpenAI`'s page for creating an API key.
-    OpenaiKeys,
+    /// `OpenRouter`'s page for creating an API key.
+    OpenrouterKeys,
     /// The privacy notice: what the app sends.
     Privacy,
     /// The source code.
@@ -387,8 +385,7 @@ impl Link {
     #[must_use]
     pub fn url(self) -> String {
         match self {
-            Self::GroqKeys => "https://console.groq.com/keys".to_owned(),
-            Self::OpenaiKeys => "https://platform.openai.com/api-keys".to_owned(),
+            Self::OpenrouterKeys => "https://openrouter.ai/settings/keys".to_owned(),
             Self::Privacy => format!("{REPOSITORY}/blob/main/docs/privacy.md"),
             Self::Repository => REPOSITORY.to_owned(),
             Self::Licence => format!("{REPOSITORY}/blob/main/LICENSE"),

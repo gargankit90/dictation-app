@@ -56,7 +56,7 @@ history_seed() {
   local n=$1 now i rows=""
   now=$(($(vm "date +%s") * 1000))
   for i in $(seq 1 "$n"); do
-    rows="$rows${rows:+,}{\"id\":$((now - i * 60000)),\"text\":\"seeded entry $i\",\"created_at\":$((now - i * 60000)),\"engine\":\"Groq\",\"pasted\":true}"
+    rows="$rows${rows:+,}{\"id\":$((now - i * 60000)),\"text\":\"seeded entry $i\",\"created_at\":$((now - i * 60000)),\"engine\":\"OpenRouter\",\"pasted\":true}"
   done
   history_write "{\"version\":1,\"entries\":[$rows]}"
 }

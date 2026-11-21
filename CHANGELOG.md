@@ -8,6 +8,13 @@ testers: short lines, no HTML).
 
 ## [Unreleased]
 
+- **Your own key is now an OpenRouter key.** Groq and OpenAI keys are no
+  longer used. Paste an OpenRouter key in Settings, Speech. Speech goes
+  through OpenRouter to OpenAI's gpt-4o-mini-transcribe model.
+- **Cleaner text.** With your own key, Vocet removes filler words, false
+  starts and stammers before it pastes. If the cleanup takes longer than
+  1.5 seconds or looks wrong, you get the plain transcript instead.
+
 ## [0.1.0] — 2026-11-18
 
 Vocet is a dictation app for the Mac. Hold a key, speak, let go, and your

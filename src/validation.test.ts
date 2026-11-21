@@ -9,8 +9,8 @@ import {
 
 describe("validateKey", () => {
   it("accepts a key, with the whitespace a paste leaves around it", () => {
-    expect(validateKey("gsk_dummy_0123")).toBeNull();
-    expect(validateKey("  gsk_dummy_0123\n")).toBeNull();
+    expect(validateKey("sk-or-dummy-0123")).toBeNull();
+    expect(validateKey("  sk-or-dummy-0123\n")).toBeNull();
   });
 
   it("refuses an empty, too long or spaced key", () => {

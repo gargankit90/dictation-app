@@ -14,7 +14,7 @@
 //!   `--debug-fail-paste`, which makes every paste fail (U7's "Not pasted").
 //!
 //! - `--debug-set-api-key-stdin` and `--debug-delete-api-key` store (the key
-//!   comes from stdin, never an argument) and remove the Groq API key through
+//!   comes from stdin, never an argument) and remove the OpenRouter API key through
 //!   the same path as the Settings window, then exit without starting the
 //!   app. They run in their own process, never in a running app, so a
 //!   forwarded second launch ignores them.
@@ -789,7 +789,7 @@ mod tests {
     fn a_provider_url_that_is_not_loopback_http_is_refused() {
         for url in [
             "https://127.0.0.1:18731/v1",
-            "http://api.groq.com/openai/v1",
+            "http://openrouter.ai/api/v1",
             "http://10.0.0.1/v1",
             "http://localhost.example.com/v1",
             "http://user:pw@127.0.0.1/v1",

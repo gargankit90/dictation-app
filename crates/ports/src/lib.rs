@@ -1,4 +1,4 @@
-//! Traits for the boundaries to the OS and the network: hotkey, audio, transcriber, text inserter, text before the cursor, clipboard, secrets, permissions, launch at login, clock.
+//! Traits for the boundaries to the OS and the network: hotkey, audio, transcriber, cleaner, text inserter, text before the cursor, clipboard, secrets, permissions, launch at login, clock.
 //!
 //! `platform` implements them for each OS (and as fakes behind its `testing`
 //! feature), `transcribe` implements [`Transcriber`], and `app` runs the
@@ -6,7 +6,8 @@
 //!
 //! # Async
 //!
-//! Only [`Transcriber`] is async: it waits on the network for seconds. Every
+//! Only [`Transcriber`] and [`Cleaner`] are async: they wait on the network.
+//! Every
 //! other port is a short synchronous call (a keychain lookup, a clipboard
 //! write, starting an audio stream), and each method says whether it may
 //! block so the pipeline can move it onto a blocking thread.
@@ -19,7 +20,7 @@
 //! - it needs no extra dependency and no allocation per call;
 //! - the pipeline is generic over its ports (static dispatch), so it doesn't
 //!   need `dyn Transcriber`;
-//! - choosing an engine at run time (`--transcriber mock`, Groq, OpenAI) can
+//! - choosing an engine at run time (`--transcriber mock`, `OpenRouter`, local) can
 //!   be an enum that implements the trait by delegating, which keeps static
 //!   dispatch. If a real need for `dyn` comes up, a boxed adapter can be
 //!   added next to the trait without changing implementations.
@@ -35,6 +36,7 @@
 #![warn(missing_docs)]
 
 mod audio;
+mod cleanup;
 mod clipboard;
 mod clock;
 mod cursor;
@@ -50,6 +52,7 @@ mod telemetry;
 mod transcribe;
 
 pub use audio::{Audio, AudioError, AudioSource};
+pub use cleanup::{Cleaner, CleanupError, NoCleanup};
 pub use clipboard::{
     Clipboard, ClipboardError, ClipboardItem, ClipboardMarkers, ClipboardSnapshot, SessionMarker,
 };
@@ -66,7 +69,8 @@ pub use opener::Opener;
 pub use permissions::{PermissionError, PermissionStatus, Permissions};
 pub use secrets::{Secret, SecretError, SecretStore};
 pub use telemetry::{
-    Arch, DurationBucket, EngineChoice, EngineKind, ErrorReporter, ErrorType, Event, LatencyBucket,
-    NoErrorReporter, NoTelemetry, OnboardingStep, SettingName, SetupProblem, Telemetry, Version,
+    Arch, CleanupOutcome, DurationBucket, EngineChoice, EngineKind, ErrorReporter, ErrorType,
+    Event, LatencyBucket, NoErrorReporter, NoTelemetry, OnboardingStep, SettingName, SetupProblem,
+    Telemetry, Version,
 };
 pub use transcribe::{TranscribeError, Transcriber};

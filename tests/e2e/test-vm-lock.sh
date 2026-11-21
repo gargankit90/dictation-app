@@ -483,7 +483,7 @@ run_case release_twice 'vm_lock_take; lock_release dictation-vm; lock_release di
 check "releasing twice, or what was never held, is harmless" test "$(status_of release_twice)" = 0
 
 # --- A scenario's own traps don't leave the lock behind -----------------------
-# (R2) Scenarios arm their own EXIT trap (arm_key_cleanup, groq_guard_start...),
+# (R2) Scenarios arm their own EXIT trap (arm_key_cleanup, apikey_guard_start...),
 # which would replace the runner's. run_scenario (lib.sh) runs each in a
 # subshell, so the runner's traps stay armed: the lock is held while the run
 # goes on and released when it ends.

@@ -30,3 +30,6 @@ lcov.info
 
 # The cleanup helper, built by scripts/build-llama-server.sh (Q4)
 /src-tauri/binaries/
+# Python (the eval harness)
+__pycache__/
+.venv/

@@ -7,7 +7,7 @@
 #   tests/e2e/run.sh e2e_startup         # just one scenario
 #   tests/e2e/run.sh --no-build --no-reset e2e_press_release
 #   E2E_VM=dictation-vm-2 tests/e2e/run.sh           # the second VM
-#   tests/e2e/run.sh --exclude e2e_real_groq         # all but this one (repeatable)
+#   tests/e2e/run.sh --exclude e2e_real_openrouter         # all but this one (repeatable)
 #   tests/e2e/run.sh --clear-stale-lock <vm>         # remove a dead run's lock
 #
 # Exits 0 only if no scenario failed and no required one was skipped. The
@@ -29,7 +29,7 @@ ALL_SCENARIOS=(
   e2e_startup e2e_single_instance_cold_race e2e_press_release
   e2e_microphone_denied_then_recover e2e_real_mic
   e2e_mock_paste e2e_paste_leaves_no_modifier e2e_clipboard_restore e2e_user_copy_wins
-  e2e_silence e2e_rapid
+  e2e_silence e2e_rapid e2e_latency
   e2e_secure_input_blocks_paste
   e2e_hold_release e2e_held_at_launch e2e_hotkey_listener_recovers
   e2e_quit_during_recording_then_relaunch e2e_tray_error_clears_on_next_recording
@@ -38,7 +38,7 @@ ALL_SCENARIOS=(
   e2e_settings_key_provider_recovery e2e_cancel_and_busy_presses
   e2e_focus_switch_during_transcription e2e_unicode_multiline_selection_paste
   e2e_quit_during_transcription_then_relaunch
-  e2e_error_bad_key e2e_real_groq
+  e2e_error_bad_key e2e_real_openrouter
   e2e_overlay_focus e2e_overlay_rendered_states_and_error e2e_pill_states
   e2e_smart_space e2e_password_field_not_read e2e_layout_paste e2e_image_clipboard_restore
   e2e_dmg_install e2e_update_keeps_permissions e2e_update_from_dictation_app
@@ -54,9 +54,9 @@ ALL_SCENARIOS=(
   e2e_update_privileged_install
   e2e_update_to_new_certificate
 )
-# Scenarios that need something the VM may lack (a microphone, a Groq key):
+# Scenarios that need something the VM may lack (a microphone, a OpenRouter key):
 # they may SKIP. Any other scenario that SKIPs fails the run.
-OPTIONAL_SCENARIOS=(e2e_real_mic e2e_real_groq e2e_update_keychain_control e2e_tray_menu_screenshots e2e_onboarding_screenshots e2e_setup_redesign_screens e2e_release_build_smoke e2e_notarized_dmg_first_launch)
+OPTIONAL_SCENARIOS=(e2e_real_mic e2e_real_openrouter e2e_update_keychain_control e2e_tray_menu_screenshots e2e_onboarding_screenshots e2e_setup_redesign_screens e2e_release_build_smoke e2e_notarized_dmg_first_launch)
 APP_PATH=target/debug/bundle/macos/$APP_NAME.app
 build=1
 reset=1

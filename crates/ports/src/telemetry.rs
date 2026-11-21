@@ -221,6 +221,21 @@ impl LatencyBucket {
     }
 }
 
+/// What the cleanup pass did for a pasted dictation (Q2), never the text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CleanupOutcome {
+    /// The cleaned text was pasted.
+    Applied,
+    /// The cleanup took too long; the raw transcript was pasted.
+    FallbackTimeout,
+    /// The guard refused the reply; the raw transcript was pasted.
+    FallbackGuard,
+    /// The cleanup failed (key, credits, route, provider, network, reply);
+    /// the raw transcript was pasted.
+    FallbackError,
+}
+
 /// Why a dictation failed, without the reason's text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -394,8 +409,12 @@ pub enum Event {
         engine_kind: EngineKind,
         /// How long the recording was.
         duration_bucket: DurationBucket,
-        /// How long the transcription took.
+        /// How long the transcription took (with the cleanup, if any).
         latency_bucket: LatencyBucket,
+        /// What the cleanup did; absent when no cleanup ran (on-device
+        /// dictation, the mock engine).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cleanup: Option<CleanupOutcome>,
     },
     /// A dictation failed.
     DictationFailed {
@@ -526,9 +545,9 @@ mod tests {
             ),
             (
                 Event::EngineSelected {
-                    engine: EngineChoice::Cloud(Provider::OpenAi),
+                    engine: EngineChoice::Cloud(Provider::OpenRouter),
                 },
-                json!({"event":"engine_selected","properties":{"kind":"cloud","provider":"openai"}}),
+                json!({"event":"engine_selected","properties":{"kind":"cloud","provider":"openrouter"}}),
             ),
             (
                 Event::EngineSelected {
@@ -541,8 +560,18 @@ mod tests {
                     engine_kind: EngineKind::Cloud,
                     duration_bucket: DurationBucket::From2To5s,
                     latency_bucket: LatencyBucket::Under500ms,
+                    cleanup: None,
                 },
                 json!({"event":"dictation_finished","properties":{"engine_kind":"cloud","duration_bucket":"from2_to5s","latency_bucket":"under500ms"}}),
+            ),
+            (
+                Event::DictationFinished {
+                    engine_kind: EngineKind::Cloud,
+                    duration_bucket: DurationBucket::Under2s,
+                    latency_bucket: LatencyBucket::From1To2s,
+                    cleanup: Some(CleanupOutcome::Applied),
+                },
+                json!({"event":"dictation_finished","properties":{"engine_kind":"cloud","duration_bucket":"under2s","latency_bucket":"from1_to2s","cleanup":"applied"}}),
             ),
             (
                 Event::DictationFailed {
@@ -652,5 +681,19 @@ mod tests {
             )),
             ErrorType::AccessibilityPermission
         );
+    }
+
+    #[test]
+    fn q2_cleanup_outcomes_have_their_documented_names() {
+        for (outcome, name) in [
+            (CleanupOutcome::Applied, "applied"),
+            (CleanupOutcome::FallbackTimeout, "fallback_timeout"),
+            (CleanupOutcome::FallbackGuard, "fallback_guard"),
+            (CleanupOutcome::FallbackError, "fallback_error"),
+        ] {
+            assert_eq!(serde_json::to_value(outcome).unwrap(), json!(name));
+            let page = include_str!("../../../docs/privacy.md");
+            assert!(page.contains(&format!("`{name}`")), "{name} isn't listed");
+        }
     }
 }

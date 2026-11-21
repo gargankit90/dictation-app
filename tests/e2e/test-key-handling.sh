@@ -37,7 +37,7 @@ has() { grep -qF -- "$1" "$2"; }
 # and scenarios, with the VM replaced by files in $STUB. Behaviour switches:
 #   STUB_LAUNCH_STATUS   status of `launch` (default 0)
 #   STUB_LAUNCH_SIGNAL   a signal `launch` sends the run
-#   STUB_TEXTEDIT_STATUS status of groq_textedit_new
+#   STUB_TEXTEDIT_STATUS status of apikey_textedit_new
 #   STUB_DELETE_STATUS   status of the VM's delete command
 cat >"$tmp/harness.sh" <<'HARNESS'
 set -euo pipefail
@@ -80,10 +80,10 @@ launch() {
 wait_for_log() { :; }
 app_log() { echo "INFO nothing to see here"; }
 logged_phases() { printf '%s\n' Recording Transcribing Inserting Idle; }
-groq_dictate() { :; }
-groq_textedit_new() { return "${STUB_TEXTEDIT_STATUS:-0}"; }
-groq_textedit_text() { echo "The quick brown fox jumps over the lazy dog."; }
-groq_textedit_quit() { :; }
+apikey_dictate() { :; }
+apikey_textedit_new() { return "${STUB_TEXTEDIT_STATUS:-0}"; }
+apikey_textedit_text() { echo "The quick brown fox jumps over the lazy dog."; }
+apikey_textedit_quit() { :; }
 collect_log() { :; }
 HARNESS
 
@@ -127,8 +127,8 @@ no_secret_outside_stdin() { # case: neither secret in the output, trace or VM ar
 }
 
 # --- a run that works ------------------------------------------------------
-KEY=GROQ_API_KEY=$SENTINEL
-run_case ok e2e_real_groq "$KEY"
+KEY=OPENROUTER_API_KEY=$SENTINEL
+run_case ok e2e_real_openrouter "$KEY"
 check "a good run exits 0" test "$(status_of ok)" = 0
 check "the key was stored, and removed after the dictation" \
   test "$(deletes ok)" = 1 -a ! -e "$tmp/ok/stored"
@@ -142,30 +142,30 @@ check "and removed by the app's hook" has "--debug-delete-api-key" "$tmp/ok/args
 check "the security tool never touches the key" lacks "generic-password" "$tmp/ok/args"
 
 # --- bash -x ---------------------------------------------------------------
-TRACE=1 run_case traced e2e_real_groq "$KEY"
+TRACE=1 run_case traced e2e_real_openrouter "$KEY"
 check "the traced run worked too" test "$(status_of traced)" = 0
-check "the trace shows the run (it is a real trace)" has "+ groq_key_store" "$tmp/traced/err"
+check "the trace shows the run (it is a real trace)" has "+ apikey_key_store" "$tmp/traced/err"
 check "bash -x: neither secret in stdout, stderr or the VM arguments" no_secret_outside_stdin traced
 check "bash -x: the key still reached the VM on stdin" has "$SENTINEL" "$tmp/traced/stdin"
 
-TRACE=1 run_case traced_fail e2e_real_groq "$KEY" STUB_LAUNCH_STATUS=23
+TRACE=1 run_case traced_fail e2e_real_openrouter "$KEY" STUB_LAUNCH_STATUS=23
 check "bash -x, failed run: neither secret in any output" no_secret_outside_stdin traced_fail
 
 TRACE=1 run_case traced_bad e2e_error_bad_key
 check "bash -x on the bad-key scenario: no secret in any output" no_secret_outside_stdin traced_bad
 
 # --- opt-in ----------------------------------------------------------------
-run_case skipped e2e_real_groq
+run_case skipped e2e_real_openrouter
 check "no key: the scenario is skipped, the VM never touched" test ! -e "$tmp/skipped/args"
 check "no key: it exits 0" test "$(status_of skipped)" = 0
 
 # --- the key never outlives the run ---------------------------------------
-run_case launch_fails e2e_real_groq "$KEY" STUB_LAUNCH_STATUS=23
+run_case launch_fails e2e_real_openrouter "$KEY" STUB_LAUNCH_STATUS=23
 check "a failing launch after the store: the run's status is kept" test "$(status_of launch_fails)" = 23
 check "a failing launch after the store: the key is removed" \
   test -e "$tmp/launch_fails/deletes" -a ! -e "$tmp/launch_fails/stored"
 
-run_case textedit_fails e2e_real_groq "$KEY" STUB_TEXTEDIT_STATUS=24
+run_case textedit_fails e2e_real_openrouter "$KEY" STUB_TEXTEDIT_STATUS=24
 check "a failing TextEdit setup: the status is kept" test "$(status_of textedit_fails)" = 24
 check "a failing TextEdit setup: the key is removed" test ! -e "$tmp/textedit_fails/stored"
 
@@ -175,7 +175,7 @@ check "a failing TextEdit setup: the key is removed" test ! -e "$tmp/textedit_fa
 for signal in INT:130 TERM:143 HUP:129; do
   name=${signal%:*}
   expected=${signal#*:}
-  run_case "signal_$name" e2e_real_groq "$KEY" STUB_LAUNCH_SIGNAL=$name
+  run_case "signal_$name" e2e_real_openrouter "$KEY" STUB_LAUNCH_SIGNAL=$name
   check "$name after the store: the key is removed" test ! -e "$tmp/signal_$name/stored"
   check "$name after the store: the run fails with $expected" test "$(status_of "signal_$name")" = "$expected"
   check "$name after the store: the cleanup ran" test "$(deletes "signal_$name")" = 1
@@ -190,18 +190,18 @@ check "the bad-key scenario works" test "$(status_of bad_key_ok)" = 0
 check "and leaves no key" test ! -e "$tmp/bad_key_ok/stored"
 
 # --- a removal that fails is reported --------------------------------------
-run_case delete_fails e2e_real_groq "$KEY" STUB_DELETE_STATUS=1
+run_case delete_fails e2e_real_openrouter "$KEY" STUB_DELETE_STATUS=1
 check "a failed removal fails the run" test "$(status_of delete_fails)" != 0
 check "a failed removal is reported" has "may still be" "$tmp/delete_fails/err"
 check "the failed removal's output hides the key" no_secret_outside_stdin delete_fails
 
-run_case delete_fails_after_error e2e_real_groq "$KEY" STUB_DELETE_STATUS=1 STUB_LAUNCH_STATUS=23
+run_case delete_fails_after_error e2e_real_openrouter "$KEY" STUB_DELETE_STATUS=1 STUB_LAUNCH_STATUS=23
 check "a failed removal after an earlier failure keeps that status" \
   test "$(status_of delete_fails_after_error)" = 23
 check "and says the key may still be there" has "may still be" "$tmp/delete_fails_after_error/err"
 
 # --- the key must be plain, so it can't carry a command --------------------
-run_case odd_key e2e_real_groq GROQ_API_KEY="abc def;touch x"
+run_case odd_key e2e_real_openrouter OPENROUTER_API_KEY="abc def;touch x"
 check "a key with odd characters is refused" test "$(status_of odd_key)" != 0
 check "and is never sent" test ! -e "$tmp/odd_key/args" -o "$(grep -c -e --debug-set-api-key-stdin "$tmp/odd_key/args" || true)" = 0
 check "and nothing was left to remove" test ! -e "$tmp/odd_key/deletes"
