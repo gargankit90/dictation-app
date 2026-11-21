@@ -25,7 +25,21 @@ def say(k: str, v) -> None:
 
 def ax() -> None:
     import ApplicationServices as AS
+    import Quartz
     say("ax_process_trusted", bool(AS.AXIsProcessTrusted()))
+    wins = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID) or []
+    say("on_screen_windows", sorted({(str(w.get("kCGWindowOwnerName")), int(w.get("kCGWindowLayer", 0)))
+                                     for w in wins}))
+    err, app = AS.AXUIElementCopyAttributeValue(AS.AXUIElementCreateSystemWide(), "AXFocusedApplication", None)
+    say("ax_focused_application", f"err={err} app={'yes' if app is not None else 'no'}")
+    import AppKit
+    te = AppKit.NSRunningApplication.runningApplicationsWithBundleIdentifier_("com.apple.TextEdit")
+    if te:
+        el = AS.AXUIElementCreateApplication(te[0].processIdentifier())
+        for attr in ("AXFrontmost", "AXFocusedWindow", "AXWindows"):
+            err, v = AS.AXUIElementCopyAttributeValue(el, attr, None)
+            say(f"textedit_{attr}", f"err={err} {'set' if v is not None else 'none'}"
+                + (f" n={len(v)}" if attr == "AXWindows" and v is not None else ""))
     try:
         t = hb.TextEditTarget(pathlib.Path.home() / "bench" / "scratch.txt")
         t.prepare()

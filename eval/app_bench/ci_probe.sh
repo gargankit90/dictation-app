@@ -67,6 +67,14 @@ section "1b TextEdit through Accessibility (this process)"
 for k in NSAutomaticCapitalizationEnabled NSAutomaticPeriodSubstitutionEnabled NSAutomaticSpellingCorrectionEnabled \
   NSAutomaticQuoteSubstitutionEnabled NSAutomaticDashSubstitutionEnabled NSAutomaticTextReplacementEnabled \
   NSAutomaticInlinePredictionEnabled NSAutomaticTextCompletionEnabled; do defaults write -g "$k" -bool false; done
+r "launchd session of this shell: $(launchctl managername 2>&1)"
+run 20 open -a TextEdit "$HOME/bench/scratch.txt" || true
+touch "$HOME/bench/scratch.txt"; run 20 open -a TextEdit "$HOME/bench/scratch.txt"
+sleep 5
+run 5 pgrep -lx TextEdit
+run 5 lsappinfo front
+run 5 sh -c 'lsappinfo info -only name "$(lsappinfo front)"'
+run 10 osascript -e 'tell application "System Events" to get name of first process whose frontmost is true'
 run 120 uv run --quiet ci_probe.py ax
 
 section "3 Virtual audio device"
