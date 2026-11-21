@@ -21,5 +21,7 @@ extend-ignore-re = ["U\\+[0-9A-Fa-f]{4}(-[0-9A-Fa-f]{4})?", "8ed04caf4663"]
 [default.extend-words]
 fo = "fo"
 ba = "ba"
+# CoreAudio's input scope four-character code (eval/app_bench.py).
+inpt = "inpt"
 # Yann Collet, xxHash's author, credited in NOTICE.
 Collet = "Collet"
