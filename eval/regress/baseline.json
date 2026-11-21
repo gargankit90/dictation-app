@@ -1,0 +1,13 @@
+{
+  "clips": 40,
+  "speech": "openai/gpt-4o-mini-transcribe (raw text, saved)",
+  "cleanup_model": "z-ai/glm-5.3-flash",
+  "cleanup_effort": "low",
+  "prompt_name": "v4",
+  "prompt_sha": "c530a8a410f1",
+  "judge": "claude-opus-5-5 effort max via claude -p (eval/judge.py, amend-va 0.2.1 prompt v1)",
+  "zer_pct": 57.5,
+  "amend_pct": 0.85,
+  "full_set_zer_pct": 88.1,
+  "source": "eval/results/voxtral-omni/gpt4o_mini__glm_v4 (PR #332)"
+}
