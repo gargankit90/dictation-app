@@ -16,3 +16,4 @@ src/bindings.ts
 about.hbs
 # Design source: generated and exploratory HTML.
 docs/design/
+docs/history/design-specs/
