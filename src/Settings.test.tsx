@@ -1035,7 +1035,7 @@ describe("Privacy", () => {
   });
 
   it("Q5: says audio and text stay on this Mac in On this Mac mode", async () => {
-    backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
+    backend.settings = { ...backend.settings, transcription: "local" };
     await open("privacy");
     expect(screen.getByText(/audio and text stay on your Mac/)).toBeTruthy();
   });
