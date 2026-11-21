@@ -59,7 +59,6 @@ impl KeychainSecretStore {
     /// [`disabled`](Self::disabled), or the test harness set
     /// [`NO_LAUNCH_VAR`](crate::reveal::NO_LAUNCH_VAR), or this is the
     /// platform crate's own unit tests.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn blocked(&self) -> Result<(), SecretError> {
         if self.disabled || crate::reveal::launching_disabled() {
             return Err(SecretError::Store(
@@ -127,24 +126,25 @@ fn secret_error(error: &keyring::Error) -> SecretError {
     }
 }
 
+/// No adapter: nothing can be saved, so nothing is saved. Reading says
+/// "no key" and deleting has nothing to delete; only `set` fails.
 #[cfg(not(target_os = "macos"))]
 impl SecretStore for KeychainSecretStore {
     fn get(&self, _name: &str) -> Result<Option<Secret>, SecretError> {
-        Err(unavailable())
+        self.blocked()?;
+        Ok(None)
     }
 
     fn set(&self, _name: &str, _secret: &Secret) -> Result<(), SecretError> {
-        Err(unavailable())
+        self.blocked()?;
+        Err(SecretError::Store(
+            "no keychain adapter for this OS yet".into(),
+        ))
     }
 
     fn delete(&self, _name: &str) -> Result<(), SecretError> {
-        Err(unavailable())
+        self.blocked()
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn unavailable() -> SecretError {
-    SecretError::Store("no keychain adapter for this OS yet".into())
 }
 
 #[cfg(test)]
@@ -197,8 +197,9 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[test]
-    fn unavailable_without_an_adapter() {
+    fn without_an_adapter_nothing_is_saved() {
         let store = KeychainSecretStore::new();
+        // cfg(test) blocks the store, so these refuse as they do on macOS.
         assert!(store.get("x").is_err());
         assert!(store.set("x", &Secret::new("y")).is_err());
         assert!(store.delete("x").is_err());
