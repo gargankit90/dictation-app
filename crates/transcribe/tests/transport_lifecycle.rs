@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use dictation_core::retry::RetryPolicy;
 use dictation_ports::{Audio, Secret, TranscribeError};
 use dictation_transcribe::check_key::check_key_within;
-use dictation_transcribe::openai_compat::{Config, GROQ, OpenAiCompat, TokioWait, Wait};
+use dictation_transcribe::openrouter::{Config, OpenRouter, TokioWait, Wait};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
@@ -87,8 +87,8 @@ impl Server {
 
     fn config(&self) -> Config {
         Config {
-            base_url: format!("http://127.0.0.1:{}/openai/v1", self.port),
-            ..Config::from_preset(GROQ)
+            base_url: format!("http://127.0.0.1:{}/api/v1", self.port),
+            ..Config::openrouter()
         }
     }
 
@@ -219,7 +219,7 @@ async fn shutdown_aborts_http_request_without_retry() {
     };
     let wait = HeldWait::default();
     let engine =
-        Arc::new(OpenAiCompat::with_wait(config, Secret::new(KEY), wait.clone(), 1).unwrap());
+        Arc::new(OpenRouter::with_wait(config, Secret::new(KEY), wait.clone(), 1).unwrap());
     let running = {
         let engine = Arc::clone(&engine);
         tokio::spawn(async move { engine.transcribe_verbose(&audio()).await })
@@ -245,7 +245,7 @@ async fn abort_during_backoff_sends_no_next_request() {
     };
     let wait = HeldWait::default();
     let engine =
-        Arc::new(OpenAiCompat::with_wait(config, Secret::new(KEY), wait.clone(), 1).unwrap());
+        Arc::new(OpenRouter::with_wait(config, Secret::new(KEY), wait.clone(), 1).unwrap());
     let running = {
         let engine = Arc::clone(&engine);
         tokio::spawn(async move { engine.transcribe_verbose(&audio()).await })
@@ -268,7 +268,7 @@ async fn without_an_abort_the_engine_retries_after_the_backoff() {
         retry: quick_retries(3),
         ..server.config()
     };
-    let engine = OpenAiCompat::new(config, Secret::new(KEY)).unwrap();
+    let engine = OpenRouter::new(config, Secret::new(KEY)).unwrap();
     let result = tokio::time::timeout(FENCE, engine.transcribe_verbose(&audio())).await;
     assert!(
         matches!(result, Ok(Err(TranscribeError::Engine(_)))),
@@ -285,7 +285,7 @@ async fn no_headers_times_out() {
         retry: retries(1),
         ..server.config()
     };
-    let engine = OpenAiCompat::new(config, Secret::new(KEY)).unwrap();
+    let engine = OpenRouter::new(config, Secret::new(KEY)).unwrap();
     let start = Instant::now();
     let result = tokio::time::timeout(FENCE, engine.transcribe_verbose(&audio())).await;
     assert_eq!(result.unwrap().unwrap_err(), TranscribeError::Timeout);
@@ -302,7 +302,7 @@ async fn partial_body_times_out() {
         retry: retries(1),
         ..server.config()
     };
-    let engine = OpenAiCompat::new(config, Secret::new(KEY)).unwrap();
+    let engine = OpenRouter::new(config, Secret::new(KEY)).unwrap();
     let start = Instant::now();
     let result = tokio::time::timeout(FENCE, engine.transcribe_verbose(&audio())).await;
     // The deadline covers the body, not just the headers.
@@ -319,7 +319,7 @@ async fn truncated_body_has_safe_error() {
         retry: retries(1),
         ..server.config()
     };
-    let engine = OpenAiCompat::new(config, Secret::new(KEY)).unwrap();
+    let engine = OpenRouter::new(config, Secret::new(KEY)).unwrap();
     let result = tokio::time::timeout(FENCE, engine.transcribe_verbose(&audio())).await;
     // Fixed text: no key, no half-read transcript, no URL.
     assert_eq!(result.unwrap().unwrap_err(), cut_off);
@@ -331,7 +331,7 @@ async fn truncated_body_has_safe_error() {
         retry: quick_retries(3),
         ..server.config()
     };
-    let engine = OpenAiCompat::new(config, Secret::new(KEY)).unwrap();
+    let engine = OpenRouter::new(config, Secret::new(KEY)).unwrap();
     let result = tokio::time::timeout(FENCE, engine.transcribe_verbose(&audio())).await;
     assert_eq!(result.unwrap().unwrap_err(), cut_off);
     assert_eq!(server.requests(), 3, "retried up to the limit, no more");

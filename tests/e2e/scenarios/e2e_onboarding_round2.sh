@@ -21,7 +21,7 @@ e2e_onboarding_round2() {
   ax press "$APP_NAME" "$R2_WINDOW" "Get started" >/dev/null 2>&1 || true
   expect "Speech" ax_ok wait-text "$APP_NAME" "$R2_WINDOW" "Which language" 15
   expect "choose my own key" \
-    ax_ok radio-press "$APP_NAME" "$R2_WINDOW" "Use my own Groq or OpenAI key"
+    ax_ok radio-press "$APP_NAME" "$R2_WINDOW" "Use my own OpenRouter key"
   expect "the choice is saved before any quit" wait_until_progress own_key
   expect "quit from the tray" quit_from_tray
   clear_app_log

@@ -165,13 +165,13 @@ fn criterion_4_choosing_a_provider_switches_to_its_default_model() {
         transcription: Transcription::Local,
         ..Settings::default()
     };
-    choose_cloud(&mut settings, Provider::OpenAi);
+    choose_cloud(&mut settings, Provider::OpenRouter);
     assert_eq!(settings.transcription, Transcription::Cloud);
-    assert_eq!(settings.provider, Provider::OpenAi);
-    assert_eq!(settings.model, Provider::OpenAi.default_model());
+    assert_eq!(settings.provider, Provider::OpenRouter);
+    assert_eq!(settings.model, Provider::OpenRouter.default_model());
 
     settings.model = "custom".into();
-    choose_cloud(&mut settings, Provider::OpenAi);
+    choose_cloud(&mut settings, Provider::OpenRouter);
     assert_eq!(
         settings.model, "custom",
         "the same provider keeps its model"
@@ -298,18 +298,19 @@ fn criterion_4_status_says_loading_ready_or_why_it_failed() {
 fn criterion_5_remove_key_deletes_it_from_the_keychain() {
     let rig = rig("remove-key", loads());
     rig.config
-        .set_api_key(Provider::Groq, "gsk_remove-me-NOT-REAL-1234")
+        .set_api_key(Provider::OpenRouter, "sk-or-remove-me-NOT-REAL-1234")
         .unwrap();
-    assert!(rig.config.has_api_key(Provider::Groq).unwrap());
-    rig.live.delete_key(&rig.config, Provider::Groq).unwrap();
-    assert!(!rig.config.has_api_key(Provider::Groq).unwrap());
+    assert!(rig.config.has_api_key(Provider::OpenRouter).unwrap());
+    rig.live
+        .delete_key(&rig.config, Provider::OpenRouter)
+        .unwrap();
+    assert!(!rig.config.has_api_key(Provider::OpenRouter).unwrap());
 }
 
 #[test]
 fn links_are_a_closed_list_of_https_pages() {
     for link in [
-        Link::GroqKeys,
-        Link::OpenaiKeys,
+        Link::OpenrouterKeys,
         Link::Privacy,
         Link::Repository,
         Link::Licence,
@@ -408,13 +409,16 @@ async fn a_hotkey_waiting_for_accessibility_fails_no_write() {
     let (live, keys) = (rig.live.clone(), control.clone());
     write(Arc::clone(&rig.config), &usage, move |config| {
         commands::write_change(config, &live, &keys, |settings| {
-            choose_cloud(settings, Provider::OpenAi);
+            choose_cloud(settings, Provider::OpenRouter);
         })
         .map_err(|error| error.to_string())
     })
     .await
     .expect("the own-key route's engine is saved");
-    assert_eq!(rig.config.settings().unwrap().provider, Provider::OpenAi);
+    assert_eq!(
+        rig.config.settings().unwrap().provider,
+        Provider::OpenRouter
+    );
 
     let (live, keys) = (rig.live.clone(), control.clone());
     write(Arc::clone(&rig.config), &usage, move |config| {

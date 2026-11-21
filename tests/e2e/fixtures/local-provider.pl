@@ -1,9 +1,13 @@
 #!/usr/bin/perl
-# A stand-in speech-to-text provider on the VM's loopback (T4a): it speaks
-# the OpenAI-compatible `POST …/audio/transcriptions` API the app's real
-# engine uses, so the signed test build (pointed here with
-# --debug-provider-url) goes through its real HTTP client, keychain key,
-# retries and JSON parsing, with no network and no real key.
+# A stand-in for OpenRouter on the VM's loopback (T4a, Q2): it speaks the
+# `POST …/audio/transcriptions` API the app's real engine uses (a JSON body
+# with the WAV in base64; a multipart form is read too), so the signed test
+# build (pointed here with --debug-provider-url) goes through its real HTTP
+# client, keychain key, retries and JSON parsing, with no network and no
+# real key. `POST …/chat/completions` (the cleanup pass) answers with the
+# transcript it was sent, unchanged, so cleanup is applied and the paste is
+# what the speech reply said; it is logged as `cleanup`, not `request`, so
+# the request numbers stay the speech requests'. It is never held.
 #
 #   perl local-provider.pl <state-dir> [port]      # default port 18731
 #
@@ -12,7 +16,7 @@
 # request. It is controlled, and read back, through files in <state-dir>:
 #
 #   accept-key.sha256  the SHA-256 (hex) of the one key it accepts; any other
-#                      key, or none, gets a 401 as Groq gives. Only the hash
+#                      key, or none, gets a 401 as OpenRouter gives. Only the hash
 #                      is on disk, so a test can check that no file holds the
 #                      key itself.
 #   gate               while this file exists, a reply is held after its
@@ -26,6 +30,7 @@
 #                        listening port=<p> pid=<pid>
 #                        request n=<n> path=<p> auth=good|bad|none model=<m>
 #                          language=<l> format=<f> audio_bytes=<b>
+#                        cleanup auth=good|bad|none status=<s>
 #                        held n=<n>
 #                        closed n=<n>       the client hung up while held
 #                        released n=<n> closed=0|1
@@ -166,6 +171,48 @@ sub read_request {
   return ($method, $path, \%headers, $body);
 }
 
+# The JSON body as a hash, or undef if it isn't a JSON object.
+sub json_body {
+  my ($body) = @_;
+  my $value = eval { JSON::PP->new->utf8->decode($body) };
+  return ref $value eq 'HASH' ? $value : undef;
+}
+
+# A request field: from the JSON body, else the multipart form; "-" if absent.
+sub field {
+  my ($json, $body, $name) = @_;
+  if ($json) {
+    my $value = $json->{$name};
+    return defined $value && !ref $value ? $value : '-';
+  }
+  return form_field($body, $name);
+}
+
+# The audio's size in bytes: the base64 `input_audio.data` decoded, or the
+# multipart file.
+sub audio_bytes {
+  my ($json, $body) = @_;
+  if ($json) {
+    require MIME::Base64;
+    my $data = ref $json->{input_audio} eq 'HASH' ? $json->{input_audio}{data} : undef;
+    return defined $data ? length MIME::Base64::decode_base64($data) : 0;
+  }
+  return form_file_bytes($body);
+}
+
+# The transcript between the tags of a chat request's user message.
+sub cleanup_input {
+  my ($json) = @_;
+  my $messages = $json && ref $json->{messages} eq 'ARRAY' ? $json->{messages} : [];
+  for my $message (@$messages) {
+    next unless ref $message eq 'HASH' && ($message->{role} // '') eq 'user';
+    my $content = $message->{content} // '';
+    return $1 if $content =~ m{<transcript>\n(.*)\n</transcript>}s;
+    return $content;
+  }
+  return '';
+}
+
 # A text field of a multipart form, or "-".
 sub form_field {
   my ($body, $name) = @_;
@@ -241,9 +288,23 @@ sub serve {
     }
     $auth = ($want ne '' && sha256_hex($1) eq lc $want) ? 'good' : 'bad';
   }
+  my $json = json_body($body);
+  if ($method eq 'POST' && $path =~ m{/chat/completions$}) {
+    my ($status, $reply) = (401,
+      '{"error":{"message":"Invalid API Key","code":401}}');
+    if ($auth eq 'good') {
+      $reply = JSON::PP->new->ascii->canonical->encode({
+        choices => [{ message => { role => 'assistant', content => cleanup_input($json) }, finish_reason => 'stop' }],
+      });
+      $status = 200;
+    }
+    respond($sock, $status, $status == 200 ? 'OK' : 'Unauthorized', $reply);
+    event("cleanup auth=$auth status=$status");
+    return;
+  }
   my $fields = sprintf 'model=%s language=%s format=%s audio_bytes=%d',
-    form_field($body, 'model'), form_field($body, 'language'),
-    form_field($body, 'response_format'), form_file_bytes($body);
+    field($json, $body, 'model'), field($json, $body, 'language'),
+    field($json, $body, 'response_format'), audio_bytes($json, $body);
   $fields =~ s/[^\x20-\x7e]/?/g;
   (my $safe_path = $path) =~ s/[^\x21-\x7e]/?/g;
   my $text = reply_text();

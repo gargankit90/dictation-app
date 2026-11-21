@@ -79,7 +79,7 @@ srs_mode() {
     ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Gujarati needs your own key" 10
   srs_settled_shot "speech-uncovered-$mode"
   ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" English
-  ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" "Use my own Groq or OpenAI key"
+  ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" "Use my own OpenRouter key"
   expect "$mode: no form yet" ax_ok wait-no-text "$APP_NAME" "$SRS_WINDOW" "Test & Save" 2
   srs_settled_shot "speech-own-key-selected-$mode"
   ax_ok press "$APP_NAME" "$SRS_WINDOW" Continue
@@ -92,7 +92,7 @@ srs_mode() {
   ax_ok secret-set "$APP_NAME" "$SRS_WINDOW" api-key "$PROVIDER_GOOD_KEY"
   ax_ok press "$APP_NAME" "$SRS_WINDOW" "Test & Save"
   expect "$mode: Key saved" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Key saved" 15
-  GROQ_KEY_STORED=1
+  API_KEY_STORED=1
   srs_settled_shot "key-saved-$mode"
   obs_size 680 520
   srs_settled_shot "key-saved-680x520-$mode"
@@ -120,7 +120,7 @@ srs_launch() {
 }
 
 provider_clear_key_if_any() {
-  GROQ_KEY_STORED=1
+  API_KEY_STORED=1
   provider_cleanup >/dev/null 2>&1 || true
   provider_start "$PROVIDER_GOOD_KEY"
 }

@@ -1,13 +1,13 @@
 // The own-key panel (U6), shared by Settings' sheet (U12) and onboarding's
-// Speech step (U8): pick the provider, the how-to, the field and Test & Save
-// (saved only if the test passes).
+// Speech step (U8): the OpenRouter key (Q2), the how-to, the field and Test &
+// Save (saved only if the test passes).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { commands } from "../bindings";
 import type { Provider, Settings_Serialize } from "../bindings";
 import { BROKEN, messageOf } from "../keyTest";
-import { PROVIDERS, providerInfo } from "../providers";
+import { providerInfo } from "../providers";
 import { validateKey } from "../validation";
 
 /** Shown after Test & Save, once the provider accepted the key and the Keychain kept it. */
@@ -17,10 +17,9 @@ export const SAVED_LINE = "A key is saved in your Keychain.";
 /** A good key the Keychain wouldn't keep (U6 criterion 5). */
 export const KEY_NOT_SAVED = "Key works, but couldn't be saved to your Keychain";
 
-/** Where each provider's keys are made, and the steps to get one. */
-const KEY_STEPS: Record<Provider, { link: "groq_keys" | "openai_keys"; site: string }> = {
-  groq: { link: "groq_keys", site: "console.groq.com" },
-  openai: { link: "openai_keys", site: "platform.openai.com" },
+/** Where the provider's keys are made, and the steps to get one. */
+const KEY_STEPS: Record<Provider, { link: "openrouter_keys"; site: string }> = {
+  openrouter: { link: "openrouter_keys", site: "openrouter.ai" },
 };
 
 export type KeyStatus =
@@ -83,13 +82,6 @@ export function useOwnKey({
   const writing = useRef(false);
   // Only the newest key lookup counts.
   const keyCheck = useRef(0);
-
-  // The panel follows the stored provider when it changes elsewhere.
-  const [seenProvider, setSeenProvider] = useState(settings.provider);
-  if (settings.provider !== seenProvider) {
-    setSeenProvider(settings.provider);
-    setProvider(settings.provider);
-  }
 
   const checkKeySaved = useCallback(async (which: Provider) => {
     keyCheck.current += 1;
@@ -278,25 +270,12 @@ export function OwnKeyPanel({
   providerOnly?: boolean;
 }) {
   const { provider, keyInput, keyStatus, keyNotice, keyBusy } = ownKey;
-  const info = providerInfo(provider);
+  const info = providerInfo();
   const steps = KEY_STEPS[provider];
+  // One provider since Q2: the row names it instead of offering a choice.
   const providerRow = (
     <div className="panel-row provider-row">
-      <label htmlFor="provider">Provider</label>
-      <select
-        id="provider"
-        value={provider}
-        disabled={keyBusy === "saving" || keyBusy === "removing"}
-        onChange={(event) => {
-          ownKey.changeProvider(event.target.value as Provider);
-        }}
-      >
-        {PROVIDERS.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.name}
-          </option>
-        ))}
-      </select>
+      <span id="provider">Your {info.name} key</span>
     </div>
   );
   if (providerOnly) {

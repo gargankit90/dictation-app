@@ -5,20 +5,12 @@
 //! app reads and writes the file. The API key is never part of the
 //! settings: it lives in the OS keychain (`docs/ENGINEERING.md`).
 //!
-//! Versions:
-//!
-//! - **v1** (M3.0 drafts): `{"version": 1, "engine": "groq",
-//!   "whisper_model": "…", "language": "en" | "", "hotkey": "RightAlt"}`,
-//!   with `""` meaning "detect the language".
-//! - **v2** (current): `engine` is renamed `provider`, `whisper_model` is
-//!   renamed `model`, and "detect" is `null` instead of `""`. M5.3 added
-//!   `launch_at_login` (default `false`) without a version bump: a file
-//!   without it loads with the default. L1 added `transcription`
-//!   (`"cloud"` or `"local"`, default `"cloud"`) and `local_model` (an id
-//!   from [`crate::local_models::CATALOGUE`]) the same way.
-//!   A1 added `share_usage_events` (default `true`) the same way. U7 added
-//!   `history_limit` (one of [`HISTORY_LIMITS`], default
-//!   [`DEFAULT_HISTORY_LIMIT`]) the same way.
+//! The file is `{"version": 2, …}`. M5.3 added `launch_at_login`, L1
+//! `transcription` and `local_model`, A1 `share_usage_events`, U7
+//! `history_limit`, all without a version bump: a file without one loads
+//! with its default. Since Q2 `provider` is `"openrouter"`; an unknown
+//! `provider` or `model` loads as its default. There are no migrations: an
+//! older (or unversioned) file is read as the current version.
 //!
 //! Fields this version doesn't know (from a newer build, or a hand edit) are
 //! ignored, and missing ones take their defaults, so an old or partial file
@@ -31,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
+use crate::cloud_models;
 use crate::hotkey_spec::HotkeySpec;
 use crate::local_models;
 
@@ -46,39 +39,36 @@ pub const HISTORY_LIMITS: [u32; 5] = [0, 10, 25, 50, 100];
 /// How many recent dictations are kept unless the user chooses otherwise.
 pub const DEFAULT_HISTORY_LIMIT: u32 = 25;
 
-/// The cloud speech-to-text provider.
+/// The cloud provider: `OpenRouter`, with the user's own key (Q2). A file
+/// with any other value loads as `OpenRouter` ([`from_json`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
-    /// Groq's `OpenAI`-compatible Whisper API.
+    /// `OpenRouter`'s API: speech and cleanup models from
+    /// [`crate::cloud_models`].
     #[default]
-    Groq,
-    /// The `OpenAI` Whisper API.
-    #[serde(rename = "openai")]
-    OpenAi,
+    #[serde(rename = "openrouter")]
+    OpenRouter,
 }
 
 impl Provider {
     /// Every provider.
-    pub const ALL: [Self; 2] = [Self::Groq, Self::OpenAi];
+    pub const ALL: [Self; 1] = [Self::OpenRouter];
 
-    /// The model a new user gets with this provider.
+    /// The speech model a new user gets with this provider.
     #[must_use]
     pub fn default_model(self) -> &'static str {
         match self {
-            Self::Groq => "whisper-large-v3-turbo",
-            Self::OpenAi => "whisper-1",
+            Self::OpenRouter => cloud_models::DEFAULT_SPEECH,
         }
     }
 
-    /// The name this provider's API key is stored under in the keychain
-    /// (one key per provider).
+    /// The name this provider's API key is stored under in the keychain.
     #[must_use]
     pub fn key_name(self) -> &'static str {
         match self {
-            Self::Groq => "groq-api-key",
-            Self::OpenAi => "openai-api-key",
+            Self::OpenRouter => "openrouter-api-key",
         }
     }
 }
@@ -86,8 +76,7 @@ impl Provider {
 impl fmt::Display for Provider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::Groq => "groq",
-            Self::OpenAi => "openai",
+            Self::OpenRouter => "openrouter",
         })
     }
 }
@@ -113,7 +102,9 @@ pub struct Settings {
     pub version: u32,
     /// Which cloud API transcribes.
     pub provider: Provider,
-    /// The provider's model name, e.g. `whisper-large-v3-turbo`.
+    /// The speech model's id in [`crate::cloud_models::CATALOG`], e.g.
+    /// `openai/gpt-4o-mini-transcribe`. An id the catalog no longer has
+    /// (a model shut down, or one from before Q2) loads as the default.
     pub model: String,
     /// An ISO 639-1 (or 639-3) language code such as `en`, or `None` to let
     /// the engine detect the language.
@@ -255,9 +246,8 @@ pub fn from_json(json: &str) -> Result<Settings, SettingsError> {
     let Value::Object(mut object) = value else {
         return Err(SettingsError::Malformed("not a JSON object".to_owned()));
     };
-    // No version: the first format, before it had one.
     let version = match object.get("version") {
-        None => 1,
+        None => u64::from(CURRENT_VERSION),
         Some(version) => version
             .as_u64()
             .ok_or_else(|| SettingsError::Malformed("version is not a number".to_owned()))?,
@@ -265,9 +255,9 @@ pub fn from_json(json: &str) -> Result<Settings, SettingsError> {
     if version > u64::from(CURRENT_VERSION) {
         return Err(SettingsError::TooNew(version));
     }
-    if version < 2 {
-        migrate_v1_to_v2(&mut object);
-    }
+    // An older file is read as this version: there are no migrations.
+    object.insert("version".to_owned(), Value::from(CURRENT_VERSION));
+    default_unknown_values(&mut object);
     let settings: Settings = serde_json::from_value(Value::Object(object))
         .map_err(|e| SettingsError::Malformed(e.to_string()))?;
     settings.validate()?;
@@ -285,19 +275,28 @@ pub fn to_json(settings: &Settings) -> Result<String, SettingsError> {
     serde_json::to_string_pretty(settings).map_err(|e| SettingsError::Malformed(e.to_string()))
 }
 
-/// v1 → v2: `engine` → `provider`, `whisper_model` → `model`, and an empty
-/// `language` (detect) → `null`. Fields v2 already has win over renamed
-/// ones; anything else is left alone.
-fn migrate_v1_to_v2(object: &mut Map<String, Value>) {
-    for (old, new) in [("engine", "provider"), ("whisper_model", "model")] {
-        if let Some(value) = object.remove(old) {
-            object.entry(new).or_insert(value);
-        }
+/// A `provider` this build doesn't know (`OpenRouter` is the only one since
+/// Q2; an old file may say `"groq"` or `"openai"`) or a speech `model` the
+/// cloud catalog doesn't have loads as that field's default, so an old file
+/// still loads with every other field kept (#328).
+fn default_unknown_values(object: &mut Map<String, Value>) {
+    let provider = Provider::OpenRouter.to_string();
+    if object.get("provider").and_then(Value::as_str) != Some(provider.as_str())
+        && object.contains_key("provider")
+    {
+        object.insert("provider".to_owned(), Value::from(provider));
     }
-    if object.get("language").and_then(Value::as_str) == Some("") {
-        object.insert("language".to_owned(), Value::Null);
+    // A model of the wrong type stays, so the file is reported malformed.
+    let unknown = object
+        .get("model")
+        .and_then(Value::as_str)
+        .is_some_and(|id| cloud_models::speech(id).is_none());
+    if unknown {
+        object.insert(
+            "model".to_owned(),
+            Value::from(Provider::OpenRouter.default_model()),
+        );
     }
-    object.insert("version".to_owned(), Value::from(2));
 }
 
 #[cfg(test)]
@@ -307,11 +306,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn criterion_1_defaults_are_valid_groq_with_language_detection() {
+    fn criterion_1_defaults_are_valid_openrouter_with_language_detection() {
         let settings = Settings::default();
         assert_eq!(settings.version, CURRENT_VERSION);
-        assert_eq!(settings.provider, Provider::Groq);
-        assert_eq!(settings.model, "whisper-large-v3-turbo");
+        assert_eq!(settings.provider, Provider::OpenRouter);
+        assert_eq!(settings.model, "openai/gpt-4o-mini-transcribe");
         assert_eq!(settings.language, None);
         assert_eq!(settings.hotkey, "RightAlt");
         settings.validate().unwrap();
@@ -319,7 +318,7 @@ mod tests {
 
     #[test]
     fn criterion_1_an_empty_object_loads_as_the_defaults() {
-        // No version means v1; every field is missing, so all default.
+        // No version is the current one; every field is missing, so all default.
         assert_eq!(from_json("{}").unwrap(), Settings::default());
         assert_eq!(from_json(r#"{"version": 2}"#).unwrap(), Settings::default());
     }
@@ -327,43 +326,15 @@ mod tests {
     #[test]
     fn criterion_1_round_trips_through_json() {
         let settings = Settings {
-            provider: Provider::OpenAi,
-            model: "whisper-1".into(),
+            provider: Provider::OpenRouter,
+            model: cloud_models::DEFAULT_SPEECH.into(),
             language: Some("de".into()),
             hotkey: "Ctrl+Shift+Space".into(),
             ..Settings::default()
         };
         let json = to_json(&settings).unwrap();
-        assert!(json.contains(r#""provider": "openai""#), "{json}");
+        assert!(json.contains(r#""provider": "openrouter""#), "{json}");
         assert_eq!(from_json(&json).unwrap(), settings);
-    }
-
-    #[test]
-    fn criterion_1_v1_is_migrated_to_v2() {
-        let v1 = r#"{
-            "version": 1,
-            "engine": "openai",
-            "whisper_model": "whisper-1",
-            "language": "",
-            "hotkey": "Ctrl+Space"
-        }"#;
-        assert_eq!(
-            from_json(v1).unwrap(),
-            Settings {
-                version: 2,
-                provider: Provider::OpenAi,
-                model: "whisper-1".into(),
-                language: None,
-                hotkey: "Ctrl+Space".into(),
-                ..Settings::default()
-            }
-        );
-        // A language stays a language; no version at all is v1 too.
-        let v1 = r#"{"engine": "groq", "whisper_model": "whisper-large-v3", "language": "fr"}"#;
-        let settings = from_json(v1).unwrap();
-        assert_eq!(settings.model, "whisper-large-v3");
-        assert_eq!(settings.language.as_deref(), Some("fr"));
-        assert_eq!(settings.hotkey, "RightAlt");
     }
 
     #[test]
@@ -385,9 +356,6 @@ mod tests {
         assert_eq!(Settings::default().history_limit, 25);
         let old = r#"{"version": 2, "provider": "openai", "model": "whisper-1"}"#;
         assert_eq!(from_json(old).unwrap().history_limit, 25);
-        // v1 migrates to v2 and gets it too.
-        let v1 = r#"{"version": 1, "engine": "groq", "whisper_model": "whisper-1"}"#;
-        assert_eq!(from_json(v1).unwrap().history_limit, 25);
     }
 
     #[test]
@@ -497,17 +465,11 @@ mod tests {
     }
 
     #[test]
-    fn criterion_1_a_v2_field_wins_over_its_v1_name() {
-        let mixed = r#"{"version": 1, "engine": "openai", "provider": "groq"}"#;
-        assert_eq!(from_json(mixed).unwrap().provider, Provider::Groq);
-    }
-
-    #[test]
     fn criterion_1_unknown_fields_are_tolerated() {
         let json = r#"{
             "version": 2,
-            "provider": "groq",
-            "model": "whisper-large-v3-turbo",
+            "provider": "openrouter",
+            "model": "openai/gpt-4o-mini-transcribe",
             "theme": "dark",
             "future": {"nested": [1, 2, 3]}
         }"#;
@@ -536,7 +498,6 @@ mod tests {
             "42",
             r#"{"version": "two"}"#,
             r#"{"version": -1}"#,
-            r#"{"provider": "whisper.cpp"}"#,
             r#"{"model": 7}"#,
         ] {
             assert!(
@@ -642,12 +603,71 @@ mod tests {
         );
     }
 
+    /// Q2 criterion 1 (#328): an old file whose provider or model this
+    /// build doesn't know still loads: those fields take their defaults and
+    /// every other preference survives.
     #[test]
-    fn providers_have_a_default_model_and_their_own_key_name() {
-        assert_eq!(Provider::OpenAi.default_model(), "whisper-1");
-        assert_eq!(Provider::Groq.key_name(), "groq-api-key");
-        assert_eq!(Provider::OpenAi.key_name(), "openai-api-key");
-        assert_eq!(Provider::OpenAi.to_string(), "openai");
+    fn q2_criterion_1_unknown_provider_and_model_values_load_as_defaults() {
+        for provider in [
+            r#""groq""#,
+            r#""openai""#,
+            r#""whisper.cpp""#,
+            r#""""#,
+            "7",
+            "null",
+            r#"{"name": "groq"}"#,
+        ] {
+            let json = format!(
+                r#"{{
+                    "version": 2,
+                    "provider": {provider},
+                    "model": "whisper-large-v3-turbo",
+                    "language": "de",
+                    "hotkey": "Ctrl+Shift+Space",
+                    "launch_at_login": true,
+                    "transcription": "local",
+                    "local_model": "qwen3-asr-0.6b-q4_k_m",
+                    "share_usage_events": false,
+                    "history_limit": 50
+                }}"#
+            );
+            let settings = from_json(&json).unwrap_or_else(|e| panic!("{provider}: {e}"));
+            assert_eq!(
+                settings,
+                Settings {
+                    version: 2,
+                    provider: Provider::OpenRouter,
+                    model: cloud_models::DEFAULT_SPEECH.into(),
+                    language: Some("de".into()),
+                    hotkey: "Ctrl+Shift+Space".into(),
+                    launch_at_login: true,
+                    transcription: Transcription::Local,
+                    local_model: "qwen3-asr-0.6b-q4_k_m".into(),
+                    share_usage_events: false,
+                    history_limit: 50,
+                },
+                "{provider}"
+            );
+            // Saved back, it is an OpenRouter file.
+            let saved = to_json(&settings).unwrap();
+            assert!(saved.contains(r#""provider": "openrouter""#), "{saved}");
+            assert!(!saved.contains("groq") && !saved.contains("whisper-large"));
+        }
+        // A model of the wrong type is still a malformed file.
+        assert!(matches!(
+            from_json(r#"{"model": 7}"#),
+            Err(SettingsError::Malformed(_))
+        ));
+    }
+
+    #[test]
+    fn openrouter_has_the_default_model_and_its_own_key_name() {
+        assert_eq!(
+            Provider::OpenRouter.default_model(),
+            cloud_models::DEFAULT_SPEECH
+        );
+        assert_eq!(Provider::OpenRouter.key_name(), "openrouter-api-key");
+        assert_eq!(Provider::OpenRouter.to_string(), "openrouter");
         for provider in Provider::ALL {
             let json = serde_json::to_string(&provider).unwrap();
             assert_eq!(json, format!("\"{provider}\""));
@@ -662,13 +682,12 @@ mod tests {
 
         #[test]
         fn valid_settings_round_trip(
-            openai in any::<bool>(),
-            model in "[a-z0-9.-]{1,40}",
             language in proptest::option::of("[a-z]{2,3}"),
         ) {
+            let model = cloud_models::DEFAULT_SPEECH;
             let settings = Settings {
-                provider: if openai { Provider::OpenAi } else { Provider::Groq },
-                model,
+                provider: Provider::OpenRouter,
+                model: model.to_owned(),
                 language,
                 ..Settings::default()
             };

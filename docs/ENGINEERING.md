@@ -15,7 +15,7 @@ adapter. Tauri is a thin layer on top.
 | `crates/core` | `dictation-core` | coordinator state machine, events, text cleanup, audio maths, WAV, settings, hotkey specs, retry policy, errors | nothing in the workspace |
 | `crates/ports` | `dictation-ports` | traits: `HotkeySource`, `AudioSource`, `Transcriber`, `TextInserter`, `Clipboard`, `SecretStore`, `Permissions`, `Clock` | `core` |
 | `crates/platform` | `dictation-platform` | OS adapters; fakes behind feature `testing` | `core`, `ports` |
-| `crates/transcribe` | `dictation-transcribe` | `Transcriber` implementations: OpenAI-compatible (Groq/OpenAI), mock; later local | `core`, `ports` |
+| `crates/transcribe` | `dictation-transcribe` | `Transcriber` and `Cleaner` implementations: OpenRouter speech and cleanup, the on-device engine, mock | `core`, `ports` |
 | `crates/telemetry` | `dictation-telemetry` | PostHog adapter for the `Telemetry` port, Sentry adapter for `ErrorReporter`, and the install ID | `ports` |
 | `crates/app` | `dictation-pipeline` | async pipeline that runs the coordinator against the ports; no Tauri types | `core`, `ports` |
 | `src-tauri` | `dictation-app` | Tauri commands, events, tray, windows, plugins, CLI flags | everything above |
@@ -218,12 +218,21 @@ adapter. Tauri is a thin layer on top.
   windows (the overlay, Settings) takes focus on the way. Checked by
   `e2e_focus_switch_during_transcription` (T4a, #117).
 - **Recording length:** maximum 5 minutes (16 kHz mono WAV ≈ 1.9 MB/min, so
-  about 9.6 MB, under Groq's upload limit).
-- **Groq upload limit** (checked 2026-10-31 at
-  <https://console.groq.com/docs/speech-to-text>): a direct file upload may
-  be up to 25 MB on the free tier and 100 MB on the dev (paid) tier; larger
-  files must be passed by URL instead. Requests shorter than 10 s are billed
-  as 10 s. We upload directly, so we plan for the 25 MB free-tier limit.
+  about 9.6 MB, 12.8 MB once base64-encoded).
+- **OpenRouter upload limit** (the owner's model notes, 2026-11-20):
+  `/audio/transcriptions` takes 25 MB, with a 60 s upstream timeout per
+  request. The audio goes as base64 in a JSON body (`input_audio`).
+- **Cloud models are data** (`crates/core/src/cloud_models.rs`): speech
+  `openai/gpt-4o-mini-transcribe` (shuts down 2027-02-26), cleanup
+  `z-ai/glm-5.3-flash`. Every request carries the model's OpenRouter privacy
+  filter (`data_collection: deny`, plus `zdr: true` for cleanup) and is never
+  retried without it.
+- **Cleanup** (Q2): after transcription and before the paste, the text goes
+  to the cleanup model with the prompt in `crates/core/prompts/cleanup.txt`
+  (the eval harness reads the same file). The reply is pasted only if the
+  guard (`dictation_core::cleanup::judge`) accepts it; a timeout (1.5 s,
+  `dictation_core::cleanup::TIMEOUT`, the request is cancelled), an error or
+  a refused reply pastes the raw transcript.
 
 ## Tests
 

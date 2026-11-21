@@ -345,7 +345,7 @@ async fn dictate_everything(dir: &Path) {
     // Settings with the old key, saved before startup.
     let secrets = MemSecretStore::new();
     let config = Arc::new(Config::new(dir.join("config"), secrets));
-    config.set_api_key(Provider::Groq, OLD_KEY).unwrap();
+    config.set_api_key(Provider::OpenRouter, OLD_KEY).unwrap();
     let transcribers = Transcribers::new(starting());
     let live = LiveEngine::follow(transcribers.clone())
         .at(&server.uri())
@@ -387,7 +387,7 @@ async fn dictate_everything(dir: &Path) {
     let (save_config, save_live) = (Arc::clone(&config), live.clone());
     tokio::task::spawn_blocking(move || {
         changed(&save_config, &save_live, |c| {
-            c.set_api_key(Provider::Groq, NEW_KEY)
+            c.set_api_key(Provider::OpenRouter, NEW_KEY)
         })
         .unwrap();
     })
@@ -508,7 +508,7 @@ impl Run {
             hotkey: hotkey.clone(),
             audio: FileAudioSource::new(wav),
             transcriber,
-            inserter: Recording::new(inserter.clone(), history, || "Groq".to_owned()),
+            inserter: Recording::new(inserter.clone(), history, || "OpenRouter".to_owned()),
             permissions: FakePermissions::all_granted(),
             clock: clock.clone(),
         };

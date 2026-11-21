@@ -1,5 +1,20 @@
 # Privacy: usage events, error reports and dictation history
 
+## What dictation sends where
+
+- **On this Mac:** the audio and the text stay on your Mac.
+- **Your own key (OpenRouter):** each dictation's **audio** goes from your Mac
+  to OpenRouter (`openrouter.ai`) with your OpenRouter key, and OpenRouter
+  passes it to OpenAI's `gpt-4o-mini-transcribe` model. The request asks
+  OpenRouter to use only providers that don't collect data
+  (`data_collection: deny`); OpenRouter has no zero-data-retention route for
+  this OpenAI model. OpenAI doesn't train on API data and may keep logs for up
+  to 30 days. The **transcript's text** then goes to OpenRouter for cleanup by
+  the `z-ai/glm-5.3-flash` model, only to hosts with zero data retention that
+  don't collect data (`zdr: true`, `data_collection: deny`). If no such host
+  answers in 1.5 seconds, nothing is cleaned and the transcript is pasted as it
+  came. Your key stays in your macOS Keychain and is sent only to OpenRouter.
+
 Vocet can share anonymous usage events and error reports so we can see
 what works and what breaks. This page lists everything it sends. The list is
 enforced in code: events are a closed enum (`crates/ports/src/telemetry.rs`),
@@ -54,7 +69,7 @@ be cleaned. If that changes it will be listed here first.
 
 ## Never sent
 
-Audio. Transcripts, and your dictation history. Anything you type or paste. API
+In usage events and error reports, never: audio. Transcripts, and your dictation history. Anything you type or paste. API
 keys. The names, bundle IDs or window titles of the apps you use. File paths. Host names. Your user
 name. Error messages (only the kind of failure). Setting values (only which
 setting changed). Your IP address: the app sends no `$ip` and sets
@@ -88,8 +103,8 @@ links one install's events together. Turning sharing off deletes it.
 | `onboarding_completed` | You finish onboarding | `step` (`ready`) |
 | `onboarding_left` | You close setup's window or quit with setup on it, and it isn't finished | `step`, as above: where you stopped |
 | `setup_problem` | Something gets in the way during setup | `reason`, one of the values under [Setup problems](#setup-problems) |
-| `engine_selected` | You pick a provider or save its key, or switch between On this Mac and Your own key | `kind` (`cloud`, `local`), `provider` (`groq`, `openai`; cloud only; which local model is never sent) |
-| `dictation_finished` | A dictation was pasted | `engine_kind` (`cloud`, `local`), `duration_bucket` (`under2s`, `from2_to5s`, `from5_to15s`, `from15_to60s`, `over60s`), `latency_bucket` (`under500ms`, `from500_to1000ms`, `from1_to2s`, `from2_to5s`, `over5s`) |
+| `engine_selected` | You save your key, or switch between On this Mac and Your own key | `kind` (`cloud`, `local`), `provider` (`openrouter`; cloud only; which local model is never sent) |
+| `dictation_finished` | A dictation was pasted | `engine_kind` (`cloud`, `local`), `duration_bucket` (`under2s`, `from2_to5s`, `from5_to15s`, `from15_to60s`, `over60s`), `latency_bucket` (`under500ms`, `from500_to1000ms`, `from1_to2s`, `from2_to5s`, `over5s`), `cleanup` (cloud only: `applied`, or the raw transcript was pasted after `fallback_timeout`, `fallback_guard` or `fallback_error`; never the text) |
 | `dictation_failed` | A dictation failed | `error_type` (`transcription`, `empty_transcript`, `insert`, `secure_input`, `microphone_permission`, `accessibility_permission`, `hotkey`) |
 | `setting_changed` | You save a changed setting | `setting` (`provider`, `model`, `language`, `hotkey`, `launch_at_login`, `share_usage_events`, `history_limit`). Turning sharing off sends nothing, not even this. |
 | `update_installed` | The first launch after an update | `from_version`, `to_version` |
@@ -171,7 +186,7 @@ Accessibility permissions, whether the dictation key works, whether the engine i
 model is downloaded and the engine has loaded it, or says it is still loading
 or couldn't load), and the last error. These checks record no
 audio and contact nobody. "Test connection" is the one button that does: it
-sends a short silent clip to your cloud provider with your saved key, only
+sends a short silent clip to OpenRouter with your saved key, only
 when you press it.
 
 "Report a problem" builds a short text report from a fixed list of fields

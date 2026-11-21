@@ -1061,19 +1061,17 @@ mod tests {
     }
 
     #[test]
-    fn the_key_counts_for_the_selected_provider_only() {
+    fn a_saved_openrouter_key_counts() {
         let dir = temp("key");
         let secrets = MemSecretStore::new();
         let config = Arc::new(Config::new(&dir, secrets));
         let live = LiveEngine::fixed();
         assert!(!key_saved(&config, &live));
         config
-            .set_api_key(dictation_core::settings::Provider::OpenAi, "sk-made-up-key")
-            .unwrap();
-        // Groq is selected (the default).
-        assert!(!key_saved(&config, &live));
-        config
-            .set_api_key(dictation_core::settings::Provider::Groq, "gsk_made_up_key")
+            .set_api_key(
+                dictation_core::settings::Provider::OpenRouter,
+                "sk-or-made-up-key",
+            )
             .unwrap();
         assert!(key_saved(&config, &live));
         let _ = std::fs::remove_dir_all(&dir);

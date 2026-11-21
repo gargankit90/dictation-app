@@ -149,22 +149,22 @@ fn saved_settings_and_key_still_load_after_the_rename() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join(SETTINGS_FILE),
-        r#"{"version":2,"provider":"openai","model":"whisper-1","language":"en","hotkey":"RightCmd","launch_at_login":true,"transcription":"cloud","local_model":"parakeet-unified-en-0.6b-q4_k_m","share_usage_events":false}"#,
+        r#"{"version":2,"provider":"openrouter","model":"openai/gpt-4o-mini-transcribe","language":"en","hotkey":"RightCmd","launch_at_login":true,"transcription":"cloud","local_model":"parakeet-unified-en-0.6b-q4_k_m","share_usage_events":false}"#,
     )
     .unwrap();
     let secrets = MemSecretStore::default();
     secrets
         .set(
-            "openai-api-key",
-            &dictation_ports::Secret::new("sk-dummy-NOT-A-REAL-KEY-0123456789"),
+            "openrouter-api-key",
+            &dictation_ports::Secret::new("sk-or-dummy-NOT-A-REAL-KEY-0123456789"),
         )
         .unwrap();
 
     let config = Config::new(&dir, secrets);
     let settings = config.settings().unwrap();
-    assert_eq!(settings.provider, Provider::OpenAi);
+    assert_eq!(settings.provider, Provider::OpenRouter);
     assert_eq!(settings.hotkey, "RightCmd");
     assert!(settings.launch_at_login);
-    assert!(config.has_api_key(Provider::OpenAi).unwrap());
+    assert!(config.has_api_key(Provider::OpenRouter).unwrap());
     let _ = fs::remove_dir_all(&dir);
 }

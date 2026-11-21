@@ -35,7 +35,7 @@ body:
     id: steps
     attributes:
       label: Steps to reproduce
-      description: What did you do? Which provider (Groq or OpenAI)? Which app had focus?
+      description: What did you do? Which engine (On this Mac or your OpenRouter key)? Which app had focus?
       placeholder: |
         1. ...
         2. ...

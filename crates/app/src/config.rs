@@ -234,7 +234,7 @@ mod tests {
         }
     }
 
-    const DUMMY_KEY: &str = "gsk_dummy_not_a_real_key_0123456789";
+    const DUMMY_KEY: &str = "sk-or-dummy-not-a-real-key-0123456789";
 
     fn config(dir: &TempDir) -> (Config<MemSecretStore>, MemSecretStore) {
         let secrets = MemSecretStore::new();
@@ -254,8 +254,7 @@ mod tests {
         let dir = TempDir::new();
         let (config, _) = config(&dir);
         let settings = Settings {
-            provider: Provider::OpenAi,
-            model: "whisper-1".into(),
+            provider: Provider::OpenRouter,
             language: Some("en".into()),
             ..Settings::default()
         };
@@ -284,10 +283,10 @@ mod tests {
         let dir = TempDir::new();
         let (config, _) = config(&dir);
         let config = std::sync::Arc::new(config);
-        // Alternate short and long models so an overlapping write would
+        // Alternate short and long model ids so an overlapping write would
         // leave the tail of the longer document behind.
         let variant = |thread: usize| Settings {
-            model: "x".repeat(if thread.is_multiple_of(2) { 1 } else { 90 } + thread),
+            local_model: "x".repeat(if thread.is_multiple_of(2) { 1 } else { 90 } + thread),
             ..Settings::default()
         };
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(THREADS));
@@ -351,21 +350,6 @@ mod tests {
     }
 
     #[test]
-    fn a_v1_file_is_migrated_on_load() {
-        let dir = TempDir::new();
-        let (config, _) = config(&dir);
-        std::fs::create_dir_all(config.path().parent().unwrap()).unwrap();
-        std::fs::write(
-            config.path(),
-            r#"{"version": 1, "engine": "openai", "whisper_model": "whisper-1", "language": ""}"#,
-        )
-        .unwrap();
-        let settings = config.settings().unwrap();
-        assert_eq!(settings.provider, Provider::OpenAi);
-        assert_eq!(settings.language, None);
-    }
-
-    #[test]
     fn a_corrupt_or_unreadable_file_is_an_error() {
         let dir = TempDir::new();
         let (config, _) = config(&dir);
@@ -383,30 +367,26 @@ mod tests {
     fn criterion_3_the_key_goes_to_the_secret_store_only() {
         let dir = TempDir::new();
         let (config, secrets) = config(&dir);
-        assert!(!config.has_api_key(Provider::Groq).unwrap());
+        assert!(!config.has_api_key(Provider::OpenRouter).unwrap());
 
         config
-            .set_api_key(Provider::Groq, &format!("  {DUMMY_KEY}\n"))
+            .set_api_key(Provider::OpenRouter, &format!("  {DUMMY_KEY}\n"))
             .unwrap();
         config.save_settings(&Settings::default()).unwrap();
 
-        assert!(config.has_api_key(Provider::Groq).unwrap());
-        assert!(
-            !config.has_api_key(Provider::OpenAi).unwrap(),
-            "per provider"
-        );
+        assert!(config.has_api_key(Provider::OpenRouter).unwrap());
         assert_eq!(
-            secrets.get("groq-api-key").unwrap().unwrap().expose(),
+            secrets.get("openrouter-api-key").unwrap().unwrap().expose(),
             DUMMY_KEY,
             "trimmed"
         );
         // The settings file never holds the key.
         let file = std::fs::read_to_string(config.path()).unwrap();
         assert!(!file.contains(DUMMY_KEY), "{file}");
-        assert!(!file.contains("gsk_"), "{file}");
+        assert!(!file.contains("sk-or-"), "{file}");
 
-        config.delete_api_key(Provider::Groq).unwrap();
-        assert!(!config.has_api_key(Provider::Groq).unwrap());
+        config.delete_api_key(Provider::OpenRouter).unwrap();
+        assert!(!config.has_api_key(Provider::OpenRouter).unwrap());
     }
 
     #[test]
@@ -418,26 +398,25 @@ mod tests {
             ("", "is empty"),
             ("   ", "is empty"),
             (long.as_str(), "is too long"),
-            ("gsk_dummy with_space", "contains spaces"),
+            ("sk-or-dummy with_space", "contains spaces"),
         ] {
-            let error = config.set_api_key(Provider::Groq, key).unwrap_err();
+            let error = config.set_api_key(Provider::OpenRouter, key).unwrap_err();
             assert_eq!(error, ConfigError::InvalidKey(why));
             if !key.trim().is_empty() {
                 assert!(!error.to_string().contains(key.trim()));
             }
         }
-        assert_eq!(secrets.get("groq-api-key").unwrap(), None);
+        assert_eq!(secrets.get("openrouter-api-key").unwrap(), None);
     }
 
     #[test]
     fn the_stored_key_is_available_to_rust_and_validate_key_trims() {
         let dir = TempDir::new();
         let (config, _) = config(&dir);
-        assert_eq!(config.api_key(Provider::Groq).unwrap(), None);
-        config.set_api_key(Provider::Groq, DUMMY_KEY).unwrap();
-        let stored = config.api_key(Provider::Groq).unwrap().unwrap();
+        assert_eq!(config.api_key(Provider::OpenRouter).unwrap(), None);
+        config.set_api_key(Provider::OpenRouter, DUMMY_KEY).unwrap();
+        let stored = config.api_key(Provider::OpenRouter).unwrap().unwrap();
         assert_eq!(stored.expose(), DUMMY_KEY);
-        assert_eq!(config.api_key(Provider::OpenAi).unwrap(), None);
         assert_eq!(validate_key(" k1\n").unwrap().expose(), "k1");
         assert_eq!(
             validate_key("a b"),
@@ -451,14 +430,14 @@ mod tests {
         let (config, secrets) = config(&dir);
         secrets.set_access_denied(true);
         assert_eq!(
-            config.has_api_key(Provider::Groq),
+            config.has_api_key(Provider::OpenRouter),
             Err(ConfigError::Secret(SecretError::AccessDenied))
         );
         assert_eq!(
-            config.set_api_key(Provider::Groq, DUMMY_KEY),
+            config.set_api_key(Provider::OpenRouter, DUMMY_KEY),
             Err(ConfigError::Secret(SecretError::AccessDenied))
         );
-        assert!(config.delete_api_key(Provider::Groq).is_err());
+        assert!(config.delete_api_key(Provider::OpenRouter).is_err());
         assert_eq!(
             ConfigError::Secret(SecretError::AccessDenied).to_string(),
             "keychain access was denied"

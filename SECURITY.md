@@ -17,7 +17,7 @@ In scope:
 - the build, signing and update scripts under `scripts/`;
 - dependencies we ship, when a vulnerability affects how the app uses them.
 
-Out of scope: vulnerabilities in the transcription providers (Groq, OpenAI),
+Out of scope: vulnerabilities in the transcription providers (OpenRouter and the models it routes to),
 macOS itself, or upstream projects with no effect on this app (report those
 upstream), and anything needing physical access to an unlocked machine.
 

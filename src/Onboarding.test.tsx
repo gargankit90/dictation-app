@@ -40,7 +40,7 @@ import { CONTINUE_REASON } from "./onboarding/TryStep";
 import { Privacy } from "./settings/Privacy";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
-const KEY = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
+const KEY = "sk-or-dummy-NOT-A-REAL-KEY-0123456789";
 const ORDER: Step[] = ["welcome", "speech", "permissions", "try", "ready"];
 const WORDS = "this is my first dictation";
 
@@ -111,12 +111,12 @@ class Backend {
   /** The server answers a resume with the whole file. */
   ignoresRange = false;
   micAnswer: PermissionState = "granted";
-  keys: Record<Provider, boolean> = { groq: false, openai: false };
+  keys: Record<Provider, boolean> = { openrouter: false };
   models: LocalModelInfo_Serialize[] = [{ ...PARAKEET }, { ...QWEN }];
   settings: Settings_Serialize = {
     version: 2,
-    provider: "groq",
-    model: "whisper-large-v3-turbo",
+    provider: "openrouter",
+    model: "openai/gpt-4o-mini-transcribe",
     language: null,
     hotkey: "RightAlt",
     launch_at_login: false,
@@ -917,29 +917,35 @@ describe("Speech", () => {
   it("finding 3: the own key choice survives a quit, with no key saved and none kept", async () => {
     const { unmount } = show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: /Use my own Groq or OpenAI key/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Use my own OpenRouter key/ }));
     await waitFor(() => {
       expect(backend.speechChoice).toBe("own_key");
     });
     fireEvent.click(primary("Continue"));
-    fireEvent.change(await screen.findByLabelText("Groq API key"), { target: { value: KEY } });
+    fireEvent.change(await screen.findByLabelText("OpenRouter API key"), {
+      target: { value: KEY },
+    });
     unmount();
 
     // The relaunch: the app's status has the choice, and the typed key is gone.
     show();
     await screen.findByText("English · 477 MB");
-    expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: /own OpenRouter/ }).checked).toBe(
+      true,
+    );
     fireEvent.click(primary("Continue"));
-    const field = await screen.findByLabelText<HTMLInputElement>("Groq API key");
+    const field = await screen.findByLabelText<HTMLInputElement>("OpenRouter API key");
     expect(field.value).toBe("");
     expect(JSON.stringify(backend.named("set_speech_choice"))).not.toContain(KEY);
   });
 
   it("finding 3: choosing local survives a quit, even with a cloud key saved", async () => {
-    backend.keys.groq = true;
+    backend.keys.openrouter = true;
     const { unmount } = show();
     await waitFor(() => {
-      expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
+      expect(screen.getByRole<HTMLInputElement>("radio", { name: /own OpenRouter/ }).checked).toBe(
+        true,
+      );
     });
     fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
     await waitFor(() => {
@@ -1025,19 +1031,19 @@ describe("Speech", () => {
   async function selectOwnKey() {
     show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: /Use my own Groq or OpenAI key/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Use my own OpenRouter key/ }));
   }
 
   async function chooseOwnKey() {
     await selectOwnKey();
     fireEvent.click(primary("Continue"));
     await screen.findByText("Connect your key");
-    return await screen.findByLabelText("Groq API key");
+    return await screen.findByLabelText("OpenRouter API key");
   }
 
   /** The screen with a key already saved: no field. */
   async function chooseSavedKey() {
-    backend.keys.groq = true;
+    backend.keys.openrouter = true;
     await selectOwnKey();
     fireEvent.click(primary("Continue"));
     await screen.findByText("✓ Key saved");
@@ -1048,7 +1054,7 @@ describe("Speech", () => {
     await waitFor(() => {
       expect(backend.speechChoice).toBe("own_key");
     });
-    expect(screen.queryByLabelText("Groq API key")).toBeNull();
+    expect(screen.queryByLabelText("OpenRouter API key")).toBeNull();
     expect(screen.queryByText("Test & Save")).toBeNull();
     expect(primary("Continue").disabled).toBe(false);
     expect(document.querySelector(".ob-reason")?.textContent).toBe("");
@@ -1060,7 +1066,7 @@ describe("Speech", () => {
     await screen.findByText("English · 477 MB");
     fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
     await screen.findByText("30 languages · 590 MB");
-    fireEvent.click(screen.getByRole("radio", { name: /Use my own Groq or OpenAI key/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Use my own OpenRouter key/ }));
     fireEvent.click(primary("Continue"));
     await screen.findByText("Connect your key");
     screen.getByText("Vocet sends your speech to this provider, using your own account with them.");
@@ -1074,7 +1080,9 @@ describe("Speech", () => {
     expect(backend.step).toBe("speech");
     expect(backend.named("set_onboarding_step")).toEqual([]);
     expect(screen.getByRole("radio", { name: "Hindi" }).getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: /own OpenRouter/ }).checked).toBe(
+      true,
+    );
   });
 
   it("U11: Back drops what was typed and a test still running", async () => {
@@ -1098,7 +1106,7 @@ describe("Speech", () => {
     });
     expect(backend.named("set_api_key")).toEqual([]);
     fireEvent.click(primary("Continue"));
-    expect((await screen.findByLabelText<HTMLInputElement>("Groq API key")).value).toBe("");
+    expect((await screen.findByLabelText<HTMLInputElement>("OpenRouter API key")).value).toBe("");
   });
 
   it("U11 criterion 6: no key: the field, and Continue waits for Test & Save", async () => {
@@ -1107,15 +1115,15 @@ describe("Speech", () => {
     expect(primary("Continue").disabled).toBe(true);
     expect(screen.getByText(KEY_REASON)).toBeTruthy();
     expect(field.getAttribute("type")).toBe("password");
-    expect(screen.getByRole("combobox", { name: "Provider" })).toBeTruthy();
-    expect(screen.getByText("console.groq.com")).toBeTruthy();
+    expect(screen.getByText("Your OpenRouter key")).toBeTruthy();
+    expect(screen.getByText("openrouter.ai")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
   });
 
   it("U11 criterion 6: a saved key shows Key saved and Replace, with no field", async () => {
     await chooseSavedKey();
     screen.getByText("In your macOS Keychain. It's never shown again.");
-    expect(screen.queryByLabelText("Groq API key")).toBeNull();
+    expect(screen.queryByLabelText("OpenRouter API key")).toBeNull();
     expect(screen.queryByRole("button", { name: "Test & Save" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
     expect(primary("Continue").disabled).toBe(false);
@@ -1124,7 +1132,7 @@ describe("Speech", () => {
   it("U11 criterion 6: Replace reveals the field, still with no Remove key", async () => {
     await chooseSavedKey();
     fireEvent.click(screen.getByRole("button", { name: "Replace" }));
-    const field = await screen.findByLabelText("Groq API key");
+    const field = await screen.findByLabelText("OpenRouter API key");
     expect(document.activeElement).toBe(field);
     expect(screen.getByRole("button", { name: "Test & Save" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
@@ -1134,41 +1142,16 @@ describe("Speech", () => {
   it("U11: a typed replacement has to be saved before Continue", async () => {
     await chooseSavedKey();
     fireEvent.click(screen.getByRole("button", { name: "Replace" }));
-    fireEvent.change(await screen.findByLabelText("Groq API key"), { target: { value: KEY } });
+    fireEvent.change(await screen.findByLabelText("OpenRouter API key"), {
+      target: { value: KEY },
+    });
     expect(primary("Continue").disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
     await screen.findByText("✓ Key saved");
     expect(primary("Continue").disabled).toBe(false);
     expect(backend.named("set_api_key")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Replace" }));
-    await screen.findByLabelText("Groq API key");
-  });
-
-  it("U11: changing Provider re-reads its key and doesn't touch the engine", async () => {
-    await chooseSavedKey();
-    fireEvent.change(screen.getByRole("combobox", { name: "Provider" }), {
-      target: { value: "openai" },
-    });
-    await screen.findByLabelText("OpenAI API key");
-    expect(screen.queryByText("✓ Key saved")).toBeNull();
-    expect(primary("Continue").disabled).toBe(true);
-    expect(screen.getByText(KEY_REASON)).toBeTruthy();
-    fireEvent.change(screen.getByRole("combobox", { name: "Provider" }), {
-      target: { value: "groq" },
-    });
-    await screen.findByText("✓ Key saved");
-    expect(backend.named("use_cloud_engine")).toEqual([]);
-  });
-
-  it("U11: with the cloud engine in use, Provider still doesn't switch it", async () => {
-    backend.settings = { ...backend.settings, transcription: "cloud", provider: "groq" };
-    await chooseSavedKey();
-    fireEvent.change(screen.getByRole("combobox", { name: "Provider" }), {
-      target: { value: "openai" },
-    });
-    await screen.findByLabelText("OpenAI API key");
-    expect(backend.named("use_cloud_engine")).toEqual([]);
-    expect(backend.settings.provider).toBe("groq");
+    await screen.findByLabelText("OpenRouter API key");
   });
 
   describe("U11 criterion 5: the cards' exact wording", () => {
@@ -1176,7 +1159,7 @@ describe("Speech", () => {
       show();
       await screen.findByText("English · 477 MB");
       screen.getByText("Runs on this Mac. Works offline after a one-time download.");
-      screen.getByText("Use my own Groq or OpenAI key");
+      screen.getByText("Use my own OpenRouter key");
       screen.getByText(
         "About 100 languages. Needs internet. Your speech is sent to the provider you choose.",
       );
@@ -1197,7 +1180,9 @@ describe("Speech", () => {
       await screen.findByText(
         "Gujarati needs your own key. Vocet's on-device models don't cover it yet.",
       );
-      expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
+      expect(screen.getByRole<HTMLInputElement>("radio", { name: /own OpenRouter/ }).checked).toBe(
+        true,
+      );
       expect(screen.queryByRole("radio", { name: "Recommended for your language" })).toBeNull();
       expect(primary("Continue").disabled).toBe(false);
       fireEvent.click(primary("Continue"));
@@ -1226,11 +1211,11 @@ describe("Speech", () => {
   });
 
   it("criterion 3: a bad key keeps Continue locked, and saves nothing", async () => {
-    backend.testResult = { kind: "invalid_key", message: "Groq rejected this API key." };
+    backend.testResult = { kind: "invalid_key", message: "OpenRouter rejected this API key." };
     const field = await chooseOwnKey();
     fireEvent.change(field, { target: { value: KEY } });
     fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
-    await screen.findByText("Groq rejected this API key.");
+    await screen.findByText("OpenRouter rejected this API key.");
     expect(backend.named("set_api_key")).toEqual([]);
     expect(primary("Continue").disabled).toBe(true);
   });
@@ -1245,7 +1230,7 @@ describe("Speech", () => {
     await screen.findByText("Two permissions");
     // It has just passed: not tested a second time.
     expect(backend.named("test_api_key")).toHaveLength(1);
-    expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "groq" });
+    expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
     expect(backend.named("download_local_model")).toEqual([]);
     expect(document.body.textContent).not.toContain(KEY);
   });
@@ -1281,7 +1266,10 @@ describe("Speech", () => {
       };
     }
 
-    const REJECTED: KeyTestError = { kind: "invalid_key", message: "Groq rejected this API key." };
+    const REJECTED: KeyTestError = {
+      kind: "invalid_key",
+      message: "OpenRouter rejected this API key.",
+    };
 
     it("Back drops it: no engine switch and no moving on, however late it answers", async () => {
       const answer = await continuePending();
@@ -1299,35 +1287,13 @@ describe("Speech", () => {
       fireEvent.click(screen.getByRole("button", { name: "Back" }));
       await screen.findByText("Which language will you mostly speak?");
       await answer(REJECTED);
-      expect(screen.queryByText("Groq rejected this API key.")).toBeNull();
-    });
-
-    it("a Provider change drops it: the old provider isn't selected", async () => {
-      const answer = await continuePending();
-      fireEvent.change(screen.getByRole("combobox", { name: "Provider" }), {
-        target: { value: "openai" },
-      });
-      await screen.findByLabelText("OpenAI API key");
-      await answer(null);
-      expect(backend.named("use_cloud_engine")).toEqual([]);
-      expect(backend.step).toBe("speech");
-      screen.getByText("Connect your key");
-    });
-
-    it("a Provider change drops a failure: it isn't blamed on the new provider", async () => {
-      const answer = await continuePending();
-      fireEvent.change(screen.getByRole("combobox", { name: "Provider" }), {
-        target: { value: "openai" },
-      });
-      await screen.findByLabelText("OpenAI API key");
-      await answer(REJECTED);
-      expect(screen.queryByText("Groq rejected this API key.")).toBeNull();
+      expect(screen.queryByText("OpenRouter rejected this API key.")).toBeNull();
     });
 
     it("Replace drops it: the screen stays for the new key", async () => {
       const answer = await continuePending();
       fireEvent.click(screen.getByRole("button", { name: "Replace" }));
-      await screen.findByLabelText("Groq API key");
+      await screen.findByLabelText("OpenRouter API key");
       await answer(null);
       expect(backend.named("use_cloud_engine")).toEqual([]);
       expect(backend.step).toBe("speech");
@@ -1345,24 +1311,24 @@ describe("Speech", () => {
       const answer = await continuePending();
       await answer(null);
       await screen.findByText("Two permissions");
-      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "groq" });
+      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
     });
   });
 
   it("criterion 3: a key saved earlier is tested before moving on", async () => {
-    backend.keys.groq = true;
-    backend.testResult = { kind: "invalid_key", message: "Groq rejected this API key." };
+    backend.keys.openrouter = true;
+    backend.testResult = { kind: "invalid_key", message: "OpenRouter rejected this API key." };
     await chooseSavedKey();
     await waitFor(() => {
       expect(primary("Continue").disabled).toBe(false);
     });
     fireEvent.click(primary("Continue"));
-    await screen.findByText("Groq rejected this API key.");
+    await screen.findByText("OpenRouter rejected this API key.");
     // The failure stays on this screen.
     screen.getByText("Connect your key");
     screen.getByText("✓ Key saved");
     expect(backend.step).toBe("speech");
-    expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "groq", key: null });
+    expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "openrouter", key: null });
   });
 });
 
@@ -1491,7 +1457,7 @@ describe("Permissions", () => {
   beforeEach(() => {
     backend.step = "permissions";
     backend.welcomePassed = true;
-    backend.keys.groq = true;
+    backend.keys.openrouter = true;
   });
 
   it("N1: someone who finished setup is told why macOS asks again, and Done ends it", async () => {
@@ -1922,9 +1888,9 @@ describe("Try it", () => {
       heard: true,
       stages: ["recorded"],
       failure: "key",
-      error: "Groq rejected the key.",
+      error: "OpenRouter rejected the key.",
     });
-    await screen.findByText("Groq rejected the key.", undefined, { timeout: 2000 });
+    await screen.findByText("OpenRouter rejected the key.", undefined, { timeout: 2000 });
     fireEvent.click(screen.getByRole("button", { name: "Back to Speech" }));
     await screen.findByText("Which language will you mostly speak?");
   });
@@ -2088,10 +2054,10 @@ describe("Ready", () => {
   });
 
   it("criterion 6: the own key says Connected only with a key saved", async () => {
-    backend.settings = { ...backend.settings, transcription: "cloud", provider: "groq" };
-    backend.keys.groq = true;
+    backend.settings = { ...backend.settings, transcription: "cloud", provider: "openrouter" };
+    backend.keys.openrouter = true;
     show();
-    await screen.findByText("Groq · ✓ Connected");
+    await screen.findByText("OpenRouter · ✓ Connected");
   });
 
   it("the events row is a switch that shows the real state and applies at once", async () => {

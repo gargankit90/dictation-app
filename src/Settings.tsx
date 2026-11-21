@@ -130,7 +130,7 @@ function languageChoice(
   if (settings.transcription === "cloud") {
     return {
       supported: cloudLanguages(settings.provider),
-      engineName: providerInfo(settings.provider).name,
+      engineName: providerInfo().name,
       englishOnly: false,
     };
   }

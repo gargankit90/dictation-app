@@ -412,8 +412,7 @@ mod tests {
     fn a_save_reports_the_names_of_what_changed() {
         let before = Settings::default();
         let after = Settings {
-            provider: Provider::OpenAi,
-            model: "whisper-1".into(),
+            model: "someone/another-model".into(),
             hotkey: "Ctrl+Space".into(),
             ..Settings::default()
         };
@@ -422,15 +421,11 @@ mod tests {
             change.events,
             [
                 Event::SettingChanged {
-                    setting: SettingName::Provider
-                },
-                Event::SettingChanged {
                     setting: SettingName::Model
                 },
                 Event::SettingChanged {
                     setting: SettingName::Hotkey
                 },
-                engine_selected(Provider::OpenAi),
             ]
         );
         assert_eq!(change.sharing, None);
@@ -453,7 +448,7 @@ mod tests {
         );
         assert_eq!(
             settings_change(&local, &cloud).events,
-            [engine_selected(Provider::Groq)]
+            [engine_selected(Provider::OpenRouter)]
         );
         // Another local model is not an engine change, and its id isn't sent.
         let other = Settings {

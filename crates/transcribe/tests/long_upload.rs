@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use dictation_core::retry::RetryPolicy;
 use dictation_core::upload_limits::LONG_CLIP;
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
-use dictation_transcribe::openai_compat::{Config, OpenAiCompat};
+use dictation_transcribe::openrouter::{Config, OpenRouter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use wiremock::matchers::{method, path};
@@ -34,8 +34,10 @@ fn clip(seconds: usize) -> Audio {
 fn config(base_url: String, grows: bool, attempts: u32, long_clip: Duration) -> Config {
     Config {
         base_url,
-        model: "whisper-large-v3-turbo".into(),
+        model: "openai/gpt-4o-mini-transcribe".into(),
         language: None,
+        prompt: None,
+        privacy: dictation_core::cloud_models::PrivacyFilter::DenyDataCollection,
         timeout: BASE,
         timeout_grows_with_audio: grows,
         long_clip,
@@ -72,13 +74,13 @@ async fn a_clip_that_needs_longer_than_the_base_limit_now_succeeds() {
 
     // Control: the old fixed limit fails this request, all attempts.
     let fixed =
-        OpenAiCompat::new(config(url.clone(), false, 2, LONG_CLIP), Secret::new(KEY)).unwrap();
+        OpenRouter::new(config(url.clone(), false, 2, LONG_CLIP), Secret::new(KEY)).unwrap();
     assert_eq!(
         fixed.transcribe(&clip(4)).await,
         Err(TranscribeError::Timeout)
     );
 
-    let grown = OpenAiCompat::new(config(url, true, 2, LONG_CLIP), Secret::new(KEY)).unwrap();
+    let grown = OpenRouter::new(config(url, true, 2, LONG_CLIP), Secret::new(KEY)).unwrap();
     assert_eq!(
         grown.transcribe(&clip(4)).await.unwrap(),
         "a long dictation"
@@ -90,7 +92,7 @@ async fn a_clip_that_needs_longer_than_the_base_limit_now_succeeds() {
 #[tokio::test]
 async fn a_server_that_never_answers_times_out_within_the_grown_limit() {
     let server = slow_server(Duration::from_secs(120)).await;
-    let engine = OpenAiCompat::new(
+    let engine = OpenRouter::new(
         config(format!("{}/v1", server.uri()), true, 1, LONG_CLIP),
         Secret::new(KEY),
     )
@@ -148,7 +150,7 @@ async fn a_long_clip_is_retried_once_after_a_timeout_and_a_short_one_keeps_its_a
     let long_clip = Duration::from_secs(3);
     for (seconds, expected) in [(4, 2), (2, 3)] {
         let (port, requests) = silent_server().await;
-        let engine = OpenAiCompat::new(
+        let engine = OpenRouter::new(
             config(format!("http://127.0.0.1:{port}/v1"), true, 3, long_clip),
             Secret::new(KEY),
         )
@@ -184,7 +186,7 @@ async fn other_failures_keep_every_attempt_at_any_clip_length() {
                 .respond_with(response)
                 .mount(&server)
                 .await;
-            let engine = OpenAiCompat::new(
+            let engine = OpenRouter::new(
                 config(format!("{}/v1", server.uri()), true, 3, LONG_CLIP),
                 Secret::new(KEY),
             )
@@ -201,7 +203,7 @@ async fn other_failures_keep_every_attempt_at_any_clip_length() {
             assert!(!text.contains(KEY));
         }
     }
-    let engine = OpenAiCompat::new(
+    let engine = OpenRouter::new(
         config("http://127.0.0.1:9/v1".into(), true, 3, LONG_CLIP),
         Secret::new(KEY),
     )
@@ -222,7 +224,7 @@ async fn other_failures_keep_every_attempt_at_any_clip_length() {
 #[tokio::test]
 #[ignore = "needs an unroutable address and about 20 s"]
 async fn a_dead_network_fails_fast_for_a_five_minute_clip() {
-    let engine = OpenAiCompat::new(
+    let engine = OpenRouter::new(
         config("http://10.255.255.1/v1".into(), true, 3, LONG_CLIP),
         Secret::new(KEY),
     )
@@ -357,12 +359,12 @@ async fn a_five_minute_upload_held_back_for_32_seconds_succeeds_and_fails_under_
                 max_attempts: 1,
                 ..RetryPolicy::default()
             },
-            ..Config::from_preset(dictation_transcribe::openai_compat::GROQ)
+            ..Config::openrouter()
         };
-        OpenAiCompat::new(config, Secret::new(KEY)).unwrap()
+        OpenRouter::new(config, Secret::new(KEY)).unwrap()
     };
     assert_eq!(
-        Config::from_preset(dictation_transcribe::openai_compat::GROQ).timeout,
+        Config::openrouter().timeout,
         Duration::from_secs(30),
         "the real base limit"
     );
@@ -426,6 +428,6 @@ async fn a_five_minute_upload_held_back_for_32_seconds_succeeds_and_fails_under_
         .unwrap()
         .unwrap();
     assert_eq!(result.unwrap(), "a slow upload");
-    // The whole body: the WAV and the multipart framing around it.
+    // The whole body: the WAV (in base64) and the JSON around it.
     assert!(grown_server.body_read.load(Ordering::SeqCst) >= wav_len);
 }

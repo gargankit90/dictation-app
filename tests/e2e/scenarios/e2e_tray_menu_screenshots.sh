@@ -35,7 +35,7 @@ tms_states() {
   expect "ready ($mode): the open menu" tms_shot "menu-ready-$mode"
   # Bad key: the real engine with no key.
   expect "the app quits" quit_from_tray
-  groq_key_remove || true
+  apikey_key_remove || true
   E2E_TRANSCRIBER=settings launch --debug-audio-file "$VM_TONE"
   expect "no-key ($mode): the app starts" wait_for_log 'INFO .*ready'
   expect "no-key ($mode): the status names the problem" tray_shows_no_key_error 15

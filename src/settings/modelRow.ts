@@ -5,6 +5,7 @@
 // that nothing is wrong with says nothing at all.
 
 import type { EngineStatus, LocalModelInfo_Serialize } from "../bindings";
+import type { ProviderInfo } from "../providers";
 
 /** `bytes` as whole megabytes, the way the design shows sizes ("477 MB"). */
 export function megabytes(bytes: number): string {
@@ -157,10 +158,14 @@ export function languagesLabel(codes: readonly string[]): string {
 /** The smaller line under a model's title (owner-approved wording, U12). */
 export const MODEL_CAPTION = "On this Mac · works offline";
 
-/** The smaller line under "Your own key" (owner-approved wording, U12). */
-export function ownKeyCaption(provider: string, saved: boolean): string {
+/**
+ * The smaller line under "Your own key" (owner-approved wording, U12), with
+ * the speech and cleanup models once a key is saved (Q2).
+ */
+export function ownKeyCaption(info: ProviderInfo, saved: boolean): string {
   return saved
-    ? `${provider} · about 100 languages · speech is sent to ${provider}`
+    ? `${info.name} · about 100 languages · speech is sent to ${info.name} · ` +
+        `speech: ${info.speechModelName} · cleanup: ${info.cleanupModelName}`
     : "About 100 languages · uses internet";
 }
 

@@ -61,8 +61,8 @@ class Backend {
 function settingsWith(limit: number, hotkey = "RightAlt"): Settings_Serialize {
   return {
     version: 2,
-    provider: "groq",
-    model: "whisper-large-v3-turbo",
+    provider: "openrouter",
+    model: "openai/gpt-4o-mini-transcribe",
     language: null,
     hotkey,
     launch_at_login: false,

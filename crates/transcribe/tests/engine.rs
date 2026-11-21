@@ -64,7 +64,7 @@ async fn with_a_key_the_settings_decide_the_request() {
         .and(|request: &Request| {
             // The body holds the WAV bytes too, so it isn't valid UTF-8.
             let body = String::from_utf8_lossy(&request.body);
-            body.contains("whisper-test-model") && body.contains("name=\"language\"")
+            body.contains("whisper-test-model") && body.contains(r#""language":"de""#)
         })
         .respond_with(reply())
         .expect(1)
@@ -82,7 +82,7 @@ async fn no_language_setting_lets_the_provider_detect_it() {
     engine.transcribe(&audio()).await.unwrap();
     let requests = server.received_requests().await.unwrap();
     let body = String::from_utf8_lossy(&requests[0].body);
-    assert!(!body.contains("name=\"language\""), "{body}");
+    assert!(!body.contains(r#""language""#), "{body}");
 }
 
 #[tokio::test]
@@ -215,7 +215,13 @@ async fn a_new_engine_replaces_the_old_one_for_the_next_dictation() {
 
     // The settings change (another server stands in for another provider):
     // the very next dictation uses it, with the new key.
-    transcribers.update(|| engine_at(&second, &settings("whisper-1", Some("en")), KEY));
+    transcribers.update(|| {
+        engine_at(
+            &second,
+            &settings("mistralai/voxtral-mini-3b-2507", Some("en")),
+            KEY,
+        )
+    });
     assert_eq!(transcribers.transcribe(&audio()).await.unwrap(), TRANSCRIPT);
     assert_eq!(first.received_requests().await.unwrap().len(), 1);
     let sent = second.received_requests().await.unwrap();
@@ -229,7 +235,7 @@ async fn a_new_engine_replaces_the_old_one_for_the_next_dictation() {
             .unwrap(),
         format!("Bearer {KEY}")
     );
-    assert!(String::from_utf8_lossy(&sent[0].body).contains("whisper-1"));
+    assert!(String::from_utf8_lossy(&sent[0].body).contains("mistralai/voxtral-mini-3b-2507"));
 }
 
 #[tokio::test]

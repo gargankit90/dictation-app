@@ -12,7 +12,7 @@ status=${2:-unknown}
 out=target/test-evidence
 mkdir -p "$out"
 
-# Groq (gsk_...) and OpenAI (sk-...) key shapes.
+# API key shapes: sk-... (OpenRouter sk-or-...) and the older gsk_....
 hide_keys() {
   sed -E 's/(gsk_|sk-)[A-Za-z0-9_-]{8,}/[key hidden]/g'
 }

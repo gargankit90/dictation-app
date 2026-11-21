@@ -120,8 +120,9 @@ impl DictationProgress {
             UiEvent::StateChanged(Phase::Transcribing) => {
                 self.recording = false;
             }
-            // Setup's practice has its own "no sound" hint (H2).
-            UiEvent::NoSound => {}
+            // Setup's practice has its own "no sound" hint (H2); the cleanup
+            // outcome is for the usage events only.
+            UiEvent::NoSound | UiEvent::Cleanup(_) => {}
             UiEvent::StateChanged(Phase::Inserting) => {
                 self.recording = false;
                 if self.view.stages.last() == Some(&Stage::Recorded) {

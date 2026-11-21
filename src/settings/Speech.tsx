@@ -236,14 +236,13 @@ export function Speech({
     onConnected: async (which) => {
       const waiting = switchOnceConnected.current;
       switchOnceConnected.current = false;
-      // Also a provider picked in the sheet, while the own key is the engine.
-      if (waiting || (!onDevice && which !== settings.provider)) await switchToCloud(which);
+      if (waiting) await switchToCloud(which);
     },
   });
   const { provider, keyStatus } = ownKey;
-  const info = providerInfo(provider);
+  const info = providerInfo();
   const cloudActive = !onDevice;
-  const stored = provider === settings.provider ? keyStatus.state : "checking";
+  const stored = keyStatus.state;
 
   // The own key is the engine and needs a key: the sheet opens by itself, once
   // and not again on every return to Speech (Design Lead item 6). State from
@@ -440,7 +439,7 @@ export function Speech({
           <EngineRow
             id="engine-own-key"
             name="Your own key"
-            caption={ownKeyCaption(info.name, keyStatus.state === "saved")}
+            caption={ownKeyCaption(info, keyStatus.state === "saved")}
             checked={cloudActive && switching === null}
             blockedBecause={busy && !cloudActive ? waitReason : null}
             disabled={busy}
