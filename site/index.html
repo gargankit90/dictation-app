@@ -577,12 +577,9 @@
           where you type: Google Docs, Notion, Claude Code, Cursor, Slack or Mail.
         </p>
         <div class="actions">
-          <a class="btn" data-download href="https://github.com/gargankit90/dictation-app/releases"
-            >Download for Mac</a
-          >
-          <a href="https://github.com/gargankit90/dictation-app">Source on GitHub</a>
+          <a class="btn" data-download href="#">Download for Mac</a>
         </div>
-        <p class="fine">macOS 13 or later · M1 or newer Mac · Free beta</p>
+        <p class="fine">macOS 13 or later · M1 or newer Mac</p>
 
         <div class="ba">
           <div class="card">
@@ -668,10 +665,7 @@
           </div>
           <p class="note">
             In both modes your history stays on your Mac. Usage and error reports are on by default;
-            turn them off in Settings → Privacy. Details:
-            <a href="https://github.com/gargankit90/dictation-app/blob/main/docs/privacy.md"
-              >privacy notes</a
-            >.
+            turn them off in Settings → Privacy.
           </p>
         </div>
       </section>
@@ -710,8 +704,9 @@
         <details>
           <summary>Can I see the source code?</summary>
           <p>
-            Yes. It is source available under the Functional Source License (FSL-1.1-ALv2). You can
-            read and build the code, and each version becomes Apache 2.0 after two years.
+            Yes, <a href="https://github.com/gargankit90/dictation-app">on GitHub</a>. It is source
+            available under the Functional Source License (FSL-1.1-ALv2). You can read and build the
+            code, and each version becomes Apache 2.0 after two years.
           </p>
         </details>
       </section>
@@ -724,29 +719,26 @@
             what breaks.
           </p>
           <div class="actions">
-            <a
-              class="btn"
-              data-download
-              href="https://github.com/gargankit90/dictation-app/releases"
-              >Download for Mac</a
-            >
-            <a href="https://github.com/gargankit90/dictation-app">Source on GitHub</a>
+            <a class="btn" data-download href="#">Download for Mac</a>
           </div>
         </div>
       </section>
     </main>
 
     <footer class="wrap">
-      <p>© 2026 Vocet Labs. Download only from vocetlabs.com or the project’s GitHub releases.</p>
+      <p>
+        © 2026 Vocet Labs ·
+        <a href="https://github.com/gargankit90/dictation-app">Source</a> ·
+        <a href="https://github.com/gargankit90/dictation-app/releases">Releases</a> ·
+        <a href="https://github.com/gargankit90/dictation-app/issues">Report a problem</a>
+      </p>
     </footer>
 
     <script>
-      // Set at release: the 0.2.0 release asset or page (not releases/latest, which skips
-      // pre-releases). Until then the links fall back to the releases list in their href.
-      const DOWNLOAD_URL = "";
-      if (DOWNLOAD_URL) {
-        for (const a of document.querySelectorAll("a[data-download]")) a.href = DOWNLOAD_URL;
-      }
+      // Set at release: the 0.2.0 release DMG (not releases/latest, which skips pre-releases).
+      const DOWNLOAD_URL =
+        "https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/Vocet_0.2.0_aarch64.dmg";
+      for (const a of document.querySelectorAll("a[data-download]")) a.href = DOWNLOAD_URL;
     </script>
   </body>
 </html>
