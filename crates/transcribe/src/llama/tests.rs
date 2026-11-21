@@ -382,6 +382,44 @@ async fn a_cancelled_start_returns_only_once_its_helper_has_exited() {
     assert!(!alive(pid), "the cancelled helper is still running");
 }
 
+/// Review round 2: a helper that ignores SIGTERM still ends, killed after
+/// the grace period and reaped, before the cancelled start returns.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_start_kills_and_reaps_a_helper_that_ignores_sigterm() {
+    let dir = TempDir::new("term-proof");
+    let pid_file = dir.0.join("pid");
+    let helper = dir.helper(&format!(
+        "trap '' TERM\necho $$ > '{0}.tmp'\nmv '{0}.tmp' '{0}'\nexec sleep 300",
+        pid_file.display()
+    ));
+    let model = dir.0.join("model.gguf");
+    let (cancel, cancelled) = tokio::sync::oneshot::channel::<()>();
+    let start = tokio::spawn(async move {
+        LlamaServer::start_until(&helper, &model, async {
+            let _ = cancelled.await;
+        })
+        .await
+    });
+    let mut pid = None;
+    for _ in 0..500 {
+        if let Ok(text) = std::fs::read_to_string(&pid_file) {
+            pid = text.trim().parse::<u32>().ok();
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let pid = pid.expect("the helper started");
+    cancel.send(()).unwrap();
+    let stopping = Instant::now();
+    assert!(matches!(start.await.unwrap(), Err(LlamaError::Cancelled)));
+    assert!(
+        !alive(pid),
+        "a SIGTERM-proof helper outlived its cancelled start"
+    );
+    // SIGKILL after the supervisor's 2 s grace, well inside the backstop.
+    assert!(stopping.elapsed() < STOP_GRACE + Duration::from_secs(2));
+}
+
 #[tokio::test]
 async fn a_missing_helper_is_named() {
     let dir = TempDir::new("missing");

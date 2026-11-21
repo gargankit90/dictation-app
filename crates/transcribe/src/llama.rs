@@ -59,18 +59,23 @@ pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(90);
 /// How often `/health` is asked while the helper starts.
 const HEALTH_POLL: Duration = Duration::from_millis(100);
 
+/// How long [`LlamaServer::stop_and_wait`] waits for the supervisor before
+/// killing the server and the supervisor itself. The supervisor escalates
+/// on its own after 2 s (SIGTERM, then SIGKILL), so this is a backstop.
+const STOP_GRACE: Duration = Duration::from_secs(4);
+
 /// The supervisor: starts the server (its path is `$0`, its arguments
 /// `$@`) in the background and prints its process id. A watcher holds the
 /// app's pipe (standard input, kept as descriptor 3 because a background
-/// job's own standard input is `/dev/null`) and kills the server when the
-/// pipe closes. The shell waits for the server, so it exits when the server
+/// job's own standard input is `/dev/null`) and stops the server when the
+/// pipe closes: SIGTERM, then SIGKILL 2 s later if it is still there. The shell waits for the server, so it exits when the server
 /// does, for whatever reason, and the app sees it. The server's standard
 /// input is `/dev/null` and descriptor 3 is opened after it starts, so only
 /// the supervisor holds the pipe.
 const SUPERVISOR: &str = r#""$0" "$@" </dev/null >/dev/null 2>&1 & pid=$!
 echo "$pid"
 exec 3<&0
-{ read -r _ <&3; kill "$pid" 2>/dev/null; } & watch=$!
+{ read -r _ <&3; kill "$pid" 2>/dev/null; sleep 2; kill -9 "$pid" 2>/dev/null; } & watch=$!
 wait "$pid"; kill "$watch" 2>/dev/null"#;
 
 /// Why the helper or a cleanup failed. None holds the transcript, the
@@ -312,9 +317,10 @@ impl LlamaServer {
         let port = free_port()?;
         let key = new_key()?;
         let base_url = format!("http://127.0.0.1:{port}");
-        let supervised = spawn_supervised(helper, &server_args(model, port), &key).await?;
+        // Before the spawn: no error after it may leave a helper running.
         let client = crate::http::client(&base_url)
             .map_err(|e| LlamaError::Start(format!("no HTTP client: {e}")))?;
+        let supervised = spawn_supervised(helper, &server_args(model, port), &key).await?;
         let server = Self {
             base_url,
             key,
@@ -330,13 +336,30 @@ impl LlamaServer {
         }
     }
 
-    /// Stops the helper and waits (up to a few seconds) for its supervisor
-    /// to exit, which it does only once the server has.
+    /// Stops the helper and returns only once it is gone: the pipe closes
+    /// (the supervisor sends SIGTERM, then SIGKILL), and the supervisor,
+    /// which exits only after reaping the server, is reaped here. If it
+    /// hasn't exited within [`STOP_GRACE`], the server and then the
+    /// supervisor get SIGKILL, which can't be ignored, and the supervisor
+    /// is reaped.
     async fn stop_and_wait(&self) {
         let supervised = lock(&self.supervisor).take();
         if let Some(mut supervised) = supervised {
             supervised.stdin.take();
-            let _ = tokio::time::timeout(Duration::from_secs(5), supervised.child.wait()).await;
+            if tokio::time::timeout(STOP_GRACE, supervised.child.wait())
+                .await
+                .is_err()
+            {
+                tracing::warn!("on-device cleanup didn't stop; killing it");
+                // The supervisor hasn't reaped the server, so its pid is
+                // still the server's.
+                let _ = Command::new("/bin/kill")
+                    .args(["-KILL", &supervised.server_pid.to_string()])
+                    .status()
+                    .await;
+                // Kills (if still needed) and reaps the supervisor.
+                let _ = supervised.child.kill().await;
+            }
         }
     }
 
@@ -353,17 +376,15 @@ impl LlamaServer {
                 tokio::time::sleep(HEALTH_POLL).await;
             }
         };
-        match tokio::time::timeout(limit, ready).await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(error)) => {
-                self.stop();
-                Err(error)
-            }
-            Err(_) => {
-                self.stop();
-                Err(LlamaError::StartTimeout)
-            }
+        let result = match tokio::time::timeout(limit, ready).await {
+            Ok(result) => result,
+            Err(_) => Err(LlamaError::StartTimeout),
+        };
+        if result.is_err() {
+            // A failed start is gone before the caller can start another.
+            self.stop_and_wait().await;
         }
+        result
     }
 
     /// The supervisor's exit status, if it has exited (the server is then
@@ -441,7 +462,15 @@ async fn spawn_supervised(
         _ => None,
     };
     let Some(server_pid) = server_pid else {
+        // Gone and reaped before the error: the closed pipe stops a server
+        // that did start, and a stuck supervisor is killed.
         drop(stdin);
+        if tokio::time::timeout(STOP_GRACE, child.wait())
+            .await
+            .is_err()
+        {
+            let _ = child.kill().await;
+        }
         return Err(LlamaError::Start("the helper didn't start".to_owned()));
     };
     Ok(Supervised {

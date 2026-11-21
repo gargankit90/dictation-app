@@ -439,3 +439,86 @@ async fn review_2_a_superseded_start_is_cancelled_and_exits_before_the_next_load
     assert_eq!(loading.load(Ordering::SeqCst), 0);
     assert_eq!(most.load(Ordering::SeqCst), 1);
 }
+
+/// Whether process `pid` exists (a reaped one doesn't).
+fn process_alive(pid: u32) -> bool {
+    std::process::Command::new("/bin/kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// Review round 2, with real processes: helpers that ignore SIGTERM and
+/// never get ready. Switching local → cloud → local never has a second
+/// helper running while the first is alive, and both end up reaped.
+#[tokio::test(flavor = "multi_thread")]
+async fn review_2_a_sigterm_proof_helper_is_gone_before_the_next_starts() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = TempDir::new("term-proof");
+    dir.download_gemma();
+    let log = dir.0.join("started");
+    let overlap = dir.0.join("overlap");
+    let helper = dir.0.join("llama-server");
+    // Each helper notes, as it starts, any earlier one still alive.
+    std::fs::write(
+        &helper,
+        format!(
+            "#!/bin/sh\ntrap '' TERM\n\
+             for p in $(cat '{log}' 2>/dev/null); do kill -0 \"$p\" 2>/dev/null && echo \"$p\" >> '{overlap}'; done\n\
+             echo $$ >> '{log}'\nexec sleep 300\n",
+            log = log.display(),
+            overlap = overlap.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let starter: Starter<LlamaServer> = Arc::new(move |model: PathBuf, cancel| {
+        let helper = helper.clone();
+        Box::pin(async move { LlamaServer::start_until(&helper, &model, cancel).await })
+    });
+    let spawn: Spawner = Arc::new(|task| {
+        tokio::spawn(task);
+    });
+    let store = ModelStore::new(dir.0.clone(), Arc::new(|_| Ok(u64::MAX))).unwrap();
+    let keeper = LocalCleanup::trusting(store, starter, spawn);
+    let started = || -> Vec<u32> {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.trim().parse().ok())
+            .collect()
+    };
+
+    keeper.follow(&settings(Transcription::Local));
+    until(|| started().len() == 1).await;
+    let first = started()[0];
+    keeper.follow(&settings(Transcription::Cloud));
+    keeper.follow(&settings(Transcription::Local));
+    // The second helper starts only once the first is gone (killed after
+    // its SIGTERM grace, and reaped).
+    for _ in 0..1_000 {
+        if started().len() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let pids = started();
+    assert_eq!(pids.len(), 2, "the second helper never started");
+    assert!(
+        !overlap.exists(),
+        "a second helper started while the first was alive"
+    );
+    assert!(!process_alive(first), "the first helper is still alive");
+
+    // Stopping for good: the second goes too.
+    keeper.release();
+    for _ in 0..1_000 {
+        if !process_alive(pids[1]) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the second helper outlived release");
+}
