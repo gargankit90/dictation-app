@@ -8,7 +8,6 @@
 mod common;
 
 use common::Captured;
-use dictation_core::settings::Settings;
 use dictation_ports::{Audio, Cleaner, Secret, Transcriber};
 use dictation_transcribe::check_key::check_key;
 use dictation_transcribe::cleanup::OpenRouterCleanup;
@@ -32,11 +31,7 @@ fn base(server: &MockServer) -> String {
 }
 
 fn speech_engine(server: &MockServer) -> Engine {
-    Engine::from_settings_at(
-        &Settings::default(),
-        Ok(Some(Secret::new(KEY))),
-        &base(server),
-    )
+    Engine::remote_at(Ok(Some(Secret::new(KEY))), &base(server))
 }
 
 /// Answers every POST with the next response, the last one repeating.

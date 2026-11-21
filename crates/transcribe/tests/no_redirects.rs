@@ -2,7 +2,11 @@
 //! provider can't send us to (and have us accept a transcript from) a
 //! server the user didn't configure. No real key: the key is fake.
 
-#![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "test helpers fail the test on purpose"
+)]
 
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
 use dictation_transcribe::check_key::check_key;
@@ -41,6 +45,17 @@ fn config(provider: &MockServer) -> Config {
     config
 }
 
+/// A redirect is an engine error that names the status.
+fn assert_redirect_error<T: std::fmt::Debug>(result: Result<T, TranscribeError>, status: u16) {
+    let Err(TranscribeError::Engine(detail)) = result else {
+        panic!("{status}: {result:?}");
+    };
+    assert!(
+        detail.contains(&format!("redirect (HTTP {status})")),
+        "{detail}"
+    );
+}
+
 async fn assert_untouched(provider: &MockServer, other: &MockServer) {
     assert!(other.received_requests().await.unwrap().is_empty());
     // A redirect is a provider error, not a retryable one: one request only.
@@ -57,7 +72,7 @@ async fn transcribe_does_not_follow_redirects() {
             samples: vec![0.0; 1_600],
         };
         let result = engine.transcribe(&audio).await;
-        assert_eq!(result, Err(TranscribeError::Redirected(status)), "{status}");
+        assert_redirect_error(result, status);
         assert_untouched(&provider, &other).await;
     }
 }
@@ -67,14 +82,13 @@ async fn check_key_does_not_follow_redirects() {
     for status in STATUSES {
         let (provider, other) = servers(status).await;
         let result = check_key(config(&provider), Secret::new(KEY)).await;
-        assert_eq!(result, Err(TranscribeError::Redirected(status)), "{status}");
+        assert_redirect_error(result, status);
         assert_untouched(&provider, &other).await;
     }
 }
 
-/// What Test key shows for a 3xx: the engine's error names the HTTP status
-/// and says redirects aren't followed (#86), and holds neither the redirect
-/// target nor the key.
+/// A 3xx's error names the HTTP status and says redirects aren't followed
+/// (#86), and holds neither the redirect target nor the key.
 #[tokio::test]
 async fn a_redirect_error_names_the_status_and_leaks_nothing() {
     for status in STATUSES {
@@ -88,12 +102,6 @@ async fn a_redirect_error_names_the_status_and_leaks_nothing() {
         assert!(shown.contains("isn't followed"), "{shown}");
         assert!(!shown.contains(&other.uri()), "{shown}");
         assert!(!shown.contains(KEY), "{shown}");
-        let user = error.user_message();
-        assert!(user.contains("redirect"), "{user}");
-        assert!(
-            !user.contains(KEY) && !user.contains(&other.uri()),
-            "{user}"
-        );
         assert!(!format!("{error:?}").contains(KEY));
     }
 }

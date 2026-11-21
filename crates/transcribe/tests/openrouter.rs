@@ -20,16 +20,7 @@ const KEY: &str = "test-key-NOT-REAL-7f3a9c";
 const TRANSCRIPT: &str = "The quick brown fox jumps over the lazy dog.";
 
 fn reply() -> serde_json::Value {
-    serde_json::json!({
-        "task": "transcribe",
-        "language": "en",
-        "duration": 1.0,
-        "text": format!(" {TRANSCRIPT}"),
-        "segments": [
-            {"id": 0, "start": 0.0, "end": 0.6, "text": " The quick brown fox", "no_speech_prob": 0.02},
-            {"id": 1, "start": 0.6, "end": 1.0, "text": " jumps over the lazy dog.", "no_speech_prob": 0.75}
-        ]
-    })
+    serde_json::json!({ "text": format!(" {TRANSCRIPT}") })
 }
 
 /// Records each wait instead of sleeping.
@@ -56,11 +47,10 @@ fn config(server: &MockServer) -> Config {
     Config {
         base_url: format!("{}/api/v1/", server.uri()),
         model: "openai/gpt-4o-mini-transcribe".into(),
-        prompt: None,
         privacy: dictation_core::cloud_models::PrivacyFilter::DenyDataCollection,
         timeout: Duration::from_secs(5),
         timeout_grows_with_audio: false,
-        long_clip: dictation_core::upload_limits::LONG_CLIP,
+        long_clip: Duration::MAX,
         retry: RetryPolicy {
             max_attempts: 3,
             base_delay: ms(100),
@@ -138,7 +128,7 @@ async fn request_carries_audio_model_and_filter_and_no_language() {
 
 // Criterion 2.
 #[tokio::test]
-async fn success_parses_text_and_no_speech_prob() {
+async fn success_parses_the_text() {
     let server = MockServer::start().await;
     mount(
         &server,
@@ -148,12 +138,6 @@ async fn success_parses_text_and_no_speech_prob() {
     .await;
     let (engine, wait) = engine(config(&server));
 
-    let t = engine.transcribe_verbose(&audio()).await.unwrap();
-    assert_eq!(t.text, TRANSCRIPT);
-    let probs: Vec<f64> = t.segments.iter().map(|s| s.no_speech_prob).collect();
-    assert_eq!(probs, [0.02, 0.75]);
-    assert_eq!(t.segments[1].text, " jumps over the lazy dog.");
-    assert!((t.segments[1].start - 0.6).abs() < 1e-12);
     assert_eq!(engine.transcribe(&audio()).await.unwrap(), TRANSCRIPT);
     assert!(wait.waits().is_empty());
 }

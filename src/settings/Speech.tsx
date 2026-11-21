@@ -6,8 +6,8 @@ import { BROKEN, messageOf } from "../messages";
 import {
   downloadingText,
   megabytes,
-  localCaption,
-  localTitle,
+  LOCAL_CAPTION,
+  LOCAL_TITLE,
   modelDetails,
   modelRow,
   cloudCaption,
@@ -165,7 +165,7 @@ export function Speech({
     setSwitching(model.id);
     setLoadErrors((now) => without(now, model.id));
     try {
-      const result = await commands.useLocalModel(model.id);
+      const result = await commands.setTranscription("local");
       if (result.status === "error") {
         setLoadErrors((now) => ({ ...now, [model.id]: messageOf(result.error) }));
       }
@@ -203,7 +203,7 @@ export function Speech({
 
   async function switchToCloud() {
     await cloud.track(async () => {
-      const result = await commands.useCloudEngine("openrouter");
+      const result = await commands.setTranscription("cloud");
       await reread();
       await refreshEngine();
       return result.status === "error" ? messageOf(result.error) : null;
@@ -254,7 +254,7 @@ export function Speech({
     setActionError(null);
     let saved = false;
     try {
-      const result = await commands.savedKeyHint("openrouter");
+      const result = await commands.savedKeyHint();
       saved = result.status === "ok" && result.data !== null;
     } catch {
       // Treated as no key: the sheet says what is wrong.
@@ -269,8 +269,7 @@ export function Speech({
 
   const busy = switching !== null || cloud.save.state === "saving";
   const switchingName = models?.find((model) => model.id === switching);
-  const waitReason =
-    switchingName === undefined ? null : `Wait until ${localTitle(switchingName)} has loaded.`;
+  const waitReason = switchingName === undefined ? null : `Wait until ${LOCAL_TITLE} has loaded.`;
 
   return (
     <>
@@ -310,7 +309,7 @@ export function Speech({
             )
           ) : (
             models.map((model) => {
-              const chosen = onDevice && settings.local_model === model.id;
+              const chosen = onDevice && model.default;
               // One row, one download: speech then cleanup (Q4).
               const shown = withCleanup(model, cleanup);
               const row = modelRow(shown, {
@@ -319,7 +318,7 @@ export function Speech({
                 switching: switching === model.id,
                 loadError: loadErrors[model.id] ?? null,
               });
-              const title = localTitle(model);
+              const title = LOCAL_TITLE;
               const error =
                 loadErrors[model.id] ??
                 (row.chip?.text === "! Couldn't load" && engine?.message ? engine.message : null);
@@ -331,9 +330,7 @@ export function Speech({
                   key={model.id}
                   id={`engine-${model.id}`}
                   name={title}
-                  caption={
-                    shown.state === "downloading" ? downloadingText(shown) : localCaption(model)
-                  }
+                  caption={shown.state === "downloading" ? downloadingText(shown) : LOCAL_CAPTION}
                   checked={checked}
                   blockedBecause={reason}
                   disabled={row.blockedBecause !== null || busy}

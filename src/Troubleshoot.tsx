@@ -94,13 +94,16 @@ export function Troubleshoot({ onBack, onOpenSettings, onReport }: Props) {
         case "open_accessibility_settings":
           await commands.requestPermission("accessibility");
           break;
-        case "open_settings":
+        case "open_speech_settings":
+        case "download_model":
+        case "choose_another_key":
           onOpenSettings();
           break;
         case "add_credits":
           await commands.openLink("openrouter_credits");
           break;
-        case "open_troubleshoot":
+        case "troubleshoot":
+        case "relaunch":
         case "try_again":
           break;
       }
@@ -157,8 +160,7 @@ export function Troubleshoot({ onBack, onOpenSettings, onReport }: Props) {
           <ul className="checks" aria-label="Checks">
             {checks.checks.map((check) => {
               const action = check.ok ? null : (check.fix ?? null);
-              const button =
-                action !== null && action !== "try_again" && action !== "open_troubleshoot";
+              const button = action !== null && action !== "try_again" && action !== "troubleshoot";
               return (
                 <li key={check.id} className="check-row" data-ok={check.ok}>
                   <span

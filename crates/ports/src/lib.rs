@@ -59,7 +59,6 @@ pub use clipboard::{
 pub use clock::Clock;
 pub use cursor::{BeforeCursor, CursorReadError, TextBeforeCursor};
 pub use dictation_core::error::Permission;
-pub use dictation_core::text::Transcript;
 pub use history::{HistoryStore, HistoryStoreError};
 pub use hotkey::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};
 pub use insert::{InsertError, TextInserter};
@@ -69,8 +68,8 @@ pub use opener::Opener;
 pub use permissions::{PermissionError, PermissionStatus, Permissions};
 pub use secrets::{Secret, SecretError, SecretStore};
 pub use telemetry::{
-    Arch, CleanupOutcome, DurationBucket, EngineChoice, EngineKind, ErrorReporter, ErrorType,
-    Event, LatencyBucket, NoErrorReporter, NoTelemetry, OnboardingStep, SettingName, SetupProblem,
+    Arch, CleanupOutcome, DurationBucket, EngineKind, ErrorReporter, ErrorType, Event,
+    LatencyBucket, NoErrorReporter, NoTelemetry, OnboardingStep, SettingName, SetupProblem,
     Telemetry, Version,
 };
 pub use transcribe::{TranscribeError, Transcriber};

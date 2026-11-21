@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use dictation_ports::{Audio, TranscribeError, Transcriber, Transcript};
+use dictation_ports::{Audio, TranscribeError, Transcriber};
 
 /// The text a [`MockTranscriber::default`] returns.
 pub const DEFAULT_TEXT: &str = "This is a test dictation.";
@@ -21,9 +21,6 @@ struct State {
     text: String,
     /// Answers for the next calls, in order, before `text` again.
     sequence: VecDeque<String>,
-    /// Reported by `transcribe_detailed`; `None` like an engine that
-    /// doesn't say.
-    no_speech_prob: Option<f64>,
     calls: usize,
 }
 
@@ -41,7 +38,6 @@ impl MockTranscriber {
             state: Arc::new(Mutex::new(State {
                 text: text.into(),
                 sequence: VecDeque::new(),
-                no_speech_prob: None,
                 calls: 0,
             })),
         }
@@ -55,15 +51,6 @@ impl MockTranscriber {
         self.lock()
             .sequence
             .extend(texts.into_iter().map(Into::into));
-        self
-    }
-
-    /// Reports `no_speech_prob` with the text from `transcribe_detailed`
-    /// (by default none, like an engine that doesn't say). Shared with
-    /// clones; returns the same mock for chaining.
-    #[must_use]
-    pub fn with_no_speech_prob(self, no_speech_prob: f64) -> Self {
-        self.lock().no_speech_prob = Some(no_speech_prob);
         self
     }
 
@@ -81,21 +68,13 @@ impl MockTranscriber {
 }
 
 impl Transcriber for MockTranscriber {
-    async fn transcribe(&self, audio: &Audio) -> Result<String, TranscribeError> {
-        self.transcribe_detailed(audio).await.map(|t| t.text)
-    }
-
-    async fn transcribe_detailed(&self, _audio: &Audio) -> Result<Transcript, TranscribeError> {
+    async fn transcribe(&self, _audio: &Audio) -> Result<String, TranscribeError> {
         let mut state = self.lock();
         state.calls += 1;
-        let text = state
+        Ok(state
             .sequence
             .pop_front()
-            .unwrap_or_else(|| state.text.clone());
-        Ok(Transcript {
-            text,
-            no_speech_prob: state.no_speech_prob,
-        })
+            .unwrap_or_else(|| state.text.clone()))
     }
 }
 
@@ -108,20 +87,6 @@ mod tests {
             sample_rate: 16_000,
             samples: vec![0.0; 1_600],
         }
-    }
-
-    #[tokio::test]
-    async fn detailed_reports_the_configured_no_speech_prob() {
-        let mock = MockTranscriber::new("Thank you.");
-        let plain = mock.transcribe_detailed(&audio()).await.unwrap();
-        assert_eq!(plain, Transcript::from_text("Thank you."));
-
-        let silent = mock.clone().with_no_speech_prob(0.9);
-        let detailed = silent.transcribe_detailed(&audio()).await.unwrap();
-        assert_eq!(detailed.no_speech_prob, Some(0.9));
-        // The plain call still gives just the text, and clones share state.
-        assert_eq!(mock.transcribe(&audio()).await.unwrap(), "Thank you.");
-        assert_eq!(mock.calls(), 3);
     }
 
     #[tokio::test]

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { commands } from "../bindings";
 import type { AppInfo } from "../bindings";
 import { BROKEN, messageOf } from "../messages";
@@ -15,21 +15,19 @@ export function lastChecked(ms: number | null, now: number = Date.now()): string
 }
 
 /**
- * Open Vocet at login (S1): applied in the background, "Applying…" until
- * the OS answers, then its real state or an inline error. Held by the
- * Settings window, not the General pane, so switching sections while the
- * OS works loses nothing.
+ * Open Vocet at login (S1): "Applying…" with the switch disabled until the
+ * OS answers, then its real state or an inline error. Held by the Settings
+ * window, not the General pane, so switching sections while the OS works
+ * loses nothing.
  */
 export function useLaunchAtLogin(stored: boolean) {
   // The user's choice while it applies, then the OS's answer, until the
   // settings are read again; `null`: what was read.
   const [answer, setLaunchAtLogin] = useState<boolean | null>(null);
   const [seenStored, setSeenStored] = useState(stored);
-  // The OS can take tens of seconds (#238); nothing waits for it.
+  // The OS can take tens of seconds (#238); the switch waits, nothing else.
   const [launchPending, setLaunchPending] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
-  // Counts the choices, so an answer to an older one is ignored.
-  const launchChoice = useRef(0);
 
   // Settings read again (the window came back): follow the OS, unless the
   // user is in the middle of changing it.
@@ -40,7 +38,6 @@ export function useLaunchAtLogin(stored: boolean) {
   const launchAtLogin = answer ?? stored;
 
   async function changeLaunch(want: boolean) {
-    const choice = ++launchChoice.current;
     setLaunchAtLogin(want);
     setLaunchPending(true);
     setLaunchError(null);
@@ -53,7 +50,6 @@ export function useLaunchAtLogin(stored: boolean) {
     } catch {
       error = BROKEN;
     }
-    if (choice !== launchChoice.current) return;
     if (actual === null) {
       try {
         const current = await commands.getSettings();
@@ -61,7 +57,6 @@ export function useLaunchAtLogin(stored: boolean) {
       } catch {
         // Keep the user's choice shown; the error says it may not have applied.
       }
-      if (choice !== launchChoice.current) return;
     }
     if (actual !== null) setLaunchAtLogin(actual);
     setLaunchError(error);
@@ -138,6 +133,7 @@ export function General({ launch }: { launch: LaunchAtLogin }) {
           checked={launchAtLogin}
           labelledBy="launch-at-login-label"
           describedBy="launch-at-login-hint"
+          disabled={launchPending}
           onChange={(want) => void changeLaunch(want)}
         />
       </Row>

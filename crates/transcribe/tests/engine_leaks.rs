@@ -7,7 +7,6 @@
 mod common;
 
 use common::Captured;
-use dictation_core::settings::Settings;
 use dictation_ports::{Audio, Secret, SecretError, Transcriber};
 use dictation_transcribe::engine::{Engine, Transcribers};
 use wiremock::matchers::{method, path};
@@ -25,11 +24,7 @@ fn audio() -> Audio {
 }
 
 fn built(server: &MockServer, key: &str) -> Engine {
-    Engine::from_settings_at(
-        &Settings::default(),
-        Ok(Some(Secret::new(key))),
-        &server.uri(),
-    )
+    Engine::remote_at(Ok(Some(Secret::new(key))), &server.uri())
 }
 
 #[tokio::test]
@@ -61,16 +56,16 @@ async fn the_key_and_transcript_stay_out_of_logs_and_messages_through_transcribe
         match transcribers.transcribe(&audio()).await {
             Ok(_) => {}
             Err(error) => {
-                shown.push_str(&format!("{error} | {error:?} | {}\n", error.user_message()));
+                shown.push_str(&format!("{error} | {error:?}\n"));
             }
         }
         shown.push_str(&format!("{transcribers:?}\n"));
     }
     // An unreadable keychain and a missing key, too.
     for key in [Err(SecretError::Store("keychain locked".into())), Ok(None)] {
-        let unavailable = Transcribers::new(Engine::from_settings(&Settings::default(), key));
+        let unavailable = Transcribers::new(Engine::remote(key));
         let error = unavailable.transcribe(&audio()).await.unwrap_err();
-        shown.push_str(&format!("{error} | {error:?} | {}\n", error.user_message()));
+        shown.push_str(&format!("{error} | {error:?}\n"));
     }
 
     let logs = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();

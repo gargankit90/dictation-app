@@ -14,20 +14,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dictation_core::diagnostics::ErrorCode;
-use dictation_core::error::DictationError;
 use dictation_core::onboarding::{Readiness, Step};
-use dictation_core::settings::{Provider, Settings, Transcription};
+use dictation_core::settings::{Settings, Transcription};
 use dictation_pipeline::config::Config as AppSettingsFile;
 use dictation_pipeline::usage::SharingGate;
 use dictation_ports::{
-    Arch, EngineChoice, EngineKind, Event, OnboardingStep, Permission, PermissionStatus,
-    Permissions, SecretStore, SettingName, SetupProblem, Telemetry, Version,
+    Arch, EngineKind, Event, OnboardingStep, Permission, PermissionStatus, Permissions,
+    SecretStore, SettingName, SetupProblem, Telemetry, Version,
 };
 use dictation_telemetry::{Config, PostHogTelemetry, SentryReporter, errors};
 use dictation_transcribe::engine::Engine;
 use dictation_transcribe::models::DownloadError;
 
-use crate::onboarding::{Onboarding, OnboardingStatus, PermissionState, View};
+use crate::onboarding::{Onboarding, OnboardingStatus, View};
 
 /// The PostHog project key this build was made with, if any.
 const BUILD_KEY: Option<&str> = option_env!("DICTATION_POSTHOG_KEY");
@@ -149,11 +148,7 @@ pub fn launched(usage: Usage, version: &str) {
 
 /// The macOS major version (`15`), or 0 if it can't be read.
 fn macos_major() -> u16 {
-    std::process::Command::new("sw_vers")
-        .arg("-productVersion")
-        .output()
-        .ok()
-        .and_then(|out| String::from_utf8(out.stdout).ok())
+    crate::diagnostics::macos_version()
         .and_then(|text| major_of(&text))
         .unwrap_or(0)
 }
@@ -186,16 +181,12 @@ pub fn settings_change(before: &Settings, after: &Settings) -> SettingsChange {
     if before.history_limit != after.history_limit {
         changed(SettingName::HistoryLimit);
     }
-    // The engine: on-device or cloud (L1), or another cloud provider.
-    let engine_changed = before.transcription != after.transcription
-        || (after.transcription == Transcription::Cloud && before.provider != after.provider);
-    if engine_changed {
-        events.push(Event::EngineSelected {
-            engine: match after.transcription {
-                Transcription::Local => EngineChoice::Local,
-                Transcription::Cloud => EngineChoice::Cloud(after.provider),
-            },
-        });
+    // The engine: on-device or cloud (L1).
+    if before.transcription != after.transcription {
+        events.push(engine_selected(match after.transcription {
+            Transcription::Local => EngineKind::Local,
+            Transcription::Cloud => EngineKind::Cloud,
+        }));
     }
     SettingsChange {
         events,
@@ -204,12 +195,10 @@ pub fn settings_change(before: &Settings, after: &Settings) -> SettingsChange {
     }
 }
 
-/// The `engine_selected` event for `provider`.
+/// The `engine_selected` event for `kind`.
 #[must_use]
-pub fn engine_selected(provider: Provider) -> Event {
-    Event::EngineSelected {
-        engine: EngineChoice::Cloud(provider),
-    }
+pub fn engine_selected(kind: EngineKind) -> Event {
+    Event::EngineSelected { kind }
 }
 
 /// Where `engine` transcribes, for `dictation_finished` (L1): on this
@@ -319,20 +308,17 @@ pub fn request_problem(permission: Permission) -> SetupProblem {
 /// is the step in the way. macOS reports no refusal of Accessibility; see
 /// [`setup_left`].
 pub fn setup_status_read(usage: &Usage, onboarding: &Onboarding, status: &OnboardingStatus) {
-    if status.step == Step::Permissions && status.microphone == PermissionState::Denied {
+    if status.step == Step::Permissions && status.microphone == PermissionStatus::Denied {
         setup_problem_once(usage, onboarding, SetupProblem::MicrophoneDenied);
     }
 }
 
 /// What the window just read about the engine: a model that can't load.
 pub fn engine_status_read(usage: &Usage, onboarding: &Onboarding, engine: &Engine) {
-    if let Engine::Unavailable(error) = engine {
-        let shown = DictationError::TranscriptionFailed {
-            reason: error.user_message(),
-        };
-        if ErrorCode::of(&shown) == ErrorCode::ModelLoadingFailed {
-            setup_problem_once(usage, onboarding, SetupProblem::ModelLoadFailed);
-        }
+    if let Engine::Unavailable(error) = engine
+        && error.code() == ErrorCode::ModelLoadingFailed
+    {
+        setup_problem_once(usage, onboarding, SetupProblem::ModelLoadFailed);
     }
 }
 
@@ -400,25 +386,18 @@ mod tests {
         let cloud = Settings::default();
         let local = Settings {
             transcription: Transcription::Local,
-            local_model: dictation_core::local_models::DEFAULT_MODEL.into(),
             ..Settings::default()
         };
         assert_eq!(
             settings_change(&cloud, &local).events,
             [Event::EngineSelected {
-                engine: EngineChoice::Local
+                kind: EngineKind::Local
             }]
         );
         assert_eq!(
             settings_change(&local, &cloud).events,
-            [engine_selected(Provider::OpenRouter)]
+            [engine_selected(EngineKind::Cloud)]
         );
-        // Another local model is not an engine change, and its id isn't sent.
-        let other = Settings {
-            local_model: "another-model".into(),
-            ..local.clone()
-        };
-        assert!(settings_change(&local, &other).events.is_empty());
     }
 
     #[test]
@@ -426,11 +405,11 @@ mod tests {
         use dictation_transcribe::local::{LocalTranscriber, SpeechModel};
         struct Silent;
         impl SpeechModel for Silent {
-            fn run(&mut self, _: &[f32], _: Option<&str>) -> Result<String, String> {
+            fn run(&mut self, _: &[f32]) -> Result<String, String> {
                 Ok(String::new())
             }
         }
-        let local = Engine::Local(LocalTranscriber::new(Box::new(Silent), None));
+        let local = Engine::Local(LocalTranscriber::new(Box::new(Silent)));
         assert_eq!(engine_kind(&local), EngineKind::Local);
         let mock = Engine::Mock(dictation_transcribe::mock::MockTranscriber::default());
         assert_eq!(engine_kind(&mock), EngineKind::Cloud);
@@ -715,9 +694,7 @@ mod tests {
             let no_key = Engine::Unavailable(TranscribeError::ModelMissing);
             engine_status_read(&usage, &onboarding, &no_key);
             assert_eq!(fake.events().len(), before);
-            let broken = Engine::Unavailable(TranscribeError::Engine(
-                "couldn't load the on-device model: bad file".into(),
-            ));
+            let broken = Engine::Unavailable(TranscribeError::ModelLoadFailed("bad file".into()));
             engine_status_read(&usage, &onboarding, &broken);
             engine_status_read(&usage, &onboarding, &broken);
             assert_eq!(

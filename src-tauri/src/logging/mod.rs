@@ -320,13 +320,13 @@ mod tests {
     fn log_everything() {
         let event = Event::TranscriptReady(TRANSCRIPT.into());
         let command = Command::Insert(TRANSCRIPT.into());
-        let failed = Event::TranscriptionFailed(format!("rejected {KEY}"));
+        let failed = Event::InsertFailed(format!("rejected {KEY}"));
         let errors = [
             TranscribeError::Network(format!("{KEY} {OPENROUTER_KEY}")),
             TranscribeError::Engine(format!("body: {{\"key\": \"{KEY}\"}}")),
             TranscribeError::KeychainUnavailable(format!("locked {KEY}")),
         ];
-        let shown = Command::ShowError(DictationError::TranscriptionFailed {
+        let shown = Command::ShowError(DictationError::InsertFailed {
             reason: KEY.to_owned(),
         });
         let secret = Secret::new(KEY);

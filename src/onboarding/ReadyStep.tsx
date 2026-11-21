@@ -11,7 +11,7 @@ import { BROKEN, messageOf } from "../messages";
 import { WhatsSent } from "../settings/Privacy";
 import type { SharingSwitch } from "../settings/Privacy";
 import { SaveStatus, Switch, useSave } from "../settings/ui";
-import { PROVIDER_NAME, modelTitle } from "../settings/modelRow";
+import { MODEL_TITLE, PROVIDER_NAME } from "../settings/modelRow";
 import { chosenModel, modelWait } from "./logic";
 import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";
@@ -51,15 +51,14 @@ function useEngineLine(
   engine: EngineStatus | null,
 ): string {
   const [keySaved, setKeySaved] = useState<boolean | null>(null);
-  const provider = settings?.provider ?? null;
   const cloud = settings?.transcription === "cloud";
   useEffect(() => {
-    if (!cloud || provider === null) return;
+    if (!cloud) return;
     const state = { cancelled: false };
     void (async () => {
       let saved = false;
       try {
-        const result = await commands.savedKeyHint(provider);
+        const result = await commands.savedKeyHint();
         saved = result.status === "ok" && result.data !== null;
       } catch {
         // Not connected, as far as this line can tell.
@@ -69,7 +68,7 @@ function useEngineLine(
     return () => {
       state.cancelled = true;
     };
-  }, [cloud, provider]);
+  }, [cloud]);
 
   if (settings === null) return "Loading…";
   if (settings.transcription === "cloud") {
@@ -81,7 +80,7 @@ function useEngineLine(
       : `${name} · ✓ Connected`;
   }
   const model = chosenModel(settings, models);
-  const name = model === null ? "On-device model" : modelTitle(model);
+  const name = model === null ? "On-device model" : MODEL_TITLE;
   const wait = modelWait(settings, models, engine);
   return `On this Mac · ${name} · ${wait ?? "✓ Ready"}`;
 }
@@ -162,6 +161,7 @@ export function ReadyStep({
             <Switch
               id="ob-login"
               checked={atLogin}
+              disabled={login.save.state === "saving"}
               labelledBy="ob-login-label"
               onChange={(enabled) => void setLogin(enabled)}
             />

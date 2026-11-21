@@ -134,7 +134,6 @@ fn the_app_is_called_vocet_in_its_config() {
 #[test]
 #[allow(clippy::unwrap_used, reason = "a test fails on purpose")]
 fn saved_settings_and_key_still_load_after_the_rename() {
-    use dictation_core::settings::Provider;
     use dictation_pipeline::config::{Config, SETTINGS_FILE};
     use dictation_platform::fakes::MemSecretStore;
     use dictation_ports::SecretStore as _;
@@ -162,9 +161,8 @@ fn saved_settings_and_key_still_load_after_the_rename() {
 
     let config = Config::new(&dir, secrets);
     let settings = config.settings().unwrap();
-    assert_eq!(settings.provider, Provider::OpenRouter);
     assert_eq!(settings.hotkey, "RightCmd");
     assert!(settings.launch_at_login);
-    assert!(config.has_api_key(Provider::OpenRouter).unwrap());
+    assert!(config.has_api_key().unwrap());
     let _ = fs::remove_dir_all(&dir);
 }

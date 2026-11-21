@@ -223,7 +223,7 @@ impl LaunchFlags {
     }
 
     fn model_url(&mut self, url: &str) {
-        if is_loopback_http(url) {
+        if dictation_transcribe::http::is_loopback_http(url) {
             self.model_url = Some(url.to_owned());
         } else {
             self.refused_model_urls.push(url.to_owned());
@@ -231,30 +231,12 @@ impl LaunchFlags {
     }
 
     fn provider_url(&mut self, url: &str) {
-        if is_loopback_http(url) {
+        if dictation_transcribe::http::is_loopback_http(url) {
             self.provider_url = Some(url.to_owned());
         } else {
             self.refused_provider_urls.push(url.to_owned());
         }
     }
-}
-
-/// Whether `url` is plain `http` to this machine: `127.0.0.0/8`, `::1` or
-/// `localhost`, with no user name or password.
-fn is_loopback_http(url: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(url) else {
-        return false;
-    };
-    // An IPv6 host comes back in brackets ("[::1]").
-    let loopback = url.host_str().is_some_and(|host| {
-        host.eq_ignore_ascii_case("localhost")
-            || host
-                .trim_start_matches('[')
-                .trim_end_matches(']')
-                .parse::<std::net::IpAddr>()
-                .is_ok_and(|ip| ip.is_loopback())
-    });
-    url.scheme() == "http" && loopback && url.username().is_empty() && url.password().is_none()
 }
 
 fn split_texts(texts: &str) -> Vec<String> {

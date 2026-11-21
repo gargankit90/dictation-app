@@ -19,7 +19,7 @@
 use std::time::Duration;
 
 use dictation_core::cleanup;
-use dictation_core::cloud_models::{self, CloudModel};
+use dictation_core::cloud_models::{CLEANUP_MODEL, PrivacyFilter};
 use dictation_ports::{Cleaner, CleanupError, Secret};
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
@@ -34,13 +34,13 @@ const TOKEN_ROOM: usize = 1_280;
 pub struct OpenRouterCleanup {
     client: Client,
     endpoint: String,
-    model: &'static CloudModel,
+    model: &'static str,
     key: Secret,
     timeout: Duration,
 }
 
 impl OpenRouterCleanup {
-    /// The catalog's cleanup model at [`BASE_URL`] with `key`.
+    /// [`CLEANUP_MODEL`] at [`BASE_URL`] with `key`.
     ///
     /// # Errors
     ///
@@ -60,7 +60,7 @@ impl OpenRouterCleanup {
         Ok(Self {
             client,
             endpoint: format!("{}/chat/completions", base_url.trim_end_matches('/')),
-            model: cloud_models::default_cleanup(),
+            model: CLEANUP_MODEL,
             key,
             timeout: cleanup::TIMEOUT,
         })
@@ -76,7 +76,7 @@ impl OpenRouterCleanup {
     /// The model's id.
     #[must_use]
     pub fn model(&self) -> &'static str {
-        self.model.id
+        self.model
     }
 
     async fn request(&self, text: &str) -> Result<String, CleanupError> {
@@ -106,12 +106,12 @@ impl Cleaner for OpenRouterCleanup {
         let result = self.request(text).await;
         match &result {
             Ok(reply) => tracing::debug!(
-                model = self.model.id,
+                model = self.model,
                 chars = text.chars().count(),
                 reply_chars = reply.chars().count(),
                 "cleanup replied"
             ),
-            Err(error) => tracing::debug!(model = self.model.id, %error, "cleanup failed"),
+            Err(error) => tracing::debug!(model = self.model, %error, "cleanup failed"),
         }
         result
     }
@@ -121,7 +121,7 @@ impl std::fmt::Debug for OpenRouterCleanup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OpenRouterCleanup")
             .field("endpoint", &self.endpoint)
-            .field("model", &self.model.id)
+            .field("model", &self.model)
             .field("key", &self.key)
             .field("timeout", &self.timeout)
             .finish_non_exhaustive()
@@ -129,21 +129,18 @@ impl std::fmt::Debug for OpenRouterCleanup {
 }
 
 /// The chat request for `text`.
-fn request_body(model: &CloudModel, text: &str) -> serde_json::Value {
-    let mut body = serde_json::json!({
-        "model": model.id,
+fn request_body(model: &str, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "model": model,
         "temperature": 0,
         "max_tokens": text.chars().count() / 2 + TOKEN_ROOM,
         "messages": [
             { "role": "system", "content": cleanup::prompt() },
             { "role": "user", "content": cleanup::user_message(text) },
         ],
-        "provider": provider_filter(model.privacy),
-    });
-    if model.low_reasoning {
-        body["reasoning"] = serde_json::json!({ "effort": "low", "exclude": true });
-    }
-    body
+        "provider": provider_filter(PrivacyFilter::ZeroDataRetention),
+        "reasoning": { "effort": "low", "exclude": true },
+    })
 }
 
 fn from_status(status: StatusCode) -> CleanupError {
@@ -205,7 +202,7 @@ mod tests {
 
     #[test]
     fn the_request_is_glm_with_zdr_low_reasoning_and_the_transcript_as_data() {
-        let body = request_body(cloud_models::default_cleanup(), "hello");
+        let body = request_body(CLEANUP_MODEL, "hello");
         assert_eq!(body["model"], "z-ai/glm-5.3-flash");
         assert_eq!(body["temperature"], 0);
         assert_eq!(body["max_tokens"], 2 + 1_280);

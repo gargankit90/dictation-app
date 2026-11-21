@@ -127,8 +127,8 @@ fn transition(state: State, event: Event) -> (State, Vec<Command>) {
                 (State::Inserting, vec![Command::Insert(text)])
             }
         }
-        (State::Transcribing, Event::TranscriptionFailed(reason)) => {
-            fail(DictationError::TranscriptionFailed { reason })
+        (State::Transcribing, Event::TranscriptionFailed(code)) => {
+            fail(DictationError::TranscriptionFailed(code))
         }
         // Nothing to paste (a dropped transcript) is not an error.
         (State::Transcribing, Event::TranscriptDropped) | (State::Inserting, Event::InsertDone) => {
@@ -166,6 +166,7 @@ fn fail(error: DictationError) -> (State, Vec<Command>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::ErrorCode;
     use crate::error::Permission;
 
     fn ms(millis: u64) -> Duration {
@@ -340,15 +341,15 @@ mod tests {
     fn criterion_6_transcription_failed_shows_error_and_returns_to_idle() {
         let (state, commands) = step(
             State::Transcribing,
-            Event::TranscriptionFailed("timed out".into()),
+            Event::TranscriptionFailed(ErrorCode::NetworkUnreachable),
         );
         assert_eq!(state, State::Idle);
         assert_eq!(
             commands,
             [
-                Command::ShowError(DictationError::TranscriptionFailed {
-                    reason: "timed out".into()
-                }),
+                Command::ShowError(DictationError::TranscriptionFailed(
+                    ErrorCode::NetworkUnreachable
+                )),
                 Command::StateChanged(Phase::Idle)
             ]
         );
@@ -469,7 +470,7 @@ mod tests {
     fn late_results_in_the_wrong_state_are_ignored() {
         let late = [
             Event::TranscriptReady("hello".into()),
-            Event::TranscriptionFailed("timed out".into()),
+            Event::TranscriptionFailed(ErrorCode::NetworkUnreachable),
             Event::InsertDone,
             Event::InsertFailed("no focus".into()),
         ];
@@ -559,6 +560,7 @@ mod proptests {
     use proptest::prelude::*;
 
     use super::*;
+    use crate::diagnostics::ErrorCode;
     use crate::error::Permission;
 
     /// An event with the time gap since the previous one, so times only go
@@ -651,7 +653,9 @@ mod proptests {
             EventKind::AudioCaptured => Event::AudioCaptured,
             EventKind::TranscriptReady => Event::TranscriptReady("hello".into()),
             EventKind::TranscriptEmpty => Event::TranscriptReady(String::new()),
-            EventKind::TranscriptionFailed => Event::TranscriptionFailed("failed".into()),
+            EventKind::TranscriptionFailed => {
+                Event::TranscriptionFailed(ErrorCode::NetworkUnreachable)
+            }
             EventKind::InsertDone => Event::InsertDone,
             EventKind::InsertFailed => Event::InsertFailed("failed".into()),
             EventKind::PermissionMissing => Event::PermissionMissing(Permission::Microphone),

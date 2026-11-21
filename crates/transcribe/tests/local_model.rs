@@ -37,7 +37,7 @@ async fn a_real_gguf_model_transcribes_16_khz_audio() {
         .await
         .unwrap()
         .unwrap();
-    let engine = LocalTranscriber::new(Box::new(loaded), None);
+    let engine = LocalTranscriber::new(Box::new(loaded));
     match (
         std::env::var("DICTATION_LOCAL_SPEECH"),
         std::env::var("DICTATION_LOCAL_EXPECT"),

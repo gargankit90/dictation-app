@@ -24,15 +24,12 @@ pub enum Role {
 /// One model the user can download.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalModel {
-    /// Stable id (speech models are saved in the settings as
-    /// `local_model`); never reuse one for different weights.
+    /// Stable id; never reuse one for different weights.
     pub id: &'static str,
     /// What it does.
     pub role: Role,
     /// What Settings shows.
     pub name: &'static str,
-    /// The languages it handles, as ISO 639 codes.
-    pub languages: &'static [&'static str],
     /// The languages in words ("English only").
     pub languages_label: &'static str,
     /// The download's exact size.
@@ -62,7 +59,6 @@ pub const ORUKQWEN_1_7B: LocalModel = LocalModel {
     id: "orukqwen-asr-1.7b-q4_k_m",
     role: Role::Speech,
     name: "OrukQwen 1.7B",
-    languages: &["en"],
     languages_label: "English only",
     size_bytes: 1_319_830_656,
     url: "https://huggingface.co/vocetlabs/orukqwen-asr-1.7b-gguf/resolve/c947468edd421a9922afbbb7887056f793e5fd20/orukqwen-asr-1.7b-Q4_K_M.gguf",
@@ -80,7 +76,6 @@ pub const GEMMA_4_E2B: LocalModel = LocalModel {
     id: "gemma-4-e2b-it-q4_k_m",
     role: Role::Cleanup,
     name: "Gemma 4 E2B",
-    languages: &["en"],
     languages_label: "English",
     size_bytes: 3_106_738_272,
     url: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/0314792d7f1f7e229411f620751375812bb9faf2/gemma-4-E2B-it-Q4_K_M.gguf",
@@ -96,8 +91,11 @@ pub const CATALOGUE: &[LocalModel] = &[ORUKQWEN_1_7B];
 /// Every cleanup model offered. The first is the default.
 pub const CLEANUP_CATALOGUE: &[LocalModel] = &[GEMMA_4_E2B];
 
-/// The speech model a new user gets: the first entry.
-pub const DEFAULT_MODEL: &str = CATALOGUE[0].id;
+/// The speech model the app runs on this Mac: the first entry.
+pub const DEFAULT: &LocalModel = &CATALOGUE[0];
+
+/// [`DEFAULT`]'s id.
+pub const DEFAULT_MODEL: &str = DEFAULT.id;
 
 /// The cleanup model used with on-device speech.
 pub const DEFAULT_CLEANUP_MODEL: &str = CLEANUP_CATALOGUE[0].id;
@@ -106,15 +104,6 @@ pub const DEFAULT_CLEANUP_MODEL: &str = CLEANUP_CATALOGUE[0].id;
 #[must_use]
 pub fn find(id: &str) -> Option<&'static LocalModel> {
     CATALOGUE.iter().find(|model| model.id == id)
-}
-
-/// The speech model to run for a saved `id`: that model, or the default
-/// when the catalogue no longer has it (a file saved before Q4 removed
-/// Parakeet and Qwen3-ASR). No migration: the file keeps the old id until
-/// the user next saves.
-#[must_use]
-pub fn resolve(id: &str) -> &'static LocalModel {
-    find(id).unwrap_or(&ORUKQWEN_1_7B)
 }
 
 /// The cleanup model with `id`, if the catalogue has it.
@@ -133,14 +122,6 @@ pub fn all() -> impl Iterator<Item = &'static LocalModel> {
 #[must_use]
 pub fn find_any(id: &str) -> Option<&'static LocalModel> {
     all().find(|model| model.id == id)
-}
-
-impl LocalModel {
-    /// Whether it handles `language` (an ISO code).
-    #[must_use]
-    pub fn speaks(&self, language: &str) -> bool {
-        self.languages.contains(&language)
-    }
 }
 
 #[cfg(test)]
@@ -225,37 +206,14 @@ mod tests {
                 Some("gguf".as_ref())
             );
             assert!(model.size_bytes > 100_000_000, "{}", model.id);
-            assert!(!model.languages.is_empty() && !model.languages_label.is_empty());
+            assert_ne!(model.languages_label, "");
             assert_ne!(model.licence, "");
-            // The id is a valid settings value.
-            assert!(model.id.len() <= crate::settings::MAX_MODEL_LEN);
             assert!(!model.id.contains(char::is_whitespace));
         }
     }
 
     #[test]
-    fn a_settings_file_with_a_removed_model_still_loads() {
-        // Q4 removed Parakeet; a file that saved it must not break loading.
-        // The id loads as it is, runs as OrukQwen, and every other
-        // preference survives.
-        let json = r#"{"version": 2, "transcription": "local",
-            "local_model": "parakeet-unified-en-0.6b-q4_k_m", "hotkey": "RightCmd"}"#;
-        let settings = crate::settings::from_json(json).unwrap();
-        assert_eq!(settings.local_model, "parakeet-unified-en-0.6b-q4_k_m");
-        assert_eq!(settings.hotkey, "RightCmd");
-        assert_eq!(find(&settings.local_model), None);
-        assert_eq!(resolve(&settings.local_model), &ORUKQWEN_1_7B);
-        assert_eq!(resolve(DEFAULT_MODEL), &ORUKQWEN_1_7B);
-        // A fresh install gets OrukQwen.
-        assert_eq!(
-            crate::settings::Settings::default().local_model,
-            DEFAULT_MODEL
-        );
-    }
-
-    #[test]
     fn orukqwen_is_english_only() {
-        assert!(ORUKQWEN_1_7B.speaks("en") && !ORUKQWEN_1_7B.speaks("hi"));
         assert_eq!(ORUKQWEN_1_7B.languages_label, "English only");
     }
 }

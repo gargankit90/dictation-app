@@ -121,7 +121,7 @@ links one install's events together. Turning sharing off deletes it.
 | `onboarding_completed` | You finish onboarding | `step` (`ready`) |
 | `onboarding_left` | You close setup's window or quit with setup on it, and it isn't finished | `step`, as above: where you stopped |
 | `setup_problem` | Something gets in the way during setup | `reason`, one of the values under [Setup problems](#setup-problems) |
-| `engine_selected` | You save your key, or switch between On this Mac and Your own key | `kind` (`cloud`, `local`), `provider` (`openrouter`; cloud only; which local model is never sent) |
+| `engine_selected` | You save your key, or switch between On this Mac and Your own key | `kind` (`cloud`, `local`; which local model is never sent) |
 | `dictation_finished` | A dictation was pasted | `engine_kind` (`cloud`, `local`), `duration_bucket` (`under2s`, `from2_to5s`, `from5_to15s`, `from15_to60s`, `over60s`), `latency_bucket` (`under500ms`, `from500_to1000ms`, `from1_to2s`, `from2_to5s`, `over5s`), `cleanup` (cloud only: `applied`, or the raw transcript was pasted after `fallback_timeout`, `fallback_guard` or `fallback_error`; never the text) |
 | `dictation_failed` | A dictation failed | `error_type` (`transcription`, `empty_transcript`, `insert`, `secure_input`, `microphone_permission`, `accessibility_permission`, `hotkey`) |
 | `setting_changed` | You save a changed setting | `setting` (`hotkey`, `launch_at_login`, `share_usage_events`, `history_limit`). Turning sharing off sends nothing, not even this. |

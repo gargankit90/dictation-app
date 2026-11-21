@@ -19,7 +19,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use dictation_core::coordinator::Phase::Idle;
-use dictation_core::text::Transcript;
 use dictation_pipeline::pipeline::{
     CURSOR_READ_TIMEOUT, Config, CursorReader, Pipeline, Ports, UiEvent,
 };
@@ -33,11 +32,11 @@ use dictation_ports::{
 const WAIT: Duration = Duration::from_secs(5);
 
 /// Answers `text`, or fails.
-struct Answering(Result<Transcript, TranscribeError>);
+struct Answering(Result<String, TranscribeError>);
 
 impl Answering {
     fn text(text: &str) -> Self {
-        Self(Ok(Transcript::from_text(text)))
+        Self(Ok(text.to_owned()))
     }
 }
 
@@ -46,14 +45,6 @@ impl Transcriber for Answering {
         &self,
         _audio: &Audio,
     ) -> impl Future<Output = Result<String, TranscribeError>> + Send {
-        let result = self.0.clone().map(|transcript| transcript.text);
-        async move { result }
-    }
-
-    fn transcribe_detailed(
-        &self,
-        _audio: &Audio,
-    ) -> impl Future<Output = Result<Transcript, TranscribeError>> + Send {
         let result = self.0.clone();
         async move { result }
     }
@@ -309,7 +300,6 @@ mod edges {
     use std::time::Duration;
 
     use dictation_core::coordinator::Phase::Idle;
-    use dictation_core::text::Transcript;
     use dictation_pipeline::pipeline::{Config, CursorReader, Pipeline, Ports, UiEvent};
     use dictation_platform::fakes::{
         FakeClock, FakeHotkey, FakeInserter, FakePermissions, FakeTextBeforeCursor, FileAudioSource,
@@ -322,11 +312,11 @@ mod edges {
     const WAIT: Duration = Duration::from_secs(5);
 
     /// Answers `text`, or fails.
-    struct Answering(Result<Transcript, TranscribeError>);
+    struct Answering(Result<String, TranscribeError>);
 
     impl Answering {
         fn text(text: &str) -> Self {
-            Self(Ok(Transcript::from_text(text)))
+            Self(Ok(text.to_owned()))
         }
     }
 
@@ -335,14 +325,6 @@ mod edges {
             &self,
             _audio: &Audio,
         ) -> impl Future<Output = Result<String, TranscribeError>> + Send {
-            let result = self.0.clone().map(|transcript| transcript.text);
-            async move { result }
-        }
-
-        fn transcribe_detailed(
-            &self,
-            _audio: &Audio,
-        ) -> impl Future<Output = Result<Transcript, TranscribeError>> + Send {
             let result = self.0.clone();
             async move { result }
         }

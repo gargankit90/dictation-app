@@ -20,7 +20,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use dictation_core::error::DictationError;
-use dictation_core::settings::Provider;
 use dictation_ports::{
     HotkeyError, HotkeyEvent, HotkeySink, HotkeySource, Permission, SecretStore,
 };
@@ -136,7 +135,7 @@ impl KeyCommand {
     }
 }
 
-/// Does `command` for [`Provider::OpenRouter`] through `config`, the way the
+/// Does `command` with the API key through `config`, the way the
 /// Settings window would: `Set` reads the key from `stdin` and stores it
 /// ([`Config::set_api_key`], which trims and validates it), `Delete` removes
 /// it. Returns what to tell the user, which never holds the key.
@@ -162,12 +161,12 @@ pub fn run_key_command<S: SecretStore>(
             let key = String::from_utf8(input)
                 .map_err(|_| "the key on stdin is not valid UTF-8".to_owned())?;
             config
-                .set_api_key(Provider::OpenRouter, &key)
+                .set_api_key(&key)
                 .map(|()| "API key stored")
                 .map_err(|error| error.to_string())
         }
         KeyCommand::Delete => config
-            .delete_api_key(Provider::OpenRouter)
+            .delete_api_key()
             .map(|()| "API key deleted")
             .map_err(|error| error.to_string()),
     }

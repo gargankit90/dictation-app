@@ -10,7 +10,6 @@ const SPEECH: LocalModelInfo_Serialize = {
   id: "orukqwen-asr-1.7b-q4_k_m",
   name: "OrukQwen 1.7B",
   languages: "English only",
-  language_codes: ["en"],
   size_bytes: 1_319_830_656,
   downloaded_bytes: 0,
   state: "missing",
@@ -32,7 +31,7 @@ describe("withCleanup", () => {
   it("sums the sizes and keeps the speech model's id and languages", () => {
     const both = withCleanup(SPEECH, GEMMA);
     expect(both.id).toBe(SPEECH.id);
-    expect(both.language_codes).toEqual(["en"]);
+    expect(both.languages).toBe(SPEECH.languages);
     expect(both.size_bytes).toBe(4_426_568_928);
     expect(both.state).toBe("missing");
     expect(downloadingText(both)).toBe("Downloading on-device models (speech + cleanup) · 4.4 GB");

@@ -91,7 +91,9 @@ describe("criterion_m5_1_2 the overlay code calls only the level command", () =>
   it.each(Object.entries(overlaySources))(
     "%s only listens and reads the level",
     (_file, source) => {
-      expect(source).not.toMatch(/\.\.\/bindings/);
+      // Types only from the bindings (the payload's, generated), never
+      // its commands.
+      expect(source).not.toMatch(/^import (?!type )[^;]*"\.\.\/bindings"/m);
       const tauriImports = [...source.matchAll(/from "(@tauri-apps\/[^"]+)"/g)].map((m) => m[1]);
       for (const module of tauriImports) {
         expect(["@tauri-apps/api/event", "@tauri-apps/api/core"]).toContain(module);

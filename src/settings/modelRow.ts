@@ -128,46 +128,24 @@ export function modelRow(model: LocalModelInfo_Serialize, context: RowContext): 
 }
 
 /**
- * A model's title: the language choice, not the checkpoint (Design Lead,
- * round 1). The one place this label lives: a count from the catalogue, since
- * "All languages" would claim more than it has (U12, the owner is deciding).
+ * The on-device model's title: its language, not the checkpoint (Design
+ * Lead, round 1). 0.2.0 is English-only.
  */
-export function modelTitle(model: LocalModelInfo_Serialize): string {
-  const codes = model.language_codes;
-  return codes.join() === "en" ? "English" : `${String(codes.length)} languages`;
-}
+export const MODEL_TITLE = "English";
 
 /**
- * The name and size together, as setup's card shows them (U11): "English ·
- * 477 MB", "30 languages · 590 MB". Settings shows the same two parts apart.
+ * The title and size together, as setup's card shows them (U11): "English ·
+ * 477 MB". Settings shows the same two parts apart.
  */
 export function modelLabel(model: LocalModelInfo_Serialize): string {
-  return `${modelTitle(model)} · ${megabytes(model.size_bytes ?? 0)}`;
+  return `${MODEL_TITLE} · ${megabytes(model.size_bytes ?? 0)}`;
 }
 
-/** Its languages in words, counted from the codes the language picker uses. */
-export function languagesLabel(codes: readonly string[]): string {
-  if (codes.join() === "en") return "English only";
-  const count = `${String(codes.length)} languages`;
-  return codes.includes("en") && codes.includes("hi")
-    ? `${count}, including English and Hindi`
-    : count;
-}
+/** The on-device row's title (owner, Q4). */
+export const LOCAL_TITLE = "On this Mac";
 
-/**
- * The on-device row's title (owner, Q4): "On this Mac"; with more than one
- * speech model, each also says its languages.
- */
-export function localTitle(model: LocalModelInfo_Serialize): string {
-  return model.language_codes.join() === "en"
-    ? "On this Mac"
-    : `On this Mac · ${modelTitle(model)}`;
-}
-
-/** The smaller line under it (owner, Q4): "English · works offline · nothing leaves your Mac". */
-export function localCaption(model: LocalModelInfo_Serialize): string {
-  return `${modelTitle(model)} · works offline · nothing leaves your Mac`;
-}
+/** The smaller line under it (owner, Q4). */
+export const LOCAL_CAPTION = `${MODEL_TITLE} · works offline · nothing leaves your Mac`;
 
 /** What one on-device download is (owner, Q4). */
 export const DOWNLOADING = "Downloading on-device models (speech + cleanup)";
@@ -181,11 +159,7 @@ export function downloadingText(model: LocalModelInfo_Serialize): string {
 /** The cloud provider's name (Q2: `OpenRouter` only). */
 export const PROVIDER_NAME = "OpenRouter";
 
-/**
- * Display names of the models in use: the catalog's in
- * `crates/core/src/cloud_models.rs`
- * (`commands::tests::the_ui_default_models_match_core` keeps them equal).
- */
+/** Display names of the models in `crates/core/src/cloud_models.rs`. */
 export const SPEECH_MODEL_NAME = "GPT-4o mini Transcribe (OpenAI)";
 export const CLEANUP_MODEL_NAME = "GLM 5.3 Flash (Z.ai)";
 
@@ -203,5 +177,5 @@ export function cloudCaption(connected: boolean): string {
  * audio never leaves.
  */
 export function modelDetails(model: LocalModelInfo_Serialize): string {
-  return `${model.name} · ${languagesLabel(model.language_codes)} · works offline · audio stays on this Mac`;
+  return `${model.name} · ${model.languages} · works offline · audio stays on this Mac`;
 }

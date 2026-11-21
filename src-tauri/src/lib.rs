@@ -5,10 +5,9 @@
 //! paste. M2.2: it records from the real microphone, and
 //! a dictation error (such as a missing microphone permission) shows in the
 //! tray until the next recording: a short title next to the icon (#151) and
-//! the message in the tooltip. A second launch
-//! forwards its flags to the running app and exits (M1.7:
-//! `dictation_platform::single_instance`, which replaced the
-//! single-instance plugin). Debug builds act on the test flags (`--press`,
+//! the message in the tooltip. A second launch exits; in debug builds it
+//! first forwards its flags to the running app (M1.7:
+//! `dictation_platform::single_instance`; release builds open no socket). Debug builds act on the test flags (`--press`,
 //! `--release`, `--debug-audio-file`, `--debug-save-audio`, `--mock-text`,
 //! `--mock-text-sequence`, `--debug-set-api-key-stdin`,
 //! `--debug-delete-api-key`; see [`flags`]; the key flags run in the
@@ -22,7 +21,8 @@
 //!
 //! M5.3: logs go to a size-bounded rotating file ([`logging`]), the tray's
 //! "Reveal log" opens its folder, and the settings screen has a "Launch at
-//! login" toggle backed by the OS's own login item (`commands::LoginItem`).
+//! login" toggle backed by the OS's own login item
+//! (`dictation_pipeline::launch::LoginItem`).
 //!
 //! M3.4: Settings… shows the `main` window, which holds the settings UI; its
 //! close button hides it instead of destroying it, so the tray can show it
@@ -55,7 +55,7 @@ pub mod diagnostics;
 pub mod engine;
 mod flags;
 mod history;
-mod key_writes;
+mod keychain;
 mod logging;
 pub mod models;
 pub mod onboarding;
@@ -73,6 +73,7 @@ use anyhow::Context as _;
 use dictation_pipeline::debug_audio::SavingAudio;
 use dictation_pipeline::history::{History, Recording};
 use dictation_pipeline::hotkey_setting::{self, ConfigurableHotkey, HotkeyControl};
+use dictation_pipeline::launch::LoginItem;
 use dictation_pipeline::pipeline::{
     CleanupStep, Config, CursorReader, Extras, Pipeline, Ports, UiEvent,
 };
@@ -268,10 +269,13 @@ pub fn run() {
     }
     let context = tauri::generate_context!();
     // Next, so a second launch exits before setting anything else up.
-    let config = single_instance::Config::new(&context.config().identifier);
+    // Only debug builds forward a later launch's flags (the e2e test hooks);
+    // release builds have no socket and a later launch just exits (SIMP1).
+    let mut config = single_instance::Config::new(&context.config().identifier);
+    config.forwarding = cfg!(debug_assertions);
     let instance = match single_instance::acquire(&config, &Message::current()) {
         Ok(Launch::Primary(instance)) => instance,
-        Ok(Launch::Forwarded) => return,
+        Ok(Launch::Forwarded | Launch::Secondary) => return,
         Err(error) => exit_early(&format!(
             "could not hand this launch to the running app: {error}"
         )),
@@ -478,10 +482,9 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     let levels = pipeline.levels();
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
     app.manage(commands::AppConfig(Arc::clone(&config)));
-    app.manage(commands::LoginItem::new(
-        Arc::new(SystemLaunchAtLogin::new()),
-        Arc::clone(&config),
-    ));
+    app.manage(Arc::new(LoginItem::new(Arc::new(
+        SystemLaunchAtLogin::new(),
+    ))));
     app.manage(commands::ActiveHotkey(hotkey_control.clone()));
     app.manage(commands::ConfigDir(config_dir.clone()));
     app.manage(commands::AppShell(Arc::new(TauriShell(
@@ -546,9 +549,12 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     // Last: a later launch is answered only once the pipeline runs and can
     // take its events. Until now it waited in the socket's backlog (its
     // launch gives up after the I/O timeout), so it is never acknowledged
-    // without being delivered.
-    listen_for_later_launches(&mut instance, injector)
-        .context("could not listen for later launches")?;
+    // without being delivered. Debug builds only: release builds ignore the
+    // test flags, so they open no socket.
+    if cfg!(debug_assertions) {
+        listen_for_later_launches(&mut instance, injector)
+            .context("could not listen for later launches")?;
+    }
     app.manage(SingleInstance(Mutex::new(Some(instance))));
     Ok(())
 }
@@ -984,7 +990,7 @@ mod tests {
     fn primary(config: &single_instance::Config) -> Instance {
         match single_instance::acquire(config, &message(&[])).unwrap() {
             Launch::Primary(instance) => instance,
-            Launch::Forwarded => panic!("not the primary"),
+            Launch::Forwarded | Launch::Secondary => panic!("not the primary"),
         }
     }
 

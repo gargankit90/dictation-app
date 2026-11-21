@@ -7,6 +7,7 @@
 use std::time::Duration;
 
 use dictation_core::coordinator::{MAX_RECORDING, MIN_HOLD, State, step};
+use dictation_core::diagnostics::ErrorCode;
 use dictation_core::error::Permission;
 use dictation_core::events::{Command, Event};
 use proptest::prelude::*;
@@ -28,7 +29,7 @@ fn event_at(kind: u8, now: Duration) -> Event {
         6 => Event::AudioCaptured,
         7 => Event::TranscriptReady("hello".into()),
         8 => Event::TranscriptReady(" ".into()),
-        9 => Event::TranscriptionFailed("failed".into()),
+        9 => Event::TranscriptionFailed(ErrorCode::NetworkUnreachable),
         10 => Event::InsertDone,
         11 => Event::InsertFailed("failed".into()),
         _ => Event::PermissionMissing(Permission::Microphone),

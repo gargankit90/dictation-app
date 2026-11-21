@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 use dictation_core::coordinator::{MAX_RECORDING, MIN_HOLD, Phase, State, step};
+use dictation_core::diagnostics::ErrorCode;
 use dictation_core::error::{DictationError, Permission};
 use dictation_core::events::{Command, Event};
 
@@ -246,7 +247,7 @@ fn late_results_after_a_cancel_are_ignored_and_the_next_dictation_works() {
             Event::CancelPressed,
             Event::AudioCaptured,
             Event::TranscriptReady("stale".into()),
-            Event::TranscriptionFailed("stale".into()),
+            Event::TranscriptionFailed(ErrorCode::NetworkUnreachable),
             Event::InsertDone,
             Event::InsertFailed("stale".into()),
             Event::HotkeyReleased(ms(800)),
@@ -285,7 +286,7 @@ fn a_late_transcript_while_inserting_does_not_insert_twice() {
         State::Inserting,
         [
             Event::TranscriptReady("again".into()),
-            Event::TranscriptionFailed("x".into()),
+            Event::TranscriptionFailed(ErrorCode::NetworkUnreachable),
         ],
     );
     assert_eq!(state, State::Inserting);

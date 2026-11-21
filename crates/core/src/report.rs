@@ -15,9 +15,9 @@
 use std::fmt::Write as _;
 
 use crate::diagnostics::LoggedError;
+use crate::error::PermissionStatus;
 use crate::hotkey_spec::{HotkeySpec, keycap_label};
 use crate::redact;
-use crate::settings::Provider;
 
 /// How many recent errors the report lists.
 pub const MAX_ERRORS: usize = 10;
@@ -28,32 +28,11 @@ const MAX_FIELD_CHARS: usize = 40;
 /// Where the issue form opens.
 pub const ISSUES_URL: &str = "https://github.com/gargankit90/dictation-app/issues/new";
 
-/// The state of an OS permission.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Access {
-    /// Granted.
-    Granted,
-    /// Refused.
-    Denied,
-    /// Not asked, or the OS can't say.
-    NotDetermined,
-}
-
-impl Access {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Granted => "granted",
-            Self::Denied => "denied",
-            Self::NotDetermined => "not determined",
-        }
-    }
-}
-
 /// Which engine transcribes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineInfo<'a> {
-    /// A cloud provider (never its key, never the account).
-    Cloud(Provider),
+    /// `OpenRouter` (never its key, never the account).
+    Cloud,
     /// A model on this Mac, by its catalogue id.
     Local(&'a str),
 }
@@ -69,9 +48,9 @@ pub struct ReportInput<'a> {
     /// The CPU architecture, such as `aarch64`.
     pub arch: &'a str,
     /// The microphone permission.
-    pub microphone: Access,
+    pub microphone: PermissionStatus,
     /// The Accessibility permission.
-    pub accessibility: Access,
+    pub accessibility: PermissionStatus,
     /// The dictation hotkey, as the settings write it. The report shows its
     /// keycap label.
     pub hotkey: &'a str,
@@ -153,7 +132,7 @@ pub fn render(input: &ReportInput<'_>) -> String {
     let _ = writeln!(out, "accessibility: {}", input.accessibility.as_str());
     let _ = writeln!(out, "dictation_key: {}", hotkey_label(input.hotkey));
     let _ = match input.engine {
-        EngineInfo::Cloud(provider) => writeln!(out, "engine: cloud ({provider})"),
+        EngineInfo::Cloud => writeln!(out, "engine: cloud (openrouter)"),
         EngineInfo::Local(model) => writeln!(out, "engine: local ({})", field(model)),
     };
     let ready = match input.engine_ready {
@@ -185,22 +164,10 @@ pub fn render(input: &ReportInput<'_>) -> String {
 #[must_use]
 pub fn issue_url(report: &str) -> String {
     let mut url = format!("{ISSUES_URL}?title=");
-    url.push_str(&percent_encode("Problem report"));
+    url.push_str(&crate::encoding::percent_encode("Problem report"));
     url.push_str("&body=");
-    url.push_str(&percent_encode(report));
+    url.push_str(&crate::encoding::percent_encode(report));
     url
-}
-
-fn percent_encode(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() * 3);
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            out.push(char::from(byte));
-        } else {
-            let _ = write!(out, "%{byte:02X}");
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -213,10 +180,10 @@ mod tests {
             app_version: "0.1.0",
             macos_version: "15.1",
             arch: "aarch64",
-            microphone: Access::Denied,
-            accessibility: Access::Granted,
+            microphone: PermissionStatus::Denied,
+            accessibility: PermissionStatus::Granted,
             hotkey: "RightAlt",
-            engine: EngineInfo::Cloud(Provider::OpenRouter),
+            engine: EngineInfo::Cloud,
             engine_ready: Some(true),
             errors,
             analytics_on: true,

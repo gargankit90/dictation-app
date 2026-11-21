@@ -8,9 +8,8 @@
 //! [`Telemetry::record`] never blocks and never fails: a telemetry problem
 //! must not reach dictation.
 
-use dictation_core::error::{DictationError, Permission};
+use dictation_core::error::DictationError;
 use dictation_core::onboarding::Step;
-use dictation_core::settings::Provider;
 use serde::Serialize;
 
 /// Records usage events.
@@ -110,27 +109,6 @@ pub enum EngineKind {
     Local,
     /// At a cloud provider.
     Cloud,
-}
-
-/// The engine the user picked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", content = "provider", rename_all = "snake_case")]
-pub enum EngineChoice {
-    /// A cloud provider.
-    Cloud(Provider),
-    /// A model on this computer (L1). Only the kind is sent, not which model.
-    Local,
-}
-
-impl EngineChoice {
-    /// Where this engine runs.
-    #[must_use]
-    pub fn kind(self) -> EngineKind {
-        match self {
-            Self::Cloud(_) => EngineKind::Cloud,
-            Self::Local => EngineKind::Local,
-        }
-    }
 }
 
 /// An onboarding step, by the name `docs/privacy.md` lists.
@@ -249,41 +227,7 @@ impl CleanupOutcome {
     }
 }
 
-/// Why a dictation failed, without the reason's text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ErrorType {
-    /// The engine failed.
-    Transcription,
-    /// The engine heard no words.
-    EmptyTranscript,
-    /// The text couldn't be pasted.
-    Insert,
-    /// A password field had focus.
-    SecureInput,
-    /// The microphone permission is missing.
-    MicrophonePermission,
-    /// The Accessibility permission is missing.
-    AccessibilityPermission,
-    /// The hotkey stopped working.
-    Hotkey,
-}
-
-impl From<&DictationError> for ErrorType {
-    fn from(error: &DictationError) -> Self {
-        match error {
-            DictationError::TranscriptionFailed { .. } => Self::Transcription,
-            DictationError::EmptyTranscript => Self::EmptyTranscript,
-            DictationError::InsertFailed { .. } => Self::Insert,
-            DictationError::SecureInput => Self::SecureInput,
-            DictationError::PermissionMissing(Permission::Microphone) => Self::MicrophonePermission,
-            DictationError::PermissionMissing(Permission::Accessibility) => {
-                Self::AccessibilityPermission
-            }
-            DictationError::HotkeyFailed => Self::Hotkey,
-        }
-    }
-}
+pub use dictation_core::diagnostics::ErrorType;
 
 /// A setting, by name. Never its value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -379,9 +323,8 @@ pub enum Event {
     },
     /// The user picked or changed the engine.
     EngineSelected {
-        /// Local or cloud, and which provider.
-        #[serde(flatten)]
-        engine: EngineChoice,
+        /// Local or cloud. Which local model is never sent.
+        kind: EngineKind,
     },
     /// A dictation was pasted.
     DictationFinished {
@@ -415,58 +358,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-
-    /// E1: an error code refines A1's `ErrorType`; it isn't a second
-    /// taxonomy. Every code sits under exactly one type, and an error's
-    /// code and type agree.
-    #[test]
-    fn error_codes_refine_error_types() {
-        use dictation_core::diagnostics::ErrorCode;
-
-        fn coarse(code: ErrorCode) -> ErrorType {
-            match code {
-                ErrorCode::MicDenied => ErrorType::MicrophonePermission,
-                ErrorCode::AccessibilityMissing => ErrorType::AccessibilityPermission,
-                ErrorCode::HotkeyUnregistered => ErrorType::Hotkey,
-                ErrorCode::NoSpeech => ErrorType::EmptyTranscript,
-                ErrorCode::PasteFailed => ErrorType::Insert,
-                ErrorCode::SecureInput => ErrorType::SecureInput,
-                ErrorCode::MicFailed
-                | ErrorCode::KeyMissing
-                | ErrorCode::KeyRejected
-                | ErrorCode::KeyUnreadable
-                | ErrorCode::NetworkUnreachable
-                | ErrorCode::ProviderQuota
-                | ErrorCode::OutOfCredits
-                | ErrorCode::ProviderRedirect
-                | ErrorCode::ModelMissing
-                | ErrorCode::ModelLoading
-                | ErrorCode::ModelLoadingFailed
-                | ErrorCode::EngineFailed => ErrorType::Transcription,
-            }
-        }
-        let errors = [
-            DictationError::TranscriptionFailed {
-                reason: "The provider rejected your API key. Check it in Settings.".into(),
-            },
-            DictationError::TranscriptionFailed {
-                reason: "the microphone failed (no microphone found)".into(),
-            },
-            DictationError::EmptyTranscript,
-            DictationError::InsertFailed { reason: "x".into() },
-            DictationError::SecureInput,
-            DictationError::PermissionMissing(Permission::Microphone),
-            DictationError::PermissionMissing(Permission::Accessibility),
-            DictationError::HotkeyFailed,
-        ];
-        for error in errors {
-            assert_eq!(
-                coarse(ErrorCode::of(&error)),
-                ErrorType::from(&error),
-                "{error:?}"
-            );
-        }
-    }
 
     fn wire(event: &Event) -> serde_json::Value {
         serde_json::to_value(event).expect("events serialise")
@@ -519,13 +410,13 @@ mod tests {
             ),
             (
                 Event::EngineSelected {
-                    engine: EngineChoice::Cloud(Provider::OpenRouter),
+                    kind: EngineKind::Cloud,
                 },
-                json!({"event":"engine_selected","properties":{"kind":"cloud","provider":"openrouter"}}),
+                json!({"event":"engine_selected","properties":{"kind":"cloud"}}),
             ),
             (
                 Event::EngineSelected {
-                    engine: EngineChoice::Local,
+                    kind: EngineKind::Local,
                 },
                 json!({"event":"engine_selected","properties":{"kind":"local"}}),
             ),
@@ -625,20 +516,6 @@ mod tests {
         assert_eq!(LatencyBucket::of(ms(1000)), LatencyBucket::From1To2s);
         assert_eq!(LatencyBucket::of(ms(2000)), LatencyBucket::From2To5s);
         assert_eq!(LatencyBucket::of(ms(5000)), LatencyBucket::Over5s);
-    }
-
-    #[test]
-    fn an_error_type_ignores_the_reason() {
-        let error = DictationError::TranscriptionFailed {
-            reason: "my secret words".into(),
-        };
-        assert_eq!(ErrorType::from(&error), ErrorType::Transcription);
-        assert_eq!(
-            ErrorType::from(&DictationError::PermissionMissing(
-                Permission::Accessibility
-            )),
-            ErrorType::AccessibilityPermission
-        );
     }
 
     #[test]
