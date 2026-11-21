@@ -145,14 +145,18 @@ class App:
 
 
 APPS: dict[str, App] = {
-    "vocet": App("Vocet", "ralt", "hold", "~/Applications/Vocet.app", "hold-to-talk, Right Option (default)"),
+    # Each app's own default key and mode, read from the release's source (BENCH1 report, "Apps and setup").
+    # Process names are checked in the VM by the preflight (pgrep -x).
+    "vocet": App("Vocet", "ralt", "hold", "~/Applications/Vocet.app", "hold Right Option (default)"),
     "handy": App("handy", "lalt+space", "hold", "/Applications/Handy.app",
-                 "push-to-talk on (default), Option+Space (default)"),
-    "openwhispr": App("OpenWhispr", "rcmd", "hold", "/Applications/OpenWhispr.app", "push-to-talk"),
-    "muesli": App("Muesli", "rcmd", "hold", "/Applications/Muesli.app", "hold-to-talk"),
-    "fluidvoice": App("FluidVoice", "rcmd", "hold", "/Applications/FluidVoice.app", "press and hold"),
-    "voiceink": App("VoiceInk", "rcmd", "hold", "/Applications/VoiceInk.app", "push-to-talk"),
-    "freeflow": App("FreeFlow", "fn", "hold", "/Applications/FreeFlow.app", "hold Fn (default)"),
+                 "Option+Space, push-to-talk (default_settings.json: push_to_talk true)"),
+    "openwhispr": App("OpenWhispr", "fn", "toggle", "/Applications/OpenWhispr.app",
+                      "Globe/Fn on macOS (hotkeyManager getEffectiveDefaultHotkey), activationMode tap (default)"),
+    "muesli": App("Muesli", "ralt", "hold", "/Applications/Muesli.app", "HotkeyConfig default: Right Option, hold"),
+    "fluidvoice": App("FluidVoice", "ralt", "toggle", "/Applications/FluidVoice.app",
+                      "defaultPrimaryDictationShortcut Right Option; hotkeyMode toggle unless press-and-hold is set"),
+    "voiceink": App("VoiceInk", "ralt", "hold", "/Applications/VoiceInk.app", "shortcut chosen in onboarding"),
+    "freeflow": App("FreeFlow", "fn", "hold", "/Applications/FreeFlow.app", "hold Fn (default); cloud only"),
     "stub": App("stub", "ralt", "hold", "", "the dry-run's simulated app"),
 }
 
