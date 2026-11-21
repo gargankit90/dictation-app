@@ -125,6 +125,8 @@ class Backend {
         return this.engine;
       case "list_local_models":
         return this.models;
+      case "list_cleanup_models":
+        return [model("gemma", { size_bytes: 3_106_738_272, state: "downloading" })];
       case "download_local_model":
         this.models = this.models.map((m) =>
           m.id === args.id ? { ...m, state: "downloading", downloaded_bytes: 212_000_000 } : m,
@@ -633,6 +635,18 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     await open("speech");
     expect(checked().map((row) => row.id)).toEqual([`engine-${ENGLISH}`]);
     expect(radio(/^English/).disabled).toBe(true);
+  });
+
+  it("Q4: the chosen On this Mac row shows its cleanup model, with no row of its own", async () => {
+    backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
+    backend.models = [ready(ENGLISH)];
+    await open("speech");
+    const status = await screen.findByTestId("cleanup-status");
+    expect(status.textContent).toContain(
+      "Cleanup (punctuation, fillers) · 3107 MB · ↓ 0 of 3107 MB",
+    );
+    expect(screen.getByRole("button", { name: "Cancel cleanup" })).toBeTruthy();
+    expect(screen.queryByText("Cleanup on this Mac")).toBeNull();
   });
 
   it("selecting a model loads it, blocks the others with a reason, then selects it", async () => {

@@ -18,7 +18,7 @@ import {
   ownKeyCaption,
 } from "./modelRow";
 import type { ModelAction } from "./modelRow";
-import { CleanupModel } from "./CleanupModel";
+import { CleanupStatus, useCleanupModels } from "./CleanupModel";
 import { OwnKeySheet, useOwnKey } from "./ownKey";
 import { Chip, Group, Row, SaveStatus, useSave } from "./ui";
 
@@ -150,6 +150,8 @@ export function Speech({
   onSheetOffered,
 }: Props) {
   const onDevice = settings.transcription === "local";
+  // Gemma, shown on the chosen "On this Mac" row (Q4).
+  const cleanup = useCleanupModels(onDevice)?.[0];
   const [switching, setSwitching] = useState<string | null>(null);
   const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<string | null>(null);
@@ -373,6 +375,7 @@ export function Speech({
                       {model.error === null ? null : (
                         <p className="hint row-error">{model.error}</p>
                       )}
+                      {chosen && cleanup !== undefined && <CleanupStatus model={cleanup} />}
                       {reason === null || row.actions.includes("download") ? null : (
                         <p className="hint row-error" data-testid="blocked-reason">
                           {reason}
@@ -464,7 +467,6 @@ export function Speech({
           {actionError}
         </p>
       )}
-      {onDevice && <CleanupModel />}
       {models?.some((model) => model.state === "downloading") && (
         <p className="hint">
           One model downloads at a time. Downloads go on while Settings is closed.

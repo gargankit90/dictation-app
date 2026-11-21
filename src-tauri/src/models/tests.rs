@@ -99,7 +99,11 @@ fn criterion_4_lists_the_catalogue_with_statuses() {
         dictation_transcribe::engine::Engine::Local(_)
     ));
     assert_eq!(local.loaded(), Some(DEFAULT));
+    // The cleanup model is part of "On this Mac" (Q4): it goes with it.
+    let gemma = local_models::find_any(local_models::DEFAULT_CLEANUP_MODEL).unwrap();
+    std::fs::write(dir.0.join(gemma.file_name), [0u8; 10]).unwrap();
     downloads.delete(&live, DEFAULT).unwrap();
+    assert!(!dir.0.join(gemma.file_name).exists());
     assert_eq!(local.loaded(), None);
     assert_eq!(
         info(&downloads.list(&live), DEFAULT).state,

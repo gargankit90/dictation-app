@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use dictation_core::local_models::{self, LocalModel};
+use dictation_core::local_models::{self, LocalModel, Role};
 use dictation_pipeline::config::Config;
 use dictation_ports::SecretStore;
 use dictation_transcribe::models::{DownloadCancel, DownloadError, ModelStatus, Progress, Resume};
@@ -311,7 +311,12 @@ impl ModelDownloads {
         local
             .store()
             .delete(model)
-            .map_err(|error| error.user_message())
+            .map_err(|error| error.user_message())?;
+        // "On this Mac" is one choice (Q4): its cleanup model goes with it.
+        if model.role == Role::Speech {
+            self.delete(live, local_models::DEFAULT_CLEANUP_MODEL)?;
+        }
+        Ok(())
     }
 }
 

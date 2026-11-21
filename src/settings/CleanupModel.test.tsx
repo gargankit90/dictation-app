@@ -1,11 +1,11 @@
-// Q4: the cleanup model's row in Settings, with the app's commands replaced
+// Q4: the cleanup model's line under "On this Mac" in Settings, with the app's commands replaced
 // by a fake backend.
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LocalModelInfo_Serialize } from "../bindings";
-import { CleanupModel, cleanupCaption, cleanupRow } from "./CleanupModel";
+import { CleanupStatus, cleanupLine } from "./CleanupModel";
 
 const GEMMA: LocalModelInfo_Serialize = {
   id: "gemma-4-e2b-it-q4_k_m",
@@ -35,8 +35,8 @@ beforeEach(() => {
       case "download_local_model":
         model = { ...model, state: "downloading", downloaded_bytes: 1_000_000_000 };
         return null;
-      case "delete_local_model":
-        model = { ...model, state: "missing", downloaded_bytes: 0 };
+      case "cancel_local_model_download":
+        model = { ...model, state: "partial" };
         return null;
       default:
         throw new Error(`unexpected command ${command}`);
@@ -49,53 +49,53 @@ afterEach(() => {
   clearMocks();
 });
 
-describe("cleanupRow", () => {
-  it("says the size and that nothing leaves the Mac", () => {
-    expect(cleanupCaption(GEMMA)).toBe(
-      "Adds punctuation, removes fillers · 3107 MB · Private: nothing leaves this Mac",
-    );
-  });
-
-  it("offers one action per state", () => {
-    expect(cleanupRow(GEMMA)).toEqual({ chip: null, action: "download", progress: null });
-    expect(cleanupRow({ ...GEMMA, state: "downloading", downloaded_bytes: 500_000_000 })).toEqual({
-      chip: "↓ 500 of 3107 MB",
+describe("cleanupLine", () => {
+  it("offers one action per state, with the size, and says nothing leaves the Mac", () => {
+    expect(cleanupLine(GEMMA)).toEqual({
+      text: "Cleanup (punctuation, fillers) · 3107 MB · not downloaded",
+      action: "download",
+      progress: null,
+    });
+    expect(cleanupLine({ ...GEMMA, state: "downloading", downloaded_bytes: 500_000_000 })).toEqual({
+      text: "Cleanup (punctuation, fillers) · 3107 MB · ↓ 500 of 3107 MB",
       action: "cancel",
       progress: { value: 500_000_000, max: 3_106_738_272 },
     });
-    expect(cleanupRow({ ...GEMMA, state: "partial", downloaded_bytes: 2_000_000 }).action).toBe(
+    expect(cleanupLine({ ...GEMMA, state: "partial", downloaded_bytes: 2_000_000 }).action).toBe(
       "resume",
     );
-    expect(cleanupRow({ ...GEMMA, state: "ready" })).toEqual({
-      chip: "✓ Ready",
-      action: "delete",
+    expect(cleanupLine({ ...GEMMA, state: "ready" })).toEqual({
+      text: "Cleanup (punctuation, fillers) · 3107 MB · ✓ Ready · Private: nothing leaves this Mac",
+      action: null,
       progress: null,
     });
   });
 });
 
-describe("CleanupModel", () => {
-  it("downloads the cleanup model and shows its progress", async () => {
-    render(<CleanupModel />);
-    expect(await screen.findByText("Gemma 4 E2B")).toBeTruthy();
-    expect(screen.getByText(/Private: nothing leaves this Mac/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+describe("CleanupStatus", () => {
+  it("starts the cleanup model's download", async () => {
+    render(<CleanupStatus model={model} />);
+    fireEvent.click(screen.getByRole("button", { name: "Download cleanup" }));
     await waitFor(() => {
-      expect(screen.getByText("↓ 1000 of 3107 MB")).toBeTruthy();
+      expect(calls.find((call) => call.command === "download_local_model")?.args).toEqual({
+        id: GEMMA.id,
+      });
     });
-    expect(calls.find((call) => call.command === "download_local_model")?.args).toEqual({
-      id: GEMMA.id,
-    });
-    expect(screen.getByRole("progressbar", { name: "Gemma 4 E2B download" })).toBeTruthy();
   });
 
-  it("deletes a downloaded model", async () => {
-    model = { ...GEMMA, state: "ready", downloaded_bytes: GEMMA.size_bytes };
-    render(<CleanupModel />);
-    expect(await screen.findByText("✓ Ready")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+  it("shows progress and cancels a running download", async () => {
+    render(
+      <CleanupStatus model={{ ...GEMMA, state: "downloading", downloaded_bytes: 1_000_000_000 }} />,
+    );
+    expect(screen.getByRole("progressbar", { name: "Cleanup model download" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel cleanup" }));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
+      expect(calls.map((call) => call.command)).toContain("cancel_local_model_download");
     });
+  });
+
+  it("offers nothing once it is ready", () => {
+    render(<CleanupStatus model={{ ...GEMMA, state: "ready" }} />);
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

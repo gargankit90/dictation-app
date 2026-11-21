@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "./bindings";
-import type {
-  LocalModelInfo_Serialize,
-  OnboardingStatus,
-  Settings_Serialize,
-  Step,
-} from "./bindings";
+import type { OnboardingStatus, Settings_Serialize, Step } from "./bindings";
 import { BROKEN, messageOf } from "./keyTest";
 import { chosenModel, cleanupStripView, modelWait, stripView } from "./onboarding/logic";
 import type { StripAction } from "./onboarding/logic";
@@ -18,6 +13,7 @@ import type { FrameParts } from "./onboarding/StepFrame";
 import { FINISH_REASON } from "./onboarding/ReadyStep";
 import { sharingBlock, useSharingSwitch } from "./settings/Privacy";
 import { useEngineStatus, useModels } from "./Settings";
+import { useCleanupModels } from "./settings/CleanupModel";
 import "./settings.css";
 
 export const STEPS: readonly { id: Step; name: string }[] = [
@@ -54,34 +50,6 @@ interface Props {
  * strip and whichever step the app says, and each step decides its own
  * primary action.
  */
-/**
- * The cleanup models (Q4), read every second while on-device speech is
- * chosen: their download follows the speech model's and its strip shows it.
- */
-function useCleanupModels(local: boolean): LocalModelInfo_Serialize[] | null {
-  const [cleanup, setCleanup] = useState<LocalModelInfo_Serialize[] | null>(null);
-  useEffect(() => {
-    if (!local) return;
-    const state = { stopped: false };
-    const read = async () => {
-      try {
-        const result = await commands.listCleanupModels();
-        if (!state.stopped && result.status === "ok") setCleanup(result.data);
-      } catch {
-        // No strip: the speech model is what setup waits for.
-      }
-    };
-    const first = window.setTimeout(() => void read(), 0);
-    const timer = window.setInterval(() => void read(), POLL_MS);
-    return () => {
-      state.stopped = true;
-      window.clearTimeout(first);
-      window.clearInterval(timer);
-    };
-  }, [local]);
-  return local ? cleanup : null;
-}
-
 export function Onboarding({ onFinished, onOpenHistory }: Props) {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
