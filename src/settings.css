@@ -722,35 +722,6 @@ button.menu-button {
   cursor: pointer;
 }
 
-/* Test microphone: U4's meter bars, in the window's colours. */
-.mic-test {
-  display: flex;
-  align-items: center;
-  gap: var(--vc-space-3);
-  margin-top: var(--vc-space-2);
-  color: var(--vc-ink-2);
-  font-size: var(--vc-text-sm);
-}
-
-.mic-meter {
-  display: inline-flex;
-  height: 18px;
-  align-items: center;
-  gap: 2px;
-}
-
-.mic-meter i {
-  width: 3px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--vc-accent);
-  transition: height var(--vc-dur-fast) var(--vc-ease);
-}
-
-.row-control .hotkey-recorder .row {
-  margin-top: var(--vc-space-1);
-}
-
 /* U12: Settings' dictation key, on one line at the window's smallest. */
 .hotkey-recorder.compact {
   display: flex;
@@ -1280,12 +1251,6 @@ main.ob {
 
 .ob-waiting {
   color: var(--vc-muted);
-}
-
-.ob-meter {
-  display: flex;
-  flex-direction: column;
-  gap: var(--vc-space-1);
 }
 
 .ob-practice {

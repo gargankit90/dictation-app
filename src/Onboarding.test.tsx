@@ -215,12 +215,8 @@ class Backend {
         return this.words;
       case "copy_practice_words":
       case "set_hotkey_recording":
-      case "start_microphone_test":
-      case "stop_microphone_test":
       case "open_link":
         return null;
-      case "read_microphone_test":
-        return { level: -20, device: "MacBook Microphone" };
       case "set_try_outcome":
         this.tryOutcome = args.outcome as TryOutcome;
         return null;
@@ -1470,37 +1466,6 @@ describe("Permissions", () => {
     });
     fireEvent.click(primary("Continue"));
     await screen.findByText("Your dictation key");
-  });
-
-  it("criterion 4: the mic card shows the live meter and input name after the grant only", async () => {
-    show();
-    await screen.findByRole("button", { name: "Allow Microphone" });
-    expect(document.querySelectorAll('[data-testid="mic-bar"]')).toHaveLength(0);
-    backend.microphone = "granted";
-    refocus();
-    await screen.findByText("MacBook Microphone: say something, the bars should move.", undefined, {
-      timeout: 2000,
-    });
-    expect(screen.getByText("No sound? Check System Settings → Sound.")).toBeTruthy();
-    expect(document.querySelectorAll('[data-testid="mic-bar"]').length).toBeGreaterThan(0);
-    await waitFor(() => {
-      expect(backend.named("read_microphone_test").length).toBeGreaterThan(0);
-    });
-  });
-
-  it("criterion 4: leaving the step stops the meter", async () => {
-    backend.microphone = "granted";
-    backend.accessibility = "granted";
-    show();
-    await waitFor(() => {
-      expect(backend.named("start_microphone_test").length).toBeGreaterThan(0);
-    });
-    fireEvent.click(primary("Back"));
-    await screen.findByText("How should Vocet transcribe?");
-    // The meter's cleanup is a passive effect: it runs after the new step shows.
-    await waitFor(() => {
-      expect(backend.named("stop_microphone_test").length).toBeGreaterThan(0);
-    });
   });
 
   it("criterion 4: denied gives Open System Settings, the exact path, and the relaunch", async () => {

@@ -5,8 +5,7 @@
 //! form whose older values could overwrite another control's newer one.
 //!
 //! Also: which engine is in use and whether it loaded ([`get_engine_status`]),
-//! Remove key ([`delete_api_key`]), Test microphone
-//! ([`start_microphone_test`]), the links Settings opens ([`open_link`], a
+//! Remove key ([`delete_api_key`]), the links Settings opens ([`open_link`], a
 //! closed list, so the page can't open any URL), the version for About, and
 //! "Check for updates" with when it last ran.
 
@@ -17,8 +16,7 @@ use dictation_core::local_models;
 use dictation_core::settings::{Provider, Settings, Transcription};
 use dictation_pipeline::config::Config;
 use dictation_pipeline::hotkey_setting::HotkeyControl;
-use dictation_pipeline::mic_test::{self, MicTest};
-use dictation_ports::{AudioError, SecretStore, TranscribeError};
+use dictation_ports::{SecretStore, TranscribeError};
 use dictation_transcribe::engine::Engine;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -250,72 +248,6 @@ pub async fn delete_api_key(
             tracing::warn!(%error, "removing the API key failed");
             error.to_string()
         })
-}
-
-/// The microphone test, managed state.
-pub struct AppMicTest(pub MicTest);
-
-/// What the user is told when the test can't start.
-fn microphone_problem(error: &AudioError) -> String {
-    match error {
-        AudioError::PermissionDenied => "Vocet isn't allowed to use the microphone. Allow it in \
-             System Settings → Privacy & Security → Microphone."
-            .to_owned(),
-        AudioError::NoDevice => {
-            "No microphone found. Connect one, or choose one in System Settings → Sound.".to_owned()
-        }
-        AudioError::AlreadyRecording | AudioError::NotRecording | AudioError::Device(_) => {
-            "The microphone didn't start. Try again.".to_owned()
-        }
-    }
-}
-
-/// Starts recording from the microphone for a few seconds, only to show
-/// its level ([`read_microphone_test`]). Ends by itself after
-/// [`mic_test::MAX_TEST`].
-#[tauri::command]
-#[specta::specta]
-pub async fn start_microphone_test(test: State<'_, AppMicTest>) -> Result<(), String> {
-    let test = test.0.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let generation = test.start().map_err(|error| {
-            tracing::warn!(%error, "the microphone test didn't start");
-            microphone_problem(&error)
-        })?;
-        test.stop_after(generation, mic_test::MAX_TEST);
-        Ok(())
-    })
-    .await
-    .map_err(|_| "the microphone task crashed".to_owned())?
-}
-
-/// The microphone test's level and device, as Settings polls them.
-#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
-pub struct MicReading {
-    /// The level since the last reading, in dBFS; `None` once the test
-    /// has ended.
-    pub level: Option<f32>,
-    /// The input device's name, if known.
-    pub device: Option<String>,
-}
-
-/// The test's level since the last call, and the device. Never blocks.
-#[tauri::command]
-#[specta::specta]
-pub fn read_microphone_test(test: State<'_, AppMicTest>) -> Result<MicReading, String> {
-    let reading = test.0.read();
-    Ok(MicReading {
-        level: reading.level,
-        device: reading.device,
-    })
-}
-
-/// Ends the microphone test.
-#[tauri::command]
-#[specta::specta]
-pub fn stop_microphone_test(test: State<'_, AppMicTest>) -> Result<(), String> {
-    test.0.stop();
-    Ok(())
 }
 
 /// A page Settings links to. A closed list: the window can't open any

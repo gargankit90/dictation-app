@@ -273,13 +273,6 @@ fn links_are_a_closed_list_of_https_pages() {
 }
 
 #[test]
-fn criterion_6_microphone_problems_say_what_to_do() {
-    assert!(microphone_problem(&AudioError::PermissionDenied).contains("System Settings"));
-    assert!(microphone_problem(&AudioError::NoDevice).contains("No microphone"));
-    assert!(!microphone_problem(&AudioError::Device("raw detail".into())).contains("raw detail"));
-}
-
-#[test]
 fn app_info_has_the_version() {
     assert_eq!(get_app_info().unwrap().version, env!("CARGO_PKG_VERSION"));
 }

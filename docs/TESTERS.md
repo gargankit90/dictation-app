@@ -88,7 +88,7 @@ Menu-bar icon > **Settings…** has these sections:
 
 - **General**: open Vocet at login, and **Check for updates** (**Check now**).
 - **Dictation**: the **dictation key** (hold it to talk, release to paste),
-  **Language**, and a **Test microphone** check.
+  and where the microphone is chosen (System Settings → Sound).
 - **Speech**: the list of engines. Select a row to use it: a model on this
   Mac (download it first), or **OpenRouter** (its own sheet:
   **Connect OpenRouter**, **Add credits**, **Disconnect**).

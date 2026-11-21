@@ -174,16 +174,6 @@ export const commands = {
 	 *  like saving one.
 	 */
 	deleteApiKey: (provider: Provider) => typedError<null, string>(__TAURI_INVOKE("delete_api_key", { provider })),
-	/**
-	 *  Starts recording from the microphone for a few seconds, only to show
-	 *  its level ([`read_microphone_test`]). Ends by itself after
-	 *  [`mic_test::MAX_TEST`].
-	 */
-	startMicrophoneTest: () => typedError<null, string>(__TAURI_INVOKE("start_microphone_test")),
-	/**  The test's level since the last call, and the device. Never blocks. */
-	readMicrophoneTest: () => typedError<MicReading_Serialize, string>(__TAURI_INVOKE("read_microphone_test")),
-	/**  Ends the microphone test. */
-	stopMicrophoneTest: () => typedError<null, string>(__TAURI_INVOKE("stop_microphone_test")),
 	/**  Opens `link` in the browser. */
 	openLink: (link: Link) => typedError<null, string>(__TAURI_INVOKE("open_link", { link })),
 	/**  The version, and when updates were last checked. */
@@ -680,31 +670,6 @@ export type LocalModelInfo_Serialize = {
 	error: string | null,
 	/**  Whether it is the catalogue's default. */
 	default: boolean,
-};
-
-/**  The microphone test's level and device, as Settings polls them. */
-export type MicReading = MicReading_Serialize | MicReading_Deserialize;
-
-/**  The microphone test's level and device, as Settings polls them. */
-export type MicReading_Deserialize = {
-	/**
-	 *  The level since the last reading, in dBFS; `None` once the test
-	 *  has ended.
-	 */
-	level?: number | null,
-	/**  The input device's name, if known. */
-	device?: string | null,
-};
-
-/**  The microphone test's level and device, as Settings polls them. */
-export type MicReading_Serialize = {
-	/**
-	 *  The level since the last reading, in dBFS; `None` once the test
-	 *  has ended.
-	 */
-	level: number | null,
-	/**  The input device's name, if known. */
-	device: string | null,
 };
 
 /**  Where a model is, as Settings shows it. */

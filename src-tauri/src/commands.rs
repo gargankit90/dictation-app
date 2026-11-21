@@ -1020,9 +1020,6 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::preferences::use_local_model,
         crate::preferences::get_engine_status,
         crate::preferences::delete_api_key,
-        crate::preferences::start_microphone_test,
-        crate::preferences::read_microphone_test,
-        crate::preferences::stop_microphone_test,
         crate::preferences::open_link,
         crate::preferences::get_app_info,
         crate::preferences::check_for_updates,
@@ -1152,9 +1149,6 @@ mod tests {
             "useLocalModel",
             "getEngineStatus",
             "deleteApiKey",
-            "startMicrophoneTest",
-            "readMicrophoneTest",
-            "stopMicrophoneTest",
             "openLink",
             "getAppInfo",
             "checkForUpdates",
@@ -1178,7 +1172,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 52,
+            commands, 49,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -3042,13 +3036,6 @@ mod capability_tests {
             ),
         )));
         // U6: a microphone that never opens, and no update check.
-        app.manage(crate::preferences::AppMicTest(
-            dictation_pipeline::mic_test::MicTest::new(Box::new(|| {
-                Box::new(dictation_platform::fakes::FileAudioSource::new(
-                    "/nonexistent/u6-mic-test.wav",
-                ))
-            })),
-        ));
         app.manage(crate::preferences::UpdateCheck(std::sync::Arc::new(|| {})));
         let windows = labels
             .iter()
@@ -3373,16 +3360,9 @@ mod capability_tests {
                 | "take_window_request"
                 | "reveal_log_file" => invoke(main, command, args(command)).map(|_| ()),
                 // U6: no keychain, network or OS: fakes and memory only.
-                "get_engine_status"
-                | "read_microphone_test"
-                | "stop_microphone_test"
-                | "get_app_info"
-                | "check_for_updates" => invoke(main, command, args(command)).map(|_| ()),
-                // U6: the fake microphone refuses; the command ran.
-                "start_microphone_test" => match invoke(main, command, args(command)) {
-                    Err(error) if !error.to_string().contains("not allowed") => Ok(()),
-                    other => other.map(|_| ()),
-                },
+                "get_engine_status" | "get_app_info" | "check_for_updates" => {
+                    invoke(main, command, args(command)).map(|_| ())
+                }
                 // No keychain, network or OS prompt: the onboarding ones
                 // run on fakes (granted permissions, no shell).
                 "get_settings"

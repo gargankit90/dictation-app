@@ -341,8 +341,6 @@ e2e_microphone_denied_then_recover() {
   # U8: setup picks up, now allowed.
   expect "Resume setup… opens setup again" ax_ok tray-click "$APP_NAME" "Resume setup"
   expect "the Microphone card is allowed" ax_ok wait-text "$APP_NAME" "Set up" "Allowed" 10
-  expect "with the live meter's line" \
-    ax_ok wait-text "$APP_NAME" "Set up" "the bars should move" 10
   screenshot e2e_microphone_denied_then_recover.setup_recovered
   expect "closing it hides it" ax_ok close "$APP_NAME" "Set up"
   log "  evidence: $(paste -sd '|' "$MIC_EVIDENCE")"

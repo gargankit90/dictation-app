@@ -63,9 +63,6 @@ class Backend {
   engine: EngineStatus = { state: "ready", message: null };
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
   testResult: KeyTestError | null = null;
-  /** The levels the microphone test reads, in order (then the last again). */
-  micLevels: number[] = [-90];
-  micRunning = false;
   /** Fails the command named, with the message (a string, as the app sends). */
   failing = new Map<string, string>();
   /** Holds the command named until the promise settles. */
@@ -143,16 +140,6 @@ class Backend {
       case "test_api_key":
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         if (this.testResult !== null) throw this.testResult;
-        return null;
-      case "start_microphone_test":
-        this.micRunning = true;
-        return null;
-      case "read_microphone_test": {
-        const level = this.micLevels.length > 1 ? this.micLevels.shift() : this.micLevels[0];
-        return { level: this.micRunning ? level : null, device: "MacBook Pro Microphone" };
-      }
-      case "stop_microphone_test":
-        this.micRunning = false;
         return null;
       case "get_app_info":
         return { version: "0.1.0", last_update_check_ms: null };
@@ -960,39 +947,6 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
     for (const call of backend.calls) {
       expect(call.command).not.toBe("get_api_key");
     }
-  });
-});
-
-describe("criterion_u6_6 Test microphone", () => {
-  it("shows the live meter and says it works when it hears sound", async () => {
-    backend.micLevels = [-80, -20, -25];
-    await open("dictation");
-    click("Test microphone");
-    await waitFor(() => {
-      expect(screen.getAllByTestId("mic-bar").length).toBeGreaterThan(0);
-    });
-    expect(await screen.findByText("Hearing you.")).toBeTruthy();
-    expect(screen.getByText("MacBook Pro Microphone")).toBeTruthy();
-  });
-
-  it("says No sound after 5 s of silence, and stops the microphone", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    backend.micLevels = [-90];
-    await open("dictation");
-    click("Test microphone");
-    await screen.findByText("Listening… say something.");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_200);
-    });
-    expect((await screen.findByRole("alert")).textContent).toContain("No sound");
-    expect(backend.named("stop_microphone_test").length).toBeGreaterThan(0);
-  });
-
-  it("says why when the microphone can't start", async () => {
-    backend.failing.set("start_microphone_test", "Vocet isn't allowed to use the microphone.");
-    await open("dictation");
-    click("Test microphone");
-    expect((await screen.findByRole("alert")).textContent).toContain("isn't allowed");
   });
 });
 
