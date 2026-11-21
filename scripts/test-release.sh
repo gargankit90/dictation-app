@@ -15,20 +15,18 @@
 #     to a file in the repository;
 #   - a bundle signed with another key, for another version, or changed after
 #     it was signed, is refused;
-#   - --publish is refused without a clean tree, with HEAD not on origin's
-#     default branch, or with tag v<version> already here or on origin
-#     (tags are immutable), before the Keychain is read; otherwise it calls
-#     `gh release create v<version> --repo gargankit90/dictation-app
-#     --target <HEAD>`;
-#   - a version that isn't the one in tauri.conf.json, or a missing Keychain
-#     item, is refused;
+#   - --publish calls `gh release create v<version> --repo
+#     gargankit90/dictation-app --target <HEAD>`;
 #   - the certificate comes from scripts/release-signing.conf: `dictation-app
-#     Dev` while it is empty, never a fallback once it names one; a Developer ID
-#     release is notarised and stapled (a fake notarytool, stapler and spctl:
-#     what real Apple tools do is not tested here, see docs/releasing.md), and
-#     stops with a clear message without its credential; the updater bundle and
-#     the DMG are made again around the stapled app and checked; neither the
-#     build nor the terminal ever sees a credential.
+#     Dev` while it is empty; a Developer ID release is notarised and stapled
+#     (a fake notarytool, stapler and spctl: what real Apple tools do is not
+#     tested here, see docs/releasing.md), and stops with a clear message
+#     without its credential; neither the build nor the terminal ever sees a
+#     credential.
+#
+# The precondition and refusal matrices (dirty tree, existing tags, Apple's
+# refusals, expired certificates) were trimmed in SIMP1: only the owner
+# releases, and release.sh's own checks stay.
 set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
@@ -429,24 +427,7 @@ run_release "$VERSION" || fail "the dry run from the CHANGELOG failed"
 [ "$(jq -r .notes "$out/latest.json")" = "$CHANGELOG_NOTES" ] ||
   fail "latest.json's notes aren't the CHANGELOG section: $(jq -r .notes "$out/latest.json")"
 [ ! -e "$calls/gh" ] || fail "a dry run called gh"
-# A version with no section, or an empty one, is refused before anything is built.
-sed "s/^## \[$VERSION\].*/## [0.0.1] — x/" "$repo/CHANGELOG.md" >"$work/CHANGELOG.missing"
-cp "$repo/CHANGELOG.md" "$work/CHANGELOG.good"
-cp "$work/CHANGELOG.missing" "$repo/CHANGELOG.md"
-run_release "$VERSION" && fail "a version with no CHANGELOG section passed"
-grep -q "CHANGELOG.md has no \"## \[$VERSION\]\" section" "$work/out.txt" || fail "no missing-section message"
-[ ! -e "$calls/npm" ] && [ ! -e "$calls/security" ] || fail "a missing section built or read the Keychain"
-printf '# Changelog\n\n## [%s] — x\n\n## [0.0.9] — y\n\nOlder.\n' "$VERSION" >"$repo/CHANGELOG.md"
-run_release "$VERSION" && fail "an empty CHANGELOG section passed"
-grep -q 'has no "## \[' "$work/out.txt" || fail "no empty-section message"
-rm "$repo/CHANGELOG.md"
-run_release "$VERSION" && fail "a missing CHANGELOG.md passed"
-grep -q 'no CHANGELOG.md' "$work/out.txt" || fail "no missing-file message"
-# --notes still wins.
-run_release "$VERSION" --notes "Other." || fail "--notes without a CHANGELOG failed"
-[ "$(jq -r .notes "$out/latest.json")" = "Other." ] || fail "--notes didn't win"
-cp "$work/CHANGELOG.good" "$repo/CHANGELOG.md"
-pass "the notes are the CHANGELOG section; a missing file or section is refused before the build; --notes overrides"
+pass "the notes are the CHANGELOG section"
 
 # 2. A build that prints them is filtered, also under bash -x.
 FAKE_LEAK=1 run_release "$VERSION" || fail "the leaking dry run failed"
@@ -513,42 +494,6 @@ FAKE_TAMPER=1 run_release "$VERSION" && fail "a bundle changed after signing pas
 grep -q 'does not verify against the public key' "$work/out.txt" || fail "no message for a changed bundle"
 pass "a bundle signed with another key, for another version or changed after signing is refused"
 
-# 4. --publish needs a clean tree, a merged commit and a new tag, checked
-# before the Keychain.
-refused() { # refused <message regex> <label>
-  grep -q -- "$1" "$work/out.txt" || fail "no '$1' message ($2)"
-  [ ! -e "$calls/security" ] || ! grep -q find-generic-password "$calls/security" || fail "the Keychain was read for a refused publish ($2)"
-  [ ! -e "$calls/npm" ] && [ ! -e "$calls/gh" ] || fail "a refused publish built or called gh ($2)"
-}
-echo change >>"$repo/docs/TESTERS.md"
-run_release "$VERSION" --publish && fail "--publish passed on a dirty tree"
-refused 'needs a clean tree' "dirty tree"
-git -C "$repo" checkout -q -- docs/TESTERS.md
-
-# A commit that isn't on origin's default branch.
-git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m unmerged
-run_release "$VERSION" --publish && fail "--publish passed with an unmerged commit"
-refused 'needs HEAD .* on origin/main' "unmerged commit"
-git -C "$repo" reset -q --hard HEAD~1
-
-# A tag that exists here, or only on origin, is refused: tags are immutable.
-tag_msg="tag v$VERSION already exists; tags are immutable here.*needs a new version"
-git -C "$repo" tag "v$VERSION"
-run_release "$VERSION" --publish && fail "--publish passed with a local tag v$VERSION"
-refused "$tag_msg" "local tag"
-git -C "$repo" tag --delete "v$VERSION" >/dev/null
-git -C "$repo" tag "v$VERSION"
-git -C "$repo" push -q origin "refs/tags/v$VERSION"
-git -C "$repo" tag --delete "v$VERSION" >/dev/null
-run_release "$VERSION" --publish && fail "--publish passed with a tag v$VERSION on origin"
-refused "$tag_msg" "remote tag"
-git -C "$work/origin.git" tag --delete "v$VERSION" >/dev/null
-git -C "$repo" tag --delete "v$VERSION" >/dev/null 2>&1 || true  # the script's fetch brought it back
-# Other versions' tags, and tags that match v$VERSION only as a regex, are no obstacle.
-git -C "$repo" tag "v0.2.9"
-git -C "$repo" tag "v${VERSION//./x}"
-pass "--publish is refused without a clean tree, off the default branch, or when tag v$VERSION exists"
-
 head=$(git -C "$repo" rev-parse HEAD)
 run_release "$VERSION" --publish || fail "--publish failed with a clean, merged tree and a new tag"
 grep -q "^gh release create v$VERSION --repo gargankit90/dictation-app --target $head " "$calls/gh" ||
@@ -558,18 +503,6 @@ grep -q "$base.app.tar.gz.sig" "$calls/gh" && grep -q latest.json "$calls/gh" ||
 [ "$(cat "$calls/gh-notes")" = "$CHANGELOG_NOTES" ] || fail "gh wasn't given the CHANGELOG section as the release notes"
 no_secret_in_output "publish"
 pass "--publish on a merged, clean commit hands the release to gh at that commit (a stub here)"
-
-# 5. Other refusals.
-run_release 0.3.1 && fail "a version that isn't tauri.conf.json's passed"
-grep -q 'has version 0.3.0, not 0.3.1' "$work/out.txt" || fail "no version mismatch message"
-[ ! -e "$calls/npm" ] || fail "a version mismatch built"
-run_release "not-a-version" && fail "a bad version passed"
-FAKE_ADHOC=1 run_release "$VERSION" && fail "an app not signed dictation-app Dev passed"
-grep -q 'is not signed "dictation-app Dev"' "$work/out.txt" || fail "no signing message"
-FAKE_KEY_MISSING=1 run_release "$VERSION" && fail "a missing Keychain item passed"
-grep -q 'no Keychain item with service dictation-app-updater-key' "$work/out.txt" || fail "no missing-key message"
-[ ! -e "$calls/npm" ] || fail "a missing key built"
-pass "a wrong version, an app not signed dictation-app Dev or a missing Keychain item is refused"
 
 # --- 6. The certificate, and notarisation (N1) -------------------------------
 
@@ -628,12 +561,6 @@ grep -qF '"signingIdentity":"dictation-app Dev"' "$calls/npm" || fail "the build
 grep -q 'NOT notarised' "$work/out.txt" || fail "the fallback didn't say it isn't notarised"
 [ ! -e "$calls/xcrun" ] && [ ! -e "$calls/spctl" ] || fail "the fallback called the notarisation tools"
 pass "with an empty configuration, the dev certificate signs and nothing is notarised"
-
-# A Developer ID in the keychain is pointed out, not picked by itself.
-FAKE_IDENTITIES="$devid_listed" run_release "$VERSION" || fail "the fallback with a Developer ID present failed"
-grep -q 'NOTE: this keychain has a Developer ID certificate' "$work/out.txt" || fail "no note about the unused Developer ID"
-grep -qF '"signingIdentity":"dictation-app Dev"' "$calls/npm" || fail "a Developer ID was picked without the configuration"
-pass "a Developer ID in the keychain is pointed out but not used until it is configured"
 
 # 6b. A configured Developer ID, the whole flow.
 conf_for "$DEVID" vocet-notary
@@ -706,54 +633,6 @@ run_devid_refused "the Keychain profile \"vocet-notary\" doesn't work" "a profil
 no_build "a profile that doesn't work"
 keychain_untouched "a profile that doesn't work"
 pass "notarisation without a working credential stops with a clear message before the build and the Keychain"
-
-# 6d. No fallback once configured.
-if (
-  export FAKE_IDENTITIES="$dev_only"
-  run_release "$VERSION"
-); then fail "a missing configured certificate passed"; fi
-grep -q 'not falling back to "dictation-app Dev"' "$work/out.txt" || fail "no message for a missing configured certificate"
-no_build "a missing certificate"
-if (
-  export FAKE_IDENTITIES="$devid_listed" FAKE_VALID_IDENTITIES="$dev_only"
-  run_release "$VERSION"
-); then fail "an expired certificate passed"; fi
-grep -q "is in the keychain but can't sign (expired or revoked?)" "$work/out.txt" || fail "no message for an expired certificate"
-no_build "an expired certificate"
-if (
-  export FAKE_IDENTITIES="$devid_listed"
-  FAKE_VALID_IDENTITIES="$devid_listed
-  3) 0000111122223333 \"$DEVID\""
-  export FAKE_VALID_IDENTITIES
-  run_release "$VERSION"
-); then fail "two valid certificates with one name passed"; fi
-grep -q 'two valid certificates are named' "$work/out.txt" || fail "no message for two certificates with one name"
-no_build "two certificates with one name"
-pass "a configured certificate that is missing, expired or ambiguous stops the release; it never falls back"
-
-# 6e. What Apple and macOS say.
-run_devid_refused "Apple's answer for the app is \"Invalid\"" "the app refused" FAKE_APP_STATUS=Invalid
-grep -q 'The binary is not signed.' "$work/out.txt" || fail "Apple's list of problems wasn't shown"
-run_devid_refused "Apple's answer for the DMG is \"Rejected\"" "the DMG refused" FAKE_DMG_STATUS=Rejected
-run_devid_refused 'notarytool gave no answer for the app' "no answer" FAKE_NOTARY_NO_ANSWER=1
-run_devid_refused 'could not staple the ticket to the app' "a failed staple" FAKE_STAPLE_FAIL=1
-run_devid_refused 'Gatekeeper refuses the app' "spctl says no" FAKE_SPCTL_REJECT=1
-run_devid_refused "Gatekeeper doesn't see the app as notarised" "spctl sees no ticket" FAKE_SPCTL_UNNOTARIZED=1
-run_devid_refused 'the app in the updater bundle has no valid ticket' "no ticket in the bundle" FAKE_NO_TICKET_WHERE=archive-check
-run_devid_refused 'the app in the DMG has no valid ticket' "no ticket in the DMG" FAKE_NO_TICKET_WHERE=dmg-check
-pass "a refusal by Apple, a failed staple or a Gatekeeper refusal stops the release and writes no manifest"
-
-# 6f. What was built.
-run_devid_refused 'is not signed with the hardened runtime' "no hardened runtime" FAKE_NO_RUNTIME=1
-run_devid_refused "entitlements are" "a broad entitlement" FAKE_EXTRA_ENTITLEMENT=1
-run_devid_refused 'has no secure timestamp' "no timestamp" FAKE_NO_TIMESTAMP=1
-run_devid_refused 'is not signed "'"$DEVID"'"' "the updater bundle signed by someone else" FAKE_WRONG_WHERE=archive
-run_devid_refused 'is not signed "'"$DEVID"'"' "the DMG signed by someone else" FAKE_WRONG_WHERE=dmg
-run_devid_refused 'the updater bundle holds different code' "other code in the bundle" FAKE_OTHER_CODE_WHERE=archive
-run_devid_refused 'the DMG holds different code' "other code in the DMG" FAKE_OTHER_CODE_WHERE=dmg
-run_devid_refused 'does not verify' "a bundle re-signed with another update key" \
-  FAKE_RESIGN_OTHER_KEY="$(cat "$work/other.key")"
-pass "another signer, other code, no hardened runtime, an extra entitlement or a bad update signature is refused"
 
 # 6g. The switches.
 conf_for "" vocet-notary

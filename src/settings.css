@@ -371,88 +371,6 @@ pre.report {
   color: var(--vc-muted);
 }
 
-.language-picker {
-  position: relative;
-}
-
-.language-field {
-  position: relative;
-}
-
-.language-flag {
-  margin: var(--vc-space-1) 0 0;
-  color: var(--vc-attention);
-  font-size: var(--vc-text-sm);
-}
-
-.language-picker input {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: var(--vc-control-h);
-  padding: var(--vc-space-1) calc(var(--vc-space-2) * 2 + 12px) var(--vc-space-1) var(--vc-space-2);
-  border: 1px solid var(--vc-line-strong);
-  border-radius: var(--vc-radius-sm);
-  background: var(--vc-bg);
-  color: var(--vc-ink);
-  font: inherit;
-  text-overflow: ellipsis;
-}
-
-.language-picker input[aria-expanded="false"]:not(:disabled) {
-  cursor: pointer;
-}
-
-.language-picker input[aria-invalid="true"] {
-  border-color: var(--vc-danger);
-}
-
-/* Part of the field's look: a click on it reaches the field. */
-.language-chevron {
-  position: absolute;
-  top: 50%;
-  right: var(--vc-space-2);
-  color: var(--vc-muted);
-  pointer-events: none;
-  transform: translateY(-50%);
-}
-
-.language-chevron.open {
-  transform: translateY(-50%) rotate(180deg);
-}
-
-/* Clear of the field's focus ring (3 px, 2 px out), or it covers the first row.
-   The picker shortens it further to fit the area it opens in. */
-.language-list {
-  position: absolute;
-  z-index: 10;
-  left: 0;
-  right: 0;
-  box-sizing: border-box;
-  max-height: 220px;
-  margin: var(--vc-space-2) 0 0;
-  padding: var(--vc-space-1);
-  overflow: auto;
-  list-style: none;
-  border: 1px solid var(--vc-line-strong);
-  border-radius: var(--vc-radius-sm);
-  background: var(--vc-bg);
-}
-
-.language-option,
-.language-empty {
-  padding: var(--vc-space-1) var(--vc-space-2);
-  border-radius: var(--vc-radius-sm);
-}
-
-.language-option.active {
-  background: var(--vc-accent);
-  color: var(--vc-accent-fg);
-}
-
-.language-empty {
-  color: var(--vc-muted);
-}
-
 button.link {
   display: inline;
   min-height: 0;
@@ -745,27 +663,6 @@ button.menu-button {
   font-size: var(--vc-text-sm);
 }
 
-/* The Keychain notice: advice, not a success. */
-.notice-info {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--vc-space-3);
-  margin-bottom: var(--vc-space-4);
-  padding: var(--vc-space-3);
-  border-radius: var(--vc-radius-md);
-  background: var(--vc-accent-soft);
-  color: var(--vc-ink);
-}
-
-.notice-info p {
-  margin: 0;
-}
-
-.notice-info button {
-  flex: none;
-}
-
 /* The own-key panel: in the sheet, and in setup's Speech step. */
 .own-key-panel {
   margin-top: var(--vc-space-3);
@@ -826,39 +723,6 @@ button.menu-button {
 .row-details summary {
   color: var(--vc-accent);
   cursor: pointer;
-}
-
-/* Test microphone: U4's meter bars, in the window's colours. */
-.mic-test {
-  display: flex;
-  align-items: center;
-  gap: var(--vc-space-3);
-  margin-top: var(--vc-space-2);
-  color: var(--vc-ink-2);
-  font-size: var(--vc-text-sm);
-}
-
-.mic-meter {
-  display: inline-flex;
-  height: 18px;
-  align-items: center;
-  gap: 2px;
-}
-
-.mic-meter i {
-  width: 3px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--vc-accent);
-  transition: height var(--vc-dur-fast) var(--vc-ease);
-}
-
-.row-control .language-picker {
-  width: 220px;
-}
-
-.row-control .hotkey-recorder .row {
-  margin-top: var(--vc-space-1);
 }
 
 /* U12: Settings' dictation key, on one line at the window's smallest. */
@@ -1379,32 +1243,6 @@ main.ob {
   font-weight: 700;
 }
 
-.ob-languages {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--vc-space-2);
-}
-
-/* `button:hover:not(:disabled)` weighs more than one class and one attribute:
-   it took the fill away under the pointer and left the light label on it. The
-   selected look has to win in every state a button has. */
-button.ob-chip[aria-checked="true"],
-button.ob-chip[aria-checked="true"]:active:not(:disabled) {
-  border-color: var(--vc-primary-bg);
-  background: var(--vc-primary-bg);
-  color: var(--vc-primary-fg);
-}
-
-button.ob-chip[aria-checked="true"]:hover:not(:disabled) {
-  border-color: var(--vc-primary-hover);
-  background: var(--vc-primary-hover);
-  color: var(--vc-primary-fg);
-}
-
-.ob-content > .language-picker {
-  width: min(320px, 100%);
-}
-
 .ob-allowed {
   color: var(--vc-ready);
   font-weight: 600;
@@ -1416,12 +1254,6 @@ button.ob-chip[aria-checked="true"]:hover:not(:disabled) {
 
 .ob-waiting {
   color: var(--vc-muted);
-}
-
-.ob-meter {
-  display: flex;
-  flex-direction: column;
-  gap: var(--vc-space-1);
 }
 
 .ob-practice {
@@ -1442,62 +1274,12 @@ button.ob-chip[aria-checked="true"]:hover:not(:disabled) {
   outline: 1px solid var(--vc-accent);
 }
 
-.ob-stages {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--vc-space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ob-stage {
-  padding: var(--vc-space-1) var(--vc-space-3);
-  border-radius: var(--vc-radius-pill);
-  background: var(--vc-bg-grouped);
-  color: var(--vc-muted);
-  font-size: var(--vc-text-sm);
-  font-weight: 600;
-}
-
-.ob-stage.done {
-  background: var(--vc-ready-soft);
-  color: var(--vc-ready);
-}
-
 .ob-sr {
   position: absolute;
   width: 1px;
   height: 1px;
   overflow: hidden;
   clip-path: inset(50%);
-}
-
-.ob-fix-area {
-  display: flex;
-  flex-direction: column;
-  gap: var(--vc-space-3);
-}
-
-.ob-fix {
-  display: flex;
-  flex-direction: column;
-  gap: var(--vc-space-2);
-  padding: var(--vc-space-3) var(--vc-space-4);
-  border-radius: var(--vc-radius-md);
-  background: var(--vc-attention-soft);
-}
-
-/* Long words scroll here, so the panel and its Copy button still fit the step. */
-.ob-words {
-  max-height: 5.5em;
-  overflow-y: auto;
-  padding: var(--vc-space-2) var(--vc-space-3);
-  border: 1px solid var(--vc-line);
-  border-radius: var(--vc-radius-sm);
-  background: var(--vc-bg);
-  font-size: var(--vc-text-lg);
-  user-select: text;
 }
 
 .ob-summary {

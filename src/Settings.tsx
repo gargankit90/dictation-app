@@ -3,11 +3,8 @@ import type { KeyboardEvent } from "react";
 import { commands } from "./bindings";
 import type { EngineStatus, LocalModelInfo_Serialize, Settings_Serialize } from "./bindings";
 import { BROKEN, messageOf } from "./messages";
-import { cloudLanguages } from "./languages";
-import { PROVIDER_NAME, modelTitle } from "./settings/modelRow";
 import "./settings.css";
 import { Dictation } from "./settings/Dictation";
-import type { LanguageChoice } from "./settings/Dictation";
 import { General, useLaunchAtLogin } from "./settings/General";
 import { About, Help } from "./settings/HelpAbout";
 import { History } from "./settings/History";
@@ -121,31 +118,6 @@ export function useEngineStatus() {
   return { engine, refresh };
 }
 
-/** The languages the engine in use offers (U2). */
-function languageChoice(
-  settings: Settings_Serialize,
-  models: LocalModelInfo_Serialize[] | null,
-): LanguageChoice {
-  if (settings.transcription === "cloud") {
-    return {
-      supported: cloudLanguages(settings.provider),
-      engineName: PROVIDER_NAME,
-      englishOnly: false,
-    };
-  }
-  const model = models?.find((candidate) => candidate.id === settings.local_model);
-  // Before the list has been read, nothing is filtered or flagged.
-  if (model === undefined) {
-    return { supported: cloudLanguages(settings.provider), engineName: null, englishOnly: false };
-  }
-  const englishOnly = model.language_codes.join() === "en";
-  return {
-    supported: model.language_codes,
-    engineName: `the ${modelTitle(model)} model`,
-    englishOnly,
-  };
-}
-
 interface Props extends HelpActions {
   /** Open at this section (the tray's fix rows); `id` makes a repeated ask count. */
   open?: { section: SectionId; id: number } | null;
@@ -170,24 +142,6 @@ export function Settings({ open = null, onOpened, ...help }: Props) {
   const [section, setSection] = useState<SectionId>(rememberedSection);
   const { models, error: modelsError, refresh: refreshModels } = useModels();
   const { engine, refresh: refreshEngine } = useEngineStatus();
-  // The first launch after the rename says something about the Keychain (U1);
-  // Speech shows it, and only with a key saved.
-  const [launchNotice, setLaunchNotice] = useState<string | null>(null);
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const result = await commands.launchNotice();
-          if (result.status === "ok") setLaunchNotice(result.data);
-        } catch {
-          // No notice is the same as nothing to say.
-        }
-      })();
-    }, 0);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, []);
   const [sheetOffered, setSheetOffered] = useState(false);
   const offerSheet = useCallback(() => {
     setSheetOffered(true);
@@ -281,16 +235,7 @@ export function Settings({ open = null, onOpened, ...help }: Props) {
         pane = <General launch={launch} />;
         break;
       case "dictation":
-        pane = (
-          <Dictation
-            settings={settings}
-            onStored={setSettings}
-            languages={languageChoice(settings, models)}
-            onOpenSpeech={() => {
-              choose("speech");
-            }}
-          />
-        );
+        pane = <Dictation settings={settings} onStored={setSettings} />;
         break;
       case "speech":
         pane = (
@@ -302,7 +247,6 @@ export function Settings({ open = null, onOpened, ...help }: Props) {
             refreshModels={refreshModels}
             engine={engine}
             refreshEngine={refreshEngine}
-            launchNotice={launchNotice}
             sheetOffered={sheetOffered}
             onSheetOffered={offerSheet}
           />

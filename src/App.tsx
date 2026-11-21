@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BROKEN, messageOf } from "./messages";
 import { commands } from "./bindings";
-import type { View, WindowPage } from "./bindings";
+import type { View } from "./bindings";
+
+/** Which Settings screen the window shows. */
+type WindowPage = "settings" | "troubleshoot" | "report";
 import { Onboarding } from "./Onboarding";
 import { Report } from "./Report";
 import { Settings } from "./Settings";
@@ -34,13 +37,6 @@ export function App() {
   const followed = useCallback(() => {
     setOpen(null);
   }, []);
-
-  // Each screen has its own window title (U12). The webview can't set it
-  // itself: it has no `core:` permissions.
-  useEffect(() => {
-    if (view !== "settings") return;
-    void commands.setWindowPage(page).catch(() => undefined);
-  }, [view, page]);
 
   // ⌘, opens Settings (U6), as in every Mac app, from Troubleshoot too.
   useEffect(() => {
@@ -106,10 +102,6 @@ export function App() {
       <Onboarding
         onFinished={() => {
           setView("settings");
-        }}
-        onOpenHistory={() => {
-          setView("settings");
-          openSection("history");
         }}
       />
     );

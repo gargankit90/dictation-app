@@ -15,25 +15,8 @@ export const commands = {
 	 *  hotkey listening than the file holds; T3 round 2).
 	 */
 	getSettings: () => typedError<Settings_Serialize, string>(__TAURI_INVOKE("get_settings")),
-	/**
-	 *  Validates and saves the settings and switches to the saved hotkey. An error means something didn't
-	 *  take effect; its text says what was saved and what wasn't.
-	 * 
-	 *  The "share anonymous usage events" field of `settings` is ignored: the
-	 *  stored choice stays, whatever the form held when it was loaded. Only
-	 *  [`set_share_usage_events`] changes it, so a Save can never undo a newer
-	 *  opt-out (A1 review, round 1). The same goes for the hotkey, which only
-	 *  [`set_hotkey`] changes (K1 review, round 1): a form loaded before the key
-	 *  was recorded can't switch it back, for `launch_at_login`, which only
-	 *  [`set_launch_at_login`] changes (S1), and for `history_limit`, which only
-	 *  [`crate::history::set_history_limit`] changes (U7), since lowering it
-	 *  deletes entries only after the user confirms.
-	 */
-	saveSettings: (settings: Settings_Deserialize) => typedError<null, string>(__TAURI_INVOKE("save_settings", { settings })),
 	/**  Stores `key` as `provider`'s API key in the keychain. Write-only. */
 	setApiKey: (provider: Provider, key: string) => typedError<null, string>(__TAURI_INVOKE("set_api_key", { provider, key })),
-	/**  Whether `provider` has an API key stored. */
-	hasApiKey: (provider: Provider) => typedError<boolean, string>(__TAURI_INVOKE("has_api_key", { provider })),
 	/**
 	 *  Tests an API key with a short silent clip through `provider`'s
 	 *  transcription endpoint: the key typed in the form (`key`, used for this
@@ -62,14 +45,14 @@ export const commands = {
 	 *  The view the settings window shows and, for onboarding (M5.2), the step
 	 *  the user is on and the two permissions. Never blocks: the key isn't read.
 	 */
-	getOnboarding: () => typedError<OnboardingStatus_Serialize, string>(__TAURI_INVOKE("get_onboarding")),
+	getOnboarding: () => typedError<OnboardingStatus, string>(__TAURI_INVOKE("get_onboarding")),
 	/**
 	 *  Asks macOS for `permission`: its prompt while it hasn't been asked,
 	 *  System Settings at the permission's page once refused (Accessibility:
 	 *  both). Returns at once; `get_onboarding` shows the answer once the user
 	 *  gives it.
 	 */
-	requestPermission: (permission: AppPermission) => typedError<OnboardingStatus_Serialize, string>(__TAURI_INVOKE("request_permission", { permission })),
+	requestPermission: (permission: AppPermission) => typedError<OnboardingStatus, string>(__TAURI_INVOKE("request_permission", { permission })),
 	/**
 	 *  Settings, Help, "Run setup again" (U5, U6): opens the first-run steps,
 	 *  from the start if setup was finished (U8), otherwise at the step the user
@@ -81,7 +64,7 @@ export const commands = {
 	 *  read from the keychain only to move past Speech). An error says which step
 	 *  comes first; the user stays where they were.
 	 */
-	setOnboardingStep: (step: Step) => typedError<OnboardingStatus_Serialize, string>(__TAURI_INVOKE("set_onboarding_step", { step })),
+	setOnboardingStep: (step: Step) => typedError<OnboardingStatus, string>(__TAURI_INVOKE("set_onboarding_step", { step })),
 	/**  Ends onboarding: the window goes back to the settings view and hides. */
 	finishOnboarding: () => typedError<null, string>(__TAURI_INVOKE("finish_onboarding")),
 	/**
@@ -172,21 +155,6 @@ export const commands = {
 	/**  Shows the log folder in the file manager, through the opener port. */
 	revealLogFile: () => typedError<null, string>(__TAURI_INVOKE("reveal_log_file")),
 	/**
-	 *  What the last dictation got through: onboarding's Try it shows success
-	 *  only when `completed` grows while its step is open.
-	 */
-	dictationProgress: () => typedError<DictationProgressView_Serialize, string>(__TAURI_INVOKE("dictation_progress")),
-	/**
-	 *  The notice for this launch only: macOS may ask once to let Vocet use the
-	 *  saved key. `None` on every other launch.
-	 */
-	launchNotice: () => typedError<string | null, string>(__TAURI_INVOKE("launch_notice")),
-	/**
-	 *  Sets the language and nothing else (`None` or empty: detect it). The
-	 *  engine follows at once.
-	 */
-	setLanguage: (language: string | null) => typedError<null, string>(__TAURI_INVOKE("set_language", { language })),
-	/**
 	 *  Dictates with `provider` and the user's own key from now on. Switching
 	 *  provider also switches to its default model.
 	 */
@@ -206,24 +174,12 @@ export const commands = {
 	 *  like saving one.
 	 */
 	deleteApiKey: (provider: Provider) => typedError<null, string>(__TAURI_INVOKE("delete_api_key", { provider })),
-	/**
-	 *  Starts recording from the microphone for a few seconds, only to show
-	 *  its level ([`read_microphone_test`]). Ends by itself after
-	 *  [`mic_test::MAX_TEST`].
-	 */
-	startMicrophoneTest: () => typedError<null, string>(__TAURI_INVOKE("start_microphone_test")),
-	/**  The test's level since the last call, and the device. Never blocks. */
-	readMicrophoneTest: () => typedError<MicReading_Serialize, string>(__TAURI_INVOKE("read_microphone_test")),
-	/**  Ends the microphone test. */
-	stopMicrophoneTest: () => typedError<null, string>(__TAURI_INVOKE("stop_microphone_test")),
 	/**  Opens `link` in the browser. */
 	openLink: (link: Link) => typedError<null, string>(__TAURI_INVOKE("open_link", { link })),
 	/**  The version, and when updates were last checked. */
 	getAppInfo: () => typedError<AppInfo_Serialize, string>(__TAURI_INVOKE("get_app_info")),
 	/**  Check now, in Settings → General: a dialog says what it found. */
 	checkForUpdates: () => typedError<null, string>(__TAURI_INVOKE("check_for_updates")),
-	/**  The page says which screen it shows, for the window's title (U12). */
-	setWindowPage: (page: WindowPage) => typedError<null, string>(__TAURI_INVOKE("set_window_page", { page })),
 	/**
 	 *  Chooses on-device model `id` before it is on this Mac (U8's "Download and
 	 *  continue"): the settings choose it now, so the choice survives a quit and
@@ -232,39 +188,6 @@ export const commands = {
 	 *  says the model isn't ready.
 	 */
 	chooseLocalModel: (id: string) => typedError<null, string>(__TAURI_INVOKE("choose_local_model", { id })),
-	/**  Keeps how the practice dictation went, for the Ready step and a relaunch. */
-	setTryOutcome: (outcome: TryOutcome) => typedError<null, string>(__TAURI_INVOKE("set_try_outcome", { outcome })),
-	/**
-	 *  Try it: the words of a practice dictation didn't reach the practice box.
-	 *  Only the window can see the box. It says only that this happened: the event
-	 *  is `paste_missed`, chosen here, with nothing from the window in it.
-	 */
-	practicePasteMissed: () => typedError<null, string>(__TAURI_INVOKE("practice_paste_missed")),
-	/**
-	 *  Keeps that the user cancelled (or resumed) the model download, so a
-	 *  relaunch doesn't start a download they stopped.
-	 */
-	setDownloadPaused: (paused: boolean) => typedError<null, string>(__TAURI_INVOKE("set_download_paused", { paused })),
-	/**
-	 *  The words of the last dictation the app tried to paste, for Try it only:
-	 *  `None` unless onboarding is on screen. Held in memory; never logged.
-	 */
-	practiceWords: () => typedError<string | null, string>(__TAURI_INVOKE("practice_words")),
-	/**
-	 *  Try it's Copy: puts [`practice_words`]'s text on the clipboard, and only
-	 *  when the user asks. Nothing is pasted.
-	 */
-	copyPracticeWords: () => typedError<null, string>(__TAURI_INVOKE("copy_practice_words")),
-	/**
-	 *  Keeps the engine selected on the Speech step, so a quit before Continue
-	 *  comes back to it. Never the key.
-	 */
-	setSpeechChoice: (choice: SpeechChoice) => typedError<null, string>(__TAURI_INVOKE("set_speech_choice", { choice })),
-	/**
-	 *  Ready's History "Change": leaves the steps for Settings. Setup stays where
-	 *  it was, and "Resume setup…" comes back to it.
-	 */
-	leaveSetupForSettings: () => typedError<null, string>(__TAURI_INVOKE("leave_setup_for_settings")),
 	/**  The recent dictations, newest first. History is in memory, so no blocking. */
 	listHistory: () => typedError<HistoryList, string>(__TAURI_INVOKE("list_history")),
 	/**
@@ -426,78 +349,6 @@ export type ConnectionResult_Serialize = {
 	message: string,
 };
 
-/**  What fixes a failed dictation, for Try it's one inline fix (U8). */
-export type DictationFailure = 
-/**  The microphone: no sound, refused or failing. */
-"microphone" | 
-/**  The API key. */
-"key" | 
-/**  The text couldn't be pasted. */
-"paste" | 
-/**  Anything else; the sentence says what happened. */
-"other";
-
-/**
- *  What the last dictation got through (U1). Counts only grow, so a window
- *  compares them with what it saw when it opened. No transcript.
- */
-export type DictationProgressView = DictationProgressView_Serialize | DictationProgressView_Deserialize;
-
-/**
- *  What the last dictation got through (U1). Counts only grow, so a window
- *  compares them with what it saw when it opened. No transcript.
- */
-export type DictationProgressView_Deserialize = {
-	/**  Dictations started since launch. */
-	started: number,
-	/**  Dictations that are over, however they ended. */
-	finished: number,
-	/**  Dictations that ended pasted with no error. */
-	completed: number,
-	/**  Errors shown. */
-	errors: number,
-	/**  The stages the current or last dictation got through, in order. */
-	stages: DictationStage[],
-	/**  The latest error's sentence, until the next recording starts. */
-	error?: string | null,
-	/**  What fixes the latest error, until the next recording starts. */
-	failure?: DictationFailure | null,
-	/**  The input was louder than silence during the current or last hold. */
-	heard: boolean,
-};
-
-/**
- *  What the last dictation got through (U1). Counts only grow, so a window
- *  compares them with what it saw when it opened. No transcript.
- */
-export type DictationProgressView_Serialize = {
-	/**  Dictations started since launch. */
-	started: number,
-	/**  Dictations that are over, however they ended. */
-	finished: number,
-	/**  Dictations that ended pasted with no error. */
-	completed: number,
-	/**  Errors shown. */
-	errors: number,
-	/**  The stages the current or last dictation got through, in order. */
-	stages: DictationStage[],
-	/**  The latest error's sentence, until the next recording starts. */
-	error: string | null,
-	/**  What fixes the latest error, until the next recording starts. */
-	failure: DictationFailure | null,
-	/**  The input was louder than silence during the current or last hold. */
-	heard: boolean,
-};
-
-/**  A stage of a dictation, as onboarding's Try it names them. */
-export type DictationStage = 
-/**  Recorded. */
-"recorded" | 
-/**  Transcribed. */
-"transcribed" | 
-/**  Pasted. */
-"pasted";
-
 /**  Where the engine in use is. */
 export type EngineState = 
 /**  The on-device model is loading. */
@@ -638,8 +489,6 @@ export type KeyTestKind =
  *  other URL.
  */
 export type Link = 
-/**  `OpenRouter`'s page for creating an API key. */
-"openrouter_keys" | 
 /**  `OpenRouter`'s page for adding credits. */
 "openrouter_credits" | 
 /**  The privacy notice: what the app sends. */
@@ -718,31 +567,6 @@ export type LocalModelInfo_Serialize = {
 	default: boolean,
 };
 
-/**  The microphone test's level and device, as Settings polls them. */
-export type MicReading = MicReading_Serialize | MicReading_Deserialize;
-
-/**  The microphone test's level and device, as Settings polls them. */
-export type MicReading_Deserialize = {
-	/**
-	 *  The level since the last reading, in dBFS; `None` once the test
-	 *  has ended.
-	 */
-	level?: number | null,
-	/**  The input device's name, if known. */
-	device?: string | null,
-};
-
-/**  The microphone test's level and device, as Settings polls them. */
-export type MicReading_Serialize = {
-	/**
-	 *  The level since the last reading, in dBFS; `None` once the test
-	 *  has ended.
-	 */
-	level: number | null,
-	/**  The input device's name, if known. */
-	device: string | null,
-};
-
 /**  Where a model is, as Settings shows it. */
 export type ModelState = 
 /**  Not on this Mac. */
@@ -755,10 +579,7 @@ export type ModelState =
 "ready";
 
 /**  What the settings window needs to show onboarding. */
-export type OnboardingStatus = OnboardingStatus_Serialize | OnboardingStatus_Deserialize;
-
-/**  What the settings window needs to show onboarding. */
-export type OnboardingStatus_Deserialize = {
+export type OnboardingStatus = {
 	/**  Which view to show. */
 	view: View,
 	/**  The step the user is on. */
@@ -772,43 +593,6 @@ export type OnboardingStatus_Deserialize = {
 	 *  relaunch makes it take.
 	 */
 	needs_relaunch: boolean,
-	/**  How the practice dictation went. */
-	try_outcome: TryOutcome,
-	/**  The user cancelled the model download. */
-	download_paused: boolean,
-	/**  The engine selected on the Speech step, if one was. */
-	speech_choice?: SpeechChoice | null,
-	/**  Sharing has been on for the whole of this walk through setup. */
-	sharing_on_throughout: boolean,
-	/**
-	 *  Setup was finished, then a permission went missing: by a person's hand,
-	 *  or through an update signed differently (N1, #206). Until setup is
-	 *  finished again the window says so, and Done closes it.
-	 */
-	asked_again: boolean,
-};
-
-/**  What the settings window needs to show onboarding. */
-export type OnboardingStatus_Serialize = {
-	/**  Which view to show. */
-	view: View,
-	/**  The step the user is on. */
-	step: Step,
-	/**  The microphone permission. */
-	microphone: PermissionState,
-	/**  The Accessibility permission. */
-	accessibility: PermissionState,
-	/**
-	 *  macOS says Accessibility is allowed but the hotkey can't use it: a
-	 *  relaunch makes it take.
-	 */
-	needs_relaunch: boolean,
-	/**  How the practice dictation went. */
-	try_outcome: TryOutcome,
-	/**  The user cancelled the model download. */
-	download_paused: boolean,
-	/**  The engine selected on the Speech step, if one was. */
-	speech_choice: SpeechChoice | null,
 	/**  Sharing has been on for the whole of this walk through setup. */
 	sharing_on_throughout: boolean,
 	/**
@@ -857,11 +641,6 @@ export type Settings_Deserialize = {
 	 *  (a model shut down, or one from before Q2) loads as the default.
 	 */
 	model?: string,
-	/**
-	 *  An ISO 639-1 (or 639-3) language code such as `en`, or `None` to let
-	 *  the engine detect the language.
-	 */
-	language?: string | null,
 	/**  The dictation hotkey, as [`HotkeySpec`] writes it (`RightAlt`). */
 	hotkey?: string,
 	/**
@@ -902,11 +681,6 @@ export type Settings_Serialize = {
 	 *  (a model shut down, or one from before Q2) loads as the default.
 	 */
 	model: string,
-	/**
-	 *  An ISO 639-1 (or 639-3) language code such as `en`, or `None` to let
-	 *  the engine detect the language.
-	 */
-	language: string | null,
 	/**  The dictation hotkey, as [`HotkeySpec`] writes it (`RightAlt`). */
 	hotkey: string,
 	/**
@@ -935,18 +709,11 @@ export type Settings_Serialize = {
 	history_limit: number,
 };
 
-/**  The engine the user selected on [`Step::Speech`], before they continue. */
-export type SpeechChoice = 
-/**  The recommended on-device model. */
-"local" | 
-/**  The user's own key. The key itself is never kept here. */
-"own_key";
-
 /**  One onboarding step, in order. */
 export type Step = 
 /**  What the app does. */
 "welcome" | 
-/**  The language, and the on-device model or the user's own key. */
+/**  The on-device model or the user's own key. */
 "speech" | 
 /**  Allow the microphone and Accessibility. */
 "permissions" | 
@@ -965,33 +732,12 @@ export type Transcription =
 /**  A downloaded model on this Mac ([`Settings::local_model`]); no key. */
 "local";
 
-/**  How the practice dictation in [`Step::Try`] went. */
-export type TryOutcome = 
-/**  Not tried yet. */
-"not_tried" | 
-/**  A dictation landed in the practice box. */
-"passed" | 
-/**  The user pressed "Skip for now". */
-"skipped";
-
 /**  What the settings window shows. */
 export type View = 
 /**  The settings form. */
 "settings" | 
 /**  The onboarding steps. */
 "onboarding";
-
-/**
- *  Which Settings screen the window shows (U12): each has its own title, and
- *  the page says when it changes.
- */
-export type WindowPage = 
-/**  The sidebar and its sections. */
-"settings" | 
-/**  Troubleshoot's checks. */
-"troubleshoot" | 
-/**  Report a problem. */
-"report";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

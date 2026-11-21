@@ -9,6 +9,8 @@ request. These folders are the paper trail, kept as written:
   PASS or FAIL. Screenshots and VM evidence sit next to the report.
 - `reviews/<id>-round<k>.md`: one Code Review round, with findings ranked
   blocker, major or minor.
+- `design-specs/`: the Design Lead's implemented U1–U14 specs and the U11
+  mock, moved from `docs/design/specs/` (SIMP1).
 
 ## How they connect
 

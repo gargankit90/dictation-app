@@ -118,7 +118,7 @@ pub const TRANSCRIBER_FLAG: &str = "--transcriber";
 /// The speech-to-text engine to run.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TranscriberChoice {
-    /// The provider, model and language from the settings and the provider's
+    /// The provider and model from the settings and the provider's
     /// key from the keychain, rebuilt whenever they're saved (M4.4).
     #[default]
     Settings,

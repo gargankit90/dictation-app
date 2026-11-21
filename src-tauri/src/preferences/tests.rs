@@ -111,55 +111,6 @@ fn is_mock(transcribers: &Transcribers) -> bool {
 }
 
 #[test]
-fn criterion_2_language_saves_on_its_own_and_keeps_every_other_field() {
-    let rig = rig("language", loads());
-    // Another control's newer values are already stored.
-    let stored = Settings {
-        hotkey: "F6".into(),
-        share_usage_events: false,
-        launch_at_login: true,
-        ..Settings::default()
-    };
-    rig.config.save_settings(&stored).unwrap();
-
-    language_change(&rig.config, &rig.live, &rig.control, Some(" hi ".into())).unwrap();
-    let after = rig.config.settings().unwrap();
-    assert_eq!(after.language.as_deref(), Some("hi"));
-    assert_eq!(
-        (
-            after.hotkey.as_str(),
-            after.share_usage_events,
-            after.launch_at_login
-        ),
-        ("F6", false, true)
-    );
-
-    language_change(&rig.config, &rig.live, &rig.control, Some(String::new())).unwrap();
-    assert_eq!(
-        rig.config.settings().unwrap().language,
-        None,
-        "empty: detect it"
-    );
-}
-
-#[test]
-fn criterion_2_an_invalid_language_changes_nothing() {
-    let rig = rig("bad-language", loads());
-    let error = language_change(
-        &rig.config,
-        &rig.live,
-        &rig.control,
-        Some("not a code!".into()),
-    )
-    .unwrap_err();
-    assert!(!error.is_empty());
-    assert_eq!(
-        rig.config.settings().unwrap().language,
-        Settings::default().language
-    );
-}
-
-#[test]
 fn criterion_4_choosing_a_provider_switches_to_its_default_model() {
     let mut settings = Settings {
         transcription: Transcription::Local,
@@ -316,7 +267,6 @@ fn criterion_5_remove_key_deletes_it_from_the_keychain() {
 #[test]
 fn links_are_a_closed_list_of_https_pages() {
     for link in [
-        Link::OpenrouterKeys,
         Link::OpenrouterCredits,
         Link::Privacy,
         Link::Repository,
@@ -326,13 +276,6 @@ fn links_are_a_closed_list_of_https_pages() {
         assert!(link.url().starts_with("https://"), "{link:?}");
     }
     assert!(Link::Privacy.url().ends_with("docs/privacy.md"));
-}
-
-#[test]
-fn criterion_6_microphone_problems_say_what_to_do() {
-    assert!(microphone_problem(&AudioError::PermissionDenied).contains("System Settings"));
-    assert!(microphone_problem(&AudioError::NoDevice).contains("No microphone"));
-    assert!(!microphone_problem(&AudioError::Device("raw detail".into())).contains("raw detail"));
 }
 
 #[test]
@@ -400,17 +343,6 @@ async fn a_hotkey_waiting_for_accessibility_fails_no_write() {
         control
             .notice()
             .is_some_and(|said| said.contains("Accessibility"))
-    );
-
-    let (live, keys) = (rig.live.clone(), control.clone());
-    write(Arc::clone(&rig.config), &usage, move |config| {
-        language_change(config, &live, &keys, Some("hi".into()))
-    })
-    .await
-    .expect("the language is saved");
-    assert_eq!(
-        rig.config.settings().unwrap().language.as_deref(),
-        Some("hi")
     );
 
     let (live, keys) = (rig.live.clone(), control.clone());

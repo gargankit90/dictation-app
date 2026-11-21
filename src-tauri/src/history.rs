@@ -189,7 +189,7 @@ mod tests {
             let store = MemHistoryStore::new();
             let history = History::open(store.clone(), Some(25));
             for n in 0..12 {
-                history.record(&format!("dictation {n}"), "OpenRouter", true);
+                history.record(&format!("dictation {n}"), true);
             }
             Self {
                 config: Config::new(&dir, MemSecretStore::new()),
@@ -262,7 +262,6 @@ mod tests {
             id: u64::MAX,
             text: "all of it".to_owned(),
             created_at: 1_000,
-            engine: "OpenRouter".to_owned(),
             pasted: false,
         });
         assert_eq!(row.id, u64::MAX.to_string());

@@ -6,7 +6,7 @@ afterEach(() => {
   resetSharingQueue();
 });
 
-// jsdom doesn't implement scrollIntoView; the language picker calls it.
+// jsdom doesn't implement scrollIntoView; Try it calls it.
 if (typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = () => undefined;
 }

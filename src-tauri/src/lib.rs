@@ -76,7 +76,6 @@ use dictation_pipeline::hotkey_setting::{self, ConfigurableHotkey, HotkeyControl
 use dictation_pipeline::pipeline::{
     CleanupStep, Config, CursorReader, Extras, Pipeline, Ports, UiEvent,
 };
-use dictation_pipeline::stand_ins::{GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
 #[cfg(debug_assertions)]
 use dictation_pipeline::test_hooks::{Breakable, HotkeyOutage, SyntheticHotkey};
@@ -133,26 +132,23 @@ type ShellHotkey = SyntheticHotkey<SavedHotkey>;
 type ShellHotkey = SavedHotkey;
 
 /// The permissions the pipeline checks on each press: the real microphone
-/// permission (Accessibility isn't checked on press: the paste reports it
-/// as `InsertError::PermissionDenied`, so the test flags work without it), or
-/// none when a debug audio file stands in for the microphone.
-enum ShellPermissions {
-    Microphone(MicrophoneOnly<SystemPermissions>),
-    None(GrantedPermissions),
-}
+/// permission, or none when a debug audio file stands in for the microphone
+/// (`None`). Accessibility isn't checked on press: the paste reports it as
+/// `InsertError::PermissionDenied`, so the test flags work without it.
+struct ShellPermissions(Option<SystemPermissions>);
 
 impl Permissions for ShellPermissions {
     fn check(&self, permission: Permission) -> PermissionStatus {
-        match self {
-            Self::Microphone(permissions) => permissions.check(permission),
-            Self::None(permissions) => permissions.check(permission),
+        match (&self.0, permission) {
+            (Some(os), Permission::Microphone) => os.check(permission),
+            _ => PermissionStatus::Granted,
         }
     }
 
     fn request(&self, permission: Permission) -> Result<(), PermissionError> {
-        match self {
-            Self::Microphone(permissions) => permissions.request(permission),
-            Self::None(permissions) => permissions.request(permission),
+        match (&self.0, permission) {
+            (Some(os), Permission::Microphone) => os.request(permission),
+            _ => Ok(()),
         }
     }
 }
@@ -177,14 +173,11 @@ fn shell_audio(
     let (audio, permissions): (Box<dyn AudioSource>, _) = match &launch.audio_file {
         Some(path) => {
             tracing::info!(path = %path.display(), "test hook: recording a file, not the microphone");
-            (
-                Box::new(FileAudioSource::new(path)),
-                ShellPermissions::None(GrantedPermissions),
-            )
+            (Box::new(FileAudioSource::new(path)), ShellPermissions(None))
         }
         None => (
             Box::new(SystemMicrophone::new()),
-            ShellPermissions::Microphone(MicrophoneOnly(SystemPermissions::new())),
+            ShellPermissions(Some(SystemPermissions::new())),
         ),
     };
     if launch.save_audio {
@@ -433,14 +426,6 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     app.manage(preferences::UpdateCheck(Arc::new(move || {
         updater::check_from_tray(&handle);
     })));
-    let handle = app.handle().clone();
-    app.manage(preferences::WindowPages(Arc::new(move |page| {
-        window::set_page(&handle, page).map_err(|error| error.to_string())
-    })));
-    // Settings' "Test microphone" (U6) records from a microphone of its own.
-    app.manage(preferences::AppMicTest(
-        dictation_pipeline::mic_test::MicTest::new(Box::new(|| Box::new(SystemMicrophone::new()))),
-    ));
     tracing::info!(
         transcriber = choice.name(),
         engine = transcribers.name(),
@@ -457,7 +442,7 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     // key, silent in scripted test launches. They follow the stored choice
     // from here on, first setup included (U10).
     let usage = usage::start(&data_dir, usage::stored_choice(&config), scripted, &version);
-    usage::launched(usage.clone(), &data_dir, &version);
+    usage::launched(usage.clone(), &version);
     app.manage(usage.clone());
     let recordings = data_dir.join("debug-recordings");
     let (audio, permissions) = shell_audio(&launch, &recordings);
@@ -467,10 +452,7 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         hotkey,
         audio,
         transcriber: transcribers.clone(),
-        inserter: Recording::new(shell_inserter(&launch), history, {
-            let config = Arc::clone(&config);
-            move || tray_menu::engine_name(&config.settings().unwrap_or_default())
-        }),
+        inserter: Recording::new(shell_inserter(&launch), history),
         permissions,
         clock: SystemClock::new(),
     };
@@ -500,15 +482,6 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         Arc::new(SystemLaunchAtLogin::new()),
         Arc::clone(&config),
     ));
-    let app_name = app
-        .config()
-        .product_name
-        .clone()
-        .unwrap_or_else(|| "Vocet".to_owned());
-    app.manage(commands::LaunchNotice(
-        dictation_pipeline::rename::first_launch_after_rename(&config_dir, &app_name)
-            .then_some(dictation_pipeline::rename::KEYCHAIN_NOTICE),
-    ));
     app.manage(commands::ActiveHotkey(hotkey_control.clone()));
     app.manage(commands::ConfigDir(config_dir.clone()));
     app.manage(commands::AppShell(Arc::new(TauriShell(
@@ -530,14 +503,12 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     // window exists, so the command always finds it.
     let overlay_level = overlay::OverlayLevel::default();
     app.manage(overlay_level.clone());
-    let heard_levels = levels.clone();
     let overlay = overlay::start(app.handle(), levels, &overlay_level)
         .inspect_err(|error| tracing::error!(%error, "could not create the overlay"))
         .ok();
     let diagnostics = diagnostics::Diagnostics::default();
     diagnostics.attach(app.handle().clone());
     app.manage(diagnostics.clone());
-    tauri::async_runtime::spawn(record_levels(heard_levels, diagnostics.clone()));
     tauri::async_runtime::spawn(show_ui_events(
         app.handle().clone(),
         ui_events,
@@ -841,23 +812,6 @@ fn handle_flags(
     Ok(())
 }
 
-/// Feeds the input levels to the progress Try it reads, so "Heard you" means
-/// sound during the hold (U8).
-async fn record_levels(
-    mut levels: dictation_pipeline::pipeline::LevelReceiver,
-    diagnostics: diagnostics::Diagnostics,
-) {
-    while levels.changed().await.is_ok() {
-        let level = levels
-            .borrow_and_update()
-            .as_ref()
-            .map(|reading| reading.dbfs);
-        if let Some(dbfs) = level {
-            diagnostics.record_level(dbfs);
-        }
-    }
-}
-
 /// Logs each state change (never the transcript), passes each event to the
 /// overlay, and to the tray, whose status line and icon show a dictation
 /// error until the next recording starts, and the hotkey while it doesn't
@@ -894,7 +848,6 @@ async fn show_ui_events(
             tracker.set_engine(usage::engine_kind(&transcribers.current()));
         }
         tracker.on_event(&event, started.elapsed());
-        diagnostics.record_event(&event);
         match &event {
             UiEvent::StateChanged(phase) => tracing::info!(?phase, "state changed"),
             UiEvent::Error(error) => {

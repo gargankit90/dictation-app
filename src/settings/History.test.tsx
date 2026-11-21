@@ -63,7 +63,6 @@ function settingsWith(limit: number, hotkey = "RightAlt"): Settings_Serialize {
     version: 2,
     provider: "openrouter",
     model: "openai/gpt-4o-mini-transcribe",
-    language: null,
     hotkey,
     launch_at_login: false,
     transcription: "cloud",

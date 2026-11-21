@@ -1,20 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { DictationProgressView, LocalModelInfo_Serialize } from "../bindings";
-import {
-  NO_SOUND,
-  NO_WORDS,
-  chosenModel,
-  holdsWords,
-  modelWait,
-  recommendedModel,
-  stripView,
-  tryView,
-} from "./logic";
+import type { LocalModelInfo_Serialize } from "../bindings";
+import { chosenModel, modelWait, recommendedModel, stripView } from "./logic";
 
 function model(update: Partial<LocalModelInfo_Serialize> = {}): LocalModelInfo_Serialize {
   return {
-    id: "english",
-    name: "OrukQwen 1.7B",
+    id: "parakeet",
+    name: "Parakeet Unified 0.6B",
     languages: "English only",
     language_codes: ["en"],
     size_bytes: 477_000_000,
@@ -28,54 +19,33 @@ function model(update: Partial<LocalModelInfo_Serialize> = {}): LocalModelInfo_S
   };
 }
 
-const MULTI_MODEL = model({
-  id: "multi",
-  name: "Multilingual Test 0.6B",
-  language_codes: ["en", "hi", "de"],
-});
-const ENGLISH_MODEL = model();
-
-const BASE: DictationProgressView = {
-  started: 2,
-  finished: 2,
-  completed: 1,
-  errors: 0,
-  stages: [],
-  error: null,
-  failure: null,
-  heard: false,
-};
+const QWEN = model({ id: "qwen", name: "Qwen3-ASR 0.6B", language_codes: ["en", "hi", "de"] });
+const PARAKEET = model();
 
 const SETTINGS = {
   version: 2,
   provider: "openrouter" as const,
   model: "openai/gpt-4o-mini-transcribe",
-  language: null,
   hotkey: "RightAlt",
   launch_at_login: false,
   transcription: "local" as const,
-  local_model: "english",
+  local_model: "parakeet",
   share_usage_events: true,
   history_limit: 25,
 };
 
 describe("recommendedModel", () => {
-  it("is the English model for English", () => {
-    expect(recommendedModel([MULTI_MODEL, ENGLISH_MODEL], "en")?.id).toBe("english");
-  });
-  it("is the multilingual model for Hindi, and for automatic", () => {
-    expect(recommendedModel([ENGLISH_MODEL, MULTI_MODEL], "hi")?.id).toBe("multi");
-    expect(recommendedModel([ENGLISH_MODEL, MULTI_MODEL], "")?.id).toBe("multi");
-  });
-  it("is nothing for a language no model speaks", () => {
-    expect(recommendedModel([ENGLISH_MODEL, MULTI_MODEL], "xx")).toBeNull();
+  it("is the English model, else the first", () => {
+    expect(recommendedModel([QWEN, PARAKEET])?.id).toBe("parakeet");
+    expect(recommendedModel([QWEN])?.id).toBe("qwen");
+    expect(recommendedModel([])).toBeNull();
   });
 });
 
 describe("chosenModel", () => {
   it("is nothing while the engine is the own key", () => {
-    expect(chosenModel({ ...SETTINGS, transcription: "cloud" }, [ENGLISH_MODEL])).toBeNull();
-    expect(chosenModel(SETTINGS, [ENGLISH_MODEL])?.id).toBe("english");
+    expect(chosenModel({ ...SETTINGS, transcription: "cloud" }, [PARAKEET])).toBeNull();
+    expect(chosenModel(SETTINGS, [PARAKEET])?.id).toBe("parakeet");
     expect(chosenModel(SETTINGS, null)).toBeNull();
   });
 });
@@ -121,7 +91,7 @@ describe("modelWait", () => {
   const engine = { state: "ready" as const, message: null };
 
   it("never waits with the own key", () => {
-    expect(modelWait({ ...SETTINGS, transcription: "cloud" }, [ENGLISH_MODEL], null)).toBeNull();
+    expect(modelWait({ ...SETTINGS, transcription: "cloud" }, [PARAKEET], null)).toBeNull();
   });
   it("gives the real percentage while downloading", () => {
     const halfway = model({ state: "downloading", downloaded_bytes: 390_000_000 });
@@ -136,61 +106,5 @@ describe("modelWait", () => {
       "Bad file.",
     );
     expect(modelWait(SETTINGS, [ready], engine)).toBeNull();
-  });
-});
-
-describe("tryView", () => {
-  const started = { ...BASE, started: 3, stages: ["recorded" as const] };
-
-  it("claims nothing without a dictation since the step opened", () => {
-    expect(tryView(null, BASE, "landed").pasted).toBe(false);
-    expect(tryView(BASE, BASE, "landed").pasted).toBe(false);
-    expect(tryView({ ...BASE, heard: true }, BASE, "unknown").heard).toBe(false);
-  });
-
-  it("each stage comes from its own report", () => {
-    expect(tryView(started, BASE, "unknown").heard).toBe(false);
-    expect(tryView({ ...started, heard: true }, BASE, "unknown").heard).toBe(true);
-    expect(tryView(started, BASE, "unknown").transcribed).toBe(false);
-    const transcribed = { ...started, stages: ["recorded" as const, "transcribed" as const] };
-    expect(tryView(transcribed, BASE, "unknown").transcribed).toBe(true);
-    expect(tryView(transcribed, BASE, "unknown").pasted).toBe(false);
-    expect(tryView(transcribed, BASE, "landed").pasted).toBe(true);
-  });
-
-  it("a paste that missed asks for the paste fix", () => {
-    expect(tryView(started, BASE, "missed").fix).toEqual({ kind: "paste" });
-  });
-
-  it("over with nothing transcribed: no sound, or no words", () => {
-    const over = { ...started, finished: 3 };
-    expect(tryView(over, BASE, "unknown").fix).toEqual({ kind: "microphone", message: NO_SOUND });
-    expect(tryView({ ...over, heard: true }, BASE, "unknown").fix).toEqual({
-      kind: "other",
-      message: NO_WORDS,
-    });
-    // Still running: no verdict yet.
-    expect(tryView(started, BASE, "unknown").fix).toEqual({ kind: "none" });
-  });
-
-  it("an error names its one fix", () => {
-    const failed = { ...started, error: "Sentence." };
-    expect(tryView({ ...failed, failure: "key" }, BASE, "unknown").fix.kind).toBe("key");
-    expect(tryView({ ...failed, failure: "microphone" }, BASE, "unknown").fix.kind).toBe(
-      "microphone",
-    );
-    expect(tryView({ ...failed, failure: "paste" }, BASE, "unknown").fix.kind).toBe("paste");
-    expect(tryView({ ...failed, failure: "other" }, BASE, "unknown").fix).toEqual({
-      kind: "other",
-      message: "Sentence.",
-    });
-  });
-});
-
-describe("holdsWords", () => {
-  it("finds the words among others, whatever the spacing", () => {
-    expect(holdsWords("before  hello\nthere after", "hello there")).toBe(true);
-    expect(holdsWords("something else", "hello there")).toBe(false);
-    expect(holdsWords("anything", "   ")).toBe(false);
   });
 });

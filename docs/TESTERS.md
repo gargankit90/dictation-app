@@ -56,9 +56,11 @@ The window has a list of steps on the side and **Continue** and **Back**
 buttons. A permission step moves on by itself once you have allowed it.
 
 1. **Welcome.** Click **Get started**.
-2. **Speech.** Pick the language you will mostly speak (English, Hindi, or
-   **More…**). Then choose how to turn speech into text:
-   - **Use OpenRouter** (selected by default): click **Continue**, then **Connect OpenRouter**.
+2. **Speech.** Choose how to turn speech into text (Vocet 0.2 is for
+   English):
+   - **Use this Mac**: click **Download and continue**. The models download
+     once; they can keep going while you do the next steps.
+   - **Use OpenRouter**: click **Continue**, then **Connect OpenRouter**.
      Your browser opens OpenRouter; sign in and allow it. A new account needs
      a few dollars of credit: **Add credits** opens that page. The key
      OpenRouter makes is kept in your macOS Keychain and never shown in
@@ -77,7 +79,7 @@ buttons. A permission step moves on by itself once you have allowed it.
    badge means you refused it earlier: switch it on in System Settings.
 4. **Try it.** Your dictation key is shown (the right Option key, right of the
    space bar; **Change…** picks another). Hold it, say a sentence and let go.
-   The words appear in the box. Click **Continue**, or **Skip for now**.
+   The words appear in the box. Click **Done**.
 5. **You're set.** A summary of your key, speech and history. Here you can
    choose **Open Vocet when I log in** and the **Share usage and error
    events** switch (see "Privacy" below). Click **Start dictating**.
@@ -88,7 +90,7 @@ Menu-bar icon > **Settings…** has these sections:
 
 - **General**: open Vocet at login, and **Check for updates** (**Check now**).
 - **Dictation**: the **dictation key** (hold it to talk, release to paste),
-  **Language**, and a **Test microphone** check.
+  and where the microphone is chosen (System Settings → Sound).
 - **Speech**: the list of engines. Select a row to use it: **OpenRouter**
   (first; its own sheet: **Connect OpenRouter**, **Add credits**,
   **Disconnect**), or **On this Mac** (download it first: one download of
@@ -244,7 +246,7 @@ The same list is in the [changelog](../CHANGELOG.md).
 - A crash inside the on-device engine is not reported (it could contain what
   you said): if the app quits on its own, tell us in a bug report
   ([#226](https://github.com/gargankit90/dictation-app/issues/226)).
-- With **Your own key**, speech goes through OpenRouter to OpenAI, and the
+- With **OpenRouter**, speech goes through OpenRouter to OpenAI, and the
   text to a cleanup model. Don't dictate anything you would not send to a cloud service.
 - Anonymous usage and error events are on by default; turn them off in
   Settings > Privacy. What is sent: [privacy.md](privacy.md).

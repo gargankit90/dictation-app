@@ -4,7 +4,7 @@ import os
 import re
 
 here = os.path.dirname(os.path.abspath(__file__))
-tok = open(os.path.join(here, "tokens.css")).read()
+tok = open(os.path.join(here, "..", "..", "design", "design-system", "tokens.css")).read()
 root = re.search(r":root \{(.*?)\n\}", tok, re.S).group(1)
 dark = re.search(r"prefers-color-scheme: dark\) \{\s*:root \{(.*?)\n  \}", tok, re.S).group(1)
 vars_css = f".theme-light{{{root}}}\n.theme-dark{{{root}{dark}}}"

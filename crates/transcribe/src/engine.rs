@@ -1,7 +1,7 @@
 //! The engine the app dictates with, rebuilt from the user's settings.
 //!
-//! [`Engine::from_settings`] turns the saved [`Settings`] (speech model,
-//! language) and the `OpenRouter` API key into a [`Remote`] engine: the
+//! [`Engine::from_settings`] turns the saved [`Settings`] (speech model)
+//! and the `OpenRouter` API key into a [`Remote`] engine: the
 //! [`OpenRouter`] speech engine with the default
 //! [`RetryPolicy`](dictation_core::retry::RetryPolicy), and the
 //! [`OpenRouterCleanup`] pass after it (Q2). When there
@@ -96,7 +96,6 @@ impl Engine {
             }
         };
         let mut config = Config::for_model(&settings.model);
-        config.language.clone_from(&settings.language);
         let base_url = base_url.unwrap_or(BASE_URL);
         base_url.clone_into(&mut config.base_url);
         let cleanup = match OpenRouterCleanup::at(base_url, key.clone()) {

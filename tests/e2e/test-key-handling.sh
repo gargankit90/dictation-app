@@ -95,10 +95,7 @@ run_case() {
   shift 2
   local dir=$tmp/$name
   mkdir -p "$dir"
-  # The bad-key scenario's checks of the app's log need a log the stubs don't
-  # make; what matters here is the key, so its FAIL records are not an error.
   local tail='[ "$SCENARIO_FAILED" = 0 ]'
-  if [ "$scenario" = e2e_error_bad_key ]; then tail=true; fi
   local flags=(-e)
   if [ "${TRACE:-0}" = 1 ]; then flags=(-x); fi
   # perl puts SIGINT back to its default first. A job started with `&` by a
@@ -151,9 +148,6 @@ check "bash -x: the key still reached the VM on stdin" has "$SENTINEL" "$tmp/tra
 TRACE=1 run_case traced_fail e2e_real_openrouter "$KEY" STUB_LAUNCH_STATUS=23
 check "bash -x, failed run: neither secret in any output" no_secret_outside_stdin traced_fail
 
-TRACE=1 run_case traced_bad e2e_error_bad_key
-check "bash -x on the bad-key scenario: no secret in any output" no_secret_outside_stdin traced_bad
-
 # --- opt-in ----------------------------------------------------------------
 run_case skipped e2e_real_openrouter
 check "no key: the scenario is skipped, the VM never touched" test ! -e "$tmp/skipped/args"
@@ -180,14 +174,6 @@ for signal in INT:130 TERM:143 HUP:129; do
   check "$name after the store: the run fails with $expected" test "$(status_of "signal_$name")" = "$expected"
   check "$name after the store: the cleanup ran" test "$(deletes "signal_$name")" = 1
 done
-
-run_case bad_key_fails e2e_error_bad_key STUB_LAUNCH_STATUS=25
-check "the bad-key scenario: a failing launch keeps its status" test "$(status_of bad_key_fails)" = 25
-check "the bad-key scenario: a failing launch still removes the key" test ! -e "$tmp/bad_key_fails/stored"
-
-run_case bad_key_ok e2e_error_bad_key
-check "the bad-key scenario works" test "$(status_of bad_key_ok)" = 0
-check "and leaves no key" test ! -e "$tmp/bad_key_ok/stored"
 
 # --- a removal that fails is reported --------------------------------------
 run_case delete_fails e2e_real_openrouter "$KEY" STUB_DELETE_STATUS=1

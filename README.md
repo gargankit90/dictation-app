@@ -93,8 +93,7 @@ To build the signed `.app`, run
 self-signed `dictation-app Dev` certificate so macOS keeps the Accessibility
 and Microphone permissions across rebuilds. Without it, `tauri build` stops
 with "The specified item could not be found in the keychain". To build the
-tester DMG, run `scripts/build-dmg.sh`; CI builds an ad-hoc-signed one as an
-artifact (`.github/workflows/dmg.yml`).
+tester DMG, run `scripts/build-dmg.sh`.
 
 ## Quality gate
 

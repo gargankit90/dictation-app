@@ -10,15 +10,17 @@
 
 #![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
 
+mod common;
+
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc as std_mpsc};
 use std::time::{Duration, Instant};
 
+use common::{DiscardingInserter, GrantedPermissions};
 use dictation_core::coordinator::{MIN_HOLD, Phase};
 use dictation_core::error::DictationError;
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
-use dictation_pipeline::stand_ins::{DiscardingInserter, GrantedPermissions};
 use dictation_pipeline::test_hooks::{Injector, SyntheticHotkey, hook_events};
 use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::fakes::{FakeClock, FakeHotkey};
