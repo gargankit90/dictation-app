@@ -198,7 +198,7 @@ pub async fn delete_api_key(
 pub enum Link {
     /// `OpenRouter`'s page for adding credits.
     OpenrouterCredits,
-    /// The privacy notice: what the app sends.
+    /// The privacy policy on the website.
     Privacy,
     /// The source code.
     Repository,
@@ -216,7 +216,7 @@ impl Link {
     pub fn url(self) -> String {
         match self {
             Self::OpenrouterCredits => "https://openrouter.ai/settings/credits".to_owned(),
-            Self::Privacy => format!("{REPOSITORY}/blob/main/docs/privacy.md"),
+            Self::Privacy => "https://vocetlabs.com/privacy".to_owned(),
             Self::Repository => REPOSITORY.to_owned(),
             Self::Licence => format!("{REPOSITORY}/blob/main/LICENSE"),
             Self::Notice => format!("{REPOSITORY}/blob/main/NOTICE"),

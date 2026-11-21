@@ -272,7 +272,7 @@ fn links_are_a_closed_list_of_https_pages() {
     ] {
         assert!(link.url().starts_with("https://"), "{link:?}");
     }
-    assert!(Link::Privacy.url().ends_with("docs/privacy.md"));
+    assert_eq!(Link::Privacy.url(), "https://vocetlabs.com/privacy");
 }
 
 #[test]
