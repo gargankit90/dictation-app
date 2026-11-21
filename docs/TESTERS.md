@@ -12,7 +12,8 @@ text:
 
 - **OpenRouter** (the default): an internet connection and an OpenRouter account (you
   pay OpenRouter for what you use; Connect OpenRouter makes the key). Your speech goes through OpenRouter to
-  OpenAI for transcription, and the text to a cleanup model that keeps no data.
+  OpenAI for transcription, and the text to a cleanup model (with "ZDR only" on in your OpenRouter account it is a zero-data-retention host). Vocet has no server
+  of its own that receives it (policy: vocetlabs.com/privacy).
 - **On this Mac**: one download (about 4.4 GB: English speech recognition,
   then a cleanup model that adds punctuation and removes fillers). Your
   speech then stays on the Mac. It is a choice in setup, not the default.
@@ -58,18 +59,16 @@ buttons. A permission step moves on by itself once you have allowed it.
 1. **Welcome.** Click **Get started**.
 2. **Speech.** Choose how to turn speech into text (Vocet 0.2 is for
    English):
-   - **Use this Mac**: click **Download and continue**. The models download
-     once; they can keep going while you do the next steps.
-   - **Use OpenRouter**: click **Continue**, then **Connect OpenRouter**.
+   - **Use OpenRouter** (selected by default): click **Continue**, then **Connect OpenRouter**.
      Your browser opens OpenRouter; sign in and allow it. A new account needs
      a few dollars of credit: **Add credits** opens that page. The key
      OpenRouter makes is kept in your macOS Keychain and never shown in
      full. If the browser can't come back, **Paste a key instead**. It is sent only to
      OpenRouter.
-   - **On this Mac only** (not selected by default): select it, then click
+   - **Use this Mac** (not selected by default): select it, then click
      **Download and continue**. One download of about 4.4 GB (speech, then
      cleanup) with one progress bar; it keeps going while you do the next
-     steps. A language the on-device models don't cover needs OpenRouter.
+     steps.
 3. **Permissions.** Click **Allow** for the **Microphone** (macOS asks once;
    choose **Allow**) and for **Accessibility** (the dictation key and typing
    into other apps need it). For Accessibility, switch **Vocet** on under
@@ -167,11 +166,11 @@ and install it over the old app, as in section 1.
 - **Your words.** With **On this Mac**, your speech is turned into text on the
   Mac and not sent anywhere. With **OpenRouter**, it goes through OpenRouter.
   Your history stays on this Mac. Audio stays in memory.
-- **Anonymous usage and error events are on by default.** Turn them off with
+- **Usage and error events (random install ID) are on by default.** Turn them off with
   **Share usage and error events** in Settings > Privacy (or on the last setup
-  screen). Off takes effect at once and deletes what was waiting. Events carry
-  no audio, no text you dictated, no API keys, no app names and no file
-  paths. Everything that can be sent is listed in [privacy.md](privacy.md).
+  screen). Off takes effect at once and deletes what was waiting. Usage events carry
+  no audio, no text you dictated, no API keys and no app names. A crash report includes the app version, the macOS major version, an error code and a stack trace: function names and source-file locations from Vocet, the libraries it uses and the Rust standard library, as they were when the app was built. It never includes the error message, paths to your files, your audio, dictated text, keys or app names.
+  Everything that can be sent is listed in [privacy.md](privacy.md).
 
 ## Something went wrong: the log
 
@@ -248,5 +247,5 @@ The same list is in the [changelog](../CHANGELOG.md).
   ([#226](https://github.com/gargankit90/dictation-app/issues/226)).
 - With **OpenRouter**, speech goes through OpenRouter to OpenAI, and the
   text to a cleanup model. Don't dictate anything you would not send to a cloud service.
-- Anonymous usage and error events are on by default; turn them off in
+- Usage and error events are on by default; turn them off in
   Settings > Privacy. What is sent: [privacy.md](privacy.md).

@@ -491,7 +491,7 @@ export type KeyTestKind =
 export type Link = 
 /**  `OpenRouter`'s page for adding credits. */
 "openrouter_credits" | 
-/**  The privacy notice: what the app sends. */
+/**  The privacy policy on the website. */
 "privacy" | 
 /**  The source code. */
 "repository" | 
