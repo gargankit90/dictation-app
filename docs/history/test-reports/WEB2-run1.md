@@ -1,7 +1,7 @@
 # MWEB2 test report, run 1
 
 PR: #351 at 35869c8 (includes the Lead's ZDR wording fix 35869c8)
-Result: FAIL (two unverified figures; copy otherwise correct)
+Result: PASS after run 1 fixes (run 1 was FAIL: two unverified figures; re-checked at 0b1a0dd)
 
 | # | Check | Result | Notes |
 | - | ----- | ------ | ----- |
@@ -20,3 +20,9 @@ Result: FAIL (two unverified figures; copy otherwise correct)
 ## Findings
 - **Major** #4 and #5 above: two numbers on the page have no evidence. Fix: reword #4 (for example "no network round trip", no figure) and drop or source the $0.70 FAQ figure, then re-check only those lines.
 - Minor: "The most accurate option" is a comparison with no citation on the page; eval/reports/voicearena.md supports Groq/AssemblyAI vs local ranks only loosely. Consider "highest accuracy of the two".
+
+## Re-check at 0b1a0dd
+- Latency figure: gone. Local card now reads "Fast, with no network round trip." (no number). PASS.
+- Cost figure: gone. FAQ now says you add credit to your own OpenRouter account and pay only for what you dictate; no price, no minimum. grep for `1 second`, `16 GB`, `0.70`, `minimum`, `top-up`, `$` finds nothing. PASS.
+- Diff since the reviewed head touches only those two spots; at 375 px scrollWidth = clientWidth = 375 still. The "most accurate" minor stays a note.
+- Gate: ran on the push (pre-push hook), plus the full run from run 1.
