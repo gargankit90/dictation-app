@@ -61,7 +61,7 @@ e2e_onboarding_first_run() {
     ax_ok secret-set "$APP_NAME" "$ONBOARDING_WINDOW" api-key "$PROVIDER_BAD_KEY"
   expect "press Test & Save" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" "Test & Save"
   expect "the window says the key was rejected" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "rejected this API key" 15
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Your API key was rejected" 15
   expect "the test reached the provider with that key" provider_request_has 1 auth=bad
   expect "Continue is still locked" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Continue unlocks once OpenRouter" 5
