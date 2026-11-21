@@ -3,7 +3,9 @@
 
 #![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
 
-use std::io::Write;
+mod common;
+
+use common::Captured;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -368,39 +370,12 @@ async fn audio_that_cant_be_encoded_is_an_engine_error() {
     assert_eq!(requests(&server).await, 0);
 }
 
-/// A `MakeWriter` that appends everything to a shared buffer.
-#[derive(Clone, Default)]
-struct Captured(Arc<Mutex<Vec<u8>>>);
-
-impl Write for Captured {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
-    type Writer = Self;
-    fn make_writer(&'a self) -> Self::Writer {
-        self.clone()
-    }
-}
-
 // Criterion 4: across success and every error path, at every log level,
 // neither logs nor errors (Display or Debug) contain the key, and the
 // transcript never reaches the log.
 #[tokio::test]
 async fn the_key_never_appears_in_logs_or_errors() {
-    let captured = Captured::default();
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
-        .with_ansi(false)
-        .with_writer(captured.clone())
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let (captured, _guard) = Captured::install();
 
     let key_body =
         serde_json::json!({"error": {"message": format!("Incorrect API key provided: {KEY}")}});
