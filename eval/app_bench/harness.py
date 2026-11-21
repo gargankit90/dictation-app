@@ -4,9 +4,9 @@
 #                 "pyobjc-framework-Quartz==11.0", "pyobjc-framework-ApplicationServices==11.0",
 #                 "pyobjc-framework-Cocoa==11.0"]
 # ///
-"""BENCH1: one black-box harness that runs the Voice Arena clips through any Mac dictation app.
+"""A black-box harness that runs a folder of speech clips through any Mac dictation app, the same way.
 
-For each clip, in the VM's GUI session (Terminal, which has Accessibility):
+For each clip, in the macOS VM's GUI session (Terminal, which has Accessibility):
 
   1. empty a plain TextEdit document and bring it to the front;
   2. press the app's dictation key (hold mode: key down; toggle mode: one tap);
@@ -14,23 +14,20 @@ For each clip, in the VM's GUI session (Terminal, which has Accessibility):
      keeps the microphone warm is ready at once), then the fixed start delay;
   4. play the clip, padded with silence, into BlackHole 2ch (the VM's default input);
   5. wait the fixed tail, release the key (or tap it again);
-  6. read the document through Accessibility every 20 ms until the text has not changed for --settle
-     seconds; latency = key-up -> last change of the text (finalize_s), first_text_s = key-up -> first text.
+  6. read the document through Accessibility every 20 ms until the text has not changed for 2 s;
+     latency = key-up -> last change of the text (finalize_s), first_text_s = key-up -> first text.
 
-Every app gets the same audio, padding and timing; only the key differs (`APPS`). Vocet's
-`--debug-audio-file` shortcut (`--driver vocet-shortcut`, debug builds) skips the microphone: the clip is
-written to the one WAV path the app was started with, then `--press` / `--release`, and the same TextEdit
-read; it exists to check that the black-box path measures the same thing (`agree`).
+Every app gets the same audio, padding and timing; only its key differs (`APPS`). Nothing is
+app-specific beyond that: no app gets a shortcut around the microphone or the keyboard.
 
-    uv run eval/app_bench.py run --app handy --clips ~/bench/clips -o ~/bench/out/handy_local/results.csv
-    uv run eval/app_bench.py run --driver vocet-shortcut --app vocet --clips ... -o ...
-    python3 eval/app_bench.py dry-run                 # the whole loop against a stub app, no macOS needed
-    python3 eval/app_bench.py summarize eval/work/bench1/*/ [--format md|csv]
-    python3 eval/app_bench.py agree eval/work/bench1/vocet_cloud eval/work/bench1/vocet_cloud_shortcut
+    uv run harness.py run --app handy --clips ~/bench/clips -o ~/bench/out/handy_local.csv
+    python3 harness.py dry-run                  # the whole loop against a stub app, no macOS needed
+    python3 harness.py summarize work/*/ [--format md|csv|json]
+    python3 harness.py compare work/run_a work/run_b     # two runs on the same clips, within noise?
 
-The results CSV holds transcripts of CC BY-NC clips: it lives under eval/work/ (git-ignored) and only the
-aggregates from `summarize` are committed. A rerun with the same -o resumes (clips already `ok` are kept).
-Stdlib only outside `run`; `run` needs macOS and the dependencies above (uv installs them).
+The results CSV holds transcripts of CC BY-NC clips: it stays in the git-ignored work/ folder and only the
+aggregates from `summarize` are published. A rerun with the same -o resumes (clips already `ok` are kept).
+Stdlib only outside `run` and `set-input`; those need macOS and the dependencies above (uv installs them).
 """
 from __future__ import annotations
 
@@ -53,7 +50,7 @@ sys.path.insert(0, str(HERE))
 FIELDS = ["app", "mode", "driver", "clip_id", "status", "attempts", "transcript", "audio_s", "ready_s",
           "first_text_s", "finalize_s", "error", "run_at"]
 
-# Fixed for every app (the Voice Arena harness's values, which PR #323 used for Vocet).
+# Fixed for every app (the values of the MIT-licensed VoiceArenaAI/Dictation-harness, so runs line up with it).
 PAD_MS = 300
 START_DELAY_S = 0.5
 TAIL_S = 4.0
@@ -147,7 +144,7 @@ class App:
 APPS: dict[str, App] = {
     # Each app's own default key and mode, read from the release's source (BENCH1 report, "Apps and setup").
     # Process names are checked in the VM by the preflight (pgrep -x).
-    "vocet": App("Vocet", "ralt", "hold", "~/Applications/Vocet.app", "hold Right Option (default)"),
+    "vocet": App("Vocet", "ralt", "hold", "/Applications/Vocet.app", "hold Right Option (default)"),
     "handy": App("handy", "lalt+space", "hold", "/Applications/Handy.app",
                  "Option+Space, push-to-talk (default_settings.json: push_to_talk true)"),
     "openwhispr": App("OpenWhispr", "fn", "toggle", "/Applications/OpenWhispr.app",
@@ -461,7 +458,7 @@ def dry_run(out: pathlib.Path, n: int = 5, latency: float = 1.2, log=print) -> d
                    driver_name="stub", log=log)
 
 
-# --- macOS: keys, audio, TextEdit, Vocet's shortcut ---------------------------------------------------
+# --- macOS: keys, audio, TextEdit --------------------------------------------------------------------
 class MacKeys:
     def __init__(self, keys: list[Key]) -> None:
         import Quartz
@@ -623,38 +620,6 @@ class BlackHoleDriver(Driver):
             self.keys.up()
 
 
-class VocetShortcutDriver(Driver):
-    """Vocet's debug-only `--debug-audio-file`: the app was started with that flag and one WAV path; it
-    reads the file on each press. The clip (16 kHz mono, the same padding) is written there, then
-    `--press` / `--release` are sent to the running app with `open`."""
-
-    def __init__(self, app_path: str, wav: pathlib.Path, timing: Timing, hold: float = 0.3) -> None:
-        self.app_path, self.wav, self.timing, self.hold = app_path, wav, timing, hold
-
-    def before_clip(self, clip: Clip) -> None:
-        import numpy as np
-        import soundfile as sf
-        import soxr
-        a, sr = sf.read(clip.path, dtype="float32", always_2d=True)
-        a = a.mean(axis=1)
-        if sr != 16000:
-            a = soxr.resample(a, sr, 16000).astype("float32")
-        pad = np.zeros(int(16000 * self.timing.pad_ms / 1000), dtype="float32")
-        sf.write(self.wav, np.concatenate([pad, a, pad]), 16000, subtype="PCM_16")
-
-    def _send(self, flag: str) -> None:
-        subprocess.run(["open", "-g", "-n", os.path.expanduser(self.app_path), "--args", flag], check=True)
-
-    def start(self) -> None:
-        self._send("--press")
-
-    def feed(self, clip: Clip) -> None:
-        time.sleep(self.hold)
-
-    def stop(self) -> None:
-        self._send("--release")
-
-
 class TextEditTarget(Target):
     """A plain-text TextEdit document (`scratch`), emptied and read through Accessibility."""
 
@@ -790,26 +755,24 @@ def summary_table(rows: list[dict], fmt_: str = "md") -> str:
     return head + "".join("| " + " | ".join(cell(r.get(c)) for c in SUMMARY_COLS) + " |\n" for r in rows)
 
 
-def agreement(a_scored: list[dict], b_scored: list[dict], tolerance_pts: float) -> dict:
-    """Black-box (a) vs shortcut (b) on the clips both judged: ZER of each, the difference, the paired
-    discordant clips, and whether the difference is within `tolerance_pts`. The tolerance is the noise of a
-    151-clip ZER: the standard error of a paired difference, 100*sqrt(discordant)/n, doubled (about a 95%
-    interval), but never below the stated floor."""
+def compare_runs(a_scored: list[dict], b_scored: list[dict], tolerance_pts: float) -> dict:
+    """Two runs on the same clips (scored CSVs): ZER of each on the clips both judged, the difference, the
+    discordant clips, and whether the difference is within noise. Noise is twice the standard error of a
+    paired difference, 100*sqrt(discordant)/n (about a 95% interval), never below `tolerance_pts`."""
     a = {r["clip_id"]: int(r["edits"]) == 0 for r in a_scored if r.get("edits", "") != ""}
     b = {r["clip_id"]: int(r["edits"]) == 0 for r in b_scored if r.get("edits", "") != ""}
     both = sorted(set(a) & set(b))
     n = len(both)
     if not n:
-        return {"n": 0, "agree": False}
+        return {"n": 0, "within": False}
     za = 100 * sum(a[c] for c in both) / n
     zb = 100 * sum(b[c] for c in both) / n
     only_a = sum(a[c] and not b[c] for c in both)
     only_b = sum(b[c] and not a[c] for c in both)
-    noise = 2 * 100 * math.sqrt(only_a + only_b) / n
-    tol = max(tolerance_pts, noise)
-    return {"n": n, "zer_blackbox": round(za, 1), "zer_shortcut": round(zb, 1), "diff_pts": round(za - zb, 1),
-            "only_blackbox_right": only_a, "only_shortcut_right": only_b, "tolerance_pts": round(tol, 1),
-            "agree": abs(za - zb) <= tol}
+    tol = max(tolerance_pts, 2 * 100 * math.sqrt(only_a + only_b) / n)
+    return {"n": n, "zer_a": round(za, 1), "zer_b": round(zb, 1), "diff_pts": round(za - zb, 1),
+            "only_a_right": only_a, "only_b_right": only_b, "tolerance_pts": round(tol, 1),
+            "within": abs(za - zb) <= tol}
 
 
 # --- CLI ---------------------------------------------------------------------------------------------
@@ -819,7 +782,6 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("run", help="run the clips through an app (macOS, in the VM's Terminal)")
     r.add_argument("--app", required=True, choices=sorted(APPS))
     r.add_argument("--mode", default="local", help="label stored on each row: local, cloud, ...")
-    r.add_argument("--driver", default="blackhole", choices=["blackhole", "vocet-shortcut"])
     r.add_argument("--hotkey", help="override the app's hotkey (parse_hotkey spec)")
     r.add_argument("--toggle", action="store_true", help="tap to start and tap to stop instead of holding")
     r.add_argument("--clips", type=pathlib.Path, required=True)
@@ -828,8 +790,6 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--only", help="comma-separated clip ids")
     r.add_argument("--attempts", type=int, default=2)
     r.add_argument("--warmup", type=int, default=1, help="unrecorded dictations before timing (loads the model)")
-    r.add_argument("--wav", type=pathlib.Path, default=pathlib.Path.home() / "bench" / "shortcut.wav",
-                   help="vocet-shortcut: the path Vocet was started with (--debug-audio-file)")
     r.add_argument("--check", action="store_true", help="preflight only")
     si = sub.add_parser("set-input", help="make an input device the default (macOS)")
     si.add_argument("device", nargs="?", default="BlackHole 2ch")
@@ -840,9 +800,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("runs", nargs="+", type=pathlib.Path)
     s.add_argument("--judge", default="claude")
     s.add_argument("--format", default="md", choices=["md", "csv", "json"])
-    g = sub.add_parser("agree", help="black-box vs Vocet shortcut on the same clips")
-    g.add_argument("blackbox", type=pathlib.Path)
-    g.add_argument("shortcut", type=pathlib.Path)
+    g = sub.add_parser("compare", help="two runs on the same clips: is the ZER difference within noise?")
+    g.add_argument("run_a", type=pathlib.Path)
+    g.add_argument("run_b", type=pathlib.Path)
     g.add_argument("--judge", default="claude")
     g.add_argument("--tolerance", type=float, default=3.0, help="floor of the tolerance, ZER points")
     a = ap.parse_args(argv)
@@ -867,31 +827,32 @@ def main(argv: list[str] | None = None) -> int:
         rows = [summarize_run(p, a.judge) for p in a.runs]
         print(json.dumps(rows, indent=1) if a.format == "json" else summary_table(rows, a.format), end="")
         return 0
-    if a.cmd == "agree":
+    if a.cmd == "compare":
         name = {"claude": "scored.csv"}.get(a.judge, f"scored_{a.judge}.csv")
-        res = agreement(read_csv(a.blackbox / name), read_csv(a.shortcut / name), a.tolerance)
+        res = compare_runs(read_csv(a.run_a / name), read_csv(a.run_b / name), a.tolerance)
         print(json.dumps(res, indent=1))
-        return 0 if res.get("agree") else 1
+        return 0 if res.get("within") else 1
 
     app = APPS[a.app]
     if a.hotkey or a.toggle:
         app = App(app.process, a.hotkey or app.hotkey, "toggle" if a.toggle else app.mode, app.bundle, app.notes)
     env = mac_preflight(app, check_process=True)
-    print(f"preflight ok: {json.dumps(env)}; app {a.app} key {app.hotkey} ({app.mode}), driver {a.driver}")
+    print(f"preflight ok: {json.dumps(env)}; app {a.app} key {app.hotkey} ({app.mode})")
     if a.check:
         return 0
     timing = Timing()
-    if a.driver == "vocet-shortcut":
-        timing.tail = 0.5  # the file is read whole on --release; no audio to wait for
-        driver: Driver = VocetShortcutDriver(app.bundle, a.wav, timing)
-    else:
-        driver = BlackHoleDriver(app, timing)
+    return run_mac(BlackHoleDriver(app, timing), "blackhole", timing, a)
+
+
+def run_mac(driver: Driver, driver_name: str, timing: Timing, a: argparse.Namespace) -> int:
+    """The `run` loop on this Mac: TextEdit as the target, the Mac kept awake. `a` carries the clips,
+    output, limit/only, attempts, warmup, app and mode."""
     target = TextEditTarget(pathlib.Path.home() / "bench" / "scratch.txt")
     clips = load_clips(a.clips, a.limit, set(a.only.split(",")) if a.only else None)
     caff = subprocess.Popen(["caffeinate", "-dimsu"])
     try:
         rows = run_all(clips, driver, target, Clock(), timing, a.output, app=a.app, mode=a.mode,
-                       driver_name=a.driver, attempts=a.attempts, warmup=a.warmup)
+                       driver_name=driver_name, attempts=a.attempts, warmup=a.warmup)
     finally:
         driver.reset()
         caff.terminate()

@@ -5,3 +5,4 @@ set -euo pipefail
 cd "$(cd "$(dirname "$0")/.." && pwd)"
 python3 -W ignore::ResourceWarning -m unittest discover -s eval -p 'test_*.py'
 python3 -W ignore::ResourceWarning -m unittest discover -s tests/e2e -p 'test_latency.py'
+eval/app_bench/test.sh

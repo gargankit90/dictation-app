@@ -1,4 +1,4 @@
-"""Tests for eval/app_bench.py (BENCH1): the key chords, the clip loop against the stub app on a simulated
+"""Tests for harness.py: the key chords, the clip loop against the stub app on a simulated
 clock (dry run), resume and retry, and the scoring path on fixed strings (harness CSV -> judge.py with a
 fake judge -> summary, and amend-va's own char_edits when it is installed). No macOS, network or key.
 """
@@ -13,9 +13,9 @@ import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import app_bench as ab  # noqa: E402
+import harness as ab  # noqa: E402
 import judge  # noqa: E402
-from test_judges import FakeJudge, fake_tools, write_csv  # noqa: E402
+from test_judge import FakeJudge, fake_tools, write_csv  # noqa: E402
 
 
 def clip(i=1, seconds=3.0, ref="the quick brown fox jumps over the lazy dog"):
@@ -152,7 +152,7 @@ class LoopTests(unittest.TestCase):
 
 
 class ScoringTests(unittest.TestCase):
-    """The harness CSV goes through eval/judge.py unchanged; ZER and latency come out of summarize."""
+    """The harness CSV goes through judge.py unchanged; ZER and latency come out of summarize."""
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -195,20 +195,19 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(char_edits("Hello Bob.", "Hello Bob.")[0], 0)
         self.assertGreater(char_edits("Run bake.", "Run make.")[0], 0)
 
-    def test_agreement_is_within_the_noise_of_a_paired_difference(self):
+    def test_two_runs_are_compared_within_the_noise_of_a_paired_difference(self):
         def scored(flags):
             return [{"clip_id": f"c{i}", "edits": "0" if ok else "3"} for i, ok in enumerate(flags)]
         same = scored([True] * 120 + [False] * 31)
-        self.assertTrue(ab.agreement(same, same, 3.0)["agree"])
+        self.assertTrue(ab.compare_runs(same, same, 3.0)["within"])
         a = scored([True] * 120 + [False] * 31)
         b = scored([True] * 116 + [False] * 4 + [True] * 2 + [False] * 29)  # 4 lost, 2 gained: -1.3 pts
-        res = ab.agreement(a, b, 3.0)
-        self.assertEqual((res["only_blackbox_right"], res["only_shortcut_right"]), (4, 2))
-        self.assertTrue(res["agree"])
+        res = ab.compare_runs(a, b, 3.0)
+        self.assertEqual((res["only_a_right"], res["only_b_right"]), (4, 2))
+        self.assertTrue(res["within"])
         far = scored([True] * 90 + [False] * 61)  # 30 clips worse: -19.9 pts
-        self.assertFalse(ab.agreement(a, far, 3.0)["agree"])
-        self.assertEqual(ab.agreement([], a, 3.0), {"n": 0, "agree": False})
-
+        self.assertFalse(ab.compare_runs(a, far, 3.0)["within"])
+        self.assertEqual(ab.compare_runs([], a, 3.0), {"n": 0, "within": False})
 
 if __name__ == "__main__":
     unittest.main()

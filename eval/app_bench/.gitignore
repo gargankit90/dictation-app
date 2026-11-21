@@ -1,0 +1,12 @@
+# Never published: the clips and their reference texts are CC BY-NC 4.0, and so are the apps' transcripts
+# of them (work/), and the judge's corrections (.judge-cache/).
+clips/
+work/
+.judge-cache/
+*.flac
+*.wav
+*.mp3
+*.m4a
+*.parquet
+__pycache__/
+.venv/

@@ -1,48 +1,51 @@
 #!/usr/bin/env bash
-# BENCH1: the 151 Voice Arena clips through Vocet and other Mac dictation apps, in a Lume VM of its own.
-# Host side; eval/app_bench.py runs in the VM's Terminal. See eval/reports/bench1.md for the order.
+# Host side of the bench: a Lume macOS VM of its own, harness.py in the VM's Terminal, results back here.
+# See README.md for the one-time VM image and the order of steps.
 #
-#   eval/app_bench.sh fetch                     # host: the 151 clips into eval/clips/ (git-ignored)
-#   eval/app_bench.sh lock | unlock             # hold / release dictation-vm-2's e2e lock for the bench
-#   eval/app_bench.sh vm-create                 # clone dictation-vm-golden -> dictation-vm-bench (once)
-#   eval/app_bench.sh vm-start [--timed] | vm-stop
-#   eval/app_bench.sh vm-setup                  # uv, the harness, the clips, BlackHole as input, no autocorrect
-#   eval/app_bench.sh install <App.app|App.dmg|App.zip> [/Applications]   # host -> VM
-#   eval/app_bench.sh run <label> <app> <mode> [harness args...]          # VM, timed; results back to the host
-#   eval/app_bench.sh check <app> [harness args...]                       # harness preflight in the VM
-#   eval/app_bench.sh meta <label> key=value...  # how the app was set up (meta.json, aggregates only)
-#   eval/app_bench.sh score <label>             # eval/judge.py (Claude) -> scored.csv
-#   eval/app_bench.sh summary                   # one row per run (eval/app_bench.py summarize)
-#   eval/app_bench.sh ssh <cmd> | cua <tool> '<json>' | screenshot <png>
+#   ./bench.sh fetch                     # the clips from their original source into clips/ (git-ignored)
+#   ./bench.sh vm-create                 # clone $BENCH_BASE_IMAGE -> $BENCH_VM (once; 8 GB, 4 CPUs)
+#   ./bench.sh vm-start [--timed] | vm-stop     # --timed refuses while any other VM runs
+#   ./bench.sh vm-setup                  # uv, the harness, the clips, BlackHole as input, no autocorrect
+#   ./bench.sh install <App.app|App.dmg|App.zip> [/Applications]   # host -> VM
+#   ./bench.sh check <app> [harness args...]                       # the harness preflight in the VM
+#   ./bench.sh run <label> <app> <mode> [harness args...]          # timed run; results to work/<label>/
+#   ./bench.sh meta <label> key=value...  # how the app was set up (work/<label>/meta.json)
+#   ./bench.sh score <label>             # judge.py (Claude) -> work/<label>/scored.csv
+#   ./bench.sh publish                   # aggregates only -> results/ (summary.csv, summary.md, per-run setup)
+#   ./bench.sh lock | unlock             # hold / release $BENCH_LOCK_FILE, if you share VMs with other jobs
+#   ./bench.sh ssh <cmd> | screenshot <png>
 #
-# Runs go to eval/work/bench1/<label>/ (git-ignored: transcripts of CC BY-NC clips). Only the VM named
-# dictation-vm-bench is ever used: never the golden image, never dictation-vm or dictation-vm-2 themselves.
-# The bench VM stands in for dictation-vm-2 while it holds that VM's e2e lock (the Lead, 2026-11-21), so a
-# Tester's run says "VM busy" instead of resetting a VM the bench is using.
+# Settings (environment): BENCH_VM (default bench-vm), BENCH_BASE_IMAGE (the VM to clone for vm-create),
+# BENCH_SSH_KEY (default ~/.ssh/id_ed25519), BENCH_VM_USER (default lume), BENCH_HOSTKEY_FROM (an ssh
+# known_hosts alias whose key the clone inherits), BENCH_LOCK_FILE (optional), BENCH_EXTRA_FILES (more files
+# for vm-setup to copy next to harness.py). work/ holds transcripts of CC BY-NC clips and is git-ignored.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-VM=dictation-vm-bench
-GOLDEN=dictation-vm-golden
-LOCKED_VM=dictation-vm-2
-LOCK_DIR=${E2E_LOCK_DIR:-$HOME/.cache/dictation-e2e}
-SSH_KEY=${SSH_KEY:-$HOME/.ssh/dictation_vm_ed25519}
-VM_USER=lume
+VM=${BENCH_VM:-bench-vm}
+BASE=${BENCH_BASE_IMAGE:-}
+LOCK_FILE=${BENCH_LOCK_FILE:-}
+SSH_KEY=${BENCH_SSH_KEY:-$HOME/.ssh/id_ed25519}
+VM_USER=${BENCH_VM_USER:-lume}
 VM_DIR=/Users/$VM_USER/bench
 CLIPS=$HERE/clips
-WORK=$HERE/work/bench1
+WORK=$HERE/work
+RESULTS=$HERE/results
 UV=/Users/$VM_USER/.local/bin/uv
+[ -z "$BASE" ] || [ "$VM" != "$BASE" ] || { echo "bench: BENCH_VM must not be the base image" >&2; exit 1; }
 
-die() { echo "app_bench: $*" >&2; exit 1; }
-log() { echo "app_bench: $*" >&2; }
+die() { echo "bench: $*" >&2; exit 1; }
+log() { echo "bench: $*" >&2; }
 
 vm_ip() { lume get "$VM" -f json 2>/dev/null | jq -r 'if type=="array" then .[0] else . end | .ipAddress // empty'; }
 vm() { ssh -i "$SSH_KEY" -o HostKeyAlias="$VM" -o BatchMode=yes -o ConnectTimeout=5 "$VM_USER@$(vm_ip)" "$@"; }
 known_host() {
   local known=$HOME/.ssh/known_hosts
   ssh-keygen -F "$VM" -f "$known" >/dev/null 2>&1 && return 0
-  grep -q '^dictation-vm ' "$known" || die "no host key for dictation-vm to copy (clones keep the golden key)"
-  sed -n 's/^dictation-vm /'"$VM"' /p' "$known" >>"$known"
+  local from=${BENCH_HOSTKEY_FROM:-}
+  [ -n "$from" ] || return 0   # first connection then asks; BatchMode fails, so add the key once by hand
+  grep -q "^$from " "$known" || die "no known_hosts entry for $from to copy (clones keep their base's host key)"
+  sed -n "s/^$from /$VM /p" "$known" >>"$known"
 }
 running_vms() { lume ls 2>/dev/null | awk '$0 ~ /running/ {print $1}'; }
 
@@ -74,34 +77,33 @@ vm_terminal_wait() {
 cmd=${1:-}; shift || true
 case "$cmd" in
   fetch)
-    uv run --quiet "$HERE/fetch_dataset.py" "$CLIPS" "$@"
+    uv run --quiet "$HERE/fetch_clips.py" "$CLIPS" "$@"
     ;;
   lock)
-    # The same lock tests/e2e/run.sh takes (a symlink whose target is "<pid> <time> <note>"), held by a
-    # sleeper process so it outlives this command; `unlock` ends the sleeper and removes the lock.
-    mkdir -p "$LOCK_DIR"
-    lock=$LOCK_DIR/$LOCKED_VM.lock
-    if [ -L "$lock" ]; then
-      die "$LOCKED_VM is locked already: $(readlink "$lock")"
-    fi
+    # A symlink whose target is "<pid> <time> <note>", held by a sleeper process so it outlives this
+    # command (the format tests/e2e of the project this came from uses, so its runs see the VM as busy).
+    [ -n "$LOCK_FILE" ] || die "BENCH_LOCK_FILE is not set"
+    mkdir -p "$(dirname "$LOCK_FILE")"
+    [ ! -L "$LOCK_FILE" ] || die "locked already: $(readlink "$LOCK_FILE")"
     nohup sleep 172800 >/dev/null 2>&1 &
     holder=$!
-    ln -s "$holder $(date '+%F %T') BENCH1 app bench ($VM)" "$lock" || { kill "$holder"; die "lost the race for $lock"; }
-    echo "$holder" >"$LOCK_DIR/bench-holder.pid"
-    log "holding $LOCKED_VM's lock (pid $holder)"
+    ln -s "$holder $(date '+%F %T') bench ($VM)" "$LOCK_FILE" || { kill "$holder"; die "lost the race for $LOCK_FILE"; }
+    echo "$holder" >"$LOCK_FILE.bench-holder"
+    log "holding $LOCK_FILE (pid $holder)"
     ;;
   unlock)
-    lock=$LOCK_DIR/$LOCKED_VM.lock
-    holder=$(cat "$LOCK_DIR/bench-holder.pid" 2>/dev/null || true)
+    [ -n "$LOCK_FILE" ] || die "BENCH_LOCK_FILE is not set"
+    holder=$(cat "$LOCK_FILE.bench-holder" 2>/dev/null || true)
     [ -n "$holder" ] || die "the bench holds no lock"
-    if [ "$(readlink "$lock" 2>/dev/null | cut -d' ' -f1)" = "$holder" ]; then rm -f "$lock"; fi
+    if [ "$(readlink "$LOCK_FILE" 2>/dev/null | cut -d' ' -f1)" = "$holder" ]; then rm -f "$LOCK_FILE"; fi
     kill "$holder" 2>/dev/null || true
-    rm -f "$LOCK_DIR/bench-holder.pid"
-    log "released $LOCKED_VM's lock"
+    rm -f "$LOCK_FILE.bench-holder"
+    log "released $LOCK_FILE"
     ;;
   vm-create)
+    [ -n "$BASE" ] || die "set BENCH_BASE_IMAGE to the VM to clone (README: the VM image)"
     lume ls | grep -q "^$VM " && die "$VM exists already"
-    lume clone "$GOLDEN" "$VM"
+    lume clone "$BASE" "$VM"
     lume set "$VM" --memory 8GB --cpu 4
     ;;
   vm-start)
@@ -125,13 +127,14 @@ case "$cmd" in
     vm "test -x $UV || curl -LsSf https://astral.sh/uv/install.sh | sh" >/dev/null
     vm "mkdir -p $VM_DIR/out && rm -rf $VM_DIR/clips && mkdir -p $VM_DIR/clips"
     tar -C "$CLIPS" -cf - . | vm "tar -C $VM_DIR/clips -xf -"
-    tar -C "$HERE" -cf - app_bench.py | vm "tar -C $VM_DIR -xf -"
+    tar -C "$HERE" -cf - harness.py | vm "tar -C $VM_DIR -xf -"
+    for f in ${BENCH_EXTRA_FILES:-}; do tar -C "$(dirname "$f")" -cf - "$(basename "$f")" | vm "tar -C $VM_DIR -xf -"; done
     # Mac-wide substitutions off, so nothing changes a typed transcript in TextEdit (TextEdit's own settings
     # live in its sandbox container, which an ssh session can't write; the document is a .txt, plain text).
     vm 'for k in NSAutomaticCapitalizationEnabled NSAutomaticPeriodSubstitutionEnabled NSAutomaticSpellingCorrectionEnabled NSAutomaticQuoteSubstitutionEnabled NSAutomaticDashSubstitutionEnabled NSAutomaticTextReplacementEnabled NSAutomaticInlinePredictionEnabled NSAutomaticTextCompletionEnabled WebAutomaticSpellingCorrectionEnabled; do defaults write -g $k -bool false; done
 '
     # Warm uv's environment (and Python) once, then make BlackHole 2ch the default input.
-    vm_terminal "cd $VM_DIR && $UV run app_bench.py dry-run && $UV run app_bench.py set-input 'BlackHole 2ch'" "$VM_DIR/setup.log"
+    vm_terminal "cd $VM_DIR && $UV run harness.py dry-run && $UV run harness.py set-input 'BlackHole 2ch'" "$VM_DIR/setup.log"
     st=$(vm_terminal_wait "$VM_DIR/setup.log" 10)
     vm "cat $VM_DIR/setup.log | tail -5"
     [ "$st" = 0 ] || die "vm-setup failed ($st)"
@@ -149,7 +152,7 @@ case "$cmd" in
     ;;
   check)
     app=${1:?app}; shift
-    vm_terminal "cd $VM_DIR && $UV run app_bench.py run --app $app --clips $VM_DIR/clips -o $VM_DIR/out/check.csv --check $*" "$VM_DIR/check.log"
+    vm_terminal "cd $VM_DIR && $UV run harness.py run --app $app --clips $VM_DIR/clips -o $VM_DIR/out/check.csv --check $*" "$VM_DIR/check.log"
     st=$(vm_terminal_wait "$VM_DIR/check.log" 5)
     vm "cat $VM_DIR/check.log"
     [ "$st" = 0 ]
@@ -160,7 +163,7 @@ case "$cmd" in
     tag=$(echo "$*" | grep -q -- '--limit' && echo trial || echo full)
     echo "start $(host_load)" >>"$out/host_load.txt"
     vm "echo start \$(date -u +%FT%TZ) load \$(sysctl -n vm.loadavg | tr -d '{}' | xargs)" >>"$out/vm_load.txt"
-    vm_terminal "cd $VM_DIR && $UV run app_bench.py run --app $app --mode $mode --clips $VM_DIR/clips -o $VM_DIR/out/$label.csv $*" "$VM_DIR/out/$label.log"
+    vm_terminal "cd $VM_DIR && $UV run harness.py run --app $app --mode $mode --clips $VM_DIR/clips -o $VM_DIR/out/$label.csv $*" "$VM_DIR/out/$label.log"
     log "running $label ($tag) in $VM's Terminal"
     st=$(vm_terminal_wait "$VM_DIR/out/$label.log" 60)
     echo "end $(host_load)" >>"$out/host_load.txt"
@@ -190,19 +193,28 @@ PY
     out=$WORK/$label
     uv run --quiet "$HERE/judge.py" --judge claude "$out/results.csv" "$CLIPS/manifest.csv" -o "$out/scored.csv" --label "$label"
     ;;
-  summary)
-    python3 "$HERE/app_bench.py" summarize "$WORK"/*/ "$@"
+  publish)
+    # Aggregates only: the summary table and, per run, how the app was set up and the load during the run.
+    mkdir -p "$RESULTS"
+    runs=()
+    for run in "$WORK"/*/; do
+      [ -f "$run/results.csv" ] || continue
+      runs+=("$run")
+      r=$(basename "$run"); mkdir -p "$RESULTS/$r"
+      for f in meta.json host_load.txt vm_load.txt; do [ ! -f "$run/$f" ] || cp "$run/$f" "$RESULTS/$r/"; done
+    done
+    [ "${#runs[@]}" -gt 0 ] || die "no runs in $WORK"
+    python3 "$HERE/harness.py" summarize "${runs[@]}" --format csv >"$RESULTS/summary.csv"
+    python3 "$HERE/harness.py" summarize "${runs[@]}" --format md >"$RESULTS/summary.md"
+    cat "$RESULTS/summary.md"
     ;;
   ssh)
     vm "$@"
     ;;
-  cua)
-    tool=${1:?tool}; args=${2:-'{}'}
-    vm "~/.local/bin/cua-driver call $tool '$args'"
-    ;;
   screenshot)
+    # Needs cua-driver (github.com/trycua) running in the VM; optional.
     vm "~/.local/bin/cua-driver call get_desktop_state '{}'" | jq -r '.screenshot_png_b64 // empty' | base64 -d >"${1:?png path}"
     ;;
   *)
-    sed -n '2,17p' "$0"; exit 2 ;;
+    sed -n '2,23p' "$0"; exit 2 ;;
 esac
