@@ -47,6 +47,7 @@ ALL_SCENARIOS=(
   e2e_hotkey_shortcuts e2e_no_words_transcript e2e_hotkey_recorder
   e2e_accessibility_revoked e2e_setup_no_permissions e2e_setup_own_key_no_permissions
   e2e_local_model
+  e2e_cleanup_applied e2e_cleanup_deadline
   e2e_first_paste_after_launch e2e_quit_right_after_paste e2e_tray_menu_screenshots
   e2e_onboarding_screenshots e2e_setup_redesign_screens
   e2e_history

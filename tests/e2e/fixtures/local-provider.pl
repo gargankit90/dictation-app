@@ -5,9 +5,10 @@
 # build (pointed here with --debug-provider-url) goes through its real HTTP
 # client, keychain key, retries and JSON parsing, with no network and no
 # real key. `POST …/chat/completions` (the cleanup pass) answers with the
-# transcript it was sent, unchanged, so cleanup is applied and the paste is
-# what the speech reply said; it is logged as `cleanup`, not `request`, so
-# the request numbers stay the speech requests'. It is never held.
+# transcript it was sent, unchanged (or with `cleanup-text`, below), so
+# cleanup is applied and the paste is what the speech reply said; it is logged
+# as `cleanup`, not `request`, so the request numbers stay the speech
+# requests'. It is held only while `cleanup-gate` exists (QT1).
 #
 #   perl local-provider.pl <state-dir> [port]      # default port 18731
 #
@@ -22,6 +23,11 @@
 #   gate               while this file exists, a reply is held after its
 #                      request has been read whole ("the gate"); removing it
 #                      releases every held reply.
+#   cleanup-gate       like `gate`, for the cleanup (chat) reply only: it is
+#                      held while this file exists, so the app's 1.5 s
+#                      deadline passes and it pastes the raw transcript.
+#   cleanup-text       what the cleanup answers instead of echoing its input
+#                      (UTF-8, as is); read when the request arrives.
 #   reply-text         the transcript to answer with (UTF-8, as is: leading
 #                      and trailing whitespace and newlines are kept);
 #                      "hello world" when absent. Read when the request
@@ -31,6 +37,8 @@
 #                        request n=<n> path=<p> auth=good|bad|none model=<m>
 #                          language=<l> format=<f> audio_bytes=<b>
 #                        cleanup auth=good|bad|none status=<s>
+#                        cleanup_held       the cleanup reply is held
+#                        cleanup_closed     the client hung up while held
 #                        held n=<n>
 #                        closed n=<n>       the client hung up while held
 #                        released n=<n> closed=0|1
@@ -238,31 +246,34 @@ sub respond {
 # Holds the reply while the gate file exists; says when the client hangs
 # up. Returns whether it did.
 sub hold {
-  my ($sock, $n) = @_;
-  return 0 unless -e "$dir/gate";
-  event("held n=$n");
+  my ($sock, $n, $gate, $label) = @_;
+  $gate //= 'gate';
+  return 0 unless -e "$dir/$gate";
+  event($label ? "${label}_held" : "held n=$n");
   my $select = IO::Select->new($sock);
   my $closed = 0;
   my $until = time + $MAX_HOLD;
-  while (-e "$dir/gate" && time < $until) {
+  while (-e "$dir/$gate" && time < $until) {
     if (!$closed && $select->can_read(0.05)) {
       my $got = sysread $sock, my $chunk, 4096;
       if (!$got) {
         $closed = 1;
-        event("closed n=$n");
+        event($label ? "${label}_closed" : "closed n=$n");
       }
     } elsif ($closed) {
       select undef, undef, undef, 0.05;
     }
   }
-  event("released n=$n closed=$closed");
+  event("released n=$n closed=$closed") unless $label;
   return $closed;
 }
 
 sub reply_text {
-  my $path = "$dir/reply-text";
-  return $DEFAULT_TEXT unless -e $path;
-  open my $fh, '<:raw', $path or return $DEFAULT_TEXT;
+  my ($name, $default) = @_;
+  my $path = "$dir/" . ($name // 'reply-text');
+  $default //= $DEFAULT_TEXT;
+  return $default unless -e $path;
+  open my $fh, '<:raw', $path or return $default;
   local $/;
   my $bytes = <$fh>;
   close $fh;
@@ -293,8 +304,10 @@ sub serve {
     my ($status, $reply) = (401,
       '{"error":{"message":"Invalid API Key","code":401}}');
     if ($auth eq 'good') {
+      my $content = reply_text('cleanup-text', cleanup_input($json));
+      hold($sock, 0, 'cleanup-gate', 'cleanup');
       $reply = JSON::PP->new->ascii->canonical->encode({
-        choices => [{ message => { role => 'assistant', content => cleanup_input($json) }, finish_reason => 'stop' }],
+        choices => [{ message => { role => 'assistant', content => $content }, finish_reason => 'stop' }],
       });
       $status = 200;
     }
