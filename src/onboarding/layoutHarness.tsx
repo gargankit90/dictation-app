@@ -648,30 +648,23 @@ async function welcomeProblems(root: HTMLElement): Promise<string[]> {
   return found;
 }
 
-/** U11: Connect your key's two states, each as the spec has it. */
+/** Connect OpenRouter's two states: not connected, and connected (key saved). */
 function keyScreenProblems(root: HTMLElement): string[] {
   const found: string[] = [];
   const text = root.textContent;
-  if (!text.includes("Connect your key")) found.push("not on Connect your key");
-  const field = root.querySelector("#api-key");
+  if (!text.includes("Connect OpenRouter") && !text.includes("Connect again")) {
+    found.push("not on Connect OpenRouter");
+  }
+  // The key field only opens under "Paste a key instead", in either state.
+  if (root.querySelector("#api-key") !== null) found.push("the key field is open by itself");
   if (view === "key-saved") {
-    if (field !== null) found.push("a saved key shows the field");
-    if (!text.includes("✓ Key saved")) found.push("a saved key doesn't say Key saved");
-    if (root.querySelector(".ob-key-saved button") === null) found.push("no Replace");
-  } else if (field === null) {
-    found.push("no key saved, and no field");
+    if (!text.includes("✓ Connected to OpenRouter"))
+      found.push("a saved key doesn't say Connected");
+    if (!text.includes("Connect again")) found.push("a saved key has no Connect again");
+  } else if (!text.includes("Continue unlocks once OpenRouter")) {
+    found.push("not connected, and Continue doesn't say why it waits");
   }
-  if (text.includes("Remove key")) found.push("setup offers Remove key");
-  // Regular height in the form: the footer's Continue is the main action.
-  const save = root.querySelector(".ob-key-panel button.primary");
-  const next = root.querySelector(".ob-footer .primary");
-  if (
-    save !== null &&
-    next !== null &&
-    save.getBoundingClientRect().height >= next.getBoundingClientRect().height
-  ) {
-    found.push("Test & Save is as big as Continue");
-  }
+  if (text.includes("Disconnect")) found.push("setup offers Disconnect");
   return found;
 }
 
@@ -766,7 +759,11 @@ function openKeyScreen(root: HTMLElement): boolean {
   if (root.querySelector(".ob-key-panel") !== null) return true;
   const next = root.querySelector<HTMLButtonElement>(".ob-footer .primary");
   const selected = root.querySelector<HTMLInputElement>('input[name="ob-engine"]:checked');
-  if (next !== null && !next.disabled && selected?.getAttribute("aria-label")?.includes("key")) {
+  if (
+    next !== null &&
+    !next.disabled &&
+    selected?.getAttribute("aria-label")?.includes("OpenRouter")
+  ) {
     next.click();
   }
   return false;

@@ -23,7 +23,7 @@ e2e_onboarding_round2() {
   # OpenRouter is the default, and pressing a selected radio changes nothing:
   # pick the on-device model first, then OpenRouter, as a person changing their mind.
   expect "choose the on-device model" \
-    ax_ok radio-press "$APP_NAME" "$R2_WINDOW" "Recommended for your language"
+    ax_ok radio-press "$APP_NAME" "$R2_WINDOW" "On this Mac only"
   expect "choose OpenRouter" \
     ax_ok radio-press "$APP_NAME" "$R2_WINDOW" "Use OpenRouter"
   expect "the choice is saved before any quit" wait_until_progress own_key

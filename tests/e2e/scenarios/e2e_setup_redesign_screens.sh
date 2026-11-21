@@ -70,7 +70,7 @@ srs_mode() {
   expect "$mode: Speech" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "English · 1320 MB" 15
   srs_settled_shot "speech-english-$mode"
   ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" Hindi
-  expect "$mode: Hindi" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "30 languages · 590 MB" 10
+  expect "$mode: Hindi" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Hindi needs" 10
   srs_settled_shot "speech-hindi-$mode"
   ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" "More…"
   expect "$mode: choose Gujarati" \

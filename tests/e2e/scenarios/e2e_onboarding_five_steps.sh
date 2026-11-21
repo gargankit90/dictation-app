@@ -84,7 +84,7 @@ e2e_onboarding_five_steps() {
   expect "press Cancel in the strip" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Cancel
   expect "the download pauses" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Download paused" 15
   vm "rm -rf $(q "$FIVE_MODELS")"
-  expect "the strip offers to resume" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "isn't downloaded yet" 15
+  expect "the strip offers to resume" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "aren't downloaded yet" 15
   expect "press Continue" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Continue
   expect "Try it blocks practice while the model is missing" \
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Practice starts once it is" 15
