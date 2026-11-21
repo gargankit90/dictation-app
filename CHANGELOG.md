@@ -8,6 +8,13 @@ testers: short lines, no HTML).
 
 ## [Unreleased]
 
+- **Terms, and a shorter setup.** The first screen now says "By continuing,
+  you agree to the Terms and Privacy Policy", and nothing is reported before
+  you press Get started. Setup has four steps (Welcome, Speech, Permissions,
+  Try it); Done on Try it ends it, and "Open Vocet when I log in" is a
+  checkbox there. The On this Mac card shows the whole download (4.4 GB), the
+  Connect OpenRouter screen is calmer, and setup comes back to the front after
+  you allow a permission in System Settings.
 - **Connect OpenRouter in one click.** Setup and Settings, Speech now have a
   Connect OpenRouter button: sign in at OpenRouter in your browser and Vocet
   keeps the key in your Keychain. Add credits opens OpenRouter's credits

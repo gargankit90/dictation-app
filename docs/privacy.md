@@ -1,7 +1,7 @@
 # Privacy: usage events, error reports and dictation history
 
 The plain-language policy is [vocetlabs.com/privacy](https://vocetlabs.com/privacy)
-(`site/privacy.html`): who we are, what leaves your Mac, what providers keep (with
+(`site/privacy.html`; the [Terms](https://vocetlabs.com/terms) are `site/terms.html`): who we are, what leaves your Mac, what providers keep (with
 sources), your choices. This page is the technical list behind it: every event
 and field, and what stays on your Mac. If the two ever disagree, fix both.
 
@@ -37,17 +37,21 @@ enforced in code: events are a closed enum (`crates/ports/src/telemetry.rs`),
 and error reports are built field by field from an allow-list
 (`crates/telemetry/src/errors.rs`), so a field not listed here cannot be sent.
 
-- **On by default.** During first setup, usage events (with a random install ID) and error
-  reports are sent from the first screen, so we can see where and why people
-  stop.
-- **The switch.** "Share usage and error events" is on the last setup screen
-  and in Settings → Privacy. One switch covers both. Off takes effect at once:
+- **On by default, from Get started.** Nothing is sent before the person
+  presses **Get started** on the first setup screen, under which it says "By
+  continuing, you agree to the Terms and Privacy Policy." (the app keeps the
+  Terms' date in `accepted_terms`, in its config folder). After that usage
+  events (with a random install ID) and error reports are sent, so we can see
+  where and why people stop. A version from before the Terms treats a finished
+  setup as agreed: its reports go on as they were.
+- **The switch.** "Share usage and error events" is in Settings → Privacy. One
+  switch covers both. Off takes effect at once:
   nothing more is sent, events and reports still waiting are deleted, requests
   under way are dropped, and the install ID is deleted. It can't recall what
   was already sent. Turning it on again makes a new ID.
 - **A stored choice wins.** If sharing is already off (for example you turned it
-  off earlier and run setup again), nothing is sent at any step and no install
-  ID is made. If the settings file can't be read, the app treats it as off.
+  off earlier and run setup again), nothing is sent at any step, Get started
+  included, and no install ID is made. If the settings file can't be read, the app treats it as off.
 - **Where it goes.** PostHog Cloud US (`https://us.i.posthog.com`), sent by
   the app itself, never by the webview.
 - **A build without a PostHog key sends nothing.** Development builds, CI and
@@ -117,8 +121,8 @@ links one install's events together. Turning sharing off deletes it.
 | Event | When | Properties |
 | --- | --- | --- |
 | `app_opened` | The app starts | `version` (for example `0.1.0`), `macos_major` (for example `15`), `arch` (`apple_silicon`, `intel`, `other`) |
-| `onboarding_step_reached` | Setup opens on a step, or you get to one | `step` (`welcome`, `speech`, `permissions`, `try`, `ready`) |
-| `onboarding_completed` | You finish onboarding | `step` (`ready`) |
+| `onboarding_step_reached` | Setup opens on a step, or you get to one | `step` (`speech`, `permissions`, `try`; the first screen is before Get started, so `welcome` is only sent when setup is opened again) |
+| `onboarding_completed` | You press Done on Try it | `step` (`try`) |
 | `onboarding_left` | You close setup's window or quit with setup on it, and it isn't finished | `step`, as above: where you stopped |
 | `setup_problem` | Something gets in the way during setup | `reason`, one of the values under [Setup problems](#setup-problems) |
 | `engine_selected` | You save your key, or switch between On this Mac and Your own key | `kind` (`cloud`, `local`; which local model is never sent) |
