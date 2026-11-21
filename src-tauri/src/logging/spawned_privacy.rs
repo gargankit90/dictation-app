@@ -468,7 +468,6 @@ fn history_stays_out_of_events_and_reports(dir: &Path, history: &History, seen: 
     let diagnostics = Diagnostics::default();
     for (n, event) in (0_u64..).zip(seen) {
         tracker.on_event(event, Duration::from_millis(n * 100));
-        diagnostics.record_event(event);
     }
     let events = telemetry.events();
     assert!(!events.is_empty(), "no usage events to check");

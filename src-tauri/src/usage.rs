@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use dictation_core::diagnostics::ErrorCode;
 use dictation_core::error::DictationError;
-use dictation_core::onboarding::{Readiness, Step, TryOutcome};
+use dictation_core::onboarding::{Readiness, Step};
 use dictation_core::settings::{Provider, Settings, Transcription};
 use dictation_pipeline::config::Config as AppSettingsFile;
 use dictation_pipeline::usage::SharingGate;
@@ -27,7 +27,6 @@ use dictation_telemetry::{Config, PostHogTelemetry, SentryReporter, errors};
 use dictation_transcribe::engine::Engine;
 use dictation_transcribe::models::DownloadError;
 
-use crate::commands::KeyTestKind;
 use crate::onboarding::{Onboarding, OnboardingStatus, PermissionState, View};
 
 /// The PostHog project key this build was made with, if any.
@@ -133,21 +132,13 @@ pub fn start(data_dir: &Path, share: bool, scripted: bool, version: &str) -> Usa
     Usage(posthog, errors, Arc::new(gate))
 }
 
-/// Records `app_opened`, and `update_installed` if the version changed
-/// since the last launch. Reads the macOS version, so it runs on the
+/// Records `app_opened`. Reads the macOS version, so it runs on the
 /// blocking pool.
-pub fn launched(usage: Usage, data_dir: &Path, version: &str) {
+pub fn launched(usage: Usage, version: &str) {
     let Some(version) = Version::new(version) else {
         return;
     };
-    let data_dir = data_dir.to_path_buf();
     tauri::async_runtime::spawn_blocking(move || {
-        if let Some(from_version) = dictation_telemetry::updated_from(&data_dir, &version) {
-            usage.record(Event::UpdateInstalled {
-                from_version,
-                to_version: version.clone(),
-            });
-        }
         usage.record(Event::AppOpened {
             version,
             macos_major: macos_major(),
@@ -186,12 +177,6 @@ pub struct SettingsChange {
 pub fn settings_change(before: &Settings, after: &Settings) -> SettingsChange {
     let mut events = Vec::new();
     let mut changed = |setting| events.push(Event::SettingChanged { setting });
-    if before.provider != after.provider {
-        changed(SettingName::Provider);
-    }
-    if before.model != after.model {
-        changed(SettingName::Model);
-    }
     if before.hotkey != after.hotkey {
         changed(SettingName::Hotkey);
     }
@@ -306,19 +291,6 @@ fn setup_problem_once(usage: &Usage, onboarding: &Onboarding, problem: SetupProb
     }
 }
 
-/// The reason for a key test that failed.
-#[must_use]
-pub fn key_test_problem(kind: KeyTestKind) -> SetupProblem {
-    match kind {
-        KeyTestKind::NoKey => SetupProblem::KeyTestFailedNoKey,
-        KeyTestKind::InvalidKey => SetupProblem::KeyTestFailedRejected,
-        KeyTestKind::RateLimited => SetupProblem::KeyTestFailedRateLimited,
-        KeyTestKind::Network => SetupProblem::KeyTestFailedNetwork,
-        KeyTestKind::Server => SetupProblem::KeyTestFailedServer,
-        KeyTestKind::Keychain => SetupProblem::KeyTestFailedKeychain,
-    }
-}
-
 /// The reason for a download that stopped by itself. A cancel is the user's
 /// own (`download_cancelled`, kept by `set_download_paused`), and a cancel
 /// also happens when another model takes its place, so it isn't one here.
@@ -332,12 +304,6 @@ pub fn download_problem(error: &DownloadError) -> Option<SetupProblem> {
         DownloadError::Disk(_) | DownloadError::Removed => Some(SetupProblem::DownloadFailedDisk),
         DownloadError::Cancelled => None,
     }
-}
-
-/// The reason for a practice outcome: only skipping is one.
-#[must_use]
-pub fn skipped_practice(outcome: TryOutcome) -> Option<SetupProblem> {
-    (outcome == TryOutcome::Skipped).then_some(SetupProblem::PracticeSkipped)
 }
 
 /// The reason for a permission's request that couldn't be shown.
@@ -409,8 +375,8 @@ mod tests {
     fn a_save_reports_the_names_of_what_changed() {
         let before = Settings::default();
         let after = Settings {
-            model: "someone/another-model".into(),
             hotkey: "Ctrl+Space".into(),
+            launch_at_login: true,
             ..Settings::default()
         };
         let change = settings_change(&before, &after);
@@ -418,10 +384,10 @@ mod tests {
             change.events,
             [
                 Event::SettingChanged {
-                    setting: SettingName::Model
+                    setting: SettingName::Hotkey
                 },
                 Event::SettingChanged {
-                    setting: SettingName::Hotkey
+                    setting: SettingName::LaunchAtLogin
                 },
             ]
         );
@@ -629,16 +595,16 @@ mod tests {
         #[test]
         fn u10_problems_count_only_while_setup_is_on_the_window() {
             let (usage, fake, onboarding) = walking(true);
-            setup_problem(&usage, &onboarding, P::KeyTestFailedRejected);
+            setup_problem(&usage, &onboarding, P::RelaunchNeeded);
             assert_eq!(fake.events(), []);
             setup_opened(&usage, &onboarding, Readiness::READY);
-            setup_problem(&usage, &onboarding, P::KeyTestFailedRejected);
+            setup_problem(&usage, &onboarding, P::RelaunchNeeded);
             onboarding.close();
             setup_problem(&usage, &onboarding, P::DownloadFailedNetwork);
             assert_eq!(
                 fake.events().last(),
                 Some(&Event::SetupProblem {
-                    reason: P::KeyTestFailedRejected
+                    reason: P::RelaunchNeeded
                 })
             );
         }
@@ -730,25 +696,6 @@ mod tests {
                 }
             }
             assert_eq!(
-                [
-                    KeyTestKind::NoKey,
-                    KeyTestKind::InvalidKey,
-                    KeyTestKind::RateLimited,
-                    KeyTestKind::Network,
-                    KeyTestKind::Server,
-                    KeyTestKind::Keychain,
-                ]
-                .map(key_test_problem),
-                [
-                    P::KeyTestFailedNoKey,
-                    P::KeyTestFailedRejected,
-                    P::KeyTestFailedRateLimited,
-                    P::KeyTestFailedNetwork,
-                    P::KeyTestFailedServer,
-                    P::KeyTestFailedKeychain,
-                ]
-            );
-            assert_eq!(
                 request_problem(Permission::Microphone),
                 P::MicrophoneRequestFailed
             );
@@ -800,16 +747,6 @@ mod tests {
             std::fs::write(config.path(), "{ not json").unwrap();
             assert!(!stored_choice(&config), "unreadable");
             let _ = std::fs::remove_dir_all(&dir);
-        }
-
-        /// The practice outcome that isn't a skip stays silent.
-        #[test]
-        fn try_outcomes_other_than_skipping_are_not_problems() {
-            assert_eq!(
-                skipped_practice(TryOutcome::Skipped),
-                Some(P::PracticeSkipped)
-            );
-            assert_eq!(skipped_practice(TryOutcome::Passed), None);
         }
     }
 }

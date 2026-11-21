@@ -25,7 +25,7 @@
 
 use std::sync::Arc;
 
-use dictation_core::onboarding::{SpeechChoice, Step, TryOutcome};
+use dictation_core::onboarding::Step;
 use dictation_core::settings::{Provider, Settings};
 use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, UndoFailed};
@@ -39,8 +39,7 @@ use tauri::State;
 
 use crate::diagnostics::Diagnostics;
 use crate::engine::{self, LiveEngine};
-use crate::history::AppHistory;
-use crate::onboarding::{self, AppPermission, Onboarding, OnboardingStatus, OsPermissions, View};
+use crate::onboarding::{self, AppPermission, Onboarding, OnboardingStatus, OsPermissions};
 use crate::usage::{self, Usage};
 
 /// Where the bindings go, relative to `src-tauri/`.
@@ -704,17 +703,11 @@ pub(crate) async fn test_saved_key(
 pub async fn test_api_key(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
-    onboarding: State<'_, Arc<Onboarding>>,
-    usage: State<'_, Usage>,
     provider: Provider,
     key: Option<String>,
 ) -> Result<(), KeyTestError> {
     let base_url = engine.provider_base_url(provider);
-    let result = key_test(&state.0, engine.inner(), provider, key, &base_url).await;
-    if let Err(error) = &result {
-        usage::setup_problem(&usage, &onboarding, usage::key_test_problem(error.kind));
-    }
-    result
+    key_test(&state.0, engine.inner(), provider, key, &base_url).await
 }
 
 /// The view the settings window shows and, for onboarding (M5.2), the step
@@ -835,109 +828,6 @@ pub async fn set_onboarding_step(
     Ok(onboarding.status(&*permissions.0, diagnostics.hotkey_is_down()))
 }
 
-/// Ready's History "Change": leaves the steps for Settings. Setup stays where
-/// it was, and "Resume setup…" comes back to it.
-#[tauri::command]
-#[specta::specta]
-pub async fn leave_setup_for_settings(
-    shell: State<'_, AppShell>,
-    onboarding: State<'_, Arc<Onboarding>>,
-) -> Result<(), String> {
-    onboarding.close();
-    shell.0.show_settings_window();
-    Ok(())
-}
-
-/// Keeps the engine selected on the Speech step, so a quit before Continue
-/// comes back to it. Never the key.
-#[tauri::command]
-#[specta::specta]
-pub async fn set_speech_choice(
-    onboarding: State<'_, Arc<Onboarding>>,
-    choice: SpeechChoice,
-) -> Result<(), String> {
-    onboarding.set_speech_choice(choice);
-    Ok(())
-}
-
-/// Keeps how the practice dictation went, for the Ready step and a relaunch.
-#[tauri::command]
-#[specta::specta]
-pub async fn set_try_outcome(
-    onboarding: State<'_, Arc<Onboarding>>,
-    usage: State<'_, Usage>,
-    outcome: TryOutcome,
-) -> Result<(), String> {
-    onboarding.set_try_outcome(outcome);
-    if let Some(problem) = usage::skipped_practice(outcome) {
-        usage::setup_problem(&usage, &onboarding, problem);
-    }
-    Ok(())
-}
-
-/// Try it: the words of a practice dictation didn't reach the practice box.
-/// Only the window can see the box. It says only that this happened: the event
-/// is `paste_missed`, chosen here, with nothing from the window in it.
-#[tauri::command]
-#[specta::specta]
-pub async fn practice_paste_missed(
-    onboarding: State<'_, Arc<Onboarding>>,
-    usage: State<'_, Usage>,
-) -> Result<(), String> {
-    usage::setup_problem(&usage, &onboarding, SetupProblem::PasteMissed);
-    Ok(())
-}
-
-/// Keeps that the user cancelled (or resumed) the model download, so a
-/// relaunch doesn't start a download they stopped.
-#[tauri::command]
-#[specta::specta]
-pub async fn set_download_paused(
-    onboarding: State<'_, Arc<Onboarding>>,
-    usage: State<'_, Usage>,
-    paused: bool,
-) -> Result<(), String> {
-    onboarding.set_download_paused(paused);
-    if paused {
-        usage::setup_problem(&usage, &onboarding, SetupProblem::DownloadCancelled);
-    }
-    Ok(())
-}
-
-/// The words of the last dictation the app tried to paste, for Try it only:
-/// `None` unless onboarding is on screen. Held in memory; never logged.
-#[tauri::command]
-#[specta::specta]
-pub async fn practice_words(
-    onboarding: State<'_, Arc<Onboarding>>,
-    history: State<'_, AppHistory>,
-) -> Result<Option<String>, String> {
-    Ok(if onboarding.view() == View::Onboarding {
-        history.0.attempted()
-    } else {
-        None
-    })
-}
-
-/// Try it's Copy: puts [`practice_words`]'s text on the clipboard, and only
-/// when the user asks. Nothing is pasted.
-#[tauri::command]
-#[specta::specta]
-pub async fn copy_practice_words(
-    onboarding: State<'_, Arc<Onboarding>>,
-    history: State<'_, AppHistory>,
-) -> Result<(), String> {
-    if onboarding.view() != View::Onboarding {
-        return Ok(());
-    }
-    let Some(text) = history.0.attempted() else {
-        return Ok(());
-    };
-    tauri::async_runtime::spawn_blocking(move || crate::tray_menu::copy_text(&text))
-        .await
-        .map_err(|_| "the copy task crashed".to_owned())?
-}
-
 /// Ends onboarding: the window goes back to the settings view and hides.
 #[tauri::command]
 #[specta::specta]
@@ -1015,7 +905,6 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::open_issue,
         crate::diagnostics::take_window_request,
         crate::diagnostics::reveal_log_file,
-        crate::diagnostics::dictation_progress,
         crate::preferences::use_cloud_engine,
         crate::preferences::use_local_model,
         crate::preferences::get_engine_status,
@@ -1024,13 +913,6 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::preferences::get_app_info,
         crate::preferences::check_for_updates,
         crate::preferences::choose_local_model,
-        set_try_outcome,
-        practice_paste_missed,
-        set_download_paused,
-        practice_words,
-        copy_practice_words,
-        set_speech_choice,
-        leave_setup_for_settings,
         crate::history::list_history,
         crate::history::copy_history_entry,
         crate::history::delete_history_entry,
@@ -1144,7 +1026,6 @@ mod tests {
             "openIssue",
             "takeWindowRequest",
             "revealLogFile",
-            "dictationProgress",
             "useCloudEngine",
             "useLocalModel",
             "getEngineStatus",
@@ -1153,12 +1034,6 @@ mod tests {
             "getAppInfo",
             "checkForUpdates",
             "chooseLocalModel",
-            "setTryOutcome",
-            "setDownloadPaused",
-            "practiceWords",
-            "copyPracticeWords",
-            "setSpeechChoice",
-            "leaveSetupForSettings",
             "listHistory",
             "copyHistoryEntry",
             "deleteHistoryEntry",
@@ -1172,7 +1047,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 49,
+            commands, 41,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1520,82 +1395,6 @@ mod tests {
                 .await
                 .expect("dropped, not waited for")
                 .unwrap();
-            let _ = std::fs::remove_dir_all(&dir);
-        }
-
-        /// Round 3: Off is in force while the settings lock is held and while
-        /// the progress file's write is stalled (the temporary file is a FIFO
-        /// with no reader, so the real write blocks until the test reads it).
-        #[tokio::test(flavor = "multi_thread")]
-        async fn u10_off_takes_effect_while_the_files_are_stalled() {
-            let dir = temp("stalled");
-            let server = server().await;
-            let settings = Arc::new(config(&dir, true));
-            let usage = live(&dir, &server, true);
-            let onboarding = Arc::new(Onboarding::load(&dir));
-            onboarding.open(dictation_core::onboarding::Readiness::READY);
-            let temporary = dir
-                .join(crate::onboarding::PROGRESS_FILE)
-                .with_extension("json.tmp");
-            let made = std::process::Command::new("mkfifo")
-                .arg(&temporary)
-                .status()
-                .unwrap();
-            assert!(made.success());
-            usage.record(step());
-            assert_eq!(usage.0.queued(), 1);
-
-            // The settings write can't start yet.
-            let held = settings_write();
-            let choosing = {
-                let (settings, usage, onboarding) = (
-                    Arc::clone(&settings),
-                    usage.clone(),
-                    Arc::clone(&onboarding),
-                );
-                std::thread::spawn(move || {
-                    choose_sharing(&settings, &usage, &onboarding, false).unwrap();
-                })
-            };
-            for _ in 0..200 {
-                if !usage.1.is_enabled() {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            let in_force = |why: &str| {
-                assert!(!usage.0.is_enabled(), "{why}: events");
-                assert!(!usage.1.is_enabled(), "{why}: reports");
-                assert_eq!(usage.0.queued(), 0, "{why}: what was waiting");
-                assert!(!id_exists(&dir), "{why}: the install ID");
-                usage.record(step());
-                assert_eq!(usage.0.queued(), 0, "{why}: a new event");
-            };
-            in_force("the settings lock held");
-            assert!(
-                settings.settings().unwrap().share_usage_events,
-                "not saved yet"
-            );
-            drop(held);
-
-            // Now the settings file is saved, and the note stalls on the FIFO.
-            for _ in 0..200 {
-                if !settings.settings().unwrap().share_usage_events {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            assert!(!settings.settings().unwrap().share_usage_events);
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            assert!(!choosing.is_finished(), "the progress write is stalled");
-            in_force("the progress write stalled");
-
-            // A reader lets the write finish, and the note is kept.
-            let written = std::fs::read(&temporary).unwrap();
-            assert!(!written.is_empty());
-            choosing.join().unwrap();
-            let permissions = dictation_platform::fakes::FakePermissions::new();
-            assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
             let _ = std::fs::remove_dir_all(&dir);
         }
 
@@ -3079,16 +2878,7 @@ mod capability_tests {
                     "set_onboarding_step",
                     serde_json::json!({ "step": "speech" }),
                 ),
-                (
-                    "test_api_key",
-                    serde_json::json!({ "provider": "openrouter" }),
-                ),
-                ("set_download_paused", serde_json::json!({ "paused": true })),
-                (
-                    "set_try_outcome",
-                    serde_json::json!({ "outcome": "skipped" }),
-                ),
-                ("practice_paste_missed", serde_json::json!({})),
+                ("relaunch_app", serde_json::json!({})),
                 ("finish_onboarding", serde_json::json!({})),
             ] {
                 let _ = invoke(main, command, args);
@@ -3115,23 +2905,10 @@ mod capability_tests {
                     },
                 ]
             );
-            assert!(
-                matches!(
-                    events[2],
-                    Event::SetupProblem {
-                        reason: SetupProblem::KeyTestFailedNoKey
-                            | SetupProblem::KeyTestFailedKeychain
-                    }
-                ),
-                "{:?}",
-                events[2]
-            );
             assert_eq!(
-                events[3..],
+                events[2..],
                 [
-                    problem(SetupProblem::DownloadCancelled),
-                    problem(SetupProblem::PracticeSkipped),
-                    problem(SetupProblem::PasteMissed),
+                    problem(SetupProblem::RelaunchNeeded),
                     Event::OnboardingCompleted {
                         step: OnboardingStep::Ready
                     },

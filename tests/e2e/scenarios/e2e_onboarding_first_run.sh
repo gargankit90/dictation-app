@@ -97,9 +97,7 @@ e2e_onboarding_first_run() {
   expect "the provider answered it" provider_wait_event '^replied n=3 status=200'
   expect "the transcript is in the practice box" \
     job_says "$PROVIDER_TEXT" ax field-get "$APP_NAME" "$ONBOARDING_WINDOW" try-field
-  expect "the window says it works, once it landed there" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "It works." 10
-  expect "press Continue" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" Continue
+  expect "press Done" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" Done
 
   expect "Ready shows the key" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "(hold)" 10

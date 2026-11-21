@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { commands } from "./bindings";
 import type { OnboardingStatus, Settings_Serialize, Step } from "./bindings";
+import type { SpeechChoice } from "./onboarding/SpeechStep";
 import { BROKEN, messageOf } from "./messages";
 import { chosenModel, modelWait, stripView } from "./onboarding/logic";
 import type { StripAction } from "./onboarding/logic";
@@ -38,18 +39,15 @@ const ACTION_LABELS: Record<StripAction, string> = {
 interface Props {
   /** Called once the user is done and the app has hidden the window. */
   onFinished: () => void;
-  /** Called once the app has left the steps for Settings → History. */
-  onOpenHistory?: () => void;
 }
 
 /**
  * The first-run steps (U8): Welcome, Speech, Permissions, Try it, Ready. The
- * app keeps the step and refuses to skip one that isn't done; it remembers
- * the step across quits. This shell shows the rail, the persistent download
+ * app keeps the step and refuses to skip one that isn't done. This shell shows the rail, the persistent download
  * strip and whichever step the app says, and each step decides its own
  * primary action.
  */
-export function Onboarding({ onFinished, onOpenHistory }: Props) {
+export function Onboarding({ onFinished }: Props) {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +56,8 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
   const { models, error: modelsError, refresh: refreshModels } = useModels();
   const { engine, refresh: refreshEngine } = useEngineStatus();
   const [downPolls, setDownPolls] = useState(0);
-  const resumeChecked = useRef(false);
+  // The engine picked on Speech, kept while the window is open.
+  const [speechChoice, setSpeechChoice] = useState<SpeechChoice | null>(null);
 
   // Here, not in a step: the writes outlive any one step, and every way out
   // of a step waits for them, since leaving can send an event. Only Ready has
@@ -157,7 +156,6 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
   const download = useCallback(
     async (id: string) => {
       try {
-        await commands.setDownloadPaused(false);
         const result = await commands.downloadLocalModel(id);
         if (result.status === "error") setError(messageOf(result.error));
       } catch {
@@ -168,27 +166,10 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
     [refreshModels],
   );
 
-  // A download that a quit interrupted picks up by itself, unless the user
-  // cancelled it. Once per launch, once everything it depends on is known.
-  const step = status?.step ?? null;
-  const paused = status?.download_paused ?? false;
-  useEffect(() => {
-    if (resumeChecked.current || models === null || settings === null || step === null) return;
-    resumeChecked.current = true;
-    if (chosen === null || paused || step === "welcome" || step === "speech") return;
-    if (chosen.state !== "partial" && chosen.state !== "missing") return;
-    if (chosen.error !== null) return;
-    // After this effect, and not on a timer its cleanup could cancel:
-    // resumeChecked is already set, so nothing would start it again.
-    const id = chosen.id;
-    queueMicrotask(() => void download(id));
-  }, [models, settings, step, chosen, paused, download]);
-
   async function stripAction(action: StripAction, id: string) {
     setError(null);
     if (action === "cancel") {
       try {
-        await commands.setDownloadPaused(true);
         await commands.cancelLocalModelDownload(id);
       } catch {
         setError(BROKEN);
@@ -315,7 +296,8 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
       {status.step === "speech" && (
         <SpeechStep
           parts={parts}
-          kept={status.speech_choice ?? null}
+          kept={speechChoice}
+          onPick={setSpeechChoice}
           settings={settings}
           onStored={setSettings}
           models={models}
@@ -338,18 +320,10 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
       {status.step === "try" && (
         <TryStep
           parts={parts}
-          status={status}
           settings={settings}
           onStored={setSettings}
           wait={modelWait(settings, models, engine)}
-          onContinue={forward}
-          onSkip={() => {
-            void (async () => {
-              await commands.setTryOutcome("skipped").catch(() => undefined);
-              await goTo("ready");
-            })();
-          }}
-          onBackToSpeech={() => void goTo("speech")}
+          onDone={forward}
         />
       )}
       {status.step === "ready" && (
@@ -360,17 +334,6 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
           onStored={setSettings}
           models={models}
           engine={engine}
-          onChangeHistory={() => {
-            void leave(async () => {
-              try {
-                const left = await commands.leaveSetupForSettings();
-                if (left.status === "error") setError(messageOf(left.error));
-                else onOpenHistory?.();
-              } catch {
-                setError(BROKEN);
-              }
-            });
-          }}
           sharing={sharing}
           onFinish={() => void leave(finishNow)}
         />

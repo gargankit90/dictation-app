@@ -103,10 +103,6 @@ export function App() {
         onFinished={() => {
           setView("settings");
         }}
-        onOpenHistory={() => {
-          setView("settings");
-          openSection("history");
-        }}
       />
     );
   }

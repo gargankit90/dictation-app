@@ -1,5 +1,5 @@
 //! The first-run steps (U8): which step a new user is on, when they may move
-//! on, and what is kept across launches.
+//! on.
 //!
 //! The steps come in a fixed order: [`Welcome`](Step::Welcome) (what the app
 //! does), [`Speech`](Step::Speech) (the
@@ -9,9 +9,7 @@
 //! holds ([`Readiness::is_met`]); the user may go to a step only when every
 //! step before it is done ([`Readiness::allows`]), and may always go back.
 //!
-//! The permissions and the key are read by the caller each time. What only
-//! the user's walk through the steps can tell is [`SetupProgress`], which the
-//! app keeps in a file so that quitting resumes at the same step.
+//! The permissions and the key are read by the caller each time.
 
 use serde::{Deserialize, Serialize};
 
@@ -140,99 +138,6 @@ impl Readiness {
     }
 }
 
-/// How the practice dictation in [`Step::Try`] went.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "snake_case")]
-pub enum TryOutcome {
-    /// Not tried yet.
-    #[default]
-    NotTried,
-    /// A dictation landed in the practice box.
-    Passed,
-    /// The user pressed "Skip for now".
-    Skipped,
-}
-
-/// The engine the user selected on [`Step::Speech`], before they continue.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[serde(rename_all = "snake_case")]
-pub enum SpeechChoice {
-    /// The recommended on-device model.
-    Local,
-    /// The user's own key. The key itself is never kept here.
-    OwnKey,
-}
-
-/// What survives a quit: where the user is and what they chose that only the
-/// steps know. Holds no audio, text or key.
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "independent facts kept in a file, each with its own meaning"
-)]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct SetupProgress {
-    /// The step the user was on.
-    pub step: Step,
-    /// The user has continued past Welcome.
-    pub welcome_passed: bool,
-    /// "Start dictating" was pressed.
-    pub completed: bool,
-    /// How the practice dictation went.
-    pub try_outcome: TryOutcome,
-    /// The user cancelled the model download, so a relaunch doesn't start it
-    /// again by itself.
-    pub download_paused: bool,
-    /// The engine selected on the Speech step, if the user selected one.
-    pub speech_choice: Option<SpeechChoice>,
-    /// Sharing was off at some point of this walk through setup, so Ready
-    /// can't say it has been on since setup began (U10). A file written before
-    /// this field existed doesn't say, and unknown counts as off.
-    #[serde(default = "unknown_sharing_history")]
-    pub sharing_was_off: bool,
-    /// Setup was finished, then a permission went missing (N1, #206): most
-    /// likely an update signed differently. The window says so and closes when
-    /// both are back, and that holds across a relaunch, until setup is finished
-    /// again.
-    pub asked_again: bool,
-}
-
-/// What [`SetupProgress::sharing_was_off`] is when nothing says: the claim
-/// "on since setup began" needs proof.
-fn unknown_sharing_history() -> bool {
-    true
-}
-
-impl SetupProgress {
-    /// Someone who set the app up before these steps existed: nothing to
-    /// resume, and they already had the chance to turn sharing off.
-    pub const ALREADY_SET_UP: Self = Self {
-        step: Step::Ready,
-        welcome_passed: true,
-        completed: true,
-        try_outcome: TryOutcome::NotTried,
-        download_paused: false,
-        speech_choice: None,
-        sharing_was_off: false,
-        asked_again: false,
-    };
-
-    /// Reads the file's text. `None` if it can't be understood.
-    #[must_use]
-    pub fn from_json(text: &str) -> Option<Self> {
-        serde_json::from_str(text).ok()
-    }
-
-    /// The file's text.
-    #[must_use]
-    pub fn to_json(&self) -> String {
-        // Plain data with string keys: serializing it can't fail.
-        serde_json::to_string(self).unwrap_or_default()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,57 +234,6 @@ mod tests {
         assert_eq!(
             readiness(true, true, false, true).resume_at(Step::Try),
             Step::Permissions
-        );
-    }
-
-    #[test]
-    fn u10_a_file_from_before_the_sharing_history_counts_as_unknown() {
-        let old = SetupProgress::from_json(r#"{"step":"permissions","welcome_passed":true}"#);
-        let old = old.expect("an old file still reads");
-        assert_eq!(old.step, Step::Permissions);
-        assert!(old.sharing_was_off);
-        // A file written now says, either way.
-        for said in [false, true] {
-            let progress = SetupProgress {
-                sharing_was_off: said,
-                ..SetupProgress::default()
-            };
-            let read = SetupProgress::from_json(&progress.to_json()).expect("reads");
-            assert_eq!(read.sharing_was_off, said);
-        }
-        // A new walk with no file has nothing unknown.
-        assert!(!SetupProgress::default().sharing_was_off);
-    }
-
-    #[test]
-    fn the_progress_round_trips_and_a_bad_file_is_refused() {
-        let progress = SetupProgress {
-            step: Step::Permissions,
-            welcome_passed: true,
-            completed: false,
-            try_outcome: TryOutcome::Skipped,
-            download_paused: true,
-            speech_choice: Some(SpeechChoice::OwnKey),
-            sharing_was_off: true,
-            asked_again: true,
-        };
-        assert_eq!(
-            SetupProgress::from_json(&progress.to_json()),
-            Some(progress)
-        );
-        assert_eq!(SetupProgress::from_json("not json"), None);
-    }
-
-    #[test]
-    fn a_partial_progress_file_takes_defaults_for_the_rest() {
-        assert_eq!(
-            SetupProgress::from_json(r#"{"step":"try"}"#),
-            Some(SetupProgress {
-                step: Step::Try,
-                // The one field that says nothing is known, not "no".
-                sharing_was_off: true,
-                ..SetupProgress::default()
-            })
         );
     }
 }

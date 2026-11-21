@@ -26,11 +26,11 @@ tray_has_no_resume_setup() {
   return 1
 }
 
-# Setup left at Permissions by an earlier launch, with an engine chosen, for
-# the scenarios that start there. The scenario's settings_reset removes both.
-seed_setup_at_permissions() {
-  vm "mkdir -p $(q "$(dirname "$SETUP_PROGRESS_VM")") &&
-    printf '%s' '{\"step\":\"permissions\",\"welcome_passed\":true}' >$(q "$SETUP_PROGRESS_VM") &&
+# Settings with an engine chosen, as an earlier launch leaves them: setup then
+# opens past Welcome, at the first step that isn't done. The scenario's
+# settings_reset removes them.
+seed_engine_chosen() {
+  vm "mkdir -p $(q "$(dirname "$SETTINGS_FILE_VM")") &&
     printf '%s' '{\"version\":2,\"transcription\":\"local\"}' >$(q "$SETTINGS_FILE_VM")"
 }
 

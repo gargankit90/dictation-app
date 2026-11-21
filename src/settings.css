@@ -1271,62 +1271,12 @@ main.ob {
   outline: 1px solid var(--vc-accent);
 }
 
-.ob-stages {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--vc-space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ob-stage {
-  padding: var(--vc-space-1) var(--vc-space-3);
-  border-radius: var(--vc-radius-pill);
-  background: var(--vc-bg-grouped);
-  color: var(--vc-muted);
-  font-size: var(--vc-text-sm);
-  font-weight: 600;
-}
-
-.ob-stage.done {
-  background: var(--vc-ready-soft);
-  color: var(--vc-ready);
-}
-
 .ob-sr {
   position: absolute;
   width: 1px;
   height: 1px;
   overflow: hidden;
   clip-path: inset(50%);
-}
-
-.ob-fix-area {
-  display: flex;
-  flex-direction: column;
-  gap: var(--vc-space-3);
-}
-
-.ob-fix {
-  display: flex;
-  flex-direction: column;
-  gap: var(--vc-space-2);
-  padding: var(--vc-space-3) var(--vc-space-4);
-  border-radius: var(--vc-radius-md);
-  background: var(--vc-attention-soft);
-}
-
-/* Long words scroll here, so the panel and its Copy button still fit the step. */
-.ob-words {
-  max-height: 5.5em;
-  overflow-y: auto;
-  padding: var(--vc-space-2) var(--vc-space-3);
-  border: 1px solid var(--vc-line);
-  border-radius: var(--vc-radius-sm);
-  background: var(--vc-bg);
-  font-size: var(--vc-text-lg);
-  user-select: text;
 }
 
 .ob-summary {

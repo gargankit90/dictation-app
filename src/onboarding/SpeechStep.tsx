@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { commands } from "../bindings";
-import type { LocalModelInfo_Serialize, Settings_Serialize, SpeechChoice } from "../bindings";
+import type { LocalModelInfo_Serialize, Settings_Serialize } from "../bindings";
 import { BROKEN, messageOf } from "../messages";
 import { modelLabel } from "../settings/modelRow";
 import { ConnectPanel, useConnection } from "../settings/connection";
@@ -26,8 +26,9 @@ const CANCEL_WAIT_MS = 200;
 
 interface Props {
   parts: FrameParts;
-  /** The engine selected earlier, kept across a quit. */
+  /** The engine selected earlier on this step, while the window is open. */
   kept: SpeechChoice | null;
+  onPick: (choice: SpeechChoice) => void;
   settings: Settings_Serialize | null;
   onStored: (settings: Settings_Serialize) => void;
   models: LocalModelInfo_Serialize[] | null;
@@ -37,7 +38,9 @@ interface Props {
   onContinue: () => void;
 }
 
-type Choice = "local" | "key";
+/** The engine picked on the step. */
+export type SpeechChoice = "local" | "key";
+type Choice = SpeechChoice;
 
 /** Waits while nothing is ready, so the step's own hooks start with settings. */
 export function SpeechStep(props: Props) {
@@ -58,6 +61,7 @@ export function SpeechStep(props: Props) {
 function SpeechForm({
   parts,
   kept,
+  onPick,
   onStored,
   models,
   modelsError,
@@ -67,15 +71,12 @@ function SpeechForm({
 }: Props) {
   // What the user picked here. Until they do: the recommendation, or the key
   // they already chose (coming back to the step).
-  const [picked, setPicked] = useState<Choice | null>(
-    kept === null ? null : kept === "own_key" ? "key" : "local",
-  );
+  const [picked, setPicked] = useState<Choice | null>(kept);
 
   function pick(choice: Choice) {
     setPicked(choice);
     setProblem(null);
-    // The key itself isn't part of this: only which engine is selected.
-    void commands.setSpeechChoice(choice === "key" ? "own_key" : "local").catch(() => undefined);
+    onPick(choice);
   }
   const [problem, setProblem] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
@@ -134,7 +135,6 @@ function SpeechForm({
   async function continueLocal(chosen: LocalModelInfo_Serialize) {
     const picked = await commands.chooseLocalModel(chosen.id);
     if (picked.status === "error") return messageOf(picked.error);
-    await commands.setDownloadPaused(false);
     await makeRoomFor(chosen.id);
     if (chosen.state !== "ready") {
       const failed = await startDownload(chosen.id);
@@ -226,8 +226,7 @@ function SpeechForm({
         label: needsDownload ? "Download and continue" : "Continue",
         onClick: () => {
           if (choice === "key") {
-            // The key itself isn't part of this: only which engine is selected.
-            void commands.setSpeechChoice("own_key").catch(() => undefined);
+            onPick("key");
             setProblem(null);
             setKeyScreen(true);
           } else {

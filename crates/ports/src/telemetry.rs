@@ -276,10 +276,6 @@ impl From<&DictationError> for ErrorType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SettingName {
-    /// The cloud provider.
-    Provider,
-    /// The model name.
-    Model,
     /// The hotkey.
     Hotkey,
     /// Launch at login.
@@ -304,22 +300,8 @@ pub enum SetupProblem {
     DownloadFailedChecksum,
     /// The model download stopped: the file couldn't be written.
     DownloadFailedDisk,
-    /// The user cancelled the model download.
-    DownloadCancelled,
     /// The downloaded model couldn't be loaded.
     ModelLoadFailed,
-    /// The key test found no key to test.
-    KeyTestFailedNoKey,
-    /// The key test failed: the provider rejected the key, or it can't be one.
-    KeyTestFailedRejected,
-    /// The key test failed: the provider is rate limiting.
-    KeyTestFailedRateLimited,
-    /// The key test failed: the provider couldn't be reached.
-    KeyTestFailedNetwork,
-    /// The key test failed: the provider failed or gave an unusable answer.
-    KeyTestFailedServer,
-    /// The key test failed: the saved key couldn't be read from the keychain.
-    KeyTestFailedKeychain,
     /// macOS reports the microphone as refused.
     MicrophoneDenied,
     /// Accessibility was asked for and still wasn't on when setup was closed.
@@ -331,34 +313,21 @@ pub enum SetupProblem {
     AccessibilityRequestFailed,
     /// The user relaunched the app because a permission hadn't taken effect.
     RelaunchNeeded,
-    /// The practice dictation's words didn't reach the practice box.
-    PasteMissed,
-    /// The user skipped the practice dictation.
-    PracticeSkipped,
 }
 
 impl SetupProblem {
     /// Every value, in the order `docs/privacy.md` lists them.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 10] = [
         Self::DownloadFailedNoSpace,
         Self::DownloadFailedNetwork,
         Self::DownloadFailedChecksum,
         Self::DownloadFailedDisk,
-        Self::DownloadCancelled,
         Self::ModelLoadFailed,
-        Self::KeyTestFailedNoKey,
-        Self::KeyTestFailedRejected,
-        Self::KeyTestFailedRateLimited,
-        Self::KeyTestFailedNetwork,
-        Self::KeyTestFailedServer,
-        Self::KeyTestFailedKeychain,
         Self::MicrophoneDenied,
         Self::AccessibilityDenied,
         Self::MicrophoneRequestFailed,
         Self::AccessibilityRequestFailed,
         Self::RelaunchNeeded,
-        Self::PasteMissed,
-        Self::PracticeSkipped,
     ];
 }
 
@@ -423,13 +392,6 @@ pub enum Event {
     SettingChanged {
         /// Which one (not its value).
         setting: SettingName,
-    },
-    /// The app was updated.
-    UpdateInstalled {
-        /// The version before.
-        from_version: Version,
-        /// The version now.
-        to_version: Version,
     },
 }
 
@@ -584,13 +546,6 @@ mod tests {
                 },
                 json!({"event":"setting_changed","properties":{"setting":"launch_at_login"}}),
             ),
-            (
-                Event::UpdateInstalled {
-                    from_version: v("0.1.0"),
-                    to_version: v("0.2.0"),
-                },
-                json!({"event":"update_installed","properties":{"from_version":"0.1.0","to_version":"0.2.0"}}),
-            ),
         ];
         for (event, expected) in cases {
             assert_eq!(wire(&event), expected);
@@ -633,21 +588,12 @@ mod tests {
                 | SetupProblem::DownloadFailedNetwork
                 | SetupProblem::DownloadFailedChecksum
                 | SetupProblem::DownloadFailedDisk
-                | SetupProblem::DownloadCancelled
                 | SetupProblem::ModelLoadFailed
-                | SetupProblem::KeyTestFailedNoKey
-                | SetupProblem::KeyTestFailedRejected
-                | SetupProblem::KeyTestFailedRateLimited
-                | SetupProblem::KeyTestFailedNetwork
-                | SetupProblem::KeyTestFailedServer
-                | SetupProblem::KeyTestFailedKeychain
                 | SetupProblem::MicrophoneDenied
                 | SetupProblem::AccessibilityDenied
                 | SetupProblem::MicrophoneRequestFailed
                 | SetupProblem::AccessibilityRequestFailed
-                | SetupProblem::RelaunchNeeded
-                | SetupProblem::PasteMissed
-                | SetupProblem::PracticeSkipped => {}
+                | SetupProblem::RelaunchNeeded => {}
             }
         }
     }

@@ -21,8 +21,6 @@ use dictation_core::error::DictationError;
 use dictation_core::report::{self, Access, EngineInfo, ReportInput};
 use dictation_core::settings::{Settings, Transcription};
 use dictation_pipeline::config::Config;
-use dictation_pipeline::pipeline::UiEvent;
-use dictation_pipeline::progress::{DictationProgress, Failure, Stage};
 use dictation_platform::secrets::KeychainSecretStore;
 use dictation_ports::{PermissionStatus, TranscribeError};
 use dictation_transcribe::engine::Engine;
@@ -80,8 +78,6 @@ pub struct Diagnostics(Arc<Shared>);
 #[derive(Default)]
 struct Shared {
     log: Mutex<ErrorLog>,
-    /// What the last dictation got through, for onboarding's Try it (U1).
-    progress: Mutex<DictationProgress>,
     /// Whether the hotkey doesn't work, as the pipeline last said.
     hotkey_down: AtomicBool,
     /// What the tray asked the window to show, until the window asks.
@@ -111,16 +107,6 @@ impl Diagnostics {
         if matches!(error, DictationError::HotkeyFailed) {
             self.0.hotkey_down.store(true, Ordering::Relaxed);
         }
-    }
-
-    /// Feeds one pipeline event to the progress Try it reads.
-    pub fn record_event(&self, event: &UiEvent) {
-        lock(&self.0.progress).on_event(event);
-    }
-
-    /// Feeds one input level to the progress Try it reads.
-    pub fn record_level(&self, dbfs: f32) {
-        lock(&self.0.progress).on_level(dbfs);
     }
 
     /// Whether the hotkey isn't working right now.
@@ -713,94 +699,6 @@ pub async fn open_issue(
             tracing::warn!(%error, "couldn't open the browser");
             "Couldn't open the browser. Use Copy and paste the report into a new issue.".to_owned()
         })
-}
-
-/// A stage of a dictation, as onboarding's Try it names them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum DictationStage {
-    /// Recorded.
-    Recorded,
-    /// Transcribed.
-    Transcribed,
-    /// Pasted.
-    Pasted,
-}
-
-/// What fixes a failed dictation, for Try it's one inline fix (U8).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum DictationFailure {
-    /// The microphone: no sound, refused or failing.
-    Microphone,
-    /// The API key.
-    Key,
-    /// The text couldn't be pasted.
-    Paste,
-    /// Anything else; the sentence says what happened.
-    Other,
-}
-
-/// What the last dictation got through (U1). Counts only grow, so a window
-/// compares them with what it saw when it opened. No transcript.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
-pub struct DictationProgressView {
-    /// Dictations started since launch.
-    pub started: u32,
-    /// Dictations that are over, however they ended.
-    pub finished: u32,
-    /// Dictations that ended pasted with no error.
-    pub completed: u32,
-    /// Errors shown.
-    pub errors: u32,
-    /// The stages the current or last dictation got through, in order.
-    pub stages: Vec<DictationStage>,
-    /// The latest error's sentence, until the next recording starts.
-    pub error: Option<String>,
-    /// What fixes the latest error, until the next recording starts.
-    pub failure: Option<DictationFailure>,
-    /// The input was louder than silence during the current or last hold.
-    pub heard: bool,
-}
-
-impl From<&dictation_pipeline::progress::ProgressView> for DictationProgressView {
-    fn from(view: &dictation_pipeline::progress::ProgressView) -> Self {
-        Self {
-            started: view.started,
-            finished: view.finished,
-            completed: view.completed,
-            errors: view.errors,
-            stages: view
-                .stages
-                .iter()
-                .map(|stage| match stage {
-                    Stage::Recorded => DictationStage::Recorded,
-                    Stage::Transcribed => DictationStage::Transcribed,
-                    Stage::Pasted => DictationStage::Pasted,
-                })
-                .collect(),
-            error: view.error.clone(),
-            failure: view.failure.map(|failure| match failure {
-                Failure::Microphone => DictationFailure::Microphone,
-                Failure::Key => DictationFailure::Key,
-                Failure::Paste => DictationFailure::Paste,
-                Failure::Other => DictationFailure::Other,
-            }),
-            heard: view.heard,
-        }
-    }
-}
-
-/// What the last dictation got through: onboarding's Try it shows success
-/// only when `completed` grows while its step is open.
-#[tauri::command]
-#[specta::specta]
-pub async fn dictation_progress(
-    diagnostics: State<'_, Diagnostics>,
-) -> Result<DictationProgressView, String> {
-    Ok(DictationProgressView::from(
-        lock(&diagnostics.0.progress).view(),
-    ))
 }
 
 /// What the tray asked the window to show since the window last asked, as
