@@ -21,10 +21,10 @@
 //! callback and a fixed key label, nothing else. The key never goes into an
 //! error or a log.
 
-use std::fmt::Write as _;
 use std::future::Future;
 use std::time::Duration;
 
+use dictation_core::encoding::{base64url, percent_encode};
 use dictation_ports::Secret;
 use reqwest::header::{CONTENT_TYPE, HeaderValue};
 use sha2::{Digest, Sha256};
@@ -133,37 +133,6 @@ fn random<const N: usize>() -> Result<[u8; N], ConnectError> {
 /// The S256 `code_challenge` of `verifier`: the base64url of its SHA-256.
 fn challenge_of(verifier: &str) -> String {
     base64url(&Sha256::digest(verifier.as_bytes()))
-}
-
-/// Base64url without padding (RFC 4648 §5).
-fn base64url(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0_u32, |n, (i, b)| n | (u32::from(*b) << (16 - 8 * i)));
-        // A chunk of 1, 2 or 3 bytes gives 2, 3 or 4 characters.
-        for i in 0..=chunk.len() {
-            let index = usize::try_from((n >> (18 - 6 * i)) & 63).unwrap_or(0);
-            out.push(char::from(ALPHABET[index]));
-        }
-    }
-    out
-}
-
-/// Percent-encodes `text` for a query value.
-fn percent_encode(text: &str) -> String {
-    let mut out = String::new();
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            out.push(char::from(byte));
-        } else {
-            let _ = write!(out, "%{byte:02X}");
-        }
-    }
-    out
 }
 
 /// Signs in at `OpenRouter` and returns the key it makes.
@@ -388,22 +357,6 @@ mod tests {
     }
 
     #[test]
-    fn base64url_matches_rfc_4648_without_padding() {
-        for (input, want) in [
-            (&b""[..], ""),
-            (b"f", "Zg"),
-            (b"fo", "Zm8"),
-            (b"foo", "Zm9v"),
-            (b"foob", "Zm9vYg"),
-            (b"fooba", "Zm9vYmE"),
-            (b"foobar", "Zm9vYmFy"),
-            (&[0xfb, 0xff, 0xfe], "-__-"),
-        ] {
-            assert_eq!(base64url(input), want);
-        }
-    }
-
-    #[test]
     fn a_verifier_is_43_url_safe_characters_and_never_repeats() {
         let a = Pkce::new().unwrap();
         let b = Pkce::new().unwrap();
@@ -416,18 +369,6 @@ mod tests {
         assert_ne!(a.verifier, b.verifier);
         assert_eq!(a.challenge, challenge_of(&a.verifier));
         assert_eq!(a.challenge.len(), 43);
-    }
-
-    #[test]
-    fn query_values_are_percent_encoded() {
-        assert_eq!(
-            percent_encode("http://localhost:1/callback"),
-            "http%3A%2F%2Flocalhost%3A1%2Fcallback"
-        );
-        assert_eq!(
-            percent_encode("Vocet on this Mac"),
-            "Vocet%20on%20this%20Mac"
-        );
     }
 
     fn config(exchange_url: String, timeout: Duration) -> Config {

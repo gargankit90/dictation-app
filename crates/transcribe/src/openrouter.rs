@@ -32,6 +32,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use dictation_core::cloud_models::{PrivacyFilter, SPEECH_MODEL};
+use dictation_core::encoding::base64;
 use dictation_core::retry::{RetryPolicy, SplitMix64};
 use dictation_core::wav;
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
@@ -84,28 +85,6 @@ pub(crate) fn provider_filter(filter: PrivacyFilter) -> serde_json::Value {
     } else {
         serde_json::json!({ "data_collection": "deny" })
     }
-}
-
-/// Standard base64 with padding (RFC 4648), for the audio in the JSON body.
-pub(crate) fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b = [
-            chunk[0],
-            chunk.get(1).copied().unwrap_or(0),
-            chunk.get(2).copied().unwrap_or(0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        for (i, shift) in [18u32, 12, 6, 0].into_iter().enumerate() {
-            if i <= chunk.len() {
-                out.push(char::from(ALPHABET[((n >> shift) & 63) as usize]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
 }
 
 /// Waits between attempts. [`TokioWait`] in the app; tests record the
@@ -415,22 +394,6 @@ mod tests {
         assert_eq!(config.model, "openai/gpt-4o-mini-transcribe");
         assert_eq!(config.privacy, PrivacyFilter::DenyDataCollection);
         assert_eq!(config.timeout, DEFAULT_TIMEOUT);
-    }
-
-    #[test]
-    fn base64_matches_rfc_4648() {
-        for (input, encoded) in [
-            (&b""[..], ""),
-            (b"f", "Zg=="),
-            (b"fo", "Zm8="),
-            (b"foo", "Zm9v"),
-            (b"foob", "Zm9vYg=="),
-            (b"fooba", "Zm9vYmE="),
-            (b"foobar", "Zm9vYmFy"),
-            (&[0xff, 0xfe, 0x00], "//4A"),
-        ] {
-            assert_eq!(base64(input), encoded, "{input:?}");
-        }
     }
 
     #[test]

@@ -559,9 +559,9 @@ export type OnboardingStatus = {
 	/**  The step the user is on. */
 	step: Step,
 	/**  The microphone permission. */
-	microphone: PermissionState,
+	microphone: PermissionStatus,
 	/**  The Accessibility permission. */
-	accessibility: PermissionState,
+	accessibility: PermissionStatus,
 	/**
 	 *  macOS says Accessibility is allowed but the hotkey can't use it: a
 	 *  relaunch makes it take.
@@ -577,15 +577,18 @@ export type OnboardingStatus = {
 	asked_again: boolean,
 };
 
-/**  A permission's state, for the onboarding steps. */
-export type PermissionState = 
+/**
+ *  Whether the OS has granted a [`Permission`]: one type for the ports,
+ *  onboarding and the report.
+ */
+export type PermissionStatus = 
 /**  Granted. */
 "granted" | 
-/**  Refused: only System Settings can grant it now. */
+/**  Refused; only the user can change it, in System Settings. */
 "denied" | 
 /**
- *  Not granted yet (for Accessibility, macOS can't tell this from
- *  refused).
+ *  Not asked yet, or the OS can't say (for Accessibility, macOS can't
+ *  tell this from refused).
  */
 "not_determined";
 

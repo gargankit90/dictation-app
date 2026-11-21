@@ -2,18 +2,9 @@
 
 use thiserror::Error;
 
-use crate::Permission;
+pub use dictation_core::error::PermissionStatus;
 
-/// Whether the OS has granted a [`Permission`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PermissionStatus {
-    /// Granted.
-    Granted,
-    /// Refused; only the user can change it, in System Settings.
-    Denied,
-    /// Not asked yet; [`Permissions::request`] can prompt.
-    NotDetermined,
-}
+use crate::Permission;
 
 /// Why a [`Permissions::request`] failed.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

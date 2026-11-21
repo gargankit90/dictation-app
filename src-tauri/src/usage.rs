@@ -26,7 +26,7 @@ use dictation_telemetry::{Config, PostHogTelemetry, SentryReporter, errors};
 use dictation_transcribe::engine::Engine;
 use dictation_transcribe::models::DownloadError;
 
-use crate::onboarding::{Onboarding, OnboardingStatus, PermissionState, View};
+use crate::onboarding::{Onboarding, OnboardingStatus, View};
 
 /// The PostHog project key this build was made with, if any.
 const BUILD_KEY: Option<&str> = option_env!("DICTATION_POSTHOG_KEY");
@@ -148,11 +148,7 @@ pub fn launched(usage: Usage, version: &str) {
 
 /// The macOS major version (`15`), or 0 if it can't be read.
 fn macos_major() -> u16 {
-    std::process::Command::new("sw_vers")
-        .arg("-productVersion")
-        .output()
-        .ok()
-        .and_then(|out| String::from_utf8(out.stdout).ok())
+    crate::diagnostics::macos_version()
         .and_then(|text| major_of(&text))
         .unwrap_or(0)
 }
@@ -312,7 +308,7 @@ pub fn request_problem(permission: Permission) -> SetupProblem {
 /// is the step in the way. macOS reports no refusal of Accessibility; see
 /// [`setup_left`].
 pub fn setup_status_read(usage: &Usage, onboarding: &Onboarding, status: &OnboardingStatus) {
-    if status.step == Step::Permissions && status.microphone == PermissionState::Denied {
+    if status.step == Step::Permissions && status.microphone == PermissionStatus::Denied {
         setup_problem_once(usage, onboarding, SetupProblem::MicrophoneDenied);
     }
 }

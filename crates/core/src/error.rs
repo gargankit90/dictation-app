@@ -15,6 +15,33 @@ pub enum Permission {
     Accessibility,
 }
 
+/// Whether the OS has granted a [`Permission`]: one type for the ports,
+/// onboarding and the report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionStatus {
+    /// Granted.
+    Granted,
+    /// Refused; only the user can change it, in System Settings.
+    Denied,
+    /// Not asked yet, or the OS can't say (for Accessibility, macOS can't
+    /// tell this from refused).
+    NotDetermined,
+}
+
+impl PermissionStatus {
+    /// The words the report uses.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Granted => "granted",
+            Self::Denied => "denied",
+            Self::NotDetermined => "not determined",
+        }
+    }
+}
+
 /// Why a dictation failed. The `Display` text is logged at info level, so
 /// it never contains the transcript or an API key: a `reason` is cut to one
 /// short line with any key hidden ([`crate::redact::summary`]). What the

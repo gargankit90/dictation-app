@@ -8,6 +8,7 @@ pub mod cleanup;
 pub mod cloud_models;
 pub mod coordinator;
 pub mod diagnostics;
+pub mod encoding;
 pub mod error;
 pub mod events;
 pub mod history;

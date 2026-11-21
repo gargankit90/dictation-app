@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use dictation_core::diagnostics::{ErrorCode, ErrorLog, FixAction, LoggedError};
 use dictation_core::error::DictationError;
 use dictation_core::local_models;
-use dictation_core::report::{self, Access, EngineInfo, ReportInput};
+use dictation_core::report::{self, EngineInfo, ReportInput};
 use dictation_core::settings::{Settings, Transcription};
 use dictation_pipeline::config::Config;
 use dictation_platform::secrets::KeychainSecretStore;
@@ -431,26 +431,24 @@ impl Environment {
     /// event loop).
     #[must_use]
     pub fn read(app_version: &str) -> Self {
-        let macos_version = std::process::Command::new("sw_vers")
-            .arg("-productVersion")
-            .output()
-            .ok()
-            .and_then(|out| String::from_utf8(out.stdout).ok())
-            .map_or_else(|| "unknown".to_owned(), |text| text.trim().to_owned());
         Self {
             app_version: app_version.to_owned(),
-            macos_version,
+            macos_version: macos_version().unwrap_or_else(|| "unknown".to_owned()),
             arch: std::env::consts::ARCH.to_owned(),
         }
     }
 }
 
-fn access(status: PermissionStatus) -> Access {
-    match status {
-        PermissionStatus::Granted => Access::Granted,
-        PermissionStatus::Denied => Access::Denied,
-        PermissionStatus::NotDetermined => Access::NotDetermined,
-    }
+/// The macOS version (`15.1`), from `sw_vers`; `None` if it can't be read.
+/// A short child process: call it off the event loop.
+#[must_use]
+pub fn macos_version() -> Option<String> {
+    std::process::Command::new("sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|text| text.trim().to_owned())
 }
 
 /// The report for the user to read. The inputs are all typed: the settings
@@ -473,8 +471,8 @@ pub fn report_text(
         app_version: &env.app_version,
         macos_version: &env.macos_version,
         arch: &env.arch,
-        microphone: access(permissions.0),
-        accessibility: access(permissions.1),
+        microphone: permissions.0,
+        accessibility: permissions.1,
         hotkey: &settings.hotkey,
         engine,
         engine_ready,

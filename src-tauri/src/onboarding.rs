@@ -49,29 +49,6 @@ pub enum View {
     Onboarding,
 }
 
-/// A permission's state, for the onboarding steps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum PermissionState {
-    /// Granted.
-    Granted,
-    /// Refused: only System Settings can grant it now.
-    Denied,
-    /// Not granted yet (for Accessibility, macOS can't tell this from
-    /// refused).
-    NotDetermined,
-}
-
-impl From<PermissionStatus> for PermissionState {
-    fn from(status: PermissionStatus) -> Self {
-        match status {
-            PermissionStatus::Granted => Self::Granted,
-            PermissionStatus::Denied => Self::Denied,
-            PermissionStatus::NotDetermined => Self::NotDetermined,
-        }
-    }
-}
-
 /// A permission the onboarding steps ask for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -99,9 +76,9 @@ pub struct OnboardingStatus {
     /// The step the user is on.
     pub step: Step,
     /// The microphone permission.
-    pub microphone: PermissionState,
+    pub microphone: PermissionStatus,
     /// The Accessibility permission.
-    pub accessibility: PermissionState,
+    pub accessibility: PermissionStatus,
     /// macOS says Accessibility is allowed but the hotkey can't use it: a
     /// relaunch makes it take.
     pub needs_relaunch: bool,
@@ -376,8 +353,8 @@ impl Onboarding {
         OnboardingStatus {
             view: state.view,
             step,
-            microphone: microphone.into(),
-            accessibility: accessibility.into(),
+            microphone,
+            accessibility,
             needs_relaunch: accessibility == PermissionStatus::Granted && hotkey_down,
             sharing_on_throughout: !state.sharing_was_off,
             asked_again: state.asked_again,
@@ -710,13 +687,13 @@ mod tests {
         let status = onboarding.status(&permissions, false);
         assert_eq!(status.view, View::Onboarding);
         assert_eq!(status.step, Step::Permissions);
-        assert_eq!(status.microphone, PermissionState::Denied);
-        assert_eq!(status.accessibility, PermissionState::NotDetermined);
+        assert_eq!(status.microphone, PermissionStatus::Denied);
+        assert_eq!(status.accessibility, PermissionStatus::NotDetermined);
 
         // Granted in System Settings while the window is open.
         permissions.set(Permission::Microphone, Granted);
         let status = onboarding.status(&permissions, false);
-        assert_eq!(status.microphone, PermissionState::Granted);
+        assert_eq!(status.microphone, PermissionStatus::Granted);
         assert_eq!(status.step, Step::Permissions);
     }
 

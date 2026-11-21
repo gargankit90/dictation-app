@@ -9,7 +9,7 @@ import { App } from "./App";
 import type {
   LocalModelInfo_Serialize,
   OnboardingStatus,
-  PermissionState,
+  PermissionStatus,
   Settings_Serialize,
   Step,
   Transcription,
@@ -83,14 +83,14 @@ class Backend {
   view: View = "onboarding";
   step: Step = "welcome";
   welcomePassed = false;
-  microphone: PermissionState = "not_determined";
-  accessibility: PermissionState = "not_determined";
+  microphone: PermissionStatus = "not_determined";
+  accessibility: PermissionStatus = "not_determined";
   needsRelaunch = false;
   askedAgain = false;
   sharingOnThroughout = true;
   /** The server answers a resume with the whole file. */
   ignoresRange = false;
-  micAnswer: PermissionState = "granted";
+  micAnswer: PermissionStatus = "granted";
   keys = { openrouter: false };
   models: LocalModelInfo_Serialize[] = [{ ...PARAKEET }];
   /** The cleanup model (Gemma): "On this Mac"'s second part. None until a test adds it. */
