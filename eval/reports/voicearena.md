@@ -261,7 +261,7 @@ single judge, one run, public set only.
 
 AI prompts gain the most (36% → 91%): they are full of the fillers and "Okay,
 so…" openers the rewrite removes. Apart from long-form, code is now the
-weakest context (81%), because what's left are technical words misheard (technical terms heard as common words).
+weakest context (81%), because what's left are technical terms heard as common words.
 
 ### What changed in the failures
 
