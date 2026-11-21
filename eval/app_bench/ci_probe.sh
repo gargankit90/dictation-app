@@ -63,6 +63,10 @@ r "grant Microphone to com.pais.handy (system db): $(tcc_grant "$SYS_TCC" kTCCSe
 r "tccutil exists: $(command -v tccutil) (it can only reset, not grant)"
 
 section "1b TextEdit through Accessibility (this process)"
+# What bench.sh vm-setup does: no Mac-wide automatic corrections.
+for k in NSAutomaticCapitalizationEnabled NSAutomaticPeriodSubstitutionEnabled NSAutomaticSpellingCorrectionEnabled \
+  NSAutomaticQuoteSubstitutionEnabled NSAutomaticDashSubstitutionEnabled NSAutomaticTextReplacementEnabled \
+  NSAutomaticInlinePredictionEnabled NSAutomaticTextCompletionEnabled; do defaults write -g "$k" -bool false; done
 run 120 uv run --quiet ci_probe.py ax
 
 section "3 Virtual audio device"

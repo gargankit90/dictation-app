@@ -189,6 +189,33 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("| x | local | m |", ab.summary_table([s]))
         self.assertTrue(ab.summary_table([s], "csv").startswith("app,mode,"))
 
+    def test_accuracy_only_rows_are_scored_but_report_no_latency(self):
+        clock, app, drv, tgt = harness(latency=50.0)  # a slow machine: past the timed mode's 30 s timeout
+        clips = [clip(1), clip(2)]
+        with tempfile.TemporaryDirectory() as d:
+            quiet = dict(app="stub", mode="local", driver_name="stub", log=lambda *_: None)
+            run = pathlib.Path(d) / "ci"
+            run.mkdir()
+            rows = ab.run_all(clips, drv, tgt, clock, ab.accuracy_only(), run / "results.csv",
+                              machine="github-macos-15", **quiet)
+            self.assertEqual({(r["status"], r["timed"], r["machine"]) for r in rows.values()},
+                             {("ok", 0, "github-macos-15")})
+            s = ab.summarize_run(run)
+            self.assertEqual((s["timing"], s["machine"], s["p50_s"]), ("not measured", "github-macos-15", None))
+            clock, app, drv, tgt = harness(latency=50.0)
+            timed = ab.run_all([clip(3)], drv, tgt, clock, ab.Timing(), pathlib.Path(d) / "t.csv", **quiet)
+            self.assertEqual(timed["c3"]["status"], "empty")  # why CI runs use accuracy_only()
+
+    def test_the_accuracy_and_speed_views_keep_the_sources_apart(self):
+        ci = {"app": "a", "machine": "github-macos-15", "timing": "not measured", "zer": 80.0, "p50_s": None}
+        mac = {"app": "a", "machine": "mac", "timing": "measured", "zer": 79.5, "p50_s": 0.8}
+        speed = ab.summary_table([ci, mac], view="speed")
+        self.assertIn("| mac |", speed)
+        self.assertNotIn("github-macos-15", speed)
+        acc = ab.summary_table([ci, mac], view="accuracy")
+        self.assertIn("github-macos-15", acc)
+        self.assertNotIn("p50_s", acc.splitlines()[0])
+
     @unittest.skipUnless(__import__("importlib").util.find_spec("amend"), "amend-va not installed (uv run pytest)")
     def test_amend_va_char_edits_on_fixed_strings(self):
         from amend.metric import char_edits

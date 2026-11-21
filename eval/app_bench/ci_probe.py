@@ -92,10 +92,10 @@ def e2e(app: str, wav: pathlib.Path, text: str) -> None:
                     "intended_text": text})
     try:
         hb.mac_preflight(hb.APPS[app], check_process=True)
-        timing = hb.Timing()
+        timing = hb.accuracy_only()
         out = d / "out.csv"
         args = argparse.Namespace(clips=d, output=out, limit=None, only=None, attempts=2, warmup=1, app=app,
-                                  mode="local")
+                                  mode="local", machine="github-macos-15")
         hb.run_mac(hb.BlackHoleDriver(hb.APPS[app], timing), "blackhole", timing, args)
         row = next(iter(hb.load_done(out).values()))
         got = set(row["transcript"].lower().replace(",", "").replace(".", "").split())

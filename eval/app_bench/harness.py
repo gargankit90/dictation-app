@@ -47,8 +47,8 @@ from datetime import datetime, timezone
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-FIELDS = ["app", "mode", "driver", "clip_id", "status", "attempts", "transcript", "audio_s", "ready_s",
-          "first_text_s", "finalize_s", "error", "run_at"]
+FIELDS = ["app", "mode", "driver", "machine", "timed", "clip_id", "status", "attempts", "transcript", "audio_s",
+          "ready_s", "first_text_s", "finalize_s", "error", "run_at"]
 
 # Fixed for every app (the values of the MIT-licensed VoiceArenaAI/Dictation-harness, so runs line up with it).
 PAD_MS = 300
@@ -177,6 +177,14 @@ class Timing:
     gap: float = GAP_S
     poll: float = POLL_S
     pad_ms: int = PAD_MS
+    timed: bool = True  # False: accuracy only; the times are still written but are not a measurement
+
+
+def accuracy_only() -> Timing:
+    """For machines whose speed isn't representative (a shared CI runner): the same audio, hold and tail,
+    but a long wait for the text, so a slow machine costs time, not accuracy. Rows are marked timed=0 and
+    `summarize` reports no latency for them."""
+    return Timing(settle=3.0, timeout=120.0, timed=False)
 
 
 class ClipError(Exception):
@@ -293,7 +301,7 @@ def fmt(v) -> str:
 
 
 def run_all(clips: list[Clip], driver: Driver, target: Target, clock: Clock, timing: Timing, out: pathlib.Path,
-            *, app: str, mode: str, driver_name: str, attempts: int = 2, warmup: int = 0,
+            *, app: str, mode: str, driver_name: str, attempts: int = 2, warmup: int = 0, machine: str = "",
             log=print) -> dict[str, dict]:
     """Runs every clip not already `ok` in `out` (resume), up to `attempts` tries each (an empty result is
     retried too), writing the CSV after each clip. First `warmup` dictations of the first clip, not
@@ -322,7 +330,8 @@ def run_all(clips: list[Clip], driver: Driver, target: Target, clock: Clock, tim
                 break
             clock.sleep(timing.gap + timing.settle)
         rows[clip.clip_id] = {
-            "app": app, "mode": mode, "driver": driver_name, "clip_id": clip.clip_id, "status": res.status,
+            "app": app, "mode": mode, "driver": driver_name, "machine": machine, "timed": int(timing.timed),
+            "clip_id": clip.clip_id, "status": res.status,
             "attempts": tries, "transcript": res.transcript, "audio_s": round(clip.audio_s, 3),
             "ready_s": fmt(res.ready_s), "first_text_s": fmt(res.first_text_s), "finalize_s": fmt(res.finalize_s),
             "error": res.error, "run_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
@@ -654,15 +663,29 @@ class TextEditTarget(Target):
             return None
         return find(win)
 
+    def front_bundle(self) -> str:
+        """The bundle id of the app with the keyboard focus, from Accessibility (NSWorkspace's answer goes
+        stale in a process without a run loop, like this one)."""
+        err, app = self.AS.AXUIElementCopyAttributeValue(self.AS.AXUIElementCreateSystemWide(),
+                                                         "AXFocusedApplication", None)
+        if err != 0 or app is None:
+            return ""
+        err, pid = self.AS.AXUIElementGetPid(app, None)
+        if err != 0:
+            return ""
+        running = self.AK.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+        return str(running.bundleIdentifier() or "") if running else ""
+
     def prepare(self) -> None:
         subprocess.run(["open", "-a", "TextEdit", str(self.scratch)], check=False)
-        for _ in range(50):
-            front = self.AK.NSWorkspace.sharedWorkspace().frontmostApplication()
-            if front and front.bundleIdentifier() == "com.apple.TextEdit":
+        front = ""
+        for _ in range(150):  # TextEdit's first launch on a fresh machine can take seconds
+            front = self.front_bundle()
+            if front == "com.apple.TextEdit":
                 break
             time.sleep(0.1)
         else:
-            raise ClipError("TextEdit didn't come to the front")
+            raise ClipError(f"TextEdit didn't come to the front (focus: {front or 'unknown'})")
         self.area = self._find_area()
         if self.area is None:
             raise ClipError("no text area in TextEdit's front window")
@@ -721,10 +744,15 @@ def summarize_run(run: pathlib.Path, judge: str = "claude") -> dict:
     scored_name = {"claude": "scored.csv"}.get(judge, f"scored_{judge}.csv")
     scored = read_csv(run / scored_name) if (run / scored_name).exists() else []
     judged = [r for r in scored if r.get("edits", "") != ""]
-    fin = [float(r["finalize_s"]) for r in res if r.get("status") == "ok" and r.get("finalize_s")]
-    first = [float(r["first_text_s"]) for r in res if r.get("status") == "ok" and r.get("first_text_s")]
+    timed = [r for r in res if r.get("status") == "ok" and r.get("timed", "1") != "0"]
+    fin = [float(r["finalize_s"]) for r in timed if r.get("finalize_s")]
+    first = [float(r["first_text_s"]) for r in timed if r.get("first_text_s")]
+    machines = sorted({r.get("machine", "") for r in res} - {""})
     out = {"run": run.name, **{k: meta.get(k, "") for k in ("app", "mode", "version", "commit", "source",
                                                              "model", "model_size", "cleanup", "driver")},
+           "machine": meta.get("machine") or ",".join(machines),
+           "timing": "measured" if timed and len(timed) == sum(r.get("status") == "ok" for r in res)
+           else ("not measured" if not timed else "partly"),
            "clips": len(res), "ok": sum(r.get("status") == "ok" for r in res),
            "judged": len(judged), "judge": judge,
            "zer": round(100 * sum(int(r["edits"]) == 0 for r in judged) / len(judged), 1) if judged else None,
@@ -735,11 +763,25 @@ def summarize_run(run: pathlib.Path, judge: str = "claude") -> dict:
     return out
 
 
-SUMMARY_COLS = ["app", "mode", "model", "model_size", "cleanup", "source", "version", "commit", "driver", "clips",
-                "ok", "judged", "zer", "amend", "p50_s", "p95_s", "first_p50_s", "date", "run"]
+SUMMARY_COLS = ["app", "mode", "model", "model_size", "cleanup", "source", "version", "commit", "machine", "timing",
+                "clips", "ok", "judged", "zer", "amend", "p50_s", "p95_s", "first_p50_s", "date", "run"]
+# Accuracy and speed come from different machines (accuracy: any machine, CI included; speed: a quiet real
+# Mac), so the published tables keep them apart.
+VIEWS = {
+    "all": SUMMARY_COLS,
+    "accuracy": ["app", "mode", "model", "model_size", "cleanup", "source", "version", "commit", "machine", "clips",
+                 "ok", "judged", "zer", "amend", "date", "run"],
+    "speed": ["app", "mode", "model", "model_size", "cleanup", "source", "version", "commit", "machine", "clips", "ok",
+              "p50_s", "p95_s", "first_p50_s", "zer", "date", "run"],
+}
 
 
-def summary_table(rows: list[dict], fmt_: str = "md") -> str:
+def summary_table(rows: list[dict], fmt_: str = "md", view: str = "all") -> str:
+    """The summary as Markdown or CSV. The speed view lists only runs whose latency was measured."""
+    cols = VIEWS[view]
+    if view == "speed":
+        rows = [r for r in rows if r.get("timing") == "measured"]
+
     def cell(v):
         if v is None or v == "":
             return "-"
@@ -747,12 +789,12 @@ def summary_table(rows: list[dict], fmt_: str = "md") -> str:
     if fmt_ == "csv":
         import io
         buf = io.StringIO()
-        w = csv.DictWriter(buf, SUMMARY_COLS, extrasaction="ignore", lineterminator="\n")
+        w = csv.DictWriter(buf, cols, extrasaction="ignore", lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
         return buf.getvalue()
-    head = "| " + " | ".join(SUMMARY_COLS) + " |\n|" + "---|" * len(SUMMARY_COLS) + "\n"
-    return head + "".join("| " + " | ".join(cell(r.get(c)) for c in SUMMARY_COLS) + " |\n" for r in rows)
+    head = "| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n"
+    return head + "".join("| " + " | ".join(cell(r.get(c)) for c in cols) + " |\n" for r in rows)
 
 
 def compare_runs(a_scored: list[dict], b_scored: list[dict], tolerance_pts: float) -> dict:
@@ -791,6 +833,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--attempts", type=int, default=2)
     r.add_argument("--warmup", type=int, default=1, help="unrecorded dictations before timing (loads the model)")
     r.add_argument("--check", action="store_true", help="preflight only")
+    r.add_argument("--accuracy-only", action="store_true",
+                   help="a machine whose speed doesn't count (CI): long text timeout, rows marked timed=0")
+    r.add_argument("--machine", default=os.environ.get("BENCH_MACHINE", ""),
+                   help="label stored on each row, e.g. github-macos-15 or mac-vm (BENCH_MACHINE)")
     si = sub.add_parser("set-input", help="make an input device the default (macOS)")
     si.add_argument("device", nargs="?", default="BlackHole 2ch")
     d = sub.add_parser("dry-run", help="the whole loop against the stub app (no macOS)")
@@ -800,6 +846,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("runs", nargs="+", type=pathlib.Path)
     s.add_argument("--judge", default="claude")
     s.add_argument("--format", default="md", choices=["md", "csv", "json"])
+    s.add_argument("--view", default="all", choices=sorted(VIEWS))
     g = sub.add_parser("compare", help="two runs on the same clips: is the ZER difference within noise?")
     g.add_argument("run_a", type=pathlib.Path)
     g.add_argument("run_b", type=pathlib.Path)
@@ -825,7 +872,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.cmd == "summarize":
         rows = [summarize_run(p, a.judge) for p in a.runs]
-        print(json.dumps(rows, indent=1) if a.format == "json" else summary_table(rows, a.format), end="")
+        print(json.dumps(rows, indent=1) if a.format == "json" else summary_table(rows, a.format, a.view), end="")
         return 0
     if a.cmd == "compare":
         name = {"claude": "scored.csv"}.get(a.judge, f"scored_{a.judge}.csv")
@@ -840,7 +887,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"preflight ok: {json.dumps(env)}; app {a.app} key {app.hotkey} ({app.mode})")
     if a.check:
         return 0
-    timing = Timing()
+    timing = accuracy_only() if a.accuracy_only else Timing()
     return run_mac(BlackHoleDriver(app, timing), "blackhole", timing, a)
 
 
@@ -852,7 +899,8 @@ def run_mac(driver: Driver, driver_name: str, timing: Timing, a: argparse.Namesp
     caff = subprocess.Popen(["caffeinate", "-dimsu"])
     try:
         rows = run_all(clips, driver, target, Clock(), timing, a.output, app=a.app, mode=a.mode,
-                       driver_name=driver_name, attempts=a.attempts, warmup=a.warmup)
+                       driver_name=driver_name, attempts=a.attempts, warmup=a.warmup,
+                       machine=getattr(a, "machine", ""))
     finally:
         driver.reset()
         caff.terminate()
