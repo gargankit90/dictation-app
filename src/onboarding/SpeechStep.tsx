@@ -128,14 +128,10 @@ function SpeechForm({
   }, [models, settings.provider]);
 
   const model = models === null ? null : recommendedModel(models, language);
-  // Known, not just not loaded yet: the key is then the only choice.
+  // Known, not just not loaded yet: OpenRouter is then the only choice. Otherwise
+  // it is the default too (owner decision, Q3); the on-device model is the other.
   const uncovered = models !== null && model === null;
-  const choice: Choice = uncovered
-    ? "key"
-    : (picked ??
-      (settings.transcription === "cloud" && connection.status.state === "connected"
-        ? "key"
-        : "local"));
+  const choice: Choice = uncovered ? "key" : (picked ?? "key");
 
   async function chooseLanguage(code: string) {
     setLanguage(code);
@@ -315,6 +311,22 @@ function SpeechForm({
         />
       )}
 
+      <label className={`ob-card ob-option${choice === "key" ? " selected" : ""}`}>
+        <input
+          type="radio"
+          name="ob-engine"
+          aria-label="Use OpenRouter"
+          checked={choice === "key"}
+          onChange={() => {
+            pick("key");
+          }}
+        />
+        <span className="ob-option-text">
+          <span className="ob-card-title">Use OpenRouter</span>
+          <span className="ob-caption">{KEY_CARD_COPY}</span>
+        </span>
+      </label>
+
       {uncovered ? (
         <p role="status" className="ob-sub">
           {uncoveredCopy(language)}
@@ -350,22 +362,6 @@ function SpeechForm({
           </span>
         </label>
       )}
-
-      <label className={`ob-card ob-option${choice === "key" ? " selected" : ""}`}>
-        <input
-          type="radio"
-          name="ob-engine"
-          aria-label="Use OpenRouter"
-          checked={choice === "key"}
-          onChange={() => {
-            pick("key");
-          }}
-        />
-        <span className="ob-option-text">
-          <span className="ob-card-title">Use OpenRouter</span>
-          <span className="ob-caption">{KEY_CARD_COPY}</span>
-        </span>
-      </label>
 
       {problem !== null && (
         <p role="alert" className="notice error">

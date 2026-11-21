@@ -942,6 +942,7 @@ describe("Speech", () => {
   it("finding 3: the own key choice survives a quit, with no key saved and none kept", async () => {
     const { unmount } = show();
     await screen.findByText("English · 477 MB");
+    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
     fireEvent.click(screen.getByRole("radio", { name: /Use OpenRouter/ }));
     await waitFor(() => {
       expect(backend.speechChoice).toBe("own_key");
@@ -985,9 +986,22 @@ describe("Speech", () => {
     ).toBe(true);
   });
 
+  it("Q3: a fresh install selects OpenRouter, listed first, with Continue to Connect", async () => {
+    show();
+    await screen.findByText("English · 477 MB");
+    const radios = screen.getAllByRole<HTMLInputElement>("radio", {
+      name: /OpenRouter|Recommended/,
+    });
+    expect(radios.map((radio) => radio.checked)).toEqual([true, false]);
+    expect(radios[0]?.getAttribute("aria-label")).toBe("Use OpenRouter");
+    expect(primary("Continue").disabled).toBe(false);
+    expect(backend.settings.transcription).toBe("cloud");
+  });
+
   it("criterion 3: English preselects Parakeet English, with its real size", async () => {
     show();
     const name = await screen.findByText("English · 477 MB");
+    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
     expect(name).toBeTruthy();
     expect(screen.getByText("Recommended for your language")).toBeTruthy();
     expect(screen.getByText(MODEL_COPY)).toBeTruthy();
@@ -1015,6 +1029,7 @@ describe("Speech", () => {
   it("criterion 3: Download and continue chooses, starts the download and moves on", async () => {
     show();
     await screen.findByText("English · 477 MB");
+    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
     fireEvent.click(primary("Download and continue"));
     await screen.findByText("Two permissions");
     expect(backend.named("choose_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
@@ -1027,6 +1042,7 @@ describe("Speech", () => {
     backend.model(PARAKEET.id).state = "ready";
     show();
     await screen.findByText("English · 477 MB");
+    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
     fireEvent.click(primary("Continue"));
     await screen.findByText("Two permissions");
     expect(backend.named("download_local_model")).toEqual([]);
@@ -1044,6 +1060,7 @@ describe("Speech", () => {
     mockIPC(backend.handle);
     show();
     await screen.findByText("English · 477 MB");
+    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
     fireEvent.click(primary("Download and continue"));
     await screen.findByText("The disk is full.");
     expect(backend.step).toBe("speech");
@@ -1053,6 +1070,8 @@ describe("Speech", () => {
   async function selectCloud() {
     show();
     await screen.findByText("English · 477 MB");
+    // OpenRouter is the default: move off it and back, so the choice is written.
+    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
     fireEvent.click(screen.getByRole("radio", { name: /Use OpenRouter/ }));
   }
 
@@ -1224,6 +1243,7 @@ describe("Speech", () => {
     it("no catalogue name and no refused wording, on any of the screens", async () => {
       show();
       await screen.findByText("English · 477 MB");
+      fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
       const shown = () => document.querySelector(".ob-main")?.textContent ?? "";
       const clean = () => {
         for (const gone of [PARAKEET.name, QWEN.name, "Parakeet", "Qwen", "Multilingual"]) {
