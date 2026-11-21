@@ -578,6 +578,27 @@ export type OnboardingStatus = {
 };
 
 /**
+ *  The overlay event's payload, generated into `src/bindings.ts` for the
+ *  overlay page. An error carries only its user-facing message, no code (U4
+ *  criterion 6).
+ */
+export type OverlayView = OverlayView_Serialize | OverlayView_Deserialize;
+
+/**
+ *  The overlay event's payload, generated into `src/bindings.ts` for the
+ *  overlay page. An error carries only its user-facing message, no code (U4
+ *  criterion 6).
+ */
+export type OverlayView_Deserialize = { state: "hidden" } | { state: "recording" } | { state: "no_sound"; device?: string | null } | { state: "transcribing" } | { state: "paste_sent" } | { state: "error"; message: string };
+
+/**
+ *  The overlay event's payload, generated into `src/bindings.ts` for the
+ *  overlay page. An error carries only its user-facing message, no code (U4
+ *  criterion 6).
+ */
+export type OverlayView_Serialize = { state: "hidden" } | { state: "recording" } | { state: "no_sound"; device?: string } | { state: "transcribing" } | { state: "paste_sent" } | { state: "error"; message: string };
+
+/**
  *  Whether the OS has granted a [`Permission`]: one type for the ports,
  *  onboarding and the report.
  */
