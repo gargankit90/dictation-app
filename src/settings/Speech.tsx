@@ -251,9 +251,10 @@ export function Speech({
     setSheetOpen(true);
   }
 
-  function closeSheet() {
+  async function closeSheet() {
+    // A key that is being saved keeps the sheet: it shows how that ends.
+    if (!(await connection.canLeave())) return;
     switchOnceConnected.current = false;
-    if (connection.busy === "connecting") void connection.cancel();
     connection.clearNotice();
     setSheetOpen(false);
     sheetOpener.current?.focus();
@@ -457,7 +458,14 @@ export function Speech({
           One model downloads at a time. Downloads go on while Settings is closed.
         </p>
       )}
-      {sheetOpen && <ConnectSheet connection={connection} onDone={closeSheet} />}
+      {sheetOpen && (
+        <ConnectSheet
+          connection={connection}
+          onDone={() => {
+            void closeSheet();
+          }}
+        />
+      )}
     </>
   );
 }

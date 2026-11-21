@@ -828,6 +828,47 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
     expect(backend.named("use_cloud_engine")).toHaveLength(0);
   });
 
+  it.each([
+    [
+      "Done",
+      () => {
+        click("Done");
+      },
+    ],
+    [
+      "Esc",
+      () => {
+        fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+      },
+    ],
+  ])(
+    "%s while the key is already being saved stays open and shows how it ends",
+    async (_name, leave) => {
+      onDevice();
+      const hold = gate();
+      backend.holds.set("connect_openrouter", hold.closed);
+      backend.cancelResult = false;
+      await open("speech");
+      fireEvent.click(radio(/^OpenRouter/));
+      await screen.findByRole("dialog");
+      click("Connect OpenRouter");
+      await screen.findByText("Waiting for OpenRouter in your browser…");
+      leave();
+      // The cancel lost the race: the sheet stays, in the saving state.
+      expect(await screen.findByText("Saving your key…")).toBeTruthy();
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      await act(async () => {
+        hold.open();
+        await Promise.resolve();
+      });
+      expect(await screen.findByText(CONNECTED)).toBeTruthy();
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      await waitFor(() => {
+        expect(backend.named("use_cloud_engine")).toHaveLength(1);
+      });
+    },
+  );
+
   it("Done during the wait cancels it", async () => {
     onDevice();
     backend.holds.set("connect_openrouter", gate().closed);
@@ -848,7 +889,9 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
     await open("speech");
     expect(await screen.findByRole("dialog", { name: "OpenRouter" })).toBeTruthy();
     click("Done");
-    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
   });
 
   it("closed unless asked for, while another engine is in use", async () => {
@@ -907,7 +950,9 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
     click("Connect…");
     const dialog = await screen.findByRole("dialog");
     fireEvent.keyDown(dialog, { key: "Escape" });
-    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
   });
 
   describe("Paste a key instead", () => {

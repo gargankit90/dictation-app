@@ -251,7 +251,12 @@ class Backend {
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         if (failure !== undefined) throw failure;
         const held = this.holds.get(command);
-        if (held !== undefined) return held.then(() => null);
+        if (held !== undefined) {
+          return held.then(() => {
+            this.keys.openrouter = true;
+            return null;
+          });
+        }
         this.keys.openrouter = true;
         return null;
       }
@@ -1146,6 +1151,39 @@ describe("Speech", () => {
     expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
     expect(backend.named("download_local_model")).toEqual([]);
   });
+
+  it.each([
+    ["Back", () => fireEvent.click(screen.getByRole("button", { name: "Back" }))],
+    [
+      "the local-only choice",
+      () => fireEvent.click(screen.getByRole("button", { name: LOCAL_ONLY })),
+    ],
+  ])(
+    "Q3: %s while the key is already being saved stays on the screen and shows the outcome",
+    async (_name, leave) => {
+      let release: () => void = () => undefined;
+      const hold = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      backend.holds.set("connect_openrouter", hold);
+      backend.cancelResult = false;
+      await openConnectScreen();
+      fireEvent.click(screen.getByRole("button", { name: "Connect OpenRouter" }));
+      await screen.findByText("Waiting for OpenRouter in your browser…");
+      leave();
+      expect((await screen.findAllByText("Saving your key…")).length).toBeGreaterThan(0);
+      expect(screen.queryByText("Which language will you mostly speak?")).toBeNull();
+      expect(backend.speechChoice).not.toBe("local");
+      await act(async () => {
+        release();
+        await hold;
+      });
+      await screen.findByText(KEY_SAVED);
+      await waitFor(() => {
+        expect(primary("Continue").disabled).toBe(false);
+      });
+    },
+  );
 
   it("Q3: a failed sign-in says why and keeps Continue locked", async () => {
     backend.failing.set("connect_openrouter", "Connecting took too long. Try again.");

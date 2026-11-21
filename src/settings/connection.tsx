@@ -103,7 +103,8 @@ export function useConnection({ onConnected, refreshEngine }: Options) {
     }
   }
 
-  async function cancel() {
+  /** Cancels the wait. `false` if it was too late: the key is being saved. */
+  async function cancel(): Promise<boolean> {
     cancelled.current = true;
     try {
       const result = await commands.cancelConnect();
@@ -112,10 +113,23 @@ export function useConnection({ onConnected, refreshEngine }: Options) {
         // finishes: say so, keep the exits shut, and report how it ends.
         cancelled.current = false;
         setBusy((now) => (now === "connecting" ? "saving" : now));
+        return false;
       }
     } catch {
       // The attempt ends by itself at its own deadline.
     }
+    return true;
+  }
+
+  /**
+   * Every way out (Done, Esc, Back, "this Mac only") asks this first: a sign-in
+   * still waiting is cancelled, and the answer says whether leaving is safe.
+   * `false` while a key is being saved: stay, the window shows the outcome.
+   */
+  async function canLeave(): Promise<boolean> {
+    if (busy === "saving" || busy === "disconnecting") return false;
+    if (busy === "connecting") return await cancel();
+    return true;
   }
 
   /** "Paste a key instead": tested, then saved only if it works. */
@@ -179,6 +193,7 @@ export function useConnection({ onConnected, refreshEngine }: Options) {
     justConnected: notice?.text === CONNECTED,
     connect,
     cancel,
+    canLeave,
     pasteKey,
     disconnect,
     addCredits,

@@ -224,12 +224,14 @@ function SpeechForm({
         : null;
   const needsDownload = choice === "local" && model !== null && model.state !== "ready";
 
-  function backFromKey() {
+  /** Back to the choices. `false` if a key is being saved: stay and show it. */
+  async function backFromKey(): Promise<boolean> {
+    if (!(await connection.canLeave())) return false;
     dropContinue();
-    if (connection.busy === "connecting") void connection.cancel();
     connection.clearNotice();
     setProblem(null);
     setKeyScreen(false);
+    return true;
   }
 
   if (keyScreen) {
@@ -239,10 +241,13 @@ function SpeechForm({
         connection={connection}
         problem={problem}
         working={working}
-        onBack={backFromKey}
+        onBack={() => {
+          void backFromKey();
+        }}
         onLocalOnly={() => {
-          backFromKey();
-          pick("local");
+          void backFromKey().then((left) => {
+            if (left) pick("local");
+          });
         }}
         onContinue={() => void go()}
       />
