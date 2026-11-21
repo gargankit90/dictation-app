@@ -10,7 +10,6 @@
 
 use dictation_core::error::{DictationError, Permission};
 use dictation_core::onboarding::Step;
-use dictation_core::settings::Provider;
 use serde::Serialize;
 
 /// Records usage events.
@@ -110,27 +109,6 @@ pub enum EngineKind {
     Local,
     /// At a cloud provider.
     Cloud,
-}
-
-/// The engine the user picked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", content = "provider", rename_all = "snake_case")]
-pub enum EngineChoice {
-    /// A cloud provider.
-    Cloud(Provider),
-    /// A model on this computer (L1). Only the kind is sent, not which model.
-    Local,
-}
-
-impl EngineChoice {
-    /// Where this engine runs.
-    #[must_use]
-    pub fn kind(self) -> EngineKind {
-        match self {
-            Self::Cloud(_) => EngineKind::Cloud,
-            Self::Local => EngineKind::Local,
-        }
-    }
 }
 
 /// An onboarding step, by the name `docs/privacy.md` lists.
@@ -379,9 +357,8 @@ pub enum Event {
     },
     /// The user picked or changed the engine.
     EngineSelected {
-        /// Local or cloud, and which provider.
-        #[serde(flatten)]
-        engine: EngineChoice,
+        /// Local or cloud. Which local model is never sent.
+        kind: EngineKind,
     },
     /// A dictation was pasted.
     DictationFinished {
@@ -518,13 +495,13 @@ mod tests {
             ),
             (
                 Event::EngineSelected {
-                    engine: EngineChoice::Cloud(Provider::OpenRouter),
+                    kind: EngineKind::Cloud,
                 },
-                json!({"event":"engine_selected","properties":{"kind":"cloud","provider":"openrouter"}}),
+                json!({"event":"engine_selected","properties":{"kind":"cloud"}}),
             ),
             (
                 Event::EngineSelected {
-                    engine: EngineChoice::Local,
+                    kind: EngineKind::Local,
                 },
                 json!({"event":"engine_selected","properties":{"kind":"local"}}),
             ),

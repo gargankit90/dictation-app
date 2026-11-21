@@ -46,7 +46,6 @@ fn model_for(bytes: &[u8]) -> LocalModel {
         id: "test-model",
         role: dictation_core::local_models::Role::Speech,
         name: "Test",
-        languages: &["en"],
         languages_label: "English only",
         size_bytes: bytes.len() as u64,
         url: "https://example.invalid/model.gguf",

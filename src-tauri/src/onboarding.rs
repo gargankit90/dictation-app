@@ -439,8 +439,7 @@ pub fn key_saved_or<S: SecretStore + 'static>(
     if settings.transcription == dictation_core::settings::Transcription::Local {
         return true;
     }
-    let provider = settings.provider;
-    match live.read_key(config, provider) {
+    match live.read_key(config) {
         Ok(key) => key.is_some(),
         Err(error) => {
             tracing::warn!(%error, "onboarding: couldn't check for a saved key");
@@ -875,12 +874,7 @@ mod tests {
         let config = Arc::new(Config::new(&dir, secrets));
         let live = LiveEngine::fixed();
         assert!(!key_saved(&config, &live));
-        config
-            .set_api_key(
-                dictation_core::settings::Provider::OpenRouter,
-                "sk-or-made-up-key",
-            )
-            .unwrap();
+        config.set_api_key("sk-or-made-up-key").unwrap();
         assert!(key_saved(&config, &live));
         let _ = std::fs::remove_dir_all(&dir);
     }

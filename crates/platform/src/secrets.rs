@@ -2,7 +2,7 @@
 //! `keyring` crate (MIT OR Apache-2.0). macOS: the login keychain, as
 //! generic passwords with service [`SERVICE`] and the secret's name as the
 //! account (`openrouter-api-key`; see
-//! `dictation_core::settings::Provider::key_name`).
+//! `dictation_core::settings::API_KEY_NAME`).
 //!
 //! Never logs a secret, and no error carries one.
 

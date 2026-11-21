@@ -18,6 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dictation_core::diagnostics::{ErrorCode, ErrorLog, FixAction, LoggedError};
 use dictation_core::error::DictationError;
+use dictation_core::local_models;
 use dictation_core::report::{self, Access, EngineInfo, ReportInput};
 use dictation_core::settings::{Settings, Transcription};
 use dictation_pipeline::config::Config;
@@ -451,8 +452,8 @@ fn access(status: PermissionStatus) -> Access {
 }
 
 /// The report for the user to read. The inputs are all typed: the settings
-/// (of which only the hotkey, provider, transcription kind, on-device model
-/// id and the analytics switch are read), permission states, the engine's
+/// (of which only the hotkey, transcription kind and the analytics switch
+/// are read), permission states, the engine's
 /// readiness, and error codes with times.
 #[must_use]
 pub fn report_text(
@@ -463,8 +464,8 @@ pub fn report_text(
     errors: &[LoggedError],
 ) -> String {
     let engine = match settings.transcription {
-        Transcription::Cloud => EngineInfo::Cloud(settings.provider),
-        Transcription::Local => EngineInfo::Local(&settings.local_model),
+        Transcription::Cloud => EngineInfo::Cloud,
+        Transcription::Local => EngineInfo::Local(local_models::DEFAULT_MODEL),
     };
     report::render(&ReportInput {
         app_version: &env.app_version,
@@ -492,7 +493,7 @@ async fn engine_state(
             let download = downloads
                 .list(live)
                 .into_iter()
-                .find(|model| model.id == settings.local_model)
+                .find(|model| model.id == local_models::DEFAULT_MODEL)
                 .map_or(ModelState::Missing, |model| model.state);
             let view = live
                 .current_engine()
@@ -500,10 +501,8 @@ async fn engine_state(
             EngineState::Local(local_state(view, download))
         }
         Transcription::Cloud => {
-            let (config, live, provider) = (Arc::clone(config), live.clone(), settings.provider);
-            let read =
-                tauri::async_runtime::spawn_blocking(move || live.read_key(&config, provider))
-                    .await;
+            let (config, live) = (Arc::clone(config), live.clone());
+            let read = tauri::async_runtime::spawn_blocking(move || live.read_key(&config)).await;
             EngineState::Cloud(match read {
                 Ok(Ok(Some(_))) => KeyState::Saved,
                 Ok(Ok(None)) => KeyState::Missing,
@@ -587,9 +586,8 @@ pub async fn test_connection(
             message: "The on-device engine needs no connection.".to_owned(),
         });
     }
-    let base_url = live.provider_base_url(settings.provider);
-    let result =
-        commands::test_saved_key(&config.0, live.inner(), settings.provider, &base_url).await;
+    let base_url = live.provider_base_url();
+    let result = commands::test_saved_key(&config.0, live.inner(), &base_url).await;
     Ok(match result {
         Ok(()) => ConnectionResult {
             ok: true,
@@ -1009,9 +1007,7 @@ mod tests {
 
         // Settings: every text field the user or a hand edit controls.
         let settings = Settings {
-            hotkey: format!("{home}/.ssh/{key}"),
-            model: format!("{transcript} {key}"),
-            local_model: format!("{home}/Library/{registered}"),
+            hotkey: format!("{home}/.ssh/{key} {transcript} {registered}"),
             ..Settings::default()
         };
         let local = Settings {

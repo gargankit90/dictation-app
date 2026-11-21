@@ -34,7 +34,6 @@ fn config(base_url: String, grows: bool, attempts: u32) -> Config {
     Config {
         base_url,
         model: "openai/gpt-4o-mini-transcribe".into(),
-        prompt: None,
         privacy: dictation_core::cloud_models::PrivacyFilter::DenyDataCollection,
         timeout: BASE,
         timeout_grows_with_audio: grows,

@@ -11,9 +11,9 @@ import type {
   LocalModelInfo_Serialize,
   OnboardingStatus,
   PermissionState,
-  Provider,
   Settings_Serialize,
   Step,
+  Transcription,
   View,
 } from "./bindings";
 import { Onboarding, RELAUNCH_AFTER_POLLS, STEPS } from "./Onboarding";
@@ -52,7 +52,6 @@ const PARAKEET: LocalModelInfo_Serialize = {
   id: "parakeet-unified-en-0.6b-q4_k_m",
   name: "Parakeet Unified 0.6B",
   languages: "English only",
-  language_codes: ["en"],
   size_bytes: 477_000_000,
   downloaded_bytes: 0,
   state: "missing",
@@ -62,37 +61,15 @@ const PARAKEET: LocalModelInfo_Serialize = {
   restarted: false,
 };
 
-/** As in the catalogue (`crates/core/src/local_models.rs`), so the count is real. */
-const THIRTY_LANGUAGES = [
-  ..."zh en yue ar de fr es pt id it ko ru th vi ja tr hi ms nl sv da fi pl cs fil fa el ro hu mk".split(
-    " ",
-  ),
-];
-
 const GEMMA: LocalModelInfo_Serialize = {
   id: "gemma-4-e2b-it-q4_k_m",
   name: "Gemma 4 E2B",
   languages: "English only",
-  language_codes: ["en"],
   size_bytes: 3_106_738_272,
   downloaded_bytes: 0,
   state: "missing",
   error: null,
   default: true,
-  resumed_from_bytes: null,
-  restarted: false,
-};
-
-const QWEN: LocalModelInfo_Serialize = {
-  id: "qwen3-asr-0.6b-q4_k_m",
-  name: "Qwen3-ASR 0.6B",
-  languages: "30 languages",
-  language_codes: THIRTY_LANGUAGES,
-  size_bytes: 590_000_000,
-  downloaded_bytes: 0,
-  state: "missing",
-  error: null,
-  default: false,
   resumed_from_bytes: null,
   restarted: false,
 };
@@ -115,18 +92,15 @@ class Backend {
   /** The server answers a resume with the whole file. */
   ignoresRange = false;
   micAnswer: PermissionState = "granted";
-  keys: Record<Provider, boolean> = { openrouter: false };
-  models: LocalModelInfo_Serialize[] = [{ ...PARAKEET }, { ...QWEN }];
+  keys = { openrouter: false };
+  models: LocalModelInfo_Serialize[] = [{ ...PARAKEET }];
   /** The cleanup model (Gemma): "On this Mac"'s second part. None until a test adds it. */
   cleanup: LocalModelInfo_Serialize[] = [];
   settings: Settings_Serialize = {
     version: 2,
-    provider: "openrouter",
-    model: "openai/gpt-4o-mini-transcribe",
     hotkey: "RightAlt",
     launch_at_login: false,
     transcription: "cloud",
-    local_model: PARAKEET.id,
     share_usage_events: true,
     history_limit: 25,
   };
@@ -158,7 +132,7 @@ class Backend {
   allows(step: Step): boolean {
     const done: Record<Step, boolean> = {
       welcome: this.welcomePassed,
-      speech: this.settings.transcription === "local" || this.keys[this.settings.provider],
+      speech: this.settings.transcription === "local" || this.keys.openrouter,
       permissions: this.microphone === "granted" && this.accessibility === "granted",
       try: true,
       ready: true,
@@ -214,7 +188,7 @@ class Backend {
         this.settings = { ...this.settings, launch_at_login: args.enabled as boolean };
         return args.enabled;
       case "saved_key_hint":
-        return this.keys[args.provider as Provider] ? "sk-or-…cdef" : null;
+        return this.keys.openrouter ? "sk-or-…cdef" : null;
       case "connect_openrouter": {
         const failure = this.failing.get(command);
         // eslint-disable-next-line @typescript-eslint/only-throw-error
@@ -232,24 +206,16 @@ class Backend {
       case "cancel_connect":
         return this.cancelResult;
       case "set_api_key":
-        this.keys[args.provider as Provider] = true;
+        this.keys.openrouter = true;
         return null;
       case "test_api_key":
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         if (this.testResult !== null) throw this.testResult;
         return null;
-      case "use_cloud_engine":
+      case "set_transcription":
         this.settings = {
           ...this.settings,
-          transcription: "cloud",
-          provider: args.provider as Provider,
-        };
-        return null;
-      case "choose_local_model":
-        this.settings = {
-          ...this.settings,
-          transcription: "local",
-          local_model: args.id as string,
+          transcription: args.transcription as Transcription,
         };
         return null;
       case "download_local_model": {
@@ -943,7 +909,7 @@ describe("Speech", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     fireEvent.click(primary("Download and continue"));
     await screen.findByText("Two permissions");
-    expect(backend.named("choose_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
+    expect(backend.named("set_transcription")[0]?.args).toEqual({ transcription: "local" });
     expect(backend.named("download_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
     expect(backend.settings.transcription).toBe("local");
     expect(backend.step).toBe("permissions");
@@ -1004,7 +970,7 @@ describe("Speech", () => {
 
   it("stays on the step and says why when the download can't start", async () => {
     backend.handle = ((original) => (command: string, payload: unknown) => {
-      if (command === "choose_local_model") {
+      if (command === "set_transcription") {
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         throw "The disk is full.";
       }
@@ -1131,7 +1097,7 @@ describe("Speech", () => {
     expect(primary("Continue").disabled).toBe(false);
     fireEvent.click(primary("Continue"));
     await screen.findByText("Two permissions");
-    expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
+    expect(backend.named("set_transcription")[0]?.args).toEqual({ transcription: "cloud" });
     expect(backend.named("download_local_model")).toEqual([]);
   });
 
@@ -1245,7 +1211,7 @@ describe("Speech", () => {
       fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
       const shown = () => document.querySelector(".ob-main")?.textContent ?? "";
       const clean = () => {
-        for (const gone of [PARAKEET.name, QWEN.name, "Parakeet", "Qwen", "Multilingual"]) {
+        for (const gone of [PARAKEET.name, "Parakeet", "Qwen", "Multilingual"]) {
           expect(shown()).not.toContain(gone);
         }
         expect(shown()).not.toMatch(/All languages|100\+/);
@@ -1652,15 +1618,8 @@ describe("Ready", () => {
     await screen.findByText("On this Mac · English · Getting the model ready: 50%");
   });
 
-  it("round 2: a multilingual model has Speech's name, with the count from its codes", async () => {
-    backend.settings = { ...backend.settings, local_model: QWEN.id };
-    backend.model(QWEN.id).state = "ready";
-    show();
-    await screen.findByText("On this Mac · 30 languages · ✓ Ready");
-  });
-
   it("criterion 6: the own key says Connected only with a key saved", async () => {
-    backend.settings = { ...backend.settings, transcription: "cloud", provider: "openrouter" };
+    backend.settings = { ...backend.settings, transcription: "cloud" };
     backend.keys.openrouter = true;
     show();
     await screen.findByText("OpenRouter · ✓ Connected");

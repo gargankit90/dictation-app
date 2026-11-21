@@ -10,8 +10,8 @@ import type {
   EngineStatus,
   KeyTestError,
   LocalModelInfo_Serialize,
-  Provider,
   Settings_Serialize,
+  Transcription,
 } from "./bindings";
 import { SECTION_KEY, Settings } from "./Settings";
 import type { SectionId } from "./Settings";
@@ -21,7 +21,6 @@ import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
 const KEY = "sk-or-dummy-NOT-A-REAL-KEY-0123456789";
 const ENGLISH = "orukqwen-asr-1.7b-q4_k_m";
-const MULTI = "multilingual-test-q4_k_m";
 
 interface Call {
   command: string;
@@ -31,10 +30,9 @@ interface Call {
 function model(id: string, overrides: Partial<LocalModelInfo_Serialize> = {}) {
   return {
     id,
-    name: id === ENGLISH ? "OrukQwen English" : "Test multilingual",
-    languages: id === ENGLISH ? "English only" : "30 languages",
-    language_codes: id === ENGLISH ? ["en"] : ["en", "hi", "de"],
-    size_bytes: id === ENGLISH ? 477_274_496 : 600_000_000,
+    name: "OrukQwen English",
+    languages: "English only",
+    size_bytes: 477_274_496,
     downloaded_bytes: 0,
     state: "missing",
     resumed_from_bytes: null,
@@ -49,17 +47,14 @@ function model(id: string, overrides: Partial<LocalModelInfo_Serialize> = {}) {
 class Backend {
   settings: Settings_Serialize = {
     version: 2,
-    provider: "openrouter",
-    model: "openai/gpt-4o-mini-transcribe",
     hotkey: "RightAlt",
     launch_at_login: false,
     transcription: "cloud",
-    local_model: ENGLISH,
     share_usage_events: true,
     history_limit: 25,
   };
-  keys: Record<Provider, boolean> = { openrouter: false };
-  models: LocalModelInfo_Serialize[] = [model(ENGLISH), model(MULTI)];
+  keys = { openrouter: false };
+  models: LocalModelInfo_Serialize[] = [model(ENGLISH)];
   cleanup: LocalModelInfo_Serialize[] = [];
   engine: EngineStatus = { state: "ready", message: null };
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
@@ -99,18 +94,10 @@ class Backend {
       case "set_share_usage_events":
         this.settings = { ...this.settings, share_usage_events: args.share as boolean };
         return null;
-      case "use_cloud_engine":
+      case "set_transcription":
         this.settings = {
           ...this.settings,
-          transcription: "cloud",
-          provider: args.provider as Provider,
-        };
-        return null;
-      case "use_local_model":
-        this.settings = {
-          ...this.settings,
-          transcription: "local",
-          local_model: args.id as string,
+          transcription: args.transcription as Transcription,
         };
         return null;
       case "get_engine_status":
@@ -128,13 +115,13 @@ class Backend {
       case "delete_local_model":
         return null;
       case "set_api_key":
-        this.keys[args.provider as Provider] = true;
+        this.keys.openrouter = true;
         return null;
       case "delete_api_key":
-        this.keys[args.provider as Provider] = false;
+        this.keys.openrouter = false;
         return null;
       case "saved_key_hint":
-        return this.keys[args.provider as Provider] ? "sk-or-…cdef" : null;
+        return this.keys.openrouter ? "sk-or-…cdef" : null;
       case "connect_openrouter":
         this.keys.openrouter = true;
         return null;
@@ -500,7 +487,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
   });
 
   it("names lead, OpenRouter first, with no Downloaded, Use this, Active or Hide", async () => {
-    backend.models = [ready(ENGLISH), model(MULTI)];
+    backend.models = [ready(ENGLISH)];
     await open("speech");
     // Q4 (owner): OpenRouter is listed first.
     const radios = within(screen.getByRole("radiogroup", { name: "Speech engine" })).getAllByRole(
@@ -508,11 +495,8 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     );
     expect(radios[0]?.getAttribute("aria-label")).toBe("OpenRouter");
     expect(radio(/^On this Mac$/)).toBeTruthy();
-    expect(radio(/^On this Mac · 3 languages/)).toBeTruthy();
     expect(radio(/^OpenRouter/)).toBeTruthy();
-    expect(
-      within(screen.getByRole("radiogroup", { name: "Speech engine" })).getAllByRole("radio"),
-    ).toHaveLength(3);
+    expect(radios).toHaveLength(2);
     // Q4 (owner): "On this Mac", then its language, offline and private.
     expect(screen.getByText("English · works offline · nothing leaves your Mac")).toBeTruthy();
     expect(
@@ -527,23 +511,20 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
   });
 
   it("exactly one row is selected", async () => {
-    backend.models = [ready(ENGLISH), ready(MULTI)];
+    backend.models = [ready(ENGLISH)];
     await open("speech");
     expect(checked().map((row) => row.id)).toEqual(["engine-openrouter"]);
   });
 
-  it("U11 criterion 5: its names and sizes are setup's, from one function", async () => {
+  it("U11 criterion 5: its size is setup's, from one function", async () => {
     await open("speech");
-    expect(backend.models.length).toBeGreaterThan(1);
-    for (const model of backend.models) {
-      const [name, size] = modelLabel(model).split(" · ");
-      expect(
-        radio(name === "English" ? /^On this Mac$/ : new RegExp(`^On this Mac · ${name ?? "?"}`)),
-      ).toBeTruthy();
-      expect(screen.getByRole("button", { name: `Download · ${size ?? "?"}` })).toBeTruthy();
-      // Setup's card shows this label, and the catalogue's name appears in neither.
-      expect(modelLabel(model)).not.toContain(model.name);
-    }
+    const [model] = backend.models;
+    if (model === undefined) throw new Error("no model");
+    const [name, size] = modelLabel(model).split(" · ");
+    expect(name).toBe("English");
+    expect(screen.getByRole("button", { name: `Download · ${size ?? "?"}` })).toBeTruthy();
+    // Setup's card shows this label, and the catalogue's name appears in neither.
+    expect(modelLabel(model)).not.toContain(model.name);
   });
 
   it("a row not downloaded shows Download and its size, and can't be selected", async () => {
@@ -551,9 +532,8 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     expect(radio(/^On this Mac$/).disabled).toBe(true);
 
     expect(screen.getByRole("button", { name: "Download · 477 MB" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Download · 600 MB" })).toBeTruthy();
     fireEvent.click(radio(/^On this Mac$/));
-    expect(backend.named("use_local_model")).toHaveLength(0);
+    expect(backend.named("set_transcription")).toHaveLength(0);
   });
 
   it("Download starts at once and shows progress with Pause; it can't be selected yet", async () => {
@@ -586,7 +566,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
   });
 
   it("a model already chosen while it downloads is the selected row", async () => {
-    backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
+    backend.settings = { ...backend.settings, transcription: "local" };
     backend.models = [model(ENGLISH, { state: "downloading", downloaded_bytes: 212_000_000 })];
     await open("speech");
     expect(checked().map((row) => row.id)).toEqual([`engine-${ENGLISH}`]);
@@ -618,19 +598,15 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     });
   });
 
-  it("selecting a model loads it, blocks the others with a reason, then selects it", async () => {
-    backend.models = [ready(ENGLISH), ready(MULTI)];
+  it("selecting the model loads it, blocks OpenRouter with a reason, then selects it", async () => {
+    backend.models = [ready(ENGLISH)];
     const loading = gate();
-    backend.holds.set("use_local_model", loading.closed);
+    backend.holds.set("set_transcription", loading.closed);
     await open("speech");
     fireEvent.click(radio(/^On this Mac$/));
     expect(await screen.findByText("Loading…")).toBeTruthy();
     expect(checked().map((row) => row.id)).toEqual([`engine-${ENGLISH}`]);
-    expect(radio(/^On this Mac · 3 languages/).disabled).toBe(true);
     expect(radio(/^OpenRouter/).disabled).toBe(true);
-    expect(screen.getByTestId("blocked-reason").textContent).toBe(
-      "Wait until On this Mac has loaded.",
-    );
     loading.open();
     await waitFor(() => {
       expect(screen.queryByText("Loading…")).toBeNull();
@@ -641,7 +617,10 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
 
   it("a model that fails to load says so, with Retry and Delete in its menu", async () => {
     backend.models = [ready(ENGLISH)];
-    backend.failing.set("use_local_model", "Couldn't load OrukQwen English: the file is damaged.");
+    backend.failing.set(
+      "set_transcription",
+      "Couldn't load OrukQwen English: the file is damaged.",
+    );
     await open("speech");
     fireEvent.click(radio(/^On this Mac$/));
     expect(await screen.findByText("! Couldn't load")).toBeTruthy();
@@ -653,23 +632,17 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
   });
 
   it("Delete is in the … menu; the row in use has the menu but can't be deleted", async () => {
-    backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
-    backend.models = [ready(ENGLISH), ready(MULTI)];
+    backend.settings = { ...backend.settings, transcription: "local" };
+    backend.models = [ready(ENGLISH)];
     await open("speech");
     click("More actions for On this Mac");
     expect(screen.queryByRole("menuitem")).toBeNull();
     expect(screen.getByText(/Choose another engine to delete it/)).toBeTruthy();
     expect(screen.getByText(/OrukQwen English · English only · works offline/)).toBeTruthy();
-    click("More actions for On this Mac");
-    click("More actions for On this Mac · 3 languages");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Delete model" }));
-    await waitFor(() => {
-      expect(backend.named("delete_local_model")[0]?.args).toEqual({ id: MULTI });
-    });
   });
 
   it("the engine in use couldn't load: it says so and stays selected", async () => {
-    backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
+    backend.settings = { ...backend.settings, transcription: "local" };
     backend.models = [ready(ENGLISH)];
     backend.engine = { state: "failed", message: "The on-device model couldn't be loaded." };
     await open("speech");
@@ -678,12 +651,12 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
   });
 
   it("selecting OpenRouter with a key saved switches at once, without the sheet", async () => {
-    backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
+    backend.settings = { ...backend.settings, transcription: "local" };
     backend.models = [ready(ENGLISH)];
     await open("speech");
     fireEvent.click(radio(/^OpenRouter/));
     await waitFor(() => {
-      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
+      expect(backend.named("set_transcription")[0]?.args).toEqual({ transcription: "cloud" });
     });
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => {
@@ -695,7 +668,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
 describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
   const radio = (name: string | RegExp) => screen.getByRole<HTMLInputElement>("radio", { name });
   const onDevice = () => {
-    backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
+    backend.settings = { ...backend.settings, transcription: "local" };
     backend.models = [model(ENGLISH, { state: "ready", downloaded_bytes: 477_274_496 })];
   };
 
@@ -705,13 +678,13 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(radio(/^OpenRouter/));
     expect(await screen.findByRole("dialog", { name: "OpenRouter" })).toBeTruthy();
-    expect(backend.named("use_cloud_engine")).toHaveLength(0);
+    expect(backend.named("set_transcription")).toHaveLength(0);
     expect(radio(/^OpenRouter/).checked).toBe(false);
     click("Connect OpenRouter");
     expect(await screen.findByText(CONNECTED)).toBeTruthy();
     expect(backend.named("connect_openrouter")).toHaveLength(1);
     await waitFor(() => {
-      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
+      expect(backend.named("set_transcription")[0]?.args).toEqual({ transcription: "cloud" });
     });
     await waitFor(() => {
       expect(radio(/^OpenRouter/).checked).toBe(true);
@@ -726,7 +699,7 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
     await screen.findByRole("dialog");
     click("Connect OpenRouter");
     expect(await screen.findByText("Connecting took too long. Try again.")).toBeTruthy();
-    expect(backend.named("use_cloud_engine")).toHaveLength(0);
+    expect(backend.named("set_transcription")).toHaveLength(0);
     expect(backend.keys.openrouter).toBe(false);
   });
 
@@ -777,7 +750,7 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
     expect(await screen.findByText(CONNECTED)).toBeTruthy();
     expect(backend.keys.openrouter).toBe(true);
     await waitFor(() => {
-      expect(backend.named("use_cloud_engine")).toHaveLength(1);
+      expect(backend.named("set_transcription")).toHaveLength(1);
     });
   });
 
@@ -799,7 +772,7 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
       await Promise.resolve();
     });
     expect(await screen.findByText("the Keychain is locked")).toBeTruthy();
-    expect(backend.named("use_cloud_engine")).toHaveLength(0);
+    expect(backend.named("set_transcription")).toHaveLength(0);
   });
 
   it.each([
@@ -838,7 +811,7 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
       expect(await screen.findByText(CONNECTED)).toBeTruthy();
       expect(screen.getByRole("dialog")).toBeTruthy();
       await waitFor(() => {
-        expect(backend.named("use_cloud_engine")).toHaveLength(1);
+        expect(backend.named("set_transcription")).toHaveLength(1);
       });
     },
   );
@@ -902,7 +875,7 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
     click("Manage…");
     click("Disconnect");
     await screen.findByText("Disconnected. The key is removed.");
-    expect(backend.named("delete_api_key")[0]?.args).toEqual({ provider: "openrouter" });
+    expect(backend.named("delete_api_key")).toHaveLength(1);
     expect(backend.keys.openrouter).toBe(false);
     expect(await screen.findByRole("button", { name: "Connect OpenRouter" })).toBeTruthy();
   });
@@ -945,8 +918,8 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
       fireEvent.change(field, { target: { value: KEY } });
       click("Test & Save");
       expect(await screen.findByText(CONNECTED)).toBeTruthy();
-      expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "openrouter", key: KEY });
-      expect(backend.named("set_api_key")[0]?.args).toEqual({ provider: "openrouter", key: KEY });
+      expect(backend.named("test_api_key")[0]?.args).toEqual({ key: KEY });
+      expect(backend.named("set_api_key")[0]?.args).toEqual({ key: KEY });
       expect(document.body.textContent).not.toContain(KEY);
       expect(screen.getByLabelText<HTMLInputElement>(/API key/).value).toBe("");
     });

@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
 
-use dictation_core::settings::{Provider, Settings};
+use dictation_core::settings::{HISTORY_LIMITS, Settings};
 use dictation_pipeline::config::Config;
 use dictation_platform::fakes::MemSecretStore;
 use dictation_ports::SecretStore;
@@ -29,23 +29,15 @@ fn whitespace_and_control_keys_are_refused_without_echo() {
         "ab\ncd-secret",
         "ab\u{0}cd-secret",
     ] {
-        let err = config
-            .set_api_key(Provider::OpenRouter, bad)
-            .unwrap_err()
-            .to_string();
+        let err = config.set_api_key(bad).unwrap_err().to_string();
         assert!(!err.contains("secret"), "error echoed the key: {err}");
         assert!(store.get("openrouter-api-key").unwrap().is_none());
     }
     let long = "k".repeat(513);
-    let err = config
-        .set_api_key(Provider::OpenRouter, &long)
-        .unwrap_err()
-        .to_string();
+    let err = config.set_api_key(&long).unwrap_err().to_string();
     assert!(!err.contains(&long));
     // exactly the max is accepted
-    config
-        .set_api_key(Provider::OpenRouter, &"k".repeat(512))
-        .unwrap();
+    config.set_api_key(&"k".repeat(512)).unwrap();
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -54,10 +46,8 @@ fn key_never_reaches_the_settings_file_or_errors_and_providers_are_separate() {
     let d = dir("leak");
     let store = MemSecretStore::default();
     let config = Config::new(&d, store.clone());
-    config
-        .set_api_key(Provider::OpenRouter, &format!("  {KEY}\n"))
-        .unwrap();
-    assert!(config.has_api_key(Provider::OpenRouter).unwrap());
+    config.set_api_key(&format!("  {KEY}\n")).unwrap();
+    assert!(config.has_api_key().unwrap());
     config.save_settings(&Settings::default()).unwrap();
     let file = std::fs::read_to_string(config.path()).unwrap();
     assert!(!file.contains(KEY) && !file.contains("gsk_"));
@@ -66,9 +56,9 @@ fn key_never_reaches_the_settings_file_or_errors_and_providers_are_separate() {
         let text = std::fs::read_to_string(e.unwrap().path()).unwrap_or_default();
         assert!(!text.contains(KEY));
     }
-    config.delete_api_key(Provider::OpenRouter).unwrap();
-    assert!(!config.has_api_key(Provider::OpenRouter).unwrap());
-    config.delete_api_key(Provider::OpenRouter).unwrap(); // idempotent
+    config.delete_api_key().unwrap();
+    assert!(!config.has_api_key().unwrap());
+    config.delete_api_key().unwrap(); // idempotent
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -82,7 +72,6 @@ fn unknown_fields_load_but_are_dropped_on_the_next_save() {
     )
     .unwrap();
     let s = config.settings().unwrap();
-    assert_eq!(s.provider, Provider::OpenRouter);
     assert_eq!(s.hotkey, "F6");
     config.save_settings(&s).unwrap();
     let file = std::fs::read_to_string(config.path()).unwrap();
@@ -98,10 +87,8 @@ fn bad_settings_values_are_rejected_and_leave_the_old_file_alone() {
     config.save_settings(&Settings::default()).unwrap();
     let before = std::fs::read_to_string(config.path()).unwrap();
     for mutate in [
-        (|s: &mut Settings| s.model = String::new()) as fn(&mut Settings),
-        |s| s.model = "has space".into(),
-        |s| s.model = "m".repeat(101),
-        |s| s.hotkey = "NotAKey".into(),
+        (|s: &mut Settings| s.hotkey = "NotAKey".into()) as fn(&mut Settings),
+        |s| s.history_limit = 7,
         |s| s.version = 1,
     ] {
         let mut s = Settings::default();
@@ -133,7 +120,8 @@ fn stress_concurrent_saves_with_a_concurrent_reader() {
     let d = dir("stress");
     let config = Arc::new(Config::new(&d, MemSecretStore::default()));
     let variant = |t: usize| Settings {
-        local_model: "m".repeat(1 + t * 37 % 100),
+        hotkey: ["F6", "RightAlt", "LeftCtrl+LeftAlt+LeftShift+LeftCmd+Space"][t % 3].into(),
+        history_limit: HISTORY_LIMITS[t % HISTORY_LIMITS.len()],
         ..Settings::default()
     };
     config.save_settings(&variant(0)).unwrap();
@@ -184,7 +172,7 @@ fn save_into_a_read_only_directory_fails_cleanly() {
     std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o555)).unwrap();
     let probe = std::fs::File::create(d.join("probe")).is_ok(); // root ignores modes
     let result = config.save_settings(&Settings {
-        model: "other-model".into(),
+        hotkey: "F6".into(),
         ..Settings::default()
     });
     std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();

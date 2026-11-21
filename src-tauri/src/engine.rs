@@ -37,10 +37,10 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use dictation_core::local_models;
-use dictation_core::settings::{Provider, Settings, Transcription};
+use dictation_core::settings::Transcription;
 use dictation_pipeline::config::{Config, ConfigError};
 use dictation_ports::{Secret, SecretError, SecretStore, TranscribeError};
-use dictation_transcribe::engine::{Engine, Transcribers, local_language};
+use dictation_transcribe::engine::{Engine, Transcribers};
 use dictation_transcribe::local::{CppModel, LocalTranscriber, SpeechModel};
 use dictation_transcribe::models::{DownloadError, ModelStore};
 
@@ -152,26 +152,24 @@ impl LocalModels {
         &self.store
     }
 
-    /// The engine for the catalogue model `id` (the default model for an id
-    /// the catalogue no longer has, Q4), with the saved `language` if the
-    /// model speaks it. Reuses the loaded model when it is the same
-    /// file. Otherwise (seconds; call it from a blocking thread) it first
+    /// The engine for the speech model ([`local_models::DEFAULT`]). Reuses
+    /// the loaded model when it is the same file. Otherwise (seconds; call
+    /// it from a blocking thread) it first
     /// makes "the model is loading" current through `stage`, so neither the
     /// app nor this cache holds the old model any more, then checks the
     /// file's SHA-256 ([`ModelStore::verified_path`]) and loads it.
-    pub fn engine(&self, id: &str, language: Option<&str>, stage: &dyn Fn(Engine)) -> Engine {
-        let model = local_models::resolve(id);
+    pub fn engine(&self, stage: &dyn Fn(Engine)) -> Engine {
+        let model = local_models::DEFAULT;
         let Some(path) = self.store.ready_path(model) else {
             self.release();
             return Engine::Unavailable(TranscribeError::ModelMissing);
         };
-        let language = local_language(model, language);
         let mut warm = lock(&self.warm);
         if let Some(loaded) = &*warm
             && loaded.id == model.id
             && loaded.path == path
         {
-            return Engine::Local(loaded.engine.with_language(language));
+            return Engine::Local(loaded.engine.clone());
         }
         // Free the old model before loading the next: two at once could
         // need gigabytes. The current engine is replaced first, then the
@@ -195,7 +193,7 @@ impl LocalModels {
         match (self.loader)(&path) {
             Ok(loaded) => {
                 tracing::info!(model = model.id, elapsed = ?started.elapsed(), "on-device model loaded");
-                let engine = LocalTranscriber::new(loaded, language);
+                let engine = LocalTranscriber::new(loaded);
                 *warm = Some(Warm {
                     id: model.id,
                     path,
@@ -297,20 +295,17 @@ impl LiveEngine {
         self
     }
 
-    /// The API root `provider` is reached at: its own endpoint, unless a test
-    /// build was pointed elsewhere ([`at`](Self::at)). Settings' Test key
-    /// uses it, so a key is tested where dictation sends it.
+    /// The API root `OpenRouter` is reached at: its own endpoint, unless a
+    /// test build was pointed elsewhere ([`at`](Self::at)). Settings' Test
+    /// key uses it, so a key is tested where dictation sends it.
     #[must_use]
-    pub fn provider_base_url(&self, provider: Provider) -> String {
-        match provider {
-            Provider::OpenRouter => self
-                .base_url
-                .clone()
-                .unwrap_or_else(|| dictation_transcribe::openrouter::BASE_URL.to_owned()),
-        }
+    pub fn provider_base_url(&self) -> String {
+        self.base_url
+            .clone()
+            .unwrap_or_else(|| dictation_transcribe::openrouter::BASE_URL.to_owned())
     }
 
-    /// `provider`'s saved key, for the settings commands (`has_api_key`, a
+    /// The saved key, for the settings commands (`has_api_key`, a
     /// test of the saved key). Bounded like the engine's own reads: the
     /// keychain gets [`KEY_READ_TIMEOUT`], through the same [`KeyReads`], so a
     /// keychain that never answers costs one parked thread however often the
@@ -323,9 +318,8 @@ impl LiveEngine {
     pub fn read_key<S: SecretStore + 'static>(
         &self,
         config: &Arc<Config<S>>,
-        provider: Provider,
     ) -> Result<Option<Secret>, SecretError> {
-        let key = self.reads.read(config, provider, self.key_timeout);
+        let key = self.reads.read(config, self.key_timeout);
         if matches!(key, Ok(Some(_))) {
             // The keychain answers now: an engine that gave up on it at
             // launch can be rebuilt (#204).
@@ -389,7 +383,7 @@ impl LiveEngine {
         )
     }
 
-    /// Saves `key` as `provider`'s API key and rebuilds the engine from it
+    /// Saves `key` as the API key and rebuilds the engine from it
     /// (T3, #113). Bounded like the reads: the keychain gets
     /// [`KEY_READ_TIMEOUT`], and at most one write is in flight app-wide, so
     /// a keychain that never answers gives an error at the deadline and
@@ -405,18 +399,17 @@ impl LiveEngine {
     pub fn write_key<S: SecretStore + 'static>(
         &self,
         config: &Arc<Config<S>>,
-        provider: Provider,
         key: String,
     ) -> Result<(), ConfigError> {
         // Refused here, so a typo never waits behind a stuck write.
         dictation_pipeline::config::validate_key(&key)?;
         let (config, live) = (Arc::clone(config), self.clone());
         self.writes.write(self.key_timeout, move || {
-            changed(&config, &live, |config| config.set_api_key(provider, &key))
+            changed(&config, &live, |config| config.set_api_key(&key))
         })
     }
 
-    /// Deletes `provider`'s key from the keychain (U6: Remove key) and
+    /// Deletes the key from the keychain (U6: Remove key) and
     /// rebuilds the engine, bounded like [`write_key`](Self::write_key).
     ///
     /// # Errors
@@ -425,16 +418,14 @@ impl LiveEngine {
     pub fn delete_key<S: SecretStore + 'static>(
         &self,
         config: &Arc<Config<S>>,
-        provider: Provider,
     ) -> Result<(), ConfigError> {
         let (config, live) = (Arc::clone(config), self.clone());
         self.writes.write(self.key_timeout, move || {
-            changed(&config, &live, |config| config.delete_api_key(provider))
+            changed(&config, &live, Config::delete_api_key)
         })
     }
 
-    /// Loads on-device model `id` before the settings choose it (U6: "Use
-    /// this"), so the engine in use keeps working until the model is ready.
+    /// Loads the on-device model before the settings choose it, so the engine in use keeps working until the model is ready.
     /// From a cloud engine nothing current changes; the loaded model waits
     /// in the cache, and the rebuild after the settings are saved reuses it
     /// at once. From another on-device model the old one is freed first, as
@@ -446,7 +437,7 @@ impl LiveEngine {
     ///
     /// Why the model couldn't be loaded (not downloaded, damaged, or the
     /// loader failed).
-    pub fn preload_local(&self, id: &str, language: Option<&str>) -> Result<(), TranscribeError> {
+    pub fn preload_local(&self) -> Result<(), TranscribeError> {
         let Some(local) = &self.local else {
             return Err(TranscribeError::Engine(
                 "on-device transcription isn't available in this build".to_owned(),
@@ -466,13 +457,13 @@ impl LiveEngine {
             Some(transcribers) if on_device_now => {
                 let mut result = Ok(());
                 transcribers.update_staged(|stage| {
-                    let engine = local.engine(id, language, stage);
+                    let engine = local.engine(stage);
                     result = outcome(&engine);
                     engine
                 });
                 result
             }
-            _ => outcome(&local.engine(id, language, &|_| {})),
+            _ => outcome(&local.engine(&|_| {})),
         }
     }
 
@@ -573,11 +564,11 @@ pub fn engine_for<S: SecretStore + 'static>(
     };
     if settings.transcription == Transcription::Local {
         tracing::info!(
-            model = %settings.local_model,
+            model = local_models::DEFAULT_MODEL,
             "engine settings: on this Mac"
         );
         return match local {
-            Some(local) => local.engine(&settings.local_model, None, stage),
+            Some(local) => local.engine(stage),
             None => Engine::Unavailable(TranscribeError::Engine(
                 "on-device transcription isn't available in this build".to_owned(),
             )),
@@ -586,15 +577,20 @@ pub fn engine_for<S: SecretStore + 'static>(
     if let Some(local) = local {
         local.release();
     }
-    let key = reads.read(config, settings.provider, key_timeout);
+    let key = reads.read(config, key_timeout);
     if let Err(error) = &key {
         // The text never holds a key.
         tracing::warn!(%error, "could not read the API key from the keychain");
     }
-    log_choice(&settings, matches!(key, Ok(Some(_))));
+    // Whether a key exists, never the key. The e2e scenarios wait for this.
+    tracing::info!(
+        provider = "openrouter",
+        has_key = matches!(key, Ok(Some(_))),
+        "engine settings"
+    );
     match base_url {
-        Some(url) => Engine::from_settings_at(&settings, key, url),
-        None => Engine::from_settings(&settings, key),
+        Some(url) => Engine::remote_at(key, url),
+        None => Engine::remote(key),
     }
 }
 
@@ -607,10 +603,10 @@ type KeyOutcome = Result<Option<Secret>, SecretError>;
 /// bound, every settings save would start another read that parks on the
 /// keychain too. So a request first looks for the read already in flight:
 ///
-/// - one that is fresh (same provider, started after the last
+/// - one that is fresh (started after the last
 ///   [`invalidate`](Self::invalidate)) is waited on and its answer shared;
-/// - one that is stale (the provider changed, or a save happened since it
-///   began, so its answer may be the old key) is waited on to finish, within
+/// - one that is stale (a save happened since it began, so its answer may
+///   be the old key) is waited on to finish, within
 ///   the same deadline, and then a new read starts.
 ///
 /// Either way the waiter's deadline is its own timeout from the call, so a
@@ -630,7 +626,6 @@ struct ReadState {
 
 /// One keychain read: what it asked for and, once it finishes, the answer.
 struct Read {
-    provider: Provider,
     generation: u64,
     outcome: Mutex<Option<KeyOutcome>>,
     finished: Condvar,
@@ -665,25 +660,24 @@ impl KeyReads {
         lock(&self.state).generation += 1;
     }
 
-    /// `provider`'s key from the keychain, waiting at most `timeout` (from
-    /// now) for it.
+    /// The key from the keychain, waiting at most `timeout` (from now) for
+    /// it.
     fn read<S: SecretStore + 'static>(
         &self,
         config: &Arc<Config<S>>,
-        provider: Provider,
         timeout: Duration,
     ) -> KeyOutcome {
         let deadline = Instant::now() + timeout;
         let wanted = lock(&self.state).generation;
         loop {
-            let read = self.in_flight_or_start(config, provider)?;
+            let read = self.in_flight_or_start(config)?;
             let Some(answer) = read.wait(deadline) else {
                 return Err(SecretError::Store(format!(
                     "no answer from the keychain after {} s (locked, or waiting for access to be allowed)",
                     timeout.as_secs()
                 )));
             };
-            if read.provider == provider && read.generation >= wanted {
+            if read.generation >= wanted {
                 return answer;
             }
             // A stale answer: it's finished now, so the next pass starts a
@@ -695,14 +689,12 @@ impl KeyReads {
     fn in_flight_or_start<S: SecretStore + 'static>(
         &self,
         config: &Arc<Config<S>>,
-        provider: Provider,
     ) -> Result<Arc<Read>, SecretError> {
         let mut state = lock(&self.state);
         if let Some(read) = &state.in_flight {
             return Ok(Arc::clone(read));
         }
         let read = Arc::new(Read {
-            provider,
             generation: state.generation,
             outcome: Mutex::new(None),
             finished: Condvar::new(),
@@ -715,20 +707,19 @@ impl KeyReads {
         std::thread::Builder::new()
             .name("keychain-read".to_owned())
             .spawn(move || {
-                let answer = catch_unwind(AssertUnwindSafe(|| reader.api_key(provider)))
-                    .map_or_else(
-                        |_| {
-                            Err(SecretError::Store(
-                                "the keychain read stopped unexpectedly".to_owned(),
-                            ))
-                        },
-                        |result| match result {
-                            Ok(key) => Ok(key),
-                            Err(ConfigError::Secret(error)) => Err(error),
-                            // `api_key` only fails in the keychain; ConfigError never holds a key.
-                            Err(other) => Err(SecretError::Store(other.to_string())),
-                        },
-                    );
+                let answer = catch_unwind(AssertUnwindSafe(|| reader.api_key())).map_or_else(
+                    |_| {
+                        Err(SecretError::Store(
+                            "the keychain read stopped unexpectedly".to_owned(),
+                        ))
+                    },
+                    |result| match result {
+                        Ok(key) => Ok(key),
+                        Err(ConfigError::Secret(error)) => Err(error),
+                        // `api_key` only fails in the keychain; ConfigError never holds a key.
+                        Err(other) => Err(SecretError::Store(other.to_string())),
+                    },
+                );
                 // Done and no longer in flight in one step, so nobody sees a
                 // finished read as still running.
                 let mut state = lock(&shared);
@@ -742,17 +733,6 @@ impl KeyReads {
         state.in_flight = Some(Arc::clone(&read));
         Ok(read)
     }
-}
-
-/// What the engine was built from, for the log: whether a key exists, never
-/// the key.
-fn log_choice(settings: &Settings, has_key: bool) {
-    tracing::info!(
-        provider = %settings.provider,
-        model = %settings.model,
-        has_key,
-        "engine settings"
-    );
 }
 
 /// Runs `change` (saving settings or a key) and, if it worked, rebuilds the
@@ -780,7 +760,7 @@ mod tests {
 
     use dictation_core::coordinator::Phase::{Idle, Inserting, Recording, Transcribing};
     use dictation_core::error::DictationError;
-    use dictation_core::settings::Provider;
+    use dictation_core::settings::Settings;
     use dictation_pipeline::pipeline::{Config as PipelineConfig, Pipeline, Ports, UiEvent};
     use dictation_pipeline::ui_events::UiReceiver;
     use dictation_platform::fakes::{
@@ -919,10 +899,7 @@ mod tests {
         }
 
         fn save_key(&self, key: &str) {
-            changed(&self.config, &self.live, |c| {
-                c.set_api_key(Provider::OpenRouter, key)
-            })
-            .unwrap();
+            changed(&self.config, &self.live, |c| c.set_api_key(key)).unwrap();
         }
 
         async fn requests(&self) -> usize {
@@ -977,7 +954,7 @@ mod tests {
         let dir = TempDir::new("startup");
         let secrets = MemSecretStore::new();
         let config = Arc::new(Config::new(dir.0.join("config"), secrets.clone()));
-        config.set_api_key(Provider::OpenRouter, KEY).unwrap();
+        config.set_api_key(KEY).unwrap();
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/audio/transcriptions"))
@@ -1070,10 +1047,7 @@ mod tests {
             local: None,
             cleanup: None,
         };
-        changed(&rig.config, &dead, |c| {
-            c.set_api_key(Provider::OpenRouter, KEY)
-        })
-        .unwrap();
+        changed(&rig.config, &dead, |c| c.set_api_key(KEY)).unwrap();
         assert_eq!(
             rig.dictate().await,
             failed("Couldn't reach the provider. Check your internet connection.")
@@ -1090,15 +1064,11 @@ mod tests {
         let mut rig = Rig::start(200).await;
         rig.save_key(KEY);
         let invalid = Settings {
-            model: String::new(),
+            hotkey: "NotAKey".into(),
             ..Settings::default()
         };
         assert!(changed(&rig.config, &rig.live, |c| c.save_settings(&invalid)).is_err());
-        assert!(
-            changed(&rig.config, &rig.live, |c| c
-                .set_api_key(Provider::OpenRouter, "  "))
-            .is_err()
-        );
+        assert!(changed(&rig.config, &rig.live, |c| c.set_api_key("  ")).is_err());
         assert_eq!(rig.dictate().await, pasted(), "still the saved key");
         rig.finish().await;
     }
@@ -1134,7 +1104,7 @@ mod tests {
         let config = Arc::new(Config::new(dir.0.join("config"), MemSecretStore::new()));
         let live = LiveEngine::fixed();
         // Nothing to rebuild: no engine, no keychain read, no panic.
-        changed(&config, &live, |c| c.set_api_key(Provider::OpenRouter, KEY)).unwrap();
+        changed(&config, &live, |c| c.set_api_key(KEY)).unwrap();
         live.rebuild(&config);
     }
 
@@ -1304,7 +1274,7 @@ mod tests {
                 assert!(crate::onboarding::key_saved(&rig.config, &rig.live));
             } else {
                 // What the key test and has_api_key call.
-                let key = rig.live.read_key(&rig.config, Provider::OpenRouter);
+                let key = rig.live.read_key(&rig.config);
                 assert_eq!(key, Ok(Some(Secret::new(KEY))));
             }
             assert_eq!(transcribers.name(), "remote", "key_saved: {via_key_saved}");
@@ -1475,7 +1445,7 @@ mod tests {
             let answers = Arc::clone(&answers);
             std::thread::spawn(move || {
                 at_once(6, move |_| {
-                    let answer = reads.read(&config, Provider::OpenRouter, WAIT);
+                    let answer = reads.read(&config, WAIT);
                     answers.lock().unwrap().push(answer);
                 });
             })
@@ -1546,7 +1516,7 @@ mod tests {
             gets: Arc::default(),
         };
         let config = Arc::new(Config::new(dir.0.join("config"), store.clone()));
-        config.set_api_key(Provider::OpenRouter, WRONG_KEY).unwrap();
+        config.set_api_key(WRONG_KEY).unwrap();
 
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -1583,7 +1553,7 @@ mod tests {
         let saved = {
             let (config, live) = (config.clone(), live.clone());
             std::thread::spawn(move || {
-                changed(&config, &live, |c| c.set_api_key(Provider::OpenRouter, KEY)).unwrap();
+                changed(&config, &live, |c| c.set_api_key(KEY)).unwrap();
             })
         };
         std::thread::sleep(Duration::from_millis(100));
@@ -1790,7 +1760,7 @@ mod tests {
             let live = LiveEngine::follow(transcribers.clone())
                 .at(&provider.url)
                 .with_key_timeout(WAIT);
-            changed(&config, &live, |c| c.set_api_key(Provider::OpenRouter, KEY)).unwrap();
+            changed(&config, &live, |c| c.set_api_key(KEY)).unwrap();
             assert_eq!(transcribers.name(), "remote");
             let wav = dir.0.join("speech.wav");
             let wav_bytes = dictation_core::wav::encode_f32(&vec![0.25; 8_000], 16_000).unwrap();
@@ -2018,7 +1988,7 @@ mod tests {
         struct Says;
 
         impl SpeechModel for Says {
-            fn run(&mut self, _: &[f32], _: Option<&str>) -> Result<String, String> {
+            fn run(&mut self, _: &[f32]) -> Result<String, String> {
                 Ok(SAID.to_owned())
             }
         }
@@ -2132,39 +2102,23 @@ mod tests {
         }
 
         #[test]
-        fn an_unknown_model_id_runs_the_default_and_a_missing_file_releases_it() {
-            let dir = TempDir::new("unknown-model");
+        fn the_loaded_model_is_reused_and_a_missing_file_releases_it() {
+            let dir = TempDir::new("reuse-model");
             download_default(&dir.0);
             let loads = Arc::new(AtomicUsize::new(0));
             let local = models(&dir.0, &loads, false);
-            let engine = local.engine(
-                dictation_core::local_models::DEFAULT_MODEL,
-                Some("hi"),
-                &|_| {},
-            );
-            let Engine::Local(engine) = engine else {
-                panic!("not local");
-            };
-            // OrukQwen is English only: Hindi isn't passed on.
-            assert_eq!(engine.language(), None);
-            assert!(local.loaded().is_some());
-            // A saved id Q4 removed runs OrukQwen, the model already loaded.
-            assert!(matches!(
-                local.engine("parakeet-unified-en-0.6b-q4_k_m", None, &|_| {}),
-                Engine::Local(_)
-            ));
+            assert!(matches!(local.engine(&|_| {}), Engine::Local(_)));
+            assert!(matches!(local.engine(&|_| {}), Engine::Local(_)));
             assert_eq!(loads.load(Ordering::SeqCst), 1);
             assert_eq!(
                 local.loaded(),
                 Some(dictation_core::local_models::DEFAULT_MODEL)
             );
             // The file gone: missing, and the loaded model is let go.
-            let model =
-                dictation_core::local_models::find(dictation_core::local_models::DEFAULT_MODEL)
-                    .unwrap();
+            let model = dictation_core::local_models::DEFAULT;
             std::fs::remove_file(dir.0.join(model.file_name)).unwrap();
             assert!(matches!(
-                local.engine("retired-model", None, &|_| {}),
+                local.engine(&|_| {}),
                 Engine::Unavailable(TranscribeError::ModelMissing)
             ));
             assert_eq!(local.loaded(), None);
@@ -2178,7 +2132,7 @@ mod tests {
         }
 
         impl SpeechModel for Probe {
-            fn run(&mut self, _: &[f32], _: Option<&str>) -> Result<String, String> {
+            fn run(&mut self, _: &[f32]) -> Result<String, String> {
                 Ok(self.name.clone())
             }
         }
@@ -2238,7 +2192,6 @@ mod tests {
             let pick = |transcription: Transcription| {
                 let settings = Settings {
                     transcription,
-                    local_model: dictation_core::local_models::DEFAULT_MODEL.to_owned(),
                     ..Settings::default()
                 };
                 changed(&config, &live, |c| c.save_settings(&settings)).unwrap();
@@ -2279,7 +2232,7 @@ mod tests {
                     Ok(Box::new(Says) as Box<dyn SpeechModel>)
                 }),
             );
-            let engine = local.engine(dictation_core::local_models::DEFAULT_MODEL, None, &|_| {});
+            let engine = local.engine(&|_| {});
             assert!(
                 matches!(engine, Engine::Unavailable(TranscribeError::ModelMissing)),
                 "{}",

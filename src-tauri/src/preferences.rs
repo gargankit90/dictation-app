@@ -1,6 +1,6 @@
 //! The commands U6's Settings needs besides the ones it shares with
 //! onboarding: every control saves on change through a command that writes
-//! only its own field ([`use_cloud_engine`], [`use_local_model`]), like K1's `set_hotkey`, A1's
+//! only its own field ([`set_transcription`]), like K1's `set_hotkey`, A1's
 //! `set_share_usage_events` and S1's `set_launch_at_login`; so there is no
 //! form whose older values could overwrite another control's newer one.
 //!
@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 use dictation_core::local_models;
-use dictation_core::settings::{Provider, Settings, Transcription};
+use dictation_core::settings::Transcription;
 use dictation_pipeline::config::Config;
 use dictation_pipeline::hotkey_setting::HotkeyControl;
 use dictation_ports::{SecretStore, TranscribeError};
@@ -54,117 +54,59 @@ async fn write<S: SecretStore + 'static>(
     Ok(())
 }
 
-/// Dictates with `provider` and the user's own key from now on. Switching
-/// provider also switches to its default model.
+/// Dictates in the cloud (`OpenRouter` with the user's own key) or on this
+/// Mac from now on.
+///
+/// On this Mac with the model downloaded, it is loaded first
+/// ([`LiveEngine::preload_local`]) and the settings choose it only if that
+/// worked, so until then the engine in use stays in use. Takes seconds;
+/// Settings shows "Loading…" meanwhile. Not downloaded yet (U8's "Download
+/// and continue"), the settings choose it at once, so the choice survives a
+/// quit and the model becomes the engine as soon as its download finishes;
+/// until then the engine says the model isn't ready.
 #[tauri::command]
 #[specta::specta]
-pub async fn use_cloud_engine(
+pub async fn set_transcription(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
     hotkey: State<'_, ActiveHotkey>,
     usage: State<'_, Usage>,
-    provider: Provider,
+    transcription: Transcription,
 ) -> Result<(), String> {
     let (live, control) = (engine.inner().clone(), hotkey.0.clone());
     write(Arc::clone(&state.0), &usage, move |config| {
-        commands::write_change(config, &live, &control, |settings| {
-            choose_cloud(settings, provider);
-        })
-        .map_err(|error| error.to_string())
+        switch(config, &live, &control, transcription)
     })
     .await
 }
 
-fn choose_cloud(settings: &mut Settings, provider: Provider) {
-    if settings.provider != provider {
-        provider.default_model().clone_into(&mut settings.model);
-    }
-    settings.provider = provider;
-    settings.transcription = Transcription::Cloud;
-}
-
-/// Dictates with on-device model `id` from now on, once it has loaded: the
-/// model is loaded first ([`LiveEngine::preload_local`]) and the settings
-/// choose it only if that worked, so until then the engine in use stays in
-/// use (from another on-device model, it is reloaded if the new one fails).
-/// Takes seconds; Settings shows "Loading…" meanwhile.
-#[tauri::command]
-#[specta::specta]
-pub async fn use_local_model(
-    state: State<'_, AppConfig>,
-    engine: State<'_, LiveEngine>,
-    hotkey: State<'_, ActiveHotkey>,
-    usage: State<'_, Usage>,
-    id: String,
-) -> Result<(), String> {
-    let (live, control) = (engine.inner().clone(), hotkey.0.clone());
-    write(Arc::clone(&state.0), &usage, move |config| {
-        switch_to_local(config, &live, &control, &id)
-    })
-    .await
-}
-
-/// Chooses on-device model `id` before it is on this Mac (U8's "Download and
-/// continue"): the settings choose it now, so the choice survives a quit and
-/// the model becomes the engine as soon as its download finishes
-/// (`download_local_model` rebuilds the engine then). Until then the engine
-/// says the model isn't ready.
-#[tauri::command]
-#[specta::specta]
-pub async fn choose_local_model(
-    state: State<'_, AppConfig>,
-    engine: State<'_, LiveEngine>,
-    hotkey: State<'_, ActiveHotkey>,
-    usage: State<'_, Usage>,
-    id: String,
-) -> Result<(), String> {
-    let (live, control) = (engine.inner().clone(), hotkey.0.clone());
-    write(Arc::clone(&state.0), &usage, move |config| {
-        choose_local(config, &live, &control, &id)
-    })
-    .await
-}
-
-fn choose_local<S: SecretStore + 'static>(
+fn switch<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
     control: &HotkeyControl,
-    id: &str,
+    transcription: Transcription,
 ) -> Result<Changed, String> {
-    let model =
-        local_models::find(id).ok_or_else(|| format!("There is no on-device model {id:?}."))?;
-    commands::write_change(config, live, control, |settings| {
-        settings.transcription = Transcription::Local;
-        model.id.clone_into(&mut settings.local_model);
-    })
-    .map_err(|error| error.to_string())
-}
-
-fn switch_to_local<S: SecretStore + 'static>(
-    config: &Arc<Config<S>>,
-    live: &LiveEngine,
-    control: &HotkeyControl,
-    id: &str,
-) -> Result<Changed, String> {
-    let model =
-        local_models::find(id).ok_or_else(|| format!("There is no on-device model {id:?}."))?;
-    if let Err(error) = live.preload_local(model.id, None) {
-        // Whatever the settings still choose becomes current again.
-        live.rebuild(config);
-        return Err(format!(
-            "Couldn't load {}: {}",
-            model.name,
-            error.user_message()
-        ));
+    if transcription == Transcription::Local {
+        match live.preload_local() {
+            Ok(()) | Err(TranscribeError::ModelMissing) => {}
+            Err(error) => {
+                // Whatever the settings still choose becomes current again.
+                live.rebuild(config);
+                return Err(format!(
+                    "Couldn't load {}: {}",
+                    local_models::DEFAULT.name,
+                    error.user_message()
+                ));
+            }
+        }
     }
     commands::write_change(config, live, control, |settings| {
-        settings.transcription = Transcription::Local;
-        model.id.clone_into(&mut settings.local_model);
+        settings.transcription = transcription;
     })
     .map_err(|error| {
-        // The new model may already be live (from another on-device model
-        // it is published as it loads). The settings weren't written, so
-        // what they still choose becomes the engine again (review round 1).
+        // The model may already be live (from another on-device engine it
+        // is published as it loads). The settings weren't written, so what
+        // they still choose becomes the engine again (review round 1).
         live.rebuild(config);
         error.to_string()
     })
@@ -231,17 +173,16 @@ pub fn get_engine_status(
     ))
 }
 
-/// Deletes `provider`'s API key from the keychain (Remove key). Bounded
+/// Deletes the API key from the keychain (Remove key). Bounded
 /// like saving one.
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_api_key(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
-    provider: Provider,
 ) -> Result<(), String> {
     let (config, live) = (Arc::clone(&state.0), engine.inner().clone());
-    tauri::async_runtime::spawn_blocking(move || live.delete_key(&config, provider))
+    tauri::async_runtime::spawn_blocking(move || live.delete_key(&config))
         .await
         .map_err(|_| "the settings task crashed".to_owned())?
         .map_err(|error| {

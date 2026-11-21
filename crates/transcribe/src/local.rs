@@ -27,14 +27,14 @@ pub const SAMPLE_RATE: u32 = 16_000;
 /// Threading: `run` takes `&mut self` and may take seconds; callers run it on
 /// a blocking thread, one call at a time.
 pub trait SpeechModel: Send {
-    /// Transcribes `pcm` (16 kHz mono, `-1.0..=1.0`). `language` is an ISO
-    /// code the model supports, or `None` for its default.
+    /// Transcribes `pcm` (16 kHz mono, `-1.0..=1.0`); the model detects the
+    /// language.
     ///
     /// # Errors
     ///
     /// A short description of what failed, for the log. It never holds the
     /// audio or the text.
-    fn run(&mut self, pcm: &[f32], language: Option<&str>) -> Result<String, String>;
+    fn run(&mut self, pcm: &[f32]) -> Result<String, String>;
 }
 
 /// transcribe.cpp running a GGUF file.
@@ -61,13 +61,9 @@ impl CppModel {
 }
 
 impl SpeechModel for CppModel {
-    fn run(&mut self, pcm: &[f32], language: Option<&str>) -> Result<String, String> {
-        let options = transcribe_cpp::RunOptions {
-            language: language.map(str::to_owned),
-            ..transcribe_cpp::RunOptions::default()
-        };
+    fn run(&mut self, pcm: &[f32]) -> Result<String, String> {
         self.session
-            .run(pcm, &options)
+            .run(pcm, &transcribe_cpp::RunOptions::default())
             .map(|transcript| transcript.text)
             .map_err(|error| error.to_string())
     }
@@ -83,34 +79,15 @@ impl std::fmt::Debug for CppModel {
 #[derive(Clone)]
 pub struct LocalTranscriber {
     model: Arc<Mutex<Box<dyn SpeechModel>>>,
-    language: Option<String>,
 }
 
 impl LocalTranscriber {
-    /// Wraps a loaded model. `language` is passed to every run; give only a
-    /// language the model supports (or `None`).
+    /// Wraps a loaded model.
     #[must_use]
-    pub fn new(model: Box<dyn SpeechModel>, language: Option<String>) -> Self {
+    pub fn new(model: Box<dyn SpeechModel>) -> Self {
         Self {
             model: Arc::new(Mutex::new(model)),
-            language,
         }
-    }
-
-    /// The same loaded model with another language hint, so a settings save
-    /// that changes only the language doesn't load the model again.
-    #[must_use]
-    pub fn with_language(&self, language: Option<String>) -> Self {
-        Self {
-            model: Arc::clone(&self.model),
-            language,
-        }
-    }
-
-    /// The language hint passed to the model.
-    #[must_use]
-    pub fn language(&self) -> Option<&str> {
-        self.language.as_deref()
     }
 
     /// Whether `self` and `other` run the same loaded model.
@@ -122,9 +99,7 @@ impl LocalTranscriber {
 
 impl std::fmt::Debug for LocalTranscriber {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalTranscriber")
-            .field("language", &self.language)
-            .finish_non_exhaustive()
+        f.debug_struct("LocalTranscriber").finish_non_exhaustive()
     }
 }
 
@@ -140,13 +115,12 @@ impl Transcriber for LocalTranscriber {
             return Ok(String::new());
         }
         let model = Arc::clone(&self.model);
-        let language = self.language.clone();
         // The samples are copied once so the blocking task owns them; a
         // dictation is seconds of audio, so this is small next to the run.
         let samples = audio.samples.clone();
         let run = tokio::task::spawn_blocking(move || {
             let mut model = model.lock().unwrap_or_else(PoisonError::into_inner);
-            model.run(&samples, language.as_deref())
+            model.run(&samples)
         });
         // Dropping this future doesn't stop a run already started: the native
         // call can't be interrupted here. It finishes and its text is dropped.
@@ -169,8 +143,8 @@ mod tests {
 
     use super::*;
 
-    /// Each run: how many samples, and the language hint.
-    type Seen = Arc<Mutex<Vec<(usize, Option<String>)>>>;
+    /// Each run: how many samples.
+    type Seen = Arc<Mutex<Vec<usize>>>;
 
     /// Returns `reply`, and records what it was given.
     struct Fake {
@@ -181,12 +155,9 @@ mod tests {
     }
 
     impl SpeechModel for Fake {
-        fn run(&mut self, pcm: &[f32], language: Option<&str>) -> Result<String, String> {
+        fn run(&mut self, pcm: &[f32]) -> Result<String, String> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            self.seen
-                .lock()
-                .unwrap()
-                .push((pcm.len(), language.map(str::to_owned)));
+            self.seen.lock().unwrap().push(pcm.len());
             *self.thread.lock().unwrap() = Some(std::thread::current().id());
             self.reply.clone()
         }
@@ -223,16 +194,16 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn criterion_1_runs_the_model_on_16_khz_audio_and_returns_trimmed_text() {
         let (model, probe) = fake(Ok("  Hello from this Mac. \n"));
-        let engine = LocalTranscriber::new(model, Some("en".into()));
+        let engine = LocalTranscriber::new(model);
         let text = engine.transcribe(&audio(16_000, 32_000)).await.unwrap();
         assert_eq!(text, "Hello from this Mac.");
-        assert_eq!(*probe.seen.lock().unwrap(), [(32_000, Some("en".into()))]);
+        assert_eq!(*probe.seen.lock().unwrap(), [32_000]);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn criterion_6_the_run_is_off_the_calling_thread() {
         let (model, probe) = fake(Ok("x"));
-        let engine = LocalTranscriber::new(model, None);
+        let engine = LocalTranscriber::new(model);
         engine.transcribe(&audio(16_000, 10)).await.unwrap();
         let ran_on = probe.thread.lock().unwrap().unwrap();
         assert_ne!(ran_on, std::thread::current().id());
@@ -241,7 +212,7 @@ mod tests {
     #[tokio::test]
     async fn other_sample_rates_and_empty_audio_never_reach_the_model() {
         let (model, probe) = fake(Ok("x"));
-        let engine = LocalTranscriber::new(model, None);
+        let engine = LocalTranscriber::new(model);
         let error = engine.transcribe(&audio(44_100, 10)).await.unwrap_err();
         assert!(error.to_string().contains("16000 Hz"), "{error}");
         assert_eq!(engine.transcribe(&audio(16_000, 0)).await.unwrap(), "");
@@ -252,7 +223,7 @@ mod tests {
     async fn a_model_error_is_an_engine_error_cut_to_one_line() {
         let long = format!("decode failed\n{}", "x".repeat(2_000));
         let (model, _probe) = fake(Err(&long));
-        let engine = LocalTranscriber::new(model, None);
+        let engine = LocalTranscriber::new(model);
         let error = engine.transcribe(&audio(16_000, 10)).await.unwrap_err();
         let TranscribeError::Engine(text) = &error else {
             panic!("{error:?}");
@@ -261,28 +232,19 @@ mod tests {
         assert!(!error.to_string().contains('\n') && error.to_string().len() < 300);
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn criterion_6_a_language_change_keeps_the_loaded_model() {
-        let (model, probe) = fake(Ok("x"));
-        let english = LocalTranscriber::new(model, Some("en".into()));
-        let detect = english.with_language(None);
-        assert!(detect.shares_model(&english));
-        assert_eq!(detect.language(), None);
-        detect.transcribe(&audio(16_000, 5)).await.unwrap();
-        english.transcribe(&audio(16_000, 6)).await.unwrap();
-        assert_eq!(
-            *probe.seen.lock().unwrap(),
-            [(5, None), (6, Some("en".into()))]
-        );
+    #[test]
+    fn clones_share_the_model() {
+        let (model, _) = fake(Ok("x"));
+        let engine = LocalTranscriber::new(model);
+        assert!(engine.clone().shares_model(&engine));
         let (other, _) = fake(Ok("y"));
-        assert!(!LocalTranscriber::new(other, None).shares_model(&english));
-        assert!(format!("{english:?}").contains("LocalTranscriber"));
+        assert!(!LocalTranscriber::new(other).shares_model(&engine));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn overlapping_calls_queue_on_the_one_model() {
         let (model, probe) = fake(Ok("x"));
-        let engine = LocalTranscriber::new(model, None);
+        let engine = LocalTranscriber::new(model);
         let clip = audio(16_000, 5);
         let (a, b) = tokio::join!(engine.transcribe(&clip), engine.transcribe(&clip));
         assert!(a.is_ok() && b.is_ok());

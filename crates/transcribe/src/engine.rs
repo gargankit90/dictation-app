@@ -1,7 +1,7 @@
 //! The engine the app dictates with, rebuilt from the user's settings.
 //!
-//! [`Engine::from_settings`] turns the saved [`Settings`] (speech model)
-//! and the `OpenRouter` API key into a [`Remote`] engine: the
+//! [`Engine::remote`] turns the `OpenRouter` API key into a [`Remote`]
+//! engine: the
 //! [`OpenRouter`] speech engine with the default
 //! [`RetryPolicy`](dictation_core::retry::RetryPolicy), and the
 //! [`OpenRouterCleanup`] pass after it (Q2). When there
@@ -27,12 +27,9 @@
 
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
-use dictation_core::settings::Settings;
 use dictation_ports::{
     Audio, Cleaner, CleanupError, Secret, SecretError, TranscribeError, Transcriber,
 };
-
-use dictation_core::local_models::LocalModel;
 
 use crate::cleanup::OpenRouterCleanup;
 use crate::local::LocalTranscriber;
@@ -62,30 +59,22 @@ pub enum Engine {
 }
 
 impl Engine {
-    /// The engine for `settings`, with `key` as read from the keychain
-    /// (`Ok(None)`: none is saved).
+    /// The cloud engine with `key` as read from the keychain (`Ok(None)`:
+    /// none is saved).
     #[must_use]
-    pub fn from_settings(settings: &Settings, key: Result<Option<Secret>, SecretError>) -> Self {
-        Self::build(settings, key, None)
+    pub fn remote(key: Result<Option<Secret>, SecretError>) -> Self {
+        Self::build(key, None)
     }
 
-    /// As [`from_settings`](Self::from_settings), but sending requests to
-    /// `base_url` instead of the provider's own endpoint (tests point it at
-    /// a local server).
+    /// As [`remote`](Self::remote), but sending requests to `base_url`
+    /// instead of the provider's own endpoint (tests point it at a local
+    /// server).
     #[must_use]
-    pub fn from_settings_at(
-        settings: &Settings,
-        key: Result<Option<Secret>, SecretError>,
-        base_url: &str,
-    ) -> Self {
-        Self::build(settings, key, Some(base_url))
+    pub fn remote_at(key: Result<Option<Secret>, SecretError>, base_url: &str) -> Self {
+        Self::build(key, Some(base_url))
     }
 
-    fn build(
-        settings: &Settings,
-        key: Result<Option<Secret>, SecretError>,
-        base_url: Option<&str>,
-    ) -> Self {
+    fn build(key: Result<Option<Secret>, SecretError>, base_url: Option<&str>) -> Self {
         let key = match key {
             Ok(Some(key)) => key,
             Ok(None) => return Self::Unavailable(TranscribeError::MissingKey),
@@ -94,7 +83,7 @@ impl Engine {
                 return Self::Unavailable(TranscribeError::KeychainUnavailable(error.to_string()));
             }
         };
-        let mut config = Config::for_model(&settings.model);
+        let mut config = Config::openrouter();
         let base_url = base_url.unwrap_or(BASE_URL);
         base_url.clone_into(&mut config.base_url);
         let cleanup = match OpenRouterCleanup::at(base_url, key.clone()) {
@@ -162,16 +151,6 @@ impl Cleaner for Engine {
             Self::Mock(_) | Self::Local(_) | Self::Unavailable(_) => Err(CleanupError::Off),
         }
     }
-}
-
-/// The language hint for `model`: the saved language if the model speaks
-/// it, else `None` (its default). OrukQwen is English only, so a saved
-/// `de` must not reach it.
-#[must_use]
-pub fn local_language(model: &LocalModel, language: Option<&str>) -> Option<String> {
-    language
-        .filter(|code| model.speaks(code))
-        .map(str::to_owned)
 }
 
 /// Builds a fresh engine; may block on the keychain.
@@ -331,7 +310,6 @@ impl std::fmt::Debug for Transcribers {
 
 #[cfg(test)]
 mod tests {
-    use dictation_core::local_models;
 
     use super::*;
     use crate::local::SpeechModel;
@@ -339,17 +317,15 @@ mod tests {
     struct Says(&'static str);
 
     impl SpeechModel for Says {
-        fn run(&mut self, _: &[f32], _: Option<&str>) -> Result<String, String> {
+        fn run(&mut self, _: &[f32]) -> Result<String, String> {
             Ok(self.0.to_owned())
         }
     }
 
     #[test]
     fn a_staged_update_is_current_before_the_build_returns() {
-        let transcribers = Transcribers::new(Engine::Local(LocalTranscriber::new(
-            Box::new(Says("old")),
-            None,
-        )));
+        let transcribers =
+            Transcribers::new(Engine::Local(LocalTranscriber::new(Box::new(Says("old")))));
         let watch = transcribers.clone();
         transcribers.update_staged(|stage| {
             stage(Engine::Unavailable(TranscribeError::ModelLoading));
@@ -362,17 +338,9 @@ mod tests {
         assert_eq!(transcribers.name(), "mock");
     }
 
-    #[test]
-    fn only_a_language_the_model_speaks_is_passed_on() {
-        let oruk = local_models::find(local_models::DEFAULT_MODEL).unwrap();
-        assert_eq!(local_language(oruk, Some("en")).as_deref(), Some("en"));
-        assert_eq!(local_language(oruk, Some("hi")), None);
-        assert_eq!(local_language(oruk, None), None);
-    }
-
     #[tokio::test(flavor = "multi_thread")]
     async fn criterion_5_a_local_engine_dictates_through_transcribers() {
-        let local = LocalTranscriber::new(Box::new(Says("on device")), None);
+        let local = LocalTranscriber::new(Box::new(Says("on device")));
         let transcribers = Transcribers::new(Engine::Unavailable(TranscribeError::ModelMissing));
         let audio = Audio {
             sample_rate: 16_000,

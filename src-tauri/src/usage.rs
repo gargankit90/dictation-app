@@ -16,12 +16,12 @@ use std::time::Duration;
 use dictation_core::diagnostics::ErrorCode;
 use dictation_core::error::DictationError;
 use dictation_core::onboarding::{Readiness, Step};
-use dictation_core::settings::{Provider, Settings, Transcription};
+use dictation_core::settings::{Settings, Transcription};
 use dictation_pipeline::config::Config as AppSettingsFile;
 use dictation_pipeline::usage::SharingGate;
 use dictation_ports::{
-    Arch, EngineChoice, EngineKind, Event, OnboardingStep, Permission, PermissionStatus,
-    Permissions, SecretStore, SettingName, SetupProblem, Telemetry, Version,
+    Arch, EngineKind, Event, OnboardingStep, Permission, PermissionStatus, Permissions,
+    SecretStore, SettingName, SetupProblem, Telemetry, Version,
 };
 use dictation_telemetry::{Config, PostHogTelemetry, SentryReporter, errors};
 use dictation_transcribe::engine::Engine;
@@ -186,16 +186,12 @@ pub fn settings_change(before: &Settings, after: &Settings) -> SettingsChange {
     if before.history_limit != after.history_limit {
         changed(SettingName::HistoryLimit);
     }
-    // The engine: on-device or cloud (L1), or another cloud provider.
-    let engine_changed = before.transcription != after.transcription
-        || (after.transcription == Transcription::Cloud && before.provider != after.provider);
-    if engine_changed {
-        events.push(Event::EngineSelected {
-            engine: match after.transcription {
-                Transcription::Local => EngineChoice::Local,
-                Transcription::Cloud => EngineChoice::Cloud(after.provider),
-            },
-        });
+    // The engine: on-device or cloud (L1).
+    if before.transcription != after.transcription {
+        events.push(engine_selected(match after.transcription {
+            Transcription::Local => EngineKind::Local,
+            Transcription::Cloud => EngineKind::Cloud,
+        }));
     }
     SettingsChange {
         events,
@@ -204,12 +200,10 @@ pub fn settings_change(before: &Settings, after: &Settings) -> SettingsChange {
     }
 }
 
-/// The `engine_selected` event for `provider`.
+/// The `engine_selected` event for `kind`.
 #[must_use]
-pub fn engine_selected(provider: Provider) -> Event {
-    Event::EngineSelected {
-        engine: EngineChoice::Cloud(provider),
-    }
+pub fn engine_selected(kind: EngineKind) -> Event {
+    Event::EngineSelected { kind }
 }
 
 /// Where `engine` transcribes, for `dictation_finished` (L1): on this
@@ -400,25 +394,18 @@ mod tests {
         let cloud = Settings::default();
         let local = Settings {
             transcription: Transcription::Local,
-            local_model: dictation_core::local_models::DEFAULT_MODEL.into(),
             ..Settings::default()
         };
         assert_eq!(
             settings_change(&cloud, &local).events,
             [Event::EngineSelected {
-                engine: EngineChoice::Local
+                kind: EngineKind::Local
             }]
         );
         assert_eq!(
             settings_change(&local, &cloud).events,
-            [engine_selected(Provider::OpenRouter)]
+            [engine_selected(EngineKind::Cloud)]
         );
-        // Another local model is not an engine change, and its id isn't sent.
-        let other = Settings {
-            local_model: "another-model".into(),
-            ..local.clone()
-        };
-        assert!(settings_change(&local, &other).events.is_empty());
     }
 
     #[test]
@@ -426,11 +413,11 @@ mod tests {
         use dictation_transcribe::local::{LocalTranscriber, SpeechModel};
         struct Silent;
         impl SpeechModel for Silent {
-            fn run(&mut self, _: &[f32], _: Option<&str>) -> Result<String, String> {
+            fn run(&mut self, _: &[f32]) -> Result<String, String> {
                 Ok(String::new())
             }
         }
-        let local = Engine::Local(LocalTranscriber::new(Box::new(Silent), None));
+        let local = Engine::Local(LocalTranscriber::new(Box::new(Silent)));
         assert_eq!(engine_kind(&local), EngineKind::Local);
         let mock = Engine::Mock(dictation_transcribe::mock::MockTranscriber::default());
         assert_eq!(engine_kind(&mock), EngineKind::Cloud);

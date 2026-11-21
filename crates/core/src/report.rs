@@ -17,7 +17,6 @@ use std::fmt::Write as _;
 use crate::diagnostics::LoggedError;
 use crate::hotkey_spec::{HotkeySpec, keycap_label};
 use crate::redact;
-use crate::settings::Provider;
 
 /// How many recent errors the report lists.
 pub const MAX_ERRORS: usize = 10;
@@ -52,8 +51,8 @@ impl Access {
 /// Which engine transcribes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineInfo<'a> {
-    /// A cloud provider (never its key, never the account).
-    Cloud(Provider),
+    /// `OpenRouter` (never its key, never the account).
+    Cloud,
     /// A model on this Mac, by its catalogue id.
     Local(&'a str),
 }
@@ -153,7 +152,7 @@ pub fn render(input: &ReportInput<'_>) -> String {
     let _ = writeln!(out, "accessibility: {}", input.accessibility.as_str());
     let _ = writeln!(out, "dictation_key: {}", hotkey_label(input.hotkey));
     let _ = match input.engine {
-        EngineInfo::Cloud(provider) => writeln!(out, "engine: cloud ({provider})"),
+        EngineInfo::Cloud => writeln!(out, "engine: cloud (openrouter)"),
         EngineInfo::Local(model) => writeln!(out, "engine: local ({})", field(model)),
     };
     let ready = match input.engine_ready {
@@ -216,7 +215,7 @@ mod tests {
             microphone: Access::Denied,
             accessibility: Access::Granted,
             hotkey: "RightAlt",
-            engine: EngineInfo::Cloud(Provider::OpenRouter),
+            engine: EngineInfo::Cloud,
             engine_ready: Some(true),
             errors,
             analytics_on: true,

@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use dictation_core::cleanup;
 use dictation_core::retry::RetryPolicy;
-use dictation_core::settings::Settings;
 use dictation_ports::{Audio, Cleaner, CleanupError, Secret, TranscribeError, Transcriber};
 use dictation_transcribe::cleanup::OpenRouterCleanup;
 use dictation_transcribe::engine::{Engine, Transcribers};
@@ -210,8 +209,7 @@ async fn a_slow_cleanup_times_out() {
 #[tokio::test(flavor = "multi_thread")]
 async fn transcribers_clean_with_the_current_engine() {
     let server = serve("/api/v1/chat/completions", chat_reply("Cleaned.")).await;
-    let engine = Engine::from_settings_at(
-        &Settings::default(),
+    let engine = Engine::remote_at(
         Ok(Some(Secret::new(KEY))),
         &format!("{}/api/v1", server.uri()),
     );
@@ -219,7 +217,7 @@ async fn transcribers_clean_with_the_current_engine() {
     assert_eq!(transcribers.clean("raw").await.unwrap(), "Cleaned.");
     transcribers.update(|| Engine::Mock(MockTranscriber::new("mocked")));
     assert_eq!(transcribers.clean("raw").await, Err(CleanupError::Off));
-    let none = Engine::from_settings(&Settings::default(), Ok(None));
+    let none = Engine::remote(Ok(None));
     transcribers.update(|| none);
     assert_eq!(transcribers.clean("raw").await, Err(CleanupError::NoKey));
 }

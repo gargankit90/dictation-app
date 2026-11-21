@@ -10,8 +10,6 @@ import { BROKEN, messageOf } from "../messages";
 import { validateKey } from "../validation";
 import { PROVIDER_NAME } from "./modelRow";
 
-const PROVIDER = "openrouter";
-
 /** Shown once the key is saved. */
 export const CONNECTED = "✓ Connected to OpenRouter";
 /** What the first screen says before the button (owner-approved, Q3). */
@@ -51,7 +49,7 @@ export function useConnection({ onConnected, refreshEngine }: Options) {
     const run = lookup.current;
     let next: Status;
     try {
-      const hint = await commands.savedKeyHint(PROVIDER);
+      const hint = await commands.savedKeyHint();
       if (hint.status === "error") {
         next = { state: "error", message: messageOf(hint.error) };
       } else if (hint.data === null) {
@@ -144,11 +142,11 @@ export function useConnection({ onConnected, refreshEngine }: Options) {
     setBusy("saving");
     let failed: string | null = null;
     try {
-      const tested = await commands.testApiKey(PROVIDER, key);
+      const tested = await commands.testApiKey(key);
       if (tested.status === "error") {
         failed = tested.error.message;
       } else {
-        const stored = await commands.setApiKey(PROVIDER, key);
+        const stored = await commands.setApiKey(key);
         if (stored.status === "error") failed = `${KEY_NOT_SAVED}: ${messageOf(stored.error)}`;
       }
     } catch {
@@ -165,7 +163,7 @@ export function useConnection({ onConnected, refreshEngine }: Options) {
     setBusy("disconnecting");
     let failed: string | null = null;
     try {
-      const result = await commands.deleteApiKey(PROVIDER);
+      const result = await commands.deleteApiKey();
       if (result.status === "error") failed = messageOf(result.error);
     } catch {
       failed = BROKEN;

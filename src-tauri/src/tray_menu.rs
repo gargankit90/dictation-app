@@ -234,7 +234,7 @@ fn read_ambient(app: &AppHandle) -> Ambient {
                 .unwrap_or_default();
             Download {
                 chosen: settings.transcription == Transcription::Local
-                    && settings.local_model == model.id,
+                    && model.id == dictation_core::local_models::DEFAULT_MODEL,
             }
         });
     let (mic, accessibility) = app.try_state::<onboarding::OsPermissions>().map_or(

@@ -6,7 +6,6 @@
 
 use std::time::Duration;
 
-use dictation_core::settings::{Provider, Settings};
 use dictation_ports::{Audio, Secret, SecretError, TranscribeError, Transcriber};
 use dictation_transcribe::engine::{Engine, Transcribers};
 use dictation_transcribe::mock::MockTranscriber;
@@ -25,19 +24,12 @@ fn audio() -> Audio {
     }
 }
 
-fn settings(model: &str) -> Settings {
-    Settings {
-        model: model.into(),
-        ..Settings::default()
-    }
-}
-
 fn key(value: &str) -> Result<Option<Secret>, SecretError> {
     Ok(Some(Secret::new(value)))
 }
 
-fn engine_at(server: &MockServer, settings: &Settings, key: &str) -> Engine {
-    Engine::from_settings_at(settings, self::key(key), &server.uri())
+fn engine_at(server: &MockServer, key: &str) -> Engine {
+    Engine::remote_at(self::key(key), &server.uri())
 }
 
 fn reply() -> ResponseTemplate {
@@ -55,7 +47,7 @@ async fn provider(response: ResponseTemplate) -> MockServer {
 }
 
 #[tokio::test]
-async fn with_a_key_the_settings_decide_the_request() {
+async fn with_a_key_the_request_carries_the_model_and_key() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/audio/transcriptions"))
@@ -63,13 +55,13 @@ async fn with_a_key_the_settings_decide_the_request() {
         .and(|request: &Request| {
             // The body holds the WAV bytes too, so it isn't valid UTF-8.
             let body = String::from_utf8_lossy(&request.body);
-            body.contains("whisper-test-model") && !body.contains(r#""language""#)
+            body.contains("openai/gpt-4o-mini-transcribe") && !body.contains(r#""language""#)
         })
         .respond_with(reply())
         .expect(1)
         .mount(&server)
         .await;
-    let engine = engine_at(&server, &settings("whisper-test-model"), KEY);
+    let engine = engine_at(&server, KEY);
     assert_eq!(engine.name(), "remote");
     assert_eq!(engine.transcribe(&audio()).await.unwrap(), TRANSCRIPT);
 }
@@ -77,7 +69,7 @@ async fn with_a_key_the_settings_decide_the_request() {
 #[tokio::test]
 async fn without_a_key_dictation_fails_at_once_and_sends_nothing() {
     let server = provider(reply()).await;
-    let engine = Engine::from_settings_at(&Settings::default(), Ok(None), &server.uri());
+    let engine = Engine::remote_at(Ok(None), &server.uri());
     assert_eq!(engine.name(), "unavailable");
     assert_eq!(
         engine.transcribe(&audio()).await,
@@ -95,7 +87,7 @@ async fn an_unreadable_keychain_is_a_keychain_error_that_says_why() {
             "keychain error: locked",
         ),
     ] {
-        let engine = Engine::from_settings(&Settings::default(), Err(denied));
+        let engine = Engine::remote(Err(denied));
         let Err(error @ TranscribeError::KeychainUnavailable(_)) =
             engine.transcribe(&audio()).await
         else {
@@ -131,7 +123,7 @@ async fn each_provider_error_maps_to_its_user_message_and_the_key_stays_out() {
                 .set_body_string(format!("bad key {KEY}")),
         )
         .await;
-        let engine = engine_at(&server, &Settings::default(), KEY);
+        let engine = engine_at(&server, KEY);
         let got = engine.transcribe(&audio()).await.unwrap_err();
         assert_eq!(got, error, "HTTP {status}");
         assert_eq!(
@@ -161,7 +153,7 @@ async fn a_provider_hiccup_is_retried_and_the_dictation_still_works() {
         .respond_with(reply())
         .mount(&server)
         .await;
-    let engine = engine_at(&server, &Settings::default(), KEY);
+    let engine = engine_at(&server, KEY);
     assert_eq!(engine.transcribe(&audio()).await.unwrap(), TRANSCRIPT);
     assert_eq!(server.received_requests().await.unwrap().len(), 2);
 }
@@ -173,11 +165,7 @@ async fn an_unreachable_provider_is_a_network_error() {
         .local_addr()
         .unwrap()
         .port();
-    let engine = Engine::from_settings_at(
-        &Settings::default(),
-        key(KEY),
-        &format!("http://127.0.0.1:{port}"),
-    );
+    let engine = Engine::remote_at(key(KEY), &format!("http://127.0.0.1:{port}"));
     let error = engine.transcribe(&audio()).await.unwrap_err();
     assert!(matches!(error, TranscribeError::Network(_)), "{error:?}");
     assert!(!error.to_string().contains(KEY));
@@ -195,16 +183,16 @@ async fn a_new_engine_replaces_the_old_one_for_the_next_dictation() {
     );
 
     // A wrong key is saved: the provider says no.
-    transcribers.update(|| engine_at(&first, &Settings::default(), OTHER_KEY));
+    transcribers.update(|| engine_at(&first, OTHER_KEY));
     assert_eq!(transcribers.name(), "remote");
     assert_eq!(
         transcribers.transcribe(&audio()).await,
         Err(TranscribeError::InvalidKey)
     );
 
-    // The settings change (another server stands in for another provider):
-    // the very next dictation uses it, with the new key.
-    transcribers.update(|| engine_at(&second, &settings("mistralai/voxtral-mini-3b-2507"), KEY));
+    // Another key is saved (another server stands in for the provider):
+    // the very next dictation uses it.
+    transcribers.update(|| engine_at(&second, KEY));
     assert_eq!(transcribers.transcribe(&audio()).await.unwrap(), TRANSCRIPT);
     assert_eq!(first.received_requests().await.unwrap().len(), 1);
     let sent = second.received_requests().await.unwrap();
@@ -218,13 +206,13 @@ async fn a_new_engine_replaces_the_old_one_for_the_next_dictation() {
             .unwrap(),
         format!("Bearer {KEY}")
     );
-    assert!(String::from_utf8_lossy(&sent[0].body).contains("mistralai/voxtral-mini-3b-2507"));
+    assert!(String::from_utf8_lossy(&sent[0].body).contains("openai/gpt-4o-mini-transcribe"));
 }
 
 #[tokio::test]
 async fn a_transcription_in_flight_finishes_with_the_engine_it_started_with() {
     let slow = provider(reply().set_delay(Duration::from_millis(300))).await;
-    let transcribers = Transcribers::new(engine_at(&slow, &Settings::default(), KEY));
+    let transcribers = Transcribers::new(engine_at(&slow, KEY));
     let running = {
         let transcribers = transcribers.clone();
         tokio::spawn(async move { transcribers.transcribe(&audio()).await })
@@ -260,24 +248,10 @@ async fn clones_share_the_engine_and_the_mock_passes_through() {
 #[tokio::test]
 async fn the_debug_output_never_shows_the_key() {
     let server = provider(reply()).await;
-    let transcribers = Transcribers::new(engine_at(&server, &Settings::default(), KEY));
+    let transcribers = Transcribers::new(engine_at(&server, KEY));
     assert!(!format!("{transcribers:?}").contains(KEY));
-    if let Engine::Remote(engine) = engine_at(&server, &Settings::default(), KEY) {
+    if let Engine::Remote(engine) = engine_at(&server, KEY) {
         assert!(!format!("{engine:?}").contains(KEY));
-    }
-}
-
-#[test]
-fn the_provider_picks_the_default_endpoint() {
-    // Built, not called: no request leaves the test.
-    for provider in Provider::ALL {
-        let settings = Settings {
-            provider,
-            model: provider.default_model().to_owned(),
-            ..Settings::default()
-        };
-        let engine = Engine::from_settings(&settings, key(KEY));
-        assert_eq!(engine.name(), "remote", "{provider}");
     }
 }
 

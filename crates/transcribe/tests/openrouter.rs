@@ -47,7 +47,6 @@ fn config(server: &MockServer) -> Config {
     Config {
         base_url: format!("{}/api/v1/", server.uri()),
         model: "openai/gpt-4o-mini-transcribe".into(),
-        prompt: None,
         privacy: dictation_core::cloud_models::PrivacyFilter::DenyDataCollection,
         timeout: Duration::from_secs(5),
         timeout_grows_with_audio: false,

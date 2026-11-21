@@ -68,8 +68,8 @@ pub use opener::Opener;
 pub use permissions::{PermissionError, PermissionStatus, Permissions};
 pub use secrets::{Secret, SecretError, SecretStore};
 pub use telemetry::{
-    Arch, CleanupOutcome, DurationBucket, EngineChoice, EngineKind, ErrorReporter, ErrorType,
-    Event, LatencyBucket, NoErrorReporter, NoTelemetry, OnboardingStep, SettingName, SetupProblem,
+    Arch, CleanupOutcome, DurationBucket, EngineKind, ErrorReporter, ErrorType, Event,
+    LatencyBucket, NoErrorReporter, NoTelemetry, OnboardingStep, SettingName, SetupProblem,
     Telemetry, Version,
 };
 pub use transcribe::{TranscribeError, Transcriber};

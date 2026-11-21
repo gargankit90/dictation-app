@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use dictation_core::coordinator::Phase;
-use dictation_core::settings::{Provider, Settings};
+use dictation_core::settings::Settings;
 use dictation_pipeline::config::Config;
 use dictation_pipeline::history::{HISTORY_FILE, History, Recording};
 use dictation_pipeline::pipeline::{Config as PipelineConfig, Pipeline, Ports, UiEvent};
@@ -339,7 +339,7 @@ async fn dictate_everything(dir: &Path) {
     // Settings with the old key, saved before startup.
     let secrets = MemSecretStore::new();
     let config = Arc::new(Config::new(dir.join("config"), secrets));
-    config.set_api_key(Provider::OpenRouter, OLD_KEY).unwrap();
+    config.set_api_key(OLD_KEY).unwrap();
     let transcribers = Transcribers::new(starting());
     let live = LiveEngine::follow(transcribers.clone())
         .at(&server.uri())
@@ -380,10 +380,7 @@ async fn dictate_everything(dir: &Path) {
     // as the command does.
     let (save_config, save_live) = (Arc::clone(&config), live.clone());
     tokio::task::spawn_blocking(move || {
-        changed(&save_config, &save_live, |c| {
-            c.set_api_key(Provider::OpenRouter, NEW_KEY)
-        })
-        .unwrap();
+        changed(&save_config, &save_live, |c| c.set_api_key(NEW_KEY)).unwrap();
     })
     .await
     .unwrap();

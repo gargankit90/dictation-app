@@ -7,7 +7,6 @@ function model(update: Partial<LocalModelInfo_Serialize> = {}): LocalModelInfo_S
     id: "parakeet",
     name: "Parakeet Unified 0.6B",
     languages: "English only",
-    language_codes: ["en"],
     size_bytes: 477_000_000,
     downloaded_bytes: 0,
     state: "missing",
@@ -19,25 +18,22 @@ function model(update: Partial<LocalModelInfo_Serialize> = {}): LocalModelInfo_S
   };
 }
 
-const QWEN = model({ id: "qwen", name: "Qwen3-ASR 0.6B", language_codes: ["en", "hi", "de"] });
 const PARAKEET = model();
 
 const SETTINGS = {
   version: 2,
-  provider: "openrouter" as const,
-  model: "openai/gpt-4o-mini-transcribe",
   hotkey: "RightAlt",
   launch_at_login: false,
   transcription: "local" as const,
-  local_model: "parakeet",
   share_usage_events: true,
   history_limit: 25,
 };
 
 describe("recommendedModel", () => {
-  it("is the English model, else the first", () => {
-    expect(recommendedModel([QWEN, PARAKEET])?.id).toBe("parakeet");
-    expect(recommendedModel([QWEN])?.id).toBe("qwen");
+  it("is the catalogue's default, else the first", () => {
+    const other = model({ id: "other", default: false });
+    expect(recommendedModel([other, PARAKEET])?.id).toBe("parakeet");
+    expect(recommendedModel([other])?.id).toBe("other");
     expect(recommendedModel([])).toBeNull();
   });
 });

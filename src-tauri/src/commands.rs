@@ -26,12 +26,14 @@
 use std::sync::Arc;
 
 use dictation_core::onboarding::Step;
-use dictation_core::settings::{Provider, Settings};
+use dictation_core::settings::Settings;
 use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, UndoFailed};
 use dictation_pipeline::launch::LoginSync;
 use dictation_platform::secrets::KeychainSecretStore;
-use dictation_ports::{LaunchAtLogin, Permission, SecretStore, SetupProblem, TranscribeError};
+use dictation_ports::{
+    EngineKind, LaunchAtLogin, Permission, SecretStore, SetupProblem, TranscribeError,
+};
 use dictation_transcribe::check_key::check_key;
 use dictation_transcribe::openrouter;
 use serde::Serialize;
@@ -461,7 +463,7 @@ fn write_sharing<S: SecretStore>(
     Ok(())
 }
 
-/// Stores `key` as `provider`'s API key in the keychain. Write-only.
+/// Stores `key` as the API key in the keychain. Write-only.
 // Bounded: a keychain that never answers gives an error after
 // `engine::KEY_READ_TIMEOUT`, and a retry doesn't start another write.
 #[tauri::command]
@@ -470,11 +472,10 @@ pub async fn set_api_key(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
     usage: State<'_, Usage>,
-    provider: Provider,
     key: String,
 ) -> Result<(), String> {
-    save_key(&state.0, engine.inner(), provider, key).await?;
-    usage.record(usage::engine_selected(provider));
+    save_key(&state.0, engine.inner(), key).await?;
+    usage.record(usage::engine_selected(EngineKind::Cloud));
     Ok(())
 }
 
@@ -484,11 +485,10 @@ pub async fn set_api_key(
 pub(crate) async fn save_key<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
-    provider: Provider,
     key: String,
 ) -> Result<(), String> {
     let (config, live) = (Arc::clone(config), live.clone());
-    tauri::async_runtime::spawn_blocking(move || live.write_key(&config, provider, key))
+    tauri::async_runtime::spawn_blocking(move || live.write_key(&config, key))
         .await
         .map_err(|_| "the settings task crashed".to_owned())?
         .map_err(|error| {
@@ -497,16 +497,15 @@ pub(crate) async fn save_key<S: SecretStore + 'static>(
         })
 }
 
-/// Whether `provider` has a key stored (for the keychain tests; the UI asks
+/// Whether a key is stored (for the keychain tests; the UI asks
 /// `saved_key_hint`).
 #[cfg(test)]
 async fn has_key<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
-    provider: Provider,
 ) -> Result<bool, String> {
     let (config, live) = (Arc::clone(config), live.clone());
-    tauri::async_runtime::spawn_blocking(move || live.read_key(&config, provider))
+    tauri::async_runtime::spawn_blocking(move || live.read_key(&config))
         .await
         .map_err(|_| "the settings task crashed".to_owned())?
         .map(|key| key.is_some())
@@ -553,17 +552,13 @@ impl KeyTestError {
 }
 
 /// The provider's name for messages.
-fn provider_name(provider: Provider) -> &'static str {
-    match provider {
-        Provider::OpenRouter => "OpenRouter",
-    }
-}
+const PROVIDER_NAME: &str = "OpenRouter";
 
 /// The user-facing error for a failed check. The messages are fixed text
 /// plus the engine's own detail, which never holds the key, the audio or a
 /// transcript (`TranscribeError`).
-fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
-    let name = provider_name(provider);
+fn describe(error: &TranscribeError) -> KeyTestError {
+    let name = PROVIDER_NAME;
     match error {
         TranscribeError::MissingKey => KeyTestError::new(
             KeyTestKind::NoKey,
@@ -622,16 +617,15 @@ fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
 }
 
 /// Tests `typed`, or the stored key if `typed` is `None`, against
-/// `provider` at `base_url`. A typed key is only used for this request;
+/// `OpenRouter` at `base_url`. A typed key is only used for this request;
 /// it is not stored (saving it is `set_api_key`'s job).
 async fn key_test<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
-    provider: Provider,
     typed: Option<String>,
     base_url: &str,
 ) -> Result<(), KeyTestError> {
-    let name = provider_name(provider);
+    let name = PROVIDER_NAME;
     let (key, source) = match typed {
         Some(typed) => {
             let key = config::validate_key(&typed).map_err(|error| match error {
@@ -647,7 +641,7 @@ async fn key_test<S: SecretStore + 'static>(
             // never answers is an error here, not a button stuck on
             // "Testing…", and a retry doesn't start another thread.
             let (stored, live) = (Arc::clone(config), live.clone());
-            let stored = tokio::task::spawn_blocking(move || live.read_key(&stored, provider))
+            let stored = tokio::task::spawn_blocking(move || live.read_key(&stored))
                 .await
                 .map_err(|_| KeyTestError::new(KeyTestKind::Keychain, "the keychain task crashed"))?
                 .map_err(|error| {
@@ -671,23 +665,22 @@ async fn key_test<S: SecretStore + 'static>(
     };
     let result = check_key(engine, key).await;
     match &result {
-        Ok(()) => tracing::info!(%provider, source, "API key works"),
-        Err(error) => tracing::warn!(%provider, source, %error, "API key test failed"),
+        Ok(()) => tracing::info!(source, "API key works"),
+        Err(error) => tracing::warn!(source, %error, "API key test failed"),
     }
-    result.map_err(|error| describe(provider, &error))
+    result.map_err(|error| describe(&error))
 }
 
-/// Tests the saved key of `provider` (Troubleshoot's "Test connection").
+/// Tests the saved key (Troubleshoot's "Test connection").
 pub(crate) async fn test_saved_key(
     config: &Arc<Config<KeychainSecretStore>>,
     live: &LiveEngine,
-    provider: Provider,
     base_url: &str,
 ) -> Result<(), KeyTestError> {
-    key_test(config, live, provider, None, base_url).await
+    key_test(config, live, None, base_url).await
 }
 
-/// Tests an API key with a short silent clip through `provider`'s
+/// Tests an API key with a short silent clip through `OpenRouter`'s
 /// transcription endpoint: the key typed in the form (`key`, used for this
 /// request only and not stored), or the saved one if `key` is `None`. The
 /// key never comes back; the result is success or a [`KeyTestError`].
@@ -696,11 +689,10 @@ pub(crate) async fn test_saved_key(
 pub async fn test_api_key(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
-    provider: Provider,
     key: Option<String>,
 ) -> Result<(), KeyTestError> {
-    let base_url = engine.provider_base_url(provider);
-    key_test(&state.0, engine.inner(), provider, key, &base_url).await
+    let base_url = engine.provider_base_url();
+    key_test(&state.0, engine.inner(), key, &base_url).await
 }
 
 /// The view the settings window shows and, for onboarding (M5.2), the step
@@ -899,14 +891,12 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::open_issue,
         crate::diagnostics::take_window_request,
         crate::diagnostics::reveal_log_file,
-        crate::preferences::use_cloud_engine,
-        crate::preferences::use_local_model,
+        crate::preferences::set_transcription,
         crate::preferences::get_engine_status,
         crate::preferences::delete_api_key,
         crate::preferences::open_link,
         crate::preferences::get_app_info,
         crate::preferences::check_for_updates,
-        crate::preferences::choose_local_model,
         crate::history::list_history,
         crate::history::copy_history_entry,
         crate::history::delete_history_entry,
@@ -1002,39 +992,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_ui_default_models_match_core() {
-        let names = std::fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/settings/modelRow.ts"),
-        )
-        .unwrap();
-        let provider = format!(
-            "PROVIDER_NAME = \"{}\"",
-            provider_name(Provider::OpenRouter)
-        );
-        assert!(
-            names.contains(&provider),
-            "src/settings/modelRow.ts lacks {provider}"
-        );
-        for (constant, id) in [
-            (
-                "SPEECH_MODEL_NAME",
-                dictation_core::cloud_models::DEFAULT_SPEECH,
-            ),
-            (
-                "CLEANUP_MODEL_NAME",
-                dictation_core::cloud_models::DEFAULT_CLEANUP,
-            ),
-        ] {
-            let name = dictation_core::cloud_models::find(id).unwrap().display_name;
-            let entry = format!("{constant} = \"{name}\"");
-            assert!(
-                names.contains(&entry),
-                "src/settings/modelRow.ts lacks {entry}"
-            );
-        }
-    }
-
     /// The field names of a generated TypeScript object type's body.
     fn field_names(body: &str) -> Vec<&str> {
         body.lines()
@@ -1084,12 +1041,9 @@ mod tests {
             fields,
             [
                 "version",
-                "provider",
-                "model",
                 "hotkey",
                 "launch_at_login",
                 "transcription",
-                "local_model",
                 "share_usage_events",
                 "history_limit"
             ]
@@ -1106,7 +1060,6 @@ mod tests {
                 "id",
                 "name",
                 "languages",
-                "language_codes",
                 "size_bytes",
                 "downloaded_bytes",
                 "state",
@@ -1567,8 +1520,8 @@ mod tests {
         fn invalid_settings_never_change_the_hotkey() {
             for bad in [
                 Settings {
-                    model: String::new(),
                     hotkey: "F6".into(),
+                    history_limit: 7,
                     ..on()
                 },
                 Settings {
@@ -1613,7 +1566,7 @@ mod tests {
         fn invalid_settings_are_not_saved() {
             let (config, dir) = config();
             let bad = Settings {
-                model: String::new(),
+                history_limit: 7,
                 ..on()
             };
             let (hotkey, _) = listening();
@@ -1628,6 +1581,7 @@ mod tests {
         use std::sync::{Condvar, Mutex};
         use std::time::Duration;
 
+        use dictation_core::settings::API_KEY_NAME;
         use dictation_platform::fakes::MemSecretStore;
         use dictation_ports::{Secret, SecretError};
 
@@ -1675,7 +1629,7 @@ mod tests {
 
             fn stored(&self) -> Option<String> {
                 self.inner
-                    .get(Provider::OpenRouter.key_name())
+                    .get(API_KEY_NAME)
                     .unwrap()
                     .map(|key| key.expose().to_owned())
             }
@@ -1726,23 +1680,17 @@ mod tests {
             let quick = live.clone().with_key_timeout(SHORT);
 
             for attempt in 1..=3 {
-                let error = tokio::time::timeout(
-                    LIMIT,
-                    save_key(&config, &quick, Provider::OpenRouter, FIRST.into()),
-                )
-                .await
-                .expect("the save never returned")
-                .unwrap_err();
+                let error = tokio::time::timeout(LIMIT, save_key(&config, &quick, FIRST.into()))
+                    .await
+                    .expect("the save never returned")
+                    .unwrap_err();
                 assert!(
                     error.contains("no answer from the keychain"),
                     "{attempt}: {error}"
                 );
                 assert!(error.contains("may not be saved"), "{error}");
                 assert!(!error.contains(FIRST));
-                assert_eq!(
-                    has_key(&config, &live, Provider::OpenRouter).await,
-                    Ok(false)
-                );
+                assert_eq!(has_key(&config, &live).await, Ok(false));
             }
             assert_eq!(
                 store.asked(),
@@ -1755,14 +1703,8 @@ mod tests {
             landed
                 .recv_timeout(LIMIT)
                 .expect("the late write never landed");
-            assert_eq!(
-                has_key(&config, &live, Provider::OpenRouter).await,
-                Ok(true)
-            );
-            assert_eq!(
-                save_key(&config, &live, Provider::OpenRouter, NEWER.into()).await,
-                Ok(())
-            );
+            assert_eq!(has_key(&config, &live).await, Ok(true));
+            assert_eq!(save_key(&config, &live, NEWER.into()).await, Ok(()));
             assert_eq!(store.stored().as_deref(), Some(NEWER));
         }
 
@@ -1774,15 +1716,11 @@ mod tests {
             let (config, store, landed) = rig();
             let live = LiveEngine::fixed();
             let quick = live.clone().with_key_timeout(SHORT);
-            assert!(
-                save_key(&config, &quick, Provider::OpenRouter, FIRST.into())
-                    .await
-                    .is_err()
-            );
+            assert!(save_key(&config, &quick, FIRST.into()).await.is_err());
 
             let newer = tokio::spawn({
                 let (config, live) = (Arc::clone(&config), live.clone());
-                async move { save_key(&config, &live, Provider::OpenRouter, NEWER.into()).await }
+                async move { save_key(&config, &live, NEWER.into()).await }
             });
             let writes = live.writes().clone();
             let queued = tokio::task::spawn_blocking(move || writes.wait_queued(1, LIMIT))
@@ -1812,12 +1750,8 @@ mod tests {
         async fn a_key_that_cant_be_a_key_never_waits_behind_a_stuck_write() {
             let (config, store, _landed) = rig();
             let live = LiveEngine::fixed().with_key_timeout(SHORT);
-            assert!(
-                save_key(&config, &live, Provider::OpenRouter, FIRST.into())
-                    .await
-                    .is_err()
-            );
-            let error = save_key(&config, &live, Provider::OpenRouter, "two words".into())
+            assert!(save_key(&config, &live, FIRST.into()).await.is_err());
+            let error = save_key(&config, &live, "two words".into())
                 .await
                 .unwrap_err();
             assert!(error.contains("contains spaces"), "{error}");
@@ -2115,12 +2049,11 @@ mod tests {
         ) -> (Result<(), KeyTestError>, MemSecretStore) {
             let (config, store) = config(&temp());
             if let Some(key) = secrets {
-                config.set_api_key(Provider::OpenRouter, key).unwrap();
+                config.set_api_key(key).unwrap();
             }
             let result = key_test(
                 &config,
                 &LiveEngine::fixed(),
-                Provider::OpenRouter,
                 typed.map(str::to_owned),
                 &server.uri(),
             )
@@ -2184,7 +2117,6 @@ mod tests {
             let error = key_test(
                 &config,
                 &LiveEngine::fixed(),
-                Provider::OpenRouter,
                 Some(TYPED.to_owned()),
                 &format!("http://127.0.0.1:{port}"),
             )
@@ -2237,15 +2169,9 @@ mod tests {
             let server = provider(200, STORED).await;
             let (config, secrets) = config(&temp());
             secrets.set_access_denied(true);
-            let error = key_test(
-                &config,
-                &LiveEngine::fixed(),
-                Provider::OpenRouter,
-                None,
-                &server.uri(),
-            )
-            .await
-            .unwrap_err();
+            let error = key_test(&config, &LiveEngine::fixed(), None, &server.uri())
+                .await
+                .unwrap_err();
             assert_eq!(error.kind, KeyTestKind::Keychain);
             assert!(error.message.contains("keychain access was denied"));
         }
@@ -2306,13 +2232,13 @@ mod tests {
                 gets: Arc::default(),
             };
             let config = Arc::new(Config::new(temp(), store.clone()));
-            config.set_api_key(Provider::OpenRouter, STORED).unwrap();
+            config.set_api_key(STORED).unwrap();
             let live = LiveEngine::fixed().with_key_timeout(Duration::from_millis(150));
 
             for attempt in 1..=3 {
                 let error = tokio::time::timeout(
                     Duration::from_secs(20),
-                    key_test(&config, &live, Provider::OpenRouter, None, &server.uri()),
+                    key_test(&config, &live, None, &server.uri()),
                 )
                 .await
                 .expect("the test never returned")
@@ -2325,13 +2251,10 @@ mod tests {
                 );
                 assert!(!error.message.contains(STORED));
 
-                let status = tokio::time::timeout(
-                    Duration::from_secs(20),
-                    has_key(&config, &live, Provider::OpenRouter),
-                )
-                .await
-                .expect("the status never returned")
-                .unwrap_err();
+                let status = tokio::time::timeout(Duration::from_secs(20), has_key(&config, &live))
+                    .await
+                    .expect("the status never returned")
+                    .unwrap_err();
                 assert!(status.contains("no answer from the keychain"), "{status}");
             }
             assert_eq!(
@@ -2343,14 +2266,8 @@ mod tests {
 
             // The keychain answers: the same calls now work.
             store.open();
-            assert_eq!(
-                has_key(&config, &live, Provider::OpenRouter).await,
-                Ok(true)
-            );
-            assert_eq!(
-                key_test(&config, &live, Provider::OpenRouter, None, &server.uri()).await,
-                Ok(())
-            );
+            assert_eq!(has_key(&config, &live).await, Ok(true));
+            assert_eq!(key_test(&config, &live, None, &server.uri()).await, Ok(()));
         }
 
         #[test]
@@ -2361,10 +2278,7 @@ mod tests {
                     crate::engine::starting(),
                 )),
             ] {
-                assert_eq!(
-                    live.provider_base_url(Provider::OpenRouter),
-                    "https://openrouter.ai/api/v1"
-                );
+                assert_eq!(live.provider_base_url(), "https://openrouter.ai/api/v1");
             }
         }
 
@@ -2374,14 +2288,13 @@ mod tests {
         async fn a_test_build_tests_the_key_where_it_dictates() {
             let server = provider(200, TYPED).await;
             let live = LiveEngine::fixed().at(&server.uri());
-            assert_eq!(live.provider_base_url(Provider::OpenRouter), server.uri());
+            assert_eq!(live.provider_base_url(), server.uri());
             let (config, _) = config(&temp());
             key_test(
                 &config,
                 &live,
-                Provider::OpenRouter,
                 Some(TYPED.to_owned()),
-                &live.provider_base_url(Provider::OpenRouter),
+                &live.provider_base_url(),
             )
             .await
             .unwrap();
@@ -2935,12 +2848,7 @@ mod capability_tests {
     /// Valid arguments for each command, so a refusal can only be the ACL's.
     fn args(command: &str) -> serde_json::Value {
         match command {
-            "set_api_key" => {
-                serde_json::json!({ "provider": "openrouter", "key": "sk-or-not-a-real-key" })
-            }
-            "test_api_key" | "saved_key_hint" => {
-                serde_json::json!({ "provider": "openrouter" })
-            }
+            "set_api_key" => serde_json::json!({ "key": "sk-or-not-a-real-key" }),
             "request_permission" => serde_json::json!({ "permission": "microphone" }),
             "set_onboarding_step" => serde_json::json!({ "step": "welcome" }),
             "set_share_usage_events" => serde_json::json!({ "share": true }),
@@ -2983,7 +2891,7 @@ mod capability_tests {
     /// so no keychain or network is touched.
     fn unusable_args() -> serde_json::Value {
         serde_json::json!({
-            "provider": "not-a-provider",
+            "transcription": "nowhere",
             "settings": 0,
             "key": 0,
             "permission": "camera",
@@ -3043,6 +2951,12 @@ mod capability_tests {
                         }
                     })
                 }
+                // No arguments to refuse: the disabled keychain refuses
+                // instead, after the ACL let the call through.
+                "saved_key_hint" | "delete_api_key" => match invoke(main, command, args(command)) {
+                    Err(error) if error.to_string().contains("keychain is disabled") => Ok(()),
+                    other => other.map(|_| ()),
+                },
                 // F1: it must succeed, through the fake opener.
                 "open_issue" => invoke(main, command, args(command)).map(|_| ()),
                 "run_checks"

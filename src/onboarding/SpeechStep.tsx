@@ -147,7 +147,7 @@ function SpeechForm({
   }
 
   async function continueLocal(chosen: LocalModelInfo_Serialize) {
-    const picked = await commands.chooseLocalModel(chosen.id);
+    const picked = await commands.setTranscription("local");
     if (picked.status === "error") return messageOf(picked.error);
     await makeRoomFor(chosen.id);
     // The download is speech, then cleanup: resume it while either is missing
@@ -169,7 +169,7 @@ function SpeechForm({
   }
 
   async function continueWithKey(dropped: () => boolean) {
-    const used = await commands.useCloudEngine("openrouter");
+    const used = await commands.setTranscription("cloud");
     if (dropped()) return null;
     if (used.status === "error") return messageOf(used.error);
     await makeRoomFor(null);

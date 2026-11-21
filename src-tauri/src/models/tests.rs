@@ -33,7 +33,7 @@ impl Drop for TempDir {
 struct Silent;
 
 impl SpeechModel for Silent {
-    fn run(&mut self, _: &[f32], _: Option<&str>) -> Result<String, String> {
+    fn run(&mut self, _: &[f32]) -> Result<String, String> {
         Ok(String::new())
     }
 }
@@ -61,11 +61,6 @@ fn criterion_4_lists_the_catalogue_with_statuses() {
     assert_eq!(list[0].id, DEFAULT);
     assert!(list[0].default);
     assert_eq!(list[0].languages, "English only");
-    // The language picker (U2) filters by these codes.
-    assert_eq!(list[0].language_codes, ["en"]);
-    for (info, model) in list.iter().zip(local_models::CATALOGUE) {
-        assert_eq!(info.language_codes, model.languages);
-    }
     assert!(list.iter().all(|m| m.state == ModelState::Missing));
     assert_eq!(list[0].size_bytes, 1_319_830_656.0);
     // Cleanup models are listed on their own (Q4), never as speech.
@@ -95,7 +90,7 @@ fn criterion_4_lists_the_catalogue_with_statuses() {
     // Deleting removes both and lets go of the loaded model.
     let local = live.local().unwrap();
     assert!(matches!(
-        local.engine(DEFAULT, None, &|_| {}),
+        local.engine(&|_| {}),
         dictation_transcribe::engine::Engine::Local(_)
     ));
     assert_eq!(local.loaded(), Some(DEFAULT));
