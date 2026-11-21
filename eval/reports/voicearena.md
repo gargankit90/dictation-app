@@ -147,8 +147,8 @@ mapping). Many drafts have more than one problem.
 | **An invented "Thank you." at the end** | **11** | 3 | app (trim silence) |
 | **Code names and casing** | 8 | 2 | app cleanup with context, or engine vocabulary hints |
 | **Spoken symbols left as words** | 7 | 1 | app cleanup |
-| **Names spelt wrong**: "Rahman" for Raman, "Thomas" for Tomas, "Kiera" for Kiara | 5 | 1 | engine vocabulary hints, or the user's own dictionary |
-| Other: slang units ("89 bucks", "512 megs"), one dropped URL path | 3 | 0 | app cleanup / engine |
+| **Names spelt wrong**: three personal names heard as more common ones | 5 | 1 | engine vocabulary hints, or the user's own dictionary |
+| Other: slang units, one dropped URL path | 3 | 0 | app cleanup / engine |
 
 The questions from the brief, answered:
 
@@ -179,8 +179,8 @@ would need no edit: **ZER about 77.5%**, level with Willow Voice and just behind
 Blurt on the public set.
 
 **App side, with more context** (an LLM cleanup that knows the target app, or
-a personal dictionary): code identifiers and casing ("calculateProratedAmount",
-"date-fns", "Dockerfile") and names the user has used before. That covers 8 more
+a personal dictionary): code identifiers and casing (camelCase function names,
+package names, file names) and names the user has used before. That covers 8 more
 drafts, about **82.8%** in the best case. Groq's Whisper API also takes a
 `prompt` that can carry such names and terms to bias spelling, which is an
 app-controlled hint to the engine.
@@ -261,8 +261,7 @@ single judge, one run, public set only.
 
 AI prompts gain the most (36% → 91%): they are full of the fillers and "Okay,
 so…" openers the rewrite removes. Apart from long-form, code is now the
-weakest context (81%), because what's left are technical words misheard ("Pindanic", "independent"
-for idempotent, "math" for map).
+weakest context (81%), because what's left are technical words misheard (technical terms heard as common words).
 
 ### What changed in the failures
 
@@ -421,21 +420,9 @@ fillers (28 / 30), and wrong names (12 / 15).
 - **No invented endings.** Neither Parakeet nor Qwen3 added a "Thank you." or
   anything else on silence. The 30-second hallucination is a Whisper problem.
 - **More mishearings and names**, the main reason they score below Groq:
-  "Prius" for Priya's, "O'Caffer" and "Okaforce" for Okafor, "Grendel" for
-  Grandma, "salon" for flan, "Olympic" for Alembic,
-  "U901208" for United 1208. Qwen3 has 17 mishearings no other engine
-  makes; Parakeet has 4.
-- **Wrong unit symbols:** Parakeet wrote a food drive's "3,900 pounds" as
-  "£3,900" and "100 pounds" as "$100".
-
-**What an app-side cleanup would do here:** fixing fillers and spoken symbols
-perfectly would take Parakeet to about 67.5% ZER and Qwen3 to about 63.6%
-(upper bounds, as for Groq's 77.5%). Adding code and name formatting, about
-74.8% and 68.9%. The bigger mishearing count means cleanup lifts on-device
-less than it lifts Groq.
-
-### What this means
-
+  person names, place names, dish names and a flight number. Qwen3 has 17
+  mishearings no other engine makes; Parakeet has 4.
+- **Wrong unit symbols:** Parakeet wrote a weight in pounds as a currency amount.
 - **Out of the box, on-device Vocet is a little below Vocet with Groq**
   (Parakeet 53.0% vs 60.3% ZER, overlapping intervals; same AMEND), and both
   are near the bottom of the 14 tools. The gap to the top is mostly cleanup,
@@ -513,11 +500,9 @@ its errors are misheard terms that cleanup can't know.
 
 - **Fillers:** filler-like words (like, you know, so, oh, okay so, kind of)
   fell from 146 to 79 across the 151 texts. The rest are mostly real uses of
-  "so" and "like".
+  those words.
 - **Self-corrections:** the cue words ("no wait", "sorry", "actually") fell from
-  26 to 15. It applied corrections such as "4.2— wait, no, 4.3" → "4.3",
-  "$15,000— sorry, $16,000" → "$16,000", "4,200 pounds— sorry, no, 3,900" →
-  "3,900".
+  26 to 15. It applied the corrections, keeping only the final figure.
 
 ### What the cleanup broke
 

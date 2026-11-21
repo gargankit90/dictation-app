@@ -169,7 +169,7 @@ Gemma 4 E2B Q4_K_M adds **3.11 GB** of weights. All cleanup rows reused the loca
 ## What Fluid clean mode deletes
 
 
-**Six identifiers that were correct with the adapter off lost repeated digits with it on.** The invoice 8841 became 841 (0474), ticket 8832 became 832 (0737), and the same error affected phone numbers (0119 and 0663), an order ID (0471) and a payment reference (0629). A separate invoice was already incorrect in the raw draft (0391). The clean adapter also dropped part of an email address (0008) and changed Vite to VIP (0218). Those changes matter to someone pasting a draft even when normalized corpus WER moves little.
+**Six identifiers that were correct with the adapter off lost repeated digits with it on.** The affected clips were an invoice number (0474), a ticket number (0737), two phone numbers (0119, 0663), an order ID (0471) and a payment reference (0629). A separate invoice number was already incorrect in the raw draft (0391). The clean adapter also dropped part of an email address (0008) and altered a product name (0218). Those changes matter to someone pasting a draft even when normalized corpus WER moves little.
 
 ## Custom words (#215)
 
@@ -177,8 +177,8 @@ Qwen accepted the vocabulary through the existing Rust `RunOptions::vocabulary` 
 
 | Recognizer | Tune occurrences correct, plain → biased (19) | Check occurrences correct, plain → biased (6) | New wrong terms on check |
 | --- | ---: | ---: | --- |
-| Qwen 1.7B | 15 → 18 | 6 → 6 | **Zillow** for Zelle (0629), **Amaya** in a benefits URL (0729) |
-| Granite 2B written | 16 → 18 | 6 → 6 | **Zillow** for Zelle (0629) |
+| Qwen 1.7B | 15 → 18 | 6 → 6 | a name misheard as a brand (0629), a misheard name in a benefits URL (0729) |
+| Granite 2B written | 16 → 18 | 6 → 6 | a name misheard as a brand (0629) |
 
 
 Keep #215 opt-in. Bias recovered names on clips containing tune-selected terms. On check there was no remaining target error to fix, and bias introduced unrelated entities. Before enabling it by default, use fresh speakers with actual user dictionaries and include clips where none of their words should appear.
