@@ -58,8 +58,8 @@ host_load() {
 vm_terminal() {
   local cmd=$1 logf=$2
   vm "rm -f '$logf' '$logf.status' '$logf.status.tmp'"
-  printf '#!/bin/zsh\n( %s ) >%s 2>&1\nst=$?\necho $st >%s.tmp && mv -f %s.tmp %s.status\n' \
-    "$cmd" "$logf" "$logf.status" "$logf.status" "$logf.status" | vm "cat >'$logf.command' && chmod +x '$logf.command'"
+  printf '#!/bin/zsh\n( %s ) >%s 2>&1\nst=$?\necho $st >%s.status.tmp && mv -f %s.status.tmp %s.status\n' \
+    "$cmd" "$logf" "$logf" "$logf" "$logf" | vm "cat >'$logf.command' && chmod +x '$logf.command'"
   vm "open -a Terminal '$logf.command'"
 }
 vm_terminal_wait() {
@@ -126,10 +126,10 @@ case "$cmd" in
     vm "mkdir -p $VM_DIR/out && rm -rf $VM_DIR/clips && mkdir -p $VM_DIR/clips"
     tar -C "$CLIPS" -cf - . | vm "tar -C $VM_DIR/clips -xf -"
     tar -C "$HERE" -cf - app_bench.py | vm "tar -C $VM_DIR -xf -"
-    # Mac-wide and TextEdit substitutions off, so nothing changes a transcript on its way into TextEdit.
+    # Mac-wide substitutions off, so nothing changes a typed transcript in TextEdit (TextEdit's own settings
+    # live in its sandbox container, which an ssh session can't write; the document is a .txt, plain text).
     vm 'for k in NSAutomaticCapitalizationEnabled NSAutomaticPeriodSubstitutionEnabled NSAutomaticSpellingCorrectionEnabled NSAutomaticQuoteSubstitutionEnabled NSAutomaticDashSubstitutionEnabled NSAutomaticTextReplacementEnabled NSAutomaticInlinePredictionEnabled NSAutomaticTextCompletionEnabled WebAutomaticSpellingCorrectionEnabled; do defaults write -g $k -bool false; done
-        for k in SmartQuotes SmartDashes TextReplacement SmartLinks DataDetectors CheckSpellingWhileTyping CheckGrammarWithSpelling CorrectSpellingAutomatically SmartCopyPaste; do defaults write com.apple.TextEdit $k -bool false; done
-        defaults write com.apple.TextEdit RichText -int 0'
+'
     # Warm uv's environment (and Python) once, then make BlackHole 2ch the default input.
     vm_terminal "cd $VM_DIR && $UV run app_bench.py dry-run && $UV run app_bench.py set-input 'BlackHole 2ch'" "$VM_DIR/setup.log"
     st=$(vm_terminal_wait "$VM_DIR/setup.log" 10)
