@@ -759,6 +759,7 @@ mod tests {
     use std::time::Duration;
 
     use dictation_core::coordinator::Phase::{Idle, Inserting, Recording, Transcribing};
+    use dictation_core::diagnostics::ErrorCode;
     use dictation_core::error::DictationError;
     use dictation_core::settings::Settings;
     use dictation_pipeline::pipeline::{Config as PipelineConfig, Pipeline, Ports, UiEvent};
@@ -912,13 +913,11 @@ mod tests {
         }
     }
 
-    fn failed(reason: &str) -> Vec<UiEvent> {
+    fn failed(code: ErrorCode) -> Vec<UiEvent> {
         vec![
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
-            UiEvent::Error(DictationError::TranscriptionFailed {
-                reason: reason.to_owned(),
-            }),
+            UiEvent::Error(DictationError::TranscriptionFailed(code)),
             UiEvent::StateChanged(Idle),
         ]
     }
@@ -932,7 +931,7 @@ mod tests {
     #[tokio::test]
     async fn criterion_without_a_key_dictation_says_add_one_and_pastes_nothing() {
         let mut rig = Rig::start(200).await;
-        assert_eq!(rig.dictate().await, failed("Add your API key in Settings."));
+        assert_eq!(rig.dictate().await, failed(ErrorCode::KeyMissing));
         assert!(rig.inserter.inserted().is_empty());
         assert_eq!(rig.requests().await, 0, "no request without a key");
         rig.finish().await;
@@ -984,10 +983,7 @@ mod tests {
         let mut rig = Rig::start(200).await;
         rig.save_key(WRONG_KEY);
         let events = rig.dictate().await;
-        assert_eq!(
-            events,
-            failed("The provider rejected your API key. Check it in Settings.")
-        );
+        assert_eq!(events, failed(ErrorCode::KeyRejected));
         assert!(!format!("{events:?}").contains(WRONG_KEY));
         assert!(rig.inserter.inserted().is_empty());
         assert_eq!(rig.requests().await, 1, "a rejected key isn't retried");
@@ -1002,21 +998,9 @@ mod tests {
     #[tokio::test]
     async fn rate_limits_and_server_errors_reach_the_user_after_the_retries() {
         for (status, reason, attempts) in [
-            (
-                429,
-                "The provider is limiting requests right now. Try again in a minute.",
-                3,
-            ),
-            (
-                503,
-                "Something went wrong: the provider failed (HTTP 503).",
-                3,
-            ),
-            (
-                400,
-                "Something went wrong: the provider rejected the request (HTTP 400).",
-                1,
-            ),
+            (429, ErrorCode::ProviderQuota, 3),
+            (503, ErrorCode::EngineFailed, 3),
+            (400, ErrorCode::EngineFailed, 1),
         ] {
             let mut rig = Rig::start(status).await;
             rig.save_key(KEY);
@@ -1048,10 +1032,7 @@ mod tests {
             cleanup: None,
         };
         changed(&rig.config, &dead, |c| c.set_api_key(KEY)).unwrap();
-        assert_eq!(
-            rig.dictate().await,
-            failed("Couldn't reach the provider. Check your internet connection.")
-        );
+        assert_eq!(rig.dictate().await, failed(ErrorCode::NetworkUnreachable));
         assert!(rig.inserter.inserted().is_empty());
 
         rig.live.rebuild(&rig.config); // back to the working server
@@ -1080,10 +1061,7 @@ mod tests {
         rig.secrets.set_access_denied(true);
         rig.live.rebuild(&rig.config);
         let events = rig.dictate().await;
-        let UiEvent::Error(DictationError::TranscriptionFailed { reason }) = &events[2] else {
-            panic!("{events:?}");
-        };
-        assert!(reason.contains("Couldn't read your API key from the Keychain"));
+        assert_eq!(message(&events), ErrorCode::KeyUnreadable);
         assert!(rig.inserter.inserted().is_empty());
 
         rig.secrets.set_access_denied(false);
@@ -1091,10 +1069,7 @@ mod tests {
         std::fs::write(rig.config.path(), "{ not json").unwrap();
         rig.live.rebuild(&rig.config);
         let events = rig.dictate().await;
-        let UiEvent::Error(DictationError::TranscriptionFailed { reason }) = &events[2] else {
-            panic!("{events:?}");
-        };
-        assert!(reason.contains("couldn't read the settings"), "{reason}");
+        assert_eq!(message(&events), ErrorCode::EngineFailed);
         rig.finish().await;
     }
 
@@ -1119,12 +1094,11 @@ mod tests {
 
     const KEY_NAME: &str = "openrouter-api-key";
 
-    fn message(events: &[UiEvent]) -> String {
-        let Some(UiEvent::Error(DictationError::TranscriptionFailed { reason })) = events.get(2)
-        else {
+    fn message(events: &[UiEvent]) -> ErrorCode {
+        let Some(UiEvent::Error(DictationError::TranscriptionFailed(code))) = events.get(2) else {
             panic!("{events:?}");
         };
-        reason.clone()
+        *code
     }
 
     #[tokio::test]
@@ -1142,7 +1116,7 @@ mod tests {
         // The app is usable while the keychain is stuck: dictation says
         // what is going on instead of hanging.
         let events = rig.dictate().await;
-        assert!(message(&events).contains("Still reading your API key"));
+        assert_eq!(message(&events), ErrorCode::KeyUnreadable);
         assert!(rig.inserter.inserted().is_empty());
         assert_eq!(rig.requests().await, 0);
 
@@ -1170,11 +1144,7 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(5));
 
         let events = rig.dictate().await;
-        let reason = message(&events);
-        assert!(
-            reason.starts_with("Couldn't read your API key from the Keychain"),
-            "{reason}"
-        );
+        assert_eq!(message(&events), ErrorCode::KeyUnreadable);
         assert!(!format!("{events:?}").contains(KEY));
         assert!(rig.inserter.inserted().is_empty());
         assert_eq!(rig.requests().await, 0);
@@ -1193,14 +1163,12 @@ mod tests {
             .set_failing(Some("User interaction is not allowed."));
         let handle = rig.live.rebuild_in_background(rig.config.clone()).unwrap();
         handle.join().unwrap();
-        let reason = message(&rig.dictate().await);
-        assert!(reason.starts_with("Couldn't read your API key from the Keychain"));
+        assert_eq!(message(&rig.dictate().await), ErrorCode::KeyUnreadable);
 
         rig.secrets.set_failing(None);
         rig.secrets.set_access_denied(true);
         rig.live.rebuild(&rig.config);
-        let reason = message(&rig.dictate().await);
-        assert!(reason.starts_with("Couldn't read your API key from the Keychain"));
+        assert_eq!(message(&rig.dictate().await), ErrorCode::KeyUnreadable);
         assert!(rig.inserter.inserted().is_empty());
         rig.finish().await;
     }
@@ -1235,11 +1203,7 @@ mod tests {
     async fn criterion_1_the_next_dictation_retries_after_a_keychain_timeout() {
         let mut rig = rig_after_keychain_timeout().await;
         // Still blocked: the retry is bounded, and the user sees the same error.
-        let reason = message(&rig.dictate().await);
-        assert!(
-            reason.starts_with("Couldn't read your API key from the Keychain"),
-            "{reason}"
-        );
+        assert_eq!(message(&rig.dictate().await), ErrorCode::KeyUnreadable);
         assert!(rig.inserter.inserted().is_empty());
 
         // Access allowed: the next dictation works, no restart, no save.
@@ -1256,8 +1220,7 @@ mod tests {
         rig.secrets
             .set_failing(Some("User interaction is not allowed."));
         rig.live.rebuild(&rig.config);
-        let reason = message(&rig.dictate().await);
-        assert!(reason.starts_with("Couldn't read your API key from the Keychain"));
+        assert_eq!(message(&rig.dictate().await), ErrorCode::KeyUnreadable);
 
         rig.secrets.set_failing(None);
         assert_eq!(rig.dictate().await, pasted());
@@ -1306,8 +1269,7 @@ mod tests {
         rig.live.rebuild(&rig.config);
         let before = rig.secrets.get_calls();
         for _ in 0..2 {
-            let reason = message(&rig.dictate().await);
-            assert!(!reason.contains("Keychain"), "{reason}");
+            assert_eq!(message(&rig.dictate().await), ErrorCode::KeyMissing);
         }
         rig.live.rebuild_if_keychain_failed(&rig.config);
         assert_eq!(
@@ -1323,8 +1285,7 @@ mod tests {
         let mut rig = rig_after_keychain_timeout().await;
         let before = rig.secrets.get_calls();
         for _ in 0..3 {
-            let reason = message(&rig.dictate().await);
-            assert!(reason.starts_with("Couldn't read your API key from the Keychain"));
+            assert_eq!(message(&rig.dictate().await), ErrorCode::KeyUnreadable);
         }
         // The blocked read from launch is still the one in flight: the
         // retries wait on it (each for its timeout) and start no thread.
@@ -1410,8 +1371,7 @@ mod tests {
                 c.save_settings(&Settings::default())
             })
             .unwrap();
-            let reason = message(&rig.dictate().await);
-            assert!(reason.starts_with("Couldn't read your API key from the Keychain"));
+            assert_eq!(message(&rig.dictate().await), ErrorCode::KeyUnreadable);
         }
         // And a burst of rebuilds at the same time.
         let (live, config) = (rig.live.clone(), rig.config.clone());
@@ -2002,9 +1962,7 @@ mod tests {
                 Arc::new(move |_: &Path| {
                     loads.fetch_add(1, Ordering::SeqCst);
                     if fail {
-                        Err(TranscribeError::Engine(
-                            "couldn't load the on-device model: bad file".into(),
-                        ))
+                        Err(TranscribeError::ModelLoadFailed("bad file".into()))
                     } else {
                         Ok(Box::new(Says) as Box<dyn SpeechModel>)
                     }
@@ -2040,10 +1998,7 @@ mod tests {
                     .clone()
                     .with_local(models(&rig.dir.0.join("models"), &loads, false));
             choose(&rig, Transcription::Local);
-            assert_eq!(
-                rig.dictate().await,
-                failed("The on-device model isn't downloaded. Download the model in Settings.")
-            );
+            assert_eq!(rig.dictate().await, failed(ErrorCode::ModelMissing));
             assert!(rig.inserter.inserted().is_empty());
             assert_eq!(rig.requests().await, 0);
             assert_eq!(loads.load(Ordering::SeqCst), 0);
@@ -2077,7 +2032,7 @@ mod tests {
             // The cloud releases it; coming back loads it again.
             choose(&rig, Transcription::Cloud);
             assert_eq!(local.loaded(), None);
-            assert_eq!(rig.dictate().await, failed("Add your API key in Settings."));
+            assert_eq!(rig.dictate().await, failed(ErrorCode::KeyMissing));
             choose(&rig, Transcription::Local);
             assert_eq!(rig.dictate().await, pasted());
             assert_eq!(loads.load(Ordering::SeqCst), 2);
@@ -2093,10 +2048,7 @@ mod tests {
             let local = models(&dir, &loads, true);
             rig.live = rig.live.clone().with_local(local.clone());
             choose(&rig, Transcription::Local);
-            assert_eq!(
-                rig.dictate().await,
-                failed("Something went wrong: couldn't load the on-device model: bad file.")
-            );
+            assert_eq!(rig.dictate().await, failed(ErrorCode::ModelLoadingFailed));
             assert_eq!(local.loaded(), None);
             rig.finish().await;
         }
@@ -2210,8 +2162,8 @@ mod tests {
             );
             assert_eq!(transcribers.name(), "local");
             assert_eq!(
-                TranscribeError::ModelLoading.user_message(),
-                "The on-device model is still loading. Try again in a moment."
+                TranscribeError::ModelLoading.code(),
+                ErrorCode::ModelLoading
             );
         }
 

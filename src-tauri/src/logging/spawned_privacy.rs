@@ -124,7 +124,7 @@ fn spawned_pipeline_logs_stay_private_across_rotation() {
             "step",
             "StateChanged(Inserting)",
             "dictation failed",
-            "rejected your API key",
+            "Your API key was rejected",
             // The transcription jobs and the engine's request.
             "transcribing",
             "transcribed",

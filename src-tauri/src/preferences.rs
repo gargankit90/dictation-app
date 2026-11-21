@@ -95,7 +95,7 @@ fn switch<S: SecretStore + 'static>(
                 return Err(format!(
                     "Couldn't load {}: {}",
                     local_models::DEFAULT.name,
-                    error.user_message()
+                    error.code().user_text()
                 ));
             }
         }
@@ -144,7 +144,7 @@ pub fn status_of(engine: &Engine) -> EngineStatus {
         },
         Engine::Unavailable(error) => EngineStatus {
             state: EngineState::Failed,
-            message: Some(error.user_message()),
+            message: Some(error.code().user_text()),
         },
         Engine::Mock(_) | Engine::Remote(_) | Engine::Local(_) => EngineStatus {
             state: EngineState::Ready,

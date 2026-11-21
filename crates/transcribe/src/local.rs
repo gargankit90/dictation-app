@@ -48,14 +48,12 @@ impl CppModel {
     ///
     /// # Errors
     ///
-    /// [`TranscribeError::Engine`] if the file can't be read or isn't a model
-    /// transcribe.cpp knows.
+    /// [`TranscribeError::ModelLoadFailed`] if the file can't be read or
+    /// isn't a model transcribe.cpp knows.
     pub fn load(path: &Path) -> Result<Self, TranscribeError> {
         let session = transcribe_cpp::Model::load(path)
             .and_then(|model| model.session())
-            .map_err(|error| {
-                TranscribeError::Engine(format!("couldn't load the on-device model: {error}"))
-            })?;
+            .map_err(|error| TranscribeError::ModelLoadFailed(error.to_string()))?;
         Ok(Self { session })
     }
 }
@@ -252,13 +250,16 @@ mod tests {
     }
 
     #[test]
-    fn a_file_that_is_not_a_model_fails_to_load_with_an_engine_error() {
+    fn a_file_that_is_not_a_model_fails_to_load() {
         let dir = std::env::temp_dir().join(format!("l1-not-a-model-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("broken.gguf");
         std::fs::write(&path, b"not a gguf file").unwrap();
         let error = CppModel::load(&path).unwrap_err();
-        assert!(matches!(error, TranscribeError::Engine(_)), "{error:?}");
+        assert!(
+            matches!(error, TranscribeError::ModelLoadFailed(_)),
+            "{error:?}"
+        );
         assert!(
             error
                 .to_string()

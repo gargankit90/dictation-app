@@ -8,7 +8,6 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   EngineStatus,
-  KeyTestError,
   LocalModelInfo_Serialize,
   Settings_Serialize,
   Transcription,
@@ -58,7 +57,7 @@ class Backend {
   cleanup: LocalModelInfo_Serialize[] = [];
   engine: EngineStatus = { state: "ready", message: null };
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
-  testResult: KeyTestError | null = null;
+  testResult: string | null = null;
   /** Fails the command named, with the message (a string, as the app sends). */
   failing = new Map<string, string>();
   /** Holds the command named until the promise settles. */
@@ -925,7 +924,7 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
     });
 
     it("a key the provider rejects is not saved", async () => {
-      backend.testResult = { kind: "invalid_key", message: "OpenRouter rejected this key." };
+      backend.testResult = "OpenRouter rejected this key.";
       await openPaste();
       fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
       click("Test & Save");

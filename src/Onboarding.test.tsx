@@ -7,7 +7,6 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "./App";
 import type {
-  KeyTestError,
   LocalModelInfo_Serialize,
   OnboardingStatus,
   PermissionState,
@@ -108,7 +107,7 @@ class Backend {
     state: "ready",
     message: null,
   };
-  testResult: KeyTestError | null = null;
+  testResult: string | null = null;
   /** Fails the command named, with the message (a string, as the app sends). */
   failing = new Map<string, string>();
   /** Holds the command named until the promise settles. */
@@ -1184,7 +1183,7 @@ describe("Speech", () => {
   });
 
   it("Q3: a pasted key the provider rejects keeps Continue locked, and saves nothing", async () => {
-    backend.testResult = { kind: "invalid_key", message: "OpenRouter rejected this API key." };
+    backend.testResult = "OpenRouter rejected this API key.";
     await openConnectScreen();
     fireEvent.click(screen.getByRole("button", { name: "Paste a key instead" }));
     fireEvent.change(await screen.findByLabelText("OpenRouter API key"), {

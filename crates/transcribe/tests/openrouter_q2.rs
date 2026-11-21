@@ -132,7 +132,7 @@ async fn speech_statuses_map_to_typed_errors_without_the_key() {
         let engine = speech(&server);
         let error = engine.transcribe(&audio()).await.unwrap_err();
         assert_eq!(error, expected, "HTTP {status}");
-        let shown = format!("{error} {error:?} {} {engine:?}", error.user_message());
+        let shown = format!("{error} {error:?} {engine:?}");
         assert!(!shown.contains(KEY), "{shown}");
     }
 }
@@ -140,7 +140,7 @@ async fn speech_statuses_map_to_typed_errors_without_the_key() {
 #[tokio::test]
 async fn out_of_credits_tells_the_user_to_add_credits() {
     assert_eq!(
-        TranscribeError::OutOfCredits.user_message(),
+        TranscribeError::OutOfCredits.code().user_text(),
         "Your OpenRouter credits ran out. Add credits."
     );
 }

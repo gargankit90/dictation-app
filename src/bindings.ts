@@ -21,9 +21,10 @@ export const commands = {
 	 *  Tests an API key with a short silent clip through `OpenRouter`'s
 	 *  transcription endpoint: the key typed in the form (`key`, used for this
 	 *  request only and not stored), or the saved one if `key` is `None`. The
-	 *  key never comes back; the result is success or a [`KeyTestError`].
+	 *  key never comes back; the result is success or what went wrong, in the
+	 *  error code's words.
 	 */
-	testApiKey: (key: string | null) => typedError<null, KeyTestError>(__TAURI_INVOKE("test_api_key", { key })),
+	testApiKey: (key: string | null) => typedError<null, string>(__TAURI_INVOKE("test_api_key", { key })),
 	/**
 	 *  Signs in at `OpenRouter` and saves the key. Returns when it is saved, or
 	 *  with the reason it isn't. A cancelled attempt is an error too; the window
@@ -413,19 +414,31 @@ export type ErrorCode =
 /**  A password field had focus. */
 "secure_input";
 
-/**  What the user can do about an error, in one click. */
+/**
+ *  What the user can do about an error, in one click: the button in
+ *  Troubleshoot and the fix row in the tray.
+ */
 export type FixAction = 
-/**  Open System Settings at the Microphone page. */
+/**  Settings, on Speech (the key and the engine). */
+"open_speech_settings" | 
+/**  System Settings at the Microphone page. */
 "open_microphone_settings" | 
-/**  Open System Settings at the Accessibility page. */
+/**  System Settings at the Accessibility page. */
 "open_accessibility_settings" | 
-/**  Open this app's settings. */
-"open_settings" | 
-/**  Open the Troubleshoot window. */
-"open_troubleshoot" | 
-/**  Open `OpenRouter`'s page for adding credits. */
+/**  Settings, on the dictation key. */
+"choose_another_key" | 
+/**  Settings, on Speech, where the model downloads. */
+"download_model" | 
+/**  `OpenRouter`'s page for adding credits. */
 "add_credits" | 
-/**  Nothing to click: the next dictation is the retry. */
+/**  The Troubleshoot page. */
+"troubleshoot" | 
+/**  Restart the app, so a permission grant takes effect. */
+"relaunch" | 
+/**
+ *  Nothing to click: the next dictation is the retry. The tray offers
+ *  Troubleshoot instead.
+ */
 "try_again";
 
 /**  What Settings → History shows. */
@@ -450,29 +463,6 @@ export type HistoryRow = {
 	/**  Whether the paste worked. */
 	pasted: boolean,
 };
-
-/**  Why a key test failed. Never contains the key. */
-export type KeyTestError = {
-	/**  The category. */
-	kind: KeyTestKind,
-	/**  What to show the user. */
-	message: string,
-};
-
-/**  What went wrong when testing a key, so the UI can pick its wording. */
-export type KeyTestKind = 
-/**  No key was typed or saved to test. */
-"no_key" | 
-/**  The key can't be a key, or the provider rejected it. */
-"invalid_key" | 
-/**  The provider is rate limiting; the key may be fine. */
-"rate_limited" | 
-/**  The provider couldn't be reached (offline, DNS, timeout). */
-"network" | 
-/**  The provider failed or gave an answer we can't use. */
-"server" | 
-/**  The saved key couldn't be read from the keychain. */
-"keychain";
 
 /**
  *  A page Settings links to. A closed list: the window can't open any

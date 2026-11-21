@@ -6,6 +6,7 @@
 
 use std::time::Duration;
 
+use dictation_core::diagnostics::ErrorCode;
 use dictation_ports::{Audio, Secret, SecretError, TranscribeError, Transcriber};
 use dictation_transcribe::engine::{Engine, Transcribers};
 use dictation_transcribe::mock::MockTranscriber;
@@ -94,12 +95,12 @@ async fn an_unreadable_keychain_is_a_keychain_error_that_says_why() {
             panic!("expected a keychain error");
         };
         assert!(error.to_string().contains(words), "{error}");
-        assert!(error.user_message().contains("from the Keychain"));
+        assert_eq!(error.code(), ErrorCode::KeyUnreadable);
     }
 }
 
 #[tokio::test]
-async fn each_provider_error_maps_to_its_user_message_and_the_key_stays_out() {
+async fn each_provider_error_maps_to_its_error_and_the_key_stays_out() {
     let cases = [
         (401, TranscribeError::InvalidKey, 1),
         (403, TranscribeError::InvalidKey, 1),
@@ -131,11 +132,9 @@ async fn each_provider_error_maps_to_its_user_message_and_the_key_stays_out() {
             attempts,
             "HTTP {status}"
         );
-        for text in [got.to_string(), got.user_message()] {
-            assert!(!text.contains(KEY), "HTTP {status}: {text}");
-            assert!(!text.contains("bad key"), "HTTP {status}: {text}");
-        }
-        assert!(!got.user_message().is_empty());
+        let text = got.to_string();
+        assert!(!text.contains(KEY), "HTTP {status}: {text}");
+        assert!(!text.contains("bad key"), "HTTP {status}: {text}");
     }
 }
 

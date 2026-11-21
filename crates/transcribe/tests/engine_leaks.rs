@@ -56,7 +56,7 @@ async fn the_key_and_transcript_stay_out_of_logs_and_messages_through_transcribe
         match transcribers.transcribe(&audio()).await {
             Ok(_) => {}
             Err(error) => {
-                shown.push_str(&format!("{error} | {error:?} | {}\n", error.user_message()));
+                shown.push_str(&format!("{error} | {error:?}\n"));
             }
         }
         shown.push_str(&format!("{transcribers:?}\n"));
@@ -65,7 +65,7 @@ async fn the_key_and_transcript_stay_out_of_logs_and_messages_through_transcribe
     for key in [Err(SecretError::Store("keychain locked".into())), Ok(None)] {
         let unavailable = Transcribers::new(Engine::remote(key));
         let error = unavailable.transcribe(&audio()).await.unwrap_err();
-        shown.push_str(&format!("{error} | {error:?} | {}\n", error.user_message()));
+        shown.push_str(&format!("{error} | {error:?}\n"));
     }
 
     let logs = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();

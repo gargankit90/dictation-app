@@ -144,7 +144,7 @@ export function useConnection({ onConnected, refreshEngine }: Options) {
     try {
       const tested = await commands.testApiKey(key);
       if (tested.status === "error") {
-        failed = tested.error.message;
+        failed = tested.error;
       } else {
         const stored = await commands.setApiKey(key);
         if (stored.status === "error") failed = `${KEY_NOT_SAVED}: ${messageOf(stored.error)}`;

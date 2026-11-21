@@ -5,7 +5,7 @@
 # sentence; the next recording clears all of it. The error is an offline
 # one: the real engine
 # (`--transcriber settings`, the default) with no API key in the keychain
-# fails at once with "Add your API key in Settings.", no network needed.
+# fails at once with "No API key saved.", no network needed.
 # Then the app is quit from the tray and started on the mock, and a normal
 # dictation pastes with the title still clear.
 
@@ -14,7 +14,7 @@
 # What the tray's status line says (the code table's message).
 TRAY_NO_KEY_SHOWN="No API key saved."
 # What the log says (DictationError's Display).
-TRAY_NO_KEY_ERROR="Transcription failed: Add your API key in Settings."
+TRAY_NO_KEY_ERROR="Transcription failed: No API key saved."
 # The tray's tooltip, with nothing wrong, and its status line.
 TRAY_TOOLTIP="Vocet"
 TRAY_READY_STATUS="✓ Ready · Hold Right ⌥"

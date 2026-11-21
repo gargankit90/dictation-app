@@ -14,7 +14,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dictation_core::diagnostics::ErrorCode;
-use dictation_core::error::DictationError;
 use dictation_core::onboarding::{Readiness, Step};
 use dictation_core::settings::{Settings, Transcription};
 use dictation_pipeline::config::Config as AppSettingsFile;
@@ -320,13 +319,10 @@ pub fn setup_status_read(usage: &Usage, onboarding: &Onboarding, status: &Onboar
 
 /// What the window just read about the engine: a model that can't load.
 pub fn engine_status_read(usage: &Usage, onboarding: &Onboarding, engine: &Engine) {
-    if let Engine::Unavailable(error) = engine {
-        let shown = DictationError::TranscriptionFailed {
-            reason: error.user_message(),
-        };
-        if ErrorCode::of(&shown) == ErrorCode::ModelLoadingFailed {
-            setup_problem_once(usage, onboarding, SetupProblem::ModelLoadFailed);
-        }
+    if let Engine::Unavailable(error) = engine
+        && error.code() == ErrorCode::ModelLoadingFailed
+    {
+        setup_problem_once(usage, onboarding, SetupProblem::ModelLoadFailed);
     }
 }
 
@@ -702,9 +698,7 @@ mod tests {
             let no_key = Engine::Unavailable(TranscribeError::ModelMissing);
             engine_status_read(&usage, &onboarding, &no_key);
             assert_eq!(fake.events().len(), before);
-            let broken = Engine::Unavailable(TranscribeError::Engine(
-                "couldn't load the on-device model: bad file".into(),
-            ));
+            let broken = Engine::Unavailable(TranscribeError::ModelLoadFailed("bad file".into()));
             engine_status_read(&usage, &onboarding, &broken);
             engine_status_read(&usage, &onboarding, &broken);
             assert_eq!(

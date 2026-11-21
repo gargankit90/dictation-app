@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dictation_core::coordinator::Phase::{Idle, Inserting, Recording, Transcribing};
+use dictation_core::diagnostics::ErrorCode;
 use dictation_core::error::DictationError;
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
 use dictation_pipeline::ui_events::UiReceiver;
@@ -328,9 +329,9 @@ async fn criterion_3_transcriber_error_shows_error_and_inserts_nothing() {
         [
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
-            UiEvent::Error(DictationError::TranscriptionFailed {
-                reason: TranscribeError::Timeout.user_message()
-            }),
+            UiEvent::Error(DictationError::TranscriptionFailed(
+                TranscribeError::Timeout.code()
+            )),
             UiEvent::StateChanged(Idle),
         ]
     );
@@ -678,9 +679,7 @@ async fn a_microphone_failure_is_reported_when_the_recording_stops() {
         [
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
-            UiEvent::Error(DictationError::TranscriptionFailed {
-                reason: "the microphone failed (no microphone found)".into()
-            }),
+            UiEvent::Error(DictationError::TranscriptionFailed(ErrorCode::MicFailed)),
             UiEvent::StateChanged(Idle),
         ]
     );
@@ -746,9 +745,7 @@ async fn a_transcriber_that_panics_is_an_error_and_the_next_dictation_works() {
         [
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
-            UiEvent::Error(DictationError::TranscriptionFailed {
-                reason: "the transcriber crashed".into()
-            }),
+            UiEvent::Error(DictationError::TranscriptionFailed(ErrorCode::EngineFailed)),
             UiEvent::StateChanged(Idle),
         ]
     );
@@ -1196,9 +1193,9 @@ mod edges {
             [
                 UiEvent::StateChanged(Recording),
                 UiEvent::StateChanged(Transcribing),
-                UiEvent::Error(DictationError::TranscriptionFailed {
-                    reason: TranscribeError::Network("connection reset".into()).user_message()
-                }),
+                UiEvent::Error(DictationError::TranscriptionFailed(
+                    TranscribeError::Network("connection reset".into()).code()
+                )),
                 UiEvent::StateChanged(Idle),
             ]
         );
@@ -1266,6 +1263,7 @@ mod run2 {
     use std::time::Duration;
 
     use dictation_core::coordinator::Phase::{Idle, Inserting, Recording, Transcribing};
+    use dictation_core::diagnostics::ErrorCode;
     use dictation_core::error::DictationError;
     use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
     use dictation_pipeline::ui_events::UiReceiver;
@@ -1468,9 +1466,7 @@ mod run2 {
         vec![
             UiEvent::StateChanged(Recording),
             UiEvent::StateChanged(Transcribing),
-            UiEvent::Error(DictationError::TranscriptionFailed {
-                reason: "the transcriber crashed".into(),
-            }),
+            UiEvent::Error(DictationError::TranscriptionFailed(ErrorCode::EngineFailed)),
             UiEvent::StateChanged(Idle),
         ]
     }

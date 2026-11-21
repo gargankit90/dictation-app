@@ -374,7 +374,7 @@ mod tests {
         let (tx, mut rx) = ui_channel();
         let kinds = [
             DictationError::SecureInput,
-            DictationError::TranscriptionFailed { reason: "x".into() },
+            DictationError::TranscriptionFailed(ErrorCode::EngineFailed),
         ];
         for n in 0..UI_ERRORS_QUEUED + 5 {
             tx.send(UiEvent::Error(kinds[n % 2].clone()));

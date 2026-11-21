@@ -13,7 +13,7 @@
 //! turns that into a [`MenuModel`] the shell builds an `NSMenu` from.
 
 use dictation_core::coordinator::Phase;
-use dictation_core::diagnostics::ErrorCode;
+use dictation_core::diagnostics::{ErrorCode, FixAction};
 use dictation_core::error::DictationError;
 
 use crate::pipeline::UiEvent;
@@ -55,106 +55,45 @@ pub mod id {
     pub const QUIT: &str = "quit";
 }
 
-/// What a problem's one fix item does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Fix {
-    /// Settings, on the key and engine.
-    OpenSpeechSettings,
-    /// System Settings, Privacy & Security, Microphone.
-    OpenMicrophoneSettings,
-    /// System Settings, Privacy & Security, Accessibility.
-    OpenAccessibilitySettings,
-    /// Restart the app, so a grant takes effect.
-    Relaunch,
-    /// Settings, Speech, where models download.
-    DownloadModel,
-    /// Settings, on the dictation key.
-    ChooseAnotherKey,
-    /// The Troubleshoot page.
-    Troubleshoot,
-    /// `OpenRouter`'s page for adding credits.
-    AddCredits,
-}
-
-impl Fix {
-    const ALL: [Self; 8] = [
-        Self::OpenSpeechSettings,
-        Self::OpenMicrophoneSettings,
-        Self::OpenAccessibilitySettings,
-        Self::Relaunch,
-        Self::DownloadModel,
-        Self::ChooseAnotherKey,
-        Self::Troubleshoot,
-        Self::AddCredits,
-    ];
-
-    /// The item's id.
-    #[must_use]
-    pub const fn id(self) -> &'static str {
-        match self {
-            Self::OpenSpeechSettings => id::FIX_SPEECH,
-            Self::OpenMicrophoneSettings => id::FIX_MICROPHONE,
-            Self::OpenAccessibilitySettings => id::FIX_ACCESSIBILITY,
-            Self::Relaunch => id::FIX_RELAUNCH,
-            Self::DownloadModel => id::FIX_MODEL,
-            Self::ChooseAnotherKey => id::FIX_KEY,
-            Self::Troubleshoot => id::FIX_TROUBLESHOOT,
-            Self::AddCredits => id::FIX_CREDITS,
-        }
-    }
-
-    /// The item's label: it names the action.
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::OpenSpeechSettings => "Open Speech settings…",
-            Self::OpenMicrophoneSettings => "Open Microphone settings…",
-            Self::OpenAccessibilitySettings => "Open Accessibility settings…",
-            Self::Relaunch => "Relaunch Vocet",
-            Self::DownloadModel => "Download the model…",
-            Self::ChooseAnotherKey => "Choose another key…",
-            Self::Troubleshoot => "Troubleshoot…",
-            Self::AddCredits => "Add credits…",
-        }
-    }
-
-    /// The fix for the item `item`, if it is one.
-    #[must_use]
-    pub fn from_id(item: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|fix| fix.id() == item)
-    }
-
-    /// Whether this fix sends the user to System Settings for a grant that
-    /// reaches the app only after a relaunch.
-    #[must_use]
-    pub const fn is_grant(self) -> bool {
-        matches!(
-            self,
-            Self::OpenMicrophoneSettings | Self::OpenAccessibilitySettings
-        )
-    }
-}
-
-/// The one fix for `code`; codes with no special action get Troubleshoot.
+/// The menu item id of `fix`.
 #[must_use]
-pub const fn fix_for(code: ErrorCode) -> Fix {
-    match code {
-        ErrorCode::KeyMissing | ErrorCode::KeyRejected | ErrorCode::KeyUnreadable => {
-            Fix::OpenSpeechSettings
-        }
-        ErrorCode::MicDenied => Fix::OpenMicrophoneSettings,
-        ErrorCode::AccessibilityMissing | ErrorCode::PasteFailed => Fix::OpenAccessibilitySettings,
-        ErrorCode::ModelMissing | ErrorCode::ModelLoadingFailed => Fix::DownloadModel,
-        ErrorCode::OutOfCredits => Fix::AddCredits,
-        ErrorCode::HotkeyUnregistered => Fix::ChooseAnotherKey,
-        ErrorCode::MicFailed
-        | ErrorCode::NetworkUnreachable
-        | ErrorCode::ProviderQuota
-        | ErrorCode::ModelLoading
-        | ErrorCode::EngineFailed
-        | ErrorCode::NoSpeech
-        | ErrorCode::SecureInput => Fix::Troubleshoot,
+pub const fn fix_id(fix: FixAction) -> &'static str {
+    match fix {
+        FixAction::OpenSpeechSettings => id::FIX_SPEECH,
+        FixAction::OpenMicrophoneSettings => id::FIX_MICROPHONE,
+        FixAction::OpenAccessibilitySettings => id::FIX_ACCESSIBILITY,
+        FixAction::Relaunch => id::FIX_RELAUNCH,
+        FixAction::DownloadModel => id::FIX_MODEL,
+        FixAction::ChooseAnotherKey => id::FIX_KEY,
+        FixAction::Troubleshoot | FixAction::TryAgain => id::FIX_TROUBLESHOOT,
+        FixAction::AddCredits => id::FIX_CREDITS,
     }
+}
+
+/// The fix row's label: the action's, with "…" when it opens a window.
+#[must_use]
+pub fn fix_label(fix: FixAction) -> String {
+    match fix {
+        FixAction::Relaunch => fix.label().to_owned(),
+        _ => format!("{}…", fix.label()),
+    }
+}
+
+/// The fix for the item `item`, if it is one.
+#[must_use]
+pub fn fix_from_id(item: &str) -> Option<FixAction> {
+    [
+        FixAction::OpenSpeechSettings,
+        FixAction::OpenMicrophoneSettings,
+        FixAction::OpenAccessibilitySettings,
+        FixAction::Relaunch,
+        FixAction::DownloadModel,
+        FixAction::ChooseAnotherKey,
+        FixAction::Troubleshoot,
+        FixAction::AddCredits,
+    ]
+    .into_iter()
+    .find(|&fix| fix_id(fix) == item)
 }
 
 /// The status line while Accessibility was just granted but the key may
@@ -454,17 +393,23 @@ impl TrayStatus {
             && self.ambient.problem != Some(ErrorCode::AccessibilityMissing)
     }
 
-    /// The fix row's action for the current problem, if there is one.
+    /// The fix row's action for the current problem, if there is one: the
+    /// code table's, except that a dead key with Accessibility allowed is
+    /// fixed by choosing another, nothing to click becomes Troubleshoot, and
+    /// a grant already asked for needs a relaunch.
     #[must_use]
-    pub fn fix(&self) -> Option<Fix> {
+    pub fn fix(&self) -> Option<FixAction> {
         if self.relaunch_needed() {
-            return Some(Fix::Relaunch);
+            return Some(FixAction::Relaunch);
         }
-        let fix = fix_for(self.shown_problem()?);
-        Some(if self.grant_opened && fix.is_grant() {
-            Fix::Relaunch
-        } else {
-            fix
+        let fix = match self.shown_problem()? {
+            ErrorCode::HotkeyUnregistered => FixAction::ChooseAnotherKey,
+            code => code.info().action,
+        };
+        Some(match fix {
+            FixAction::TryAgain => FixAction::Troubleshoot,
+            fix if self.grant_opened && fix.is_grant() => FixAction::Relaunch,
+            fix => fix,
         })
     }
 
@@ -497,7 +442,7 @@ impl TrayStatus {
             };
             entries.push(Entry::disabled(id::STATUS, format!("! {sentence}")));
             if let Some(fix) = self.fix() {
-                entries.push(Entry::item(fix.id(), fix.label()));
+                entries.push(Entry::item(fix_id(fix), fix_label(fix)));
             }
             format!("{APP_NAME}: {sentence}")
         } else if relaunch {
@@ -505,7 +450,10 @@ impl TrayStatus {
                 id::STATUS,
                 format!("! {RELAUNCH_SENTENCE}"),
             ));
-            entries.push(Entry::item(Fix::Relaunch.id(), Fix::Relaunch.label()));
+            entries.push(Entry::item(
+                fix_id(FixAction::Relaunch),
+                fix_label(FixAction::Relaunch),
+            ));
             format!("{APP_NAME}: {RELAUNCH_SENTENCE}")
         } else if download.is_some() {
             entries.push(Entry::disabled(id::STATUS, "↓ Downloading speech model…"));
@@ -600,10 +548,8 @@ mod tests {
         UiEvent::Error(error)
     }
 
-    fn transcription_failed(reason: &str) -> UiEvent {
-        error(DictationError::TranscriptionFailed {
-            reason: reason.to_owned(),
-        })
+    fn transcription_failed(code: ErrorCode) -> UiEvent {
+        error(DictationError::TranscriptionFailed(code))
     }
 
     /// U12 criterion 7: the menu, exactly, whichever engine is in use.
@@ -649,7 +595,7 @@ mod tests {
     #[test]
     fn u12_criterion_7_the_old_items_are_gone() {
         let mut problem = ready("RightAlt");
-        problem.on_event(&transcription_failed("The provider rejected your API key."));
+        problem.on_event(&transcription_failed(ErrorCode::KeyRejected));
         for tray in [ready("RightAlt"), problem] {
             for (item, label) in tray.menu().outline() {
                 assert_ne!(item, "engine");
@@ -677,7 +623,7 @@ mod tests {
                 ..downloading(chosen)
             });
             // A press after the download began: the pipeline says no key.
-            tray.on_event(&transcription_failed("Add your API key in Settings."));
+            tray.on_event(&transcription_failed(ErrorCode::KeyMissing));
             assert_eq!(tray.problem(), Some(ErrorCode::KeyMissing));
             let menu = tray.menu();
             assert_eq!(
@@ -700,7 +646,7 @@ mod tests {
         };
         let mut tray = ready("RightAlt");
         tray.set_ambient(downloading(false));
-        tray.on_event(&transcription_failed("The provider rejected your API key."));
+        tray.on_event(&transcription_failed(ErrorCode::KeyRejected));
         assert!(label_of(&tray.menu(), id::STATUS).unwrap().starts_with('!'));
         // The chosen model's download doesn't answer a microphone refusal.
         let mut tray = TrayStatus::new(true);
@@ -852,17 +798,15 @@ mod tests {
             assert_eq!(enabled(&menu, fix_id), Some(true), "{code}");
             assert_eq!(menu.icon, TrayIcon::Attention, "{code}");
             assert_eq!(menu.tooltip, format!("Vocet: {sentence}"), "{code}");
-            assert_eq!(Fix::from_id(fix_id), Some(fix_for(code)), "{code}");
+            assert_eq!(fix_from_id(fix_id), tray.fix(), "{code}");
         }
     }
 
-    /// A code the table doesn't list, if one were added, still lands on
-    /// Troubleshoot because `fix_for`'s match is exhaustive; and an unknown
-    /// item id is no fix.
+    /// An item id that isn't a fix row's is no fix.
     #[test]
     fn unknown_ids_are_not_fixes() {
-        assert_eq!(Fix::from_id("nope"), None);
-        assert_eq!(Fix::from_id(id::SETTINGS), None);
+        assert_eq!(fix_from_id("nope"), None);
+        assert_eq!(fix_from_id(id::SETTINGS), None);
     }
 
     /// The two real-world sources of a problem, from the pipeline.
@@ -870,7 +814,7 @@ mod tests {
     fn criterion_2_events_raise_and_clear_the_problem() {
         let mut tray = ready("RightAlt");
         assert_eq!(tray.problem(), None);
-        assert!(tray.on_event(&transcription_failed("The provider rejected your API key.")));
+        assert!(tray.on_event(&transcription_failed(ErrorCode::KeyRejected)));
         let menu = tray.menu();
         assert_eq!(
             label_of(&menu, id::STATUS).as_deref(),
@@ -905,10 +849,10 @@ mod tests {
     fn the_hotkey_outage_is_a_problem_until_restored() {
         let mut tray = ready("RightAlt");
         assert!(tray.on_event(&error(DictationError::HotkeyFailed)));
-        assert_eq!(tray.fix(), Some(Fix::ChooseAnotherKey));
+        assert_eq!(tray.fix(), Some(FixAction::ChooseAnotherKey));
         // A newer dictation error shows over it, and the outage returns
         // after it clears.
-        tray.on_event(&transcription_failed("Add your API key in Settings."));
+        tray.on_event(&transcription_failed(ErrorCode::KeyMissing));
         assert_eq!(tray.problem(), Some(ErrorCode::KeyMissing));
         tray.on_event(&UiEvent::StateChanged(Phase::Recording));
         assert_eq!(tray.problem(), Some(ErrorCode::HotkeyUnregistered));
@@ -936,7 +880,7 @@ mod tests {
             ..ambient("RightAlt")
         });
         let menu = tray.menu();
-        assert_eq!(tray.fix(), Some(Fix::OpenAccessibilitySettings));
+        assert_eq!(tray.fix(), Some(FixAction::OpenAccessibilitySettings));
         assert_eq!(
             label_of(&menu, id::STATUS).as_deref(),
             Some("! Vocet can't paste into other apps yet.")
@@ -978,7 +922,7 @@ mod tests {
     /// setting changes; unrelated errors stay.
     #[test]
     fn a_rejected_key_clears_when_the_engine_is_switched_or_the_key_replaced() {
-        let rejected = || transcription_failed("The provider rejected your API key.");
+        let rejected = || transcription_failed(ErrorCode::KeyRejected);
         // Switched to the local engine.
         let mut tray = ready("RightAlt");
         tray.on_event(&rejected());
@@ -1043,9 +987,7 @@ mod tests {
             problem: Some(ErrorCode::ModelMissing),
             ..ambient("RightAlt")
         });
-        tray.on_event(&transcription_failed(
-            "The on-device model isn't downloaded. Download it in Settings.",
-        ));
+        tray.on_event(&transcription_failed(ErrorCode::ModelMissing));
         assert_eq!(tray.problem(), Some(ErrorCode::ModelMissing));
         tray.set_ambient(Ambient {
             engine_generation: 1,
@@ -1084,7 +1026,7 @@ mod tests {
             Some("! Right ⌥ isn't working. Choose another key.")
         );
         assert!(!tray.relaunch_needed());
-        assert_eq!(tray.fix(), Some(Fix::ChooseAnotherKey));
+        assert_eq!(tray.fix(), Some(FixAction::ChooseAnotherKey));
         tray.on_event(&UiEvent::HotkeyRestored);
         let menu = tray.menu();
         assert!(label_of(&menu, id::STATUS).unwrap().starts_with("✓ Ready"));
@@ -1102,7 +1044,7 @@ mod tests {
             problem: Some(ErrorCode::AccessibilityMissing),
             ..ambient("RightAlt")
         });
-        assert_eq!(tray.fix(), Some(Fix::OpenAccessibilitySettings));
+        assert_eq!(tray.fix(), Some(FixAction::OpenAccessibilitySettings));
         // Granted again; the hotkey is still down.
         tray.set_ambient(ambient("RightAlt"));
         let menu = tray.menu();
@@ -1156,7 +1098,7 @@ mod tests {
     fn a_microphone_denied_at_launch_shows_at_once() {
         let tray = TrayStatus::new(true);
         assert_eq!(tray.problem(), Some(ErrorCode::MicDenied));
-        assert_eq!(tray.fix(), Some(Fix::OpenMicrophoneSettings));
+        assert_eq!(tray.fix(), Some(FixAction::OpenMicrophoneSettings));
         assert_eq!(TrayStatus::new(false).problem(), None);
     }
 
@@ -1165,9 +1107,9 @@ mod tests {
     #[test]
     fn criterion_6_relaunch_replaces_the_grant_fix_after_it_was_opened() {
         let mut tray = TrayStatus::new(true);
-        assert_eq!(tray.fix(), Some(Fix::OpenMicrophoneSettings));
+        assert_eq!(tray.fix(), Some(FixAction::OpenMicrophoneSettings));
         tray.grant_opened();
-        assert_eq!(tray.fix(), Some(Fix::Relaunch));
+        assert_eq!(tray.fix(), Some(FixAction::Relaunch));
         let menu = tray.menu();
         assert_eq!(
             label_of(&menu, id::FIX_RELAUNCH).as_deref(),
@@ -1188,9 +1130,9 @@ mod tests {
         assert!(!ids(&tray.menu()).contains(&"fix-relaunch".to_owned()));
         // A fix that isn't a grant stays itself.
         let mut tray = ready("RightAlt");
-        tray.on_event(&transcription_failed("Add your API key in Settings."));
+        tray.on_event(&transcription_failed(ErrorCode::KeyMissing));
         tray.grant_opened();
-        assert_eq!(tray.fix(), Some(Fix::OpenSpeechSettings));
+        assert_eq!(tray.fix(), Some(FixAction::OpenSpeechSettings));
     }
 
     #[test]
@@ -1207,7 +1149,7 @@ mod tests {
     #[test]
     fn u7_criterion_6_history_is_below_copy_last_in_every_state() {
         let mut problem = ready("RightAlt");
-        problem.on_event(&transcription_failed("Add your API key in Settings."));
+        problem.on_event(&transcription_failed(ErrorCode::KeyMissing));
         for tray in [ready("RightAlt"), problem, TrayStatus::new(true)] {
             let listed = ids(&tray.menu());
             let copy = listed.iter().position(|id| id == id::COPY_LAST).unwrap();
@@ -1257,7 +1199,7 @@ mod tests {
         tray.on_event(&error(DictationError::PermissionMissing(
             Permission::Accessibility,
         )));
-        assert_eq!(tray.fix(), Some(Fix::OpenAccessibilitySettings));
+        assert_eq!(tray.fix(), Some(FixAction::OpenAccessibilitySettings));
         tray.on_event(&error(DictationError::InsertFailed {
             reason: "no focus".to_owned(),
         }));

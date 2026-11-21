@@ -20,23 +20,21 @@
 //!
 //! `test_api_key` (M3.4) is the one command that sends a key anywhere but
 //! the keychain: to the provider, in the `Authorization` header, with a short
-//! silent clip. It returns nothing but success or a [`KeyTestError`] whose
-//! message is written here and never holds a key.
+//! silent clip. It returns nothing but success or the error code's
+//! sentence (`dictation_core::diagnostics`), which never holds a key.
 
 use std::sync::Arc;
 
+use dictation_core::diagnostics::ErrorCode;
 use dictation_core::onboarding::Step;
 use dictation_core::settings::Settings;
 use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, UndoFailed};
 use dictation_pipeline::launch::LoginSync;
 use dictation_platform::secrets::KeychainSecretStore;
-use dictation_ports::{
-    EngineKind, LaunchAtLogin, Permission, SecretStore, SetupProblem, TranscribeError,
-};
+use dictation_ports::{EngineKind, LaunchAtLogin, Permission, SecretStore, SetupProblem};
 use dictation_transcribe::check_key::check_key;
 use dictation_transcribe::openrouter;
-use serde::Serialize;
 use tauri::State;
 
 use crate::diagnostics::Diagnostics;
@@ -515,127 +513,21 @@ async fn has_key<S: SecretStore + 'static>(
         })
 }
 
-/// What went wrong when testing a key, so the UI can pick its wording.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum KeyTestKind {
-    /// No key was typed or saved to test.
-    NoKey,
-    /// The key can't be a key, or the provider rejected it.
-    InvalidKey,
-    /// The provider is rate limiting; the key may be fine.
-    RateLimited,
-    /// The provider couldn't be reached (offline, DNS, timeout).
-    Network,
-    /// The provider failed or gave an answer we can't use.
-    Server,
-    /// The saved key couldn't be read from the keychain.
-    Keychain,
-}
-
-/// Why a key test failed. Never contains the key.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
-pub struct KeyTestError {
-    /// The category.
-    pub kind: KeyTestKind,
-    /// What to show the user.
-    pub message: String,
-}
-
-impl KeyTestError {
-    fn new(kind: KeyTestKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-        }
-    }
-}
-
-/// The provider's name for messages.
-const PROVIDER_NAME: &str = "OpenRouter";
-
-/// The user-facing error for a failed check. The messages are fixed text
-/// plus the engine's own detail, which never holds the key, the audio or a
-/// transcript (`TranscribeError`).
-fn describe(error: &TranscribeError) -> KeyTestError {
-    let name = PROVIDER_NAME;
-    match error {
-        TranscribeError::MissingKey => KeyTestError::new(
-            KeyTestKind::NoKey,
-            format!("No {name} API key is saved yet. Paste one first."),
-        ),
-        TranscribeError::InvalidKey => KeyTestError::new(
-            KeyTestKind::InvalidKey,
-            format!(
-                "{name} rejected this API key. Check that you copied the whole key from {name}."
-            ),
-        ),
-        TranscribeError::OutOfCredits => KeyTestError::new(
-            KeyTestKind::Server,
-            format!(
-                "The key works, but your {name} account has no credits. Add credits on {name}, then test again."
-            ),
-        ),
-        TranscribeError::NoRoute => KeyTestError::new(
-            KeyTestKind::Server,
-            format!(
-                "{name} has no provider for the speech model with Vocet's privacy settings right now, so the key couldn't be checked. Try again in a few minutes."
-            ),
-        ),
-        TranscribeError::RateLimited => KeyTestError::new(
-            KeyTestKind::RateLimited,
-            format!(
-                "{name} is limiting requests right now. The key may be fine; try again in a minute."
-            ),
-        ),
-        TranscribeError::Timeout => KeyTestError::new(
-            KeyTestKind::Network,
-            format!("{name} didn't answer in time. Check your internet connection and try again."),
-        ),
-        TranscribeError::Network(_) => KeyTestError::new(
-            KeyTestKind::Network,
-            format!("Couldn't reach {name}. Check your internet connection and try again."),
-        ),
-        // The key test reads the keychain itself and reports its errors
-        // (`KeyTestKind::Keychain`); these two come from the dictation engine.
-        TranscribeError::KeyPending | TranscribeError::KeychainUnavailable(_) => KeyTestError::new(
-            KeyTestKind::Keychain,
-            "Couldn't read your API key from the Keychain.".to_owned(),
-        ),
-        // Only the on-device engine reports it; a key test never runs one.
-        TranscribeError::ModelMissing | TranscribeError::ModelLoading => KeyTestError::new(
-            KeyTestKind::Server,
-            "The key couldn't be checked. Try again.".to_owned(),
-        ),
-        TranscribeError::Engine(detail) => KeyTestError::new(
-            KeyTestKind::Server,
-            format!(
-                "{name} had a problem, so the key couldn't be checked ({detail}). Try again later."
-            ),
-        ),
-    }
-}
-
 /// Tests `typed`, or the stored key if `typed` is `None`, against
 /// `OpenRouter` at `base_url`. A typed key is only used for this request;
-/// it is not stored (saving it is `set_api_key`'s job).
+/// it is not stored (saving it is `set_api_key`'s job). The error is the
+/// code of what went wrong; the details go to the log.
 async fn key_test<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
     typed: Option<String>,
     base_url: &str,
-) -> Result<(), KeyTestError> {
-    let name = PROVIDER_NAME;
+) -> Result<(), ErrorCode> {
     let (key, source) = match typed {
-        Some(typed) => {
-            let key = config::validate_key(&typed).map_err(|error| match error {
-                ConfigError::InvalidKey(reason) => {
-                    KeyTestError::new(KeyTestKind::InvalidKey, format!("The API key {reason}."))
-                }
-                other => KeyTestError::new(KeyTestKind::Keychain, other.to_string()),
-            })?;
-            (key, "typed")
-        }
+        Some(typed) => (
+            config::validate_key(&typed).map_err(|_| ErrorCode::KeyRejected)?,
+            "typed",
+        ),
         None => {
             // Bounded and shared with the engine's reads: a keychain that
             // never answers is an error here, not a button stuck on
@@ -643,20 +535,12 @@ async fn key_test<S: SecretStore + 'static>(
             let (stored, live) = (Arc::clone(config), live.clone());
             let stored = tokio::task::spawn_blocking(move || live.read_key(&stored))
                 .await
-                .map_err(|_| KeyTestError::new(KeyTestKind::Keychain, "the keychain task crashed"))?
+                .map_err(|_| ErrorCode::KeyUnreadable)?
                 .map_err(|error| {
-                    KeyTestError::new(
-                        KeyTestKind::Keychain,
-                        format!("Couldn't read the saved key: {error}."),
-                    )
+                    tracing::warn!(%error, "API key test: couldn't read the saved key");
+                    ErrorCode::KeyUnreadable
                 })?;
-            let key = stored.ok_or_else(|| {
-                KeyTestError::new(
-                    KeyTestKind::NoKey,
-                    format!("No {name} API key is saved yet. Paste one first."),
-                )
-            })?;
-            (key, "stored")
+            (stored.ok_or(ErrorCode::KeyMissing)?, "stored")
         }
     };
     let engine = openrouter::Config {
@@ -668,7 +552,7 @@ async fn key_test<S: SecretStore + 'static>(
         Ok(()) => tracing::info!(source, "API key works"),
         Err(error) => tracing::warn!(source, %error, "API key test failed"),
     }
-    result.map_err(|error| describe(&error))
+    result.map_err(|error| error.code())
 }
 
 /// Tests the saved key (Troubleshoot's "Test connection").
@@ -676,23 +560,26 @@ pub(crate) async fn test_saved_key(
     config: &Arc<Config<KeychainSecretStore>>,
     live: &LiveEngine,
     base_url: &str,
-) -> Result<(), KeyTestError> {
+) -> Result<(), ErrorCode> {
     key_test(config, live, None, base_url).await
 }
 
 /// Tests an API key with a short silent clip through `OpenRouter`'s
 /// transcription endpoint: the key typed in the form (`key`, used for this
 /// request only and not stored), or the saved one if `key` is `None`. The
-/// key never comes back; the result is success or a [`KeyTestError`].
+/// key never comes back; the result is success or what went wrong, in the
+/// error code's words.
 #[tauri::command]
 #[specta::specta]
 pub async fn test_api_key(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
     key: Option<String>,
-) -> Result<(), KeyTestError> {
+) -> Result<(), String> {
     let base_url = engine.provider_base_url();
-    key_test(&state.0, engine.inner(), key, &base_url).await
+    key_test(&state.0, engine.inner(), key, &base_url)
+        .await
+        .map_err(ErrorCode::user_text)
 }
 
 /// The view the settings window shows and, for onboarding (M5.2), the step
@@ -1021,15 +908,8 @@ mod tests {
         assert!(command("setApiKey").contains("typedError<null, string>"));
         assert!(command("savedKeyHint").contains("typedError<string | null, string>"));
         // The Test key command sends the key out and returns success or a
-        // `KeyTestError` (kind and message), never the key.
-        assert!(command("testApiKey").contains("typedError<null, KeyTestError>"));
-        let error = bindings
-            .split("export type KeyTestError = {")
-            .nth(1)
-            .and_then(|rest| rest.split("\n};").next())
-            .unwrap();
-        assert_eq!(field_names(error), ["kind", "message"]);
-        assert!(error.contains("kind: KeyTestKind") && error.contains("message: string"));
+        // sentence, never the key.
+        assert!(command("testApiKey").contains("typedError<null, string>"));
         // Settings, the only other type sent back, has no key field.
         let settings = bindings
             .split("export type Settings_Serialize = {")
@@ -2046,7 +1926,7 @@ mod tests {
             typed: Option<&str>,
             secrets: Option<&str>,
             server: &MockServer,
-        ) -> (Result<(), KeyTestError>, MemSecretStore) {
+        ) -> (Result<(), ErrorCode>, MemSecretStore) {
             let (config, store) = config(&temp());
             if let Some(key) = secrets {
                 config.set_api_key(key).unwrap();
@@ -2086,23 +1966,19 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn each_failure_has_a_kind_and_a_readable_message_without_the_key() {
-            for (status, kind, words) in [
-                (401, KeyTestKind::InvalidKey, "rejected this API key"),
-                (403, KeyTestKind::InvalidKey, "rejected this API key"),
-                (402, KeyTestKind::Server, "Add credits on OpenRouter"),
-                (404, KeyTestKind::Server, "privacy settings"),
-                (429, KeyTestKind::RateLimited, "limiting requests"),
-                (503, KeyTestKind::Server, "HTTP 503"),
-                (400, KeyTestKind::Server, "HTTP 400"),
+        async fn each_failure_has_its_code() {
+            for (status, code) in [
+                (401, ErrorCode::KeyRejected),
+                (403, ErrorCode::KeyRejected),
+                (402, ErrorCode::OutOfCredits),
+                (404, ErrorCode::EngineFailed),
+                (429, ErrorCode::ProviderQuota),
+                (503, ErrorCode::EngineFailed),
+                (400, ErrorCode::EngineFailed),
             ] {
                 let server = provider(status, TYPED).await;
                 let (result, _) = run(Some(TYPED), None, &server).await;
-                let error = result.unwrap_err();
-                assert_eq!(error.kind, kind, "HTTP {status}");
-                assert!(error.message.contains(words), "{}", error.message);
-                assert!(error.message.contains("OpenRouter"), "{}", error.message);
-                assert!(!error.message.contains(TYPED));
+                assert_eq!(result, Err(code), "HTTP {status}");
             }
         }
 
@@ -2122,26 +1998,14 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert_eq!(error.kind, KeyTestKind::Network);
-            assert!(
-                error.message.contains("Couldn't reach OpenRouter"),
-                "{}",
-                error.message
-            );
-            assert!(!error.message.contains(TYPED));
+            assert_eq!(error, ErrorCode::NetworkUnreachable);
         }
 
         #[tokio::test]
         async fn without_a_stored_or_typed_key_there_is_nothing_to_test() {
             let server = provider(200, STORED).await;
             let (result, _) = run(None, None, &server).await;
-            let error = result.unwrap_err();
-            assert_eq!(error.kind, KeyTestKind::NoKey);
-            assert!(
-                error.message.contains("No OpenRouter API key"),
-                "{}",
-                error.message
-            );
+            assert_eq!(result, Err(ErrorCode::KeyMissing));
             assert!(
                 server.received_requests().await.unwrap().is_empty(),
                 "no request without a key"
@@ -2151,15 +2015,9 @@ mod tests {
         #[tokio::test]
         async fn a_typed_key_that_cant_be_a_key_is_refused_before_any_request() {
             let server = provider(200, STORED).await;
-            for (typed, why) in [
-                ("", "is empty"),
-                ("   ", "is empty"),
-                ("two words", "contains spaces"),
-            ] {
+            for typed in ["", "   ", "two words"] {
                 let (result, _) = run(Some(typed), Some(STORED), &server).await;
-                let error = result.unwrap_err();
-                assert_eq!(error.kind, KeyTestKind::InvalidKey);
-                assert_eq!(error.message, format!("The API key {why}."));
+                assert_eq!(result, Err(ErrorCode::KeyRejected), "{typed:?}");
             }
             assert!(server.received_requests().await.unwrap().is_empty());
         }
@@ -2172,8 +2030,7 @@ mod tests {
             let error = key_test(&config, &LiveEngine::fixed(), None, &server.uri())
                 .await
                 .unwrap_err();
-            assert_eq!(error.kind, KeyTestKind::Keychain);
-            assert!(error.message.contains("keychain access was denied"));
+            assert_eq!(error, ErrorCode::KeyUnreadable);
         }
 
         /// A keychain that doesn't answer until it is opened, and counts
@@ -2243,13 +2100,7 @@ mod tests {
                 .await
                 .expect("the test never returned")
                 .unwrap_err();
-                assert_eq!(error.kind, KeyTestKind::Keychain, "test {attempt}");
-                assert!(
-                    error.message.contains("no answer from the keychain"),
-                    "{}",
-                    error.message
-                );
-                assert!(!error.message.contains(STORED));
+                assert_eq!(error, ErrorCode::KeyUnreadable, "test {attempt}");
 
                 let status = tokio::time::timeout(Duration::from_secs(20), has_key(&config, &live))
                     .await

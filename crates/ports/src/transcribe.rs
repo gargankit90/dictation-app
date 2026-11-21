@@ -5,6 +5,7 @@ use std::future::Future;
 
 use thiserror::Error;
 
+use dictation_core::diagnostics::ErrorCode;
 use dictation_core::redact;
 
 use crate::Audio;
@@ -56,6 +57,10 @@ pub enum TranscribeError {
     /// switch of model); dictation works again once it is (L1).
     #[error("the on-device model is still loading")]
     ModelLoading,
+    /// The on-device model's file couldn't be loaded (damaged, or not a
+    /// model transcribe.cpp knows). The text says why, for the log.
+    #[error("couldn't load the on-device model: {}", redact::summary(.0))]
+    ModelLoadFailed(String),
     /// The provider or engine returned an error or a response we can't read.
     /// Same rule as [`Network`](Self::Network): a short summary such as
     /// "the provider failed (HTTP 503)", never the reply body.
@@ -86,6 +91,10 @@ impl fmt::Debug for TranscribeError {
                 .finish(),
             Self::ModelMissing => f.write_str("ModelMissing"),
             Self::ModelLoading => f.write_str("ModelLoading"),
+            Self::ModelLoadFailed(text) => f
+                .debug_tuple("ModelLoadFailed")
+                .field(&redact::summary(text))
+                .finish(),
             Self::Engine(text) => f
                 .debug_tuple("Engine")
                 .field(&redact::summary(text))
@@ -95,43 +104,22 @@ impl fmt::Debug for TranscribeError {
 }
 
 impl TranscribeError {
-    /// What to tell the user, in plain words and without the provider's
-    /// name (the engine doesn't know it). Like the `Display` text it never
-    /// holds the audio, the transcript or a key; unlike it, it says what to
-    /// do next.
+    /// The code the user sees for this error (its sentence and fix are in
+    /// `dictation_core::diagnostics`). The details stay in the `Display`
+    /// text, for the log.
     #[must_use]
-    pub fn user_message(&self) -> String {
+    pub fn code(&self) -> ErrorCode {
         match self {
-            Self::MissingKey => "Add your API key in Settings.".to_owned(),
-            Self::KeyPending => "Still reading your API key from the Keychain. If a dialog asks, \
-                 allow access, then try again."
-                .to_owned(),
-            Self::KeychainUnavailable(_) => "Couldn't read your API key from the Keychain. Unlock \
-                 the Keychain or allow access, then try again, or enter the key again in Settings."
-                .to_owned(),
-            Self::InvalidKey => {
-                "The provider rejected your API key. Check it in Settings.".to_owned()
-            }
-            Self::RateLimited => {
-                "The provider is limiting requests right now. Try again in a minute.".to_owned()
-            }
-            Self::OutOfCredits => "Your OpenRouter credits ran out. Add credits.".to_owned(),
-            Self::NoRoute => "No provider can take this dictation with Vocet's privacy settings \
-                 right now. Try again in a few minutes."
-                .to_owned(),
-            Self::Timeout => {
-                "The provider didn't answer in time. Check your internet connection.".to_owned()
-            }
-            Self::Network(_) => {
-                "Couldn't reach the provider. Check your internet connection.".to_owned()
-            }
-            Self::ModelMissing => {
-                "The on-device model isn't downloaded. Download the model in Settings.".to_owned()
-            }
-            Self::ModelLoading => {
-                "The on-device model is still loading. Try again in a moment.".to_owned()
-            }
-            Self::Engine(detail) => format!("Something went wrong: {}.", redact::summary(detail)),
+            Self::MissingKey => ErrorCode::KeyMissing,
+            Self::KeyPending | Self::KeychainUnavailable(_) => ErrorCode::KeyUnreadable,
+            Self::InvalidKey => ErrorCode::KeyRejected,
+            Self::RateLimited => ErrorCode::ProviderQuota,
+            Self::OutOfCredits => ErrorCode::OutOfCredits,
+            Self::Timeout | Self::Network(_) => ErrorCode::NetworkUnreachable,
+            Self::ModelMissing => ErrorCode::ModelMissing,
+            Self::ModelLoading => ErrorCode::ModelLoading,
+            Self::ModelLoadFailed(_) => ErrorCode::ModelLoadingFailed,
+            Self::NoRoute | Self::Engine(_) => ErrorCode::EngineFailed,
         }
     }
 }
@@ -167,66 +155,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_error_has_a_message_that_says_what_to_do() {
-        let cases = [
-            (TranscribeError::MissingKey, "Add your API key in Settings."),
-            (
-                TranscribeError::InvalidKey,
-                "The provider rejected your API key. Check it in Settings.",
-            ),
-            (
-                TranscribeError::RateLimited,
-                "The provider is limiting requests right now. Try again in a minute.",
-            ),
-            (
-                TranscribeError::Timeout,
-                "The provider didn't answer in time. Check your internet connection.",
-            ),
-            (
-                TranscribeError::OutOfCredits,
-                "Your OpenRouter credits ran out. Add credits.",
-            ),
-            (
-                TranscribeError::NoRoute,
-                "No provider can take this dictation with Vocet's privacy settings right now. Try again in a few minutes.",
-            ),
-            (
-                TranscribeError::Network("dns error".into()),
-                "Couldn't reach the provider. Check your internet connection.",
-            ),
-            (
-                TranscribeError::KeyPending,
-                "Still reading your API key from the Keychain. If a dialog asks, allow access, then try again.",
-            ),
-            (
-                TranscribeError::KeychainUnavailable("keychain error: locked".into()),
-                "Couldn't read your API key from the Keychain. Unlock the Keychain or allow access, then try again, or enter the key again in Settings.",
-            ),
-            (
-                TranscribeError::ModelMissing,
-                "The on-device model isn't downloaded. Download the model in Settings.",
-            ),
-            (
-                TranscribeError::ModelLoading,
-                "The on-device model is still loading. Try again in a moment.",
-            ),
-            (
-                TranscribeError::Engine("the provider failed (HTTP 503)".into()),
-                "Something went wrong: the provider failed (HTTP 503).",
-            ),
-        ];
-        for (error, message) in cases {
-            assert_eq!(error.user_message(), message, "{error:?}");
-        }
-    }
-
-    /// E1: the error code of a transcription failure is read back from its
-    /// `user_message`, so every variant's message must land on its code.
-    #[test]
-    fn every_error_message_maps_to_its_error_code() {
-        use dictation_core::diagnostics::ErrorCode;
-        use dictation_core::error::DictationError;
-
+    fn every_error_has_its_code() {
         let cases = [
             (TranscribeError::MissingKey, ErrorCode::KeyMissing),
             (TranscribeError::KeyPending, ErrorCode::KeyUnreadable),
@@ -246,7 +175,7 @@ mod tests {
             (TranscribeError::ModelMissing, ErrorCode::ModelMissing),
             (TranscribeError::ModelLoading, ErrorCode::ModelLoading),
             (
-                TranscribeError::Engine("couldn't load the on-device model: bad file".into()),
+                TranscribeError::ModelLoadFailed("bad file".into()),
                 ErrorCode::ModelLoadingFailed,
             ),
             (
@@ -255,18 +184,14 @@ mod tests {
             ),
         ];
         for (error, code) in cases {
-            let shown = DictationError::TranscriptionFailed {
-                reason: error.user_message(),
-            };
-            assert_eq!(ErrorCode::of(&shown), code, "{error:?}");
+            assert_eq!(error.code(), code, "{error:?}");
         }
     }
 
     /// #41: whatever a provider or library puts in these strings, the text
-    /// that reaches the info log (`Display`) and the user is one short line
-    /// without a key.
+    /// that reaches the info log (`Display`) is one short line without a key.
     #[test]
-    fn display_and_user_message_hide_keys_and_cut_long_bodies() {
+    fn display_and_debug_hide_keys_and_cut_long_bodies() {
         let key = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
         let body = format!(
             "{{\"error\": \"Invalid key {key}\"}}\n{}",
@@ -275,31 +200,15 @@ mod tests {
         for error in [
             TranscribeError::Network(body.clone()),
             TranscribeError::Engine(body.clone()),
+            TranscribeError::ModelLoadFailed(body.clone()),
             TranscribeError::KeychainUnavailable(body),
         ] {
-            for text in [error.to_string(), error.user_message()] {
-                assert!(!text.contains(key), "{text}");
-                assert!(!text.contains('\n'), "{text}");
-                assert!(text.chars().count() < 300, "{text}");
-            }
+            let text = error.to_string();
+            assert!(!text.contains(key), "{text}");
+            assert!(!text.contains('\n'), "{text}");
+            assert!(text.chars().count() < 300, "{text}");
             let debug = format!("{error:?}");
             assert!(!debug.contains(key) && debug.len() < 300, "{debug}");
         }
-    }
-
-    #[test]
-    fn keychain_details_stay_out_of_the_user_message() {
-        let error = TranscribeError::KeychainUnavailable("keychain error: -25308".into());
-        assert!(!error.user_message().contains("25308"));
-        assert!(
-            error.to_string().contains("25308"),
-            "but the log keeps them"
-        );
-    }
-
-    #[test]
-    fn network_details_stay_out_of_the_user_message() {
-        let error = TranscribeError::Network("secret-host.internal refused".into());
-        assert!(!error.user_message().contains("secret-host"));
     }
 }

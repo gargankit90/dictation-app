@@ -29,7 +29,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt as _;
 
-use crate::commands::{self, AppConfig, KeyTestKind};
+use crate::commands::{self, AppConfig};
 use crate::engine::LiveEngine;
 use crate::models::{ModelDownloads, ModelState};
 use crate::onboarding::OsPermissions;
@@ -246,7 +246,9 @@ impl EngineView {
         match engine {
             Engine::Local(_) => Self::Loaded,
             Engine::Unavailable(TranscribeError::ModelLoading) => Self::Loading,
-            Engine::Unavailable(TranscribeError::Engine(_)) => Self::Failed,
+            Engine::Unavailable(
+                TranscribeError::ModelLoadFailed(_) | TranscribeError::Engine(_),
+            ) => Self::Failed,
             Engine::Unavailable(TranscribeError::ModelMissing) => Self::Missing,
             _ => Self::Other,
         }
@@ -324,11 +326,11 @@ fn failing(id: CheckId, label: &str, code: ErrorCode) -> Check {
         id,
         label: label.to_owned(),
         ok: false,
-        detail: format!("{} {}", info.message, info.next_step),
+        detail: code.user_text(),
         code: Some(code),
         details: Some(code.to_string()),
         fix: Some(info.action),
-        fix_label: Some(info.action_label.to_owned()),
+        fix_label: Some(info.action.label().to_owned()),
         local_model: None,
     }
 }
@@ -385,11 +387,11 @@ pub fn checks(input: &CheckInput) -> Vec<Check> {
                 id: CheckId::LastError,
                 label: "Last error".to_owned(),
                 ok: false,
-                detail: format!("{} {}", info.message, info.next_step),
+                detail: error.code.user_text(),
                 code: Some(error.code),
                 details: Some(format!("{} at {}", error.code, report::utc(error.at))),
                 fix: Some(info.action),
-                fix_label: Some(info.action_label.to_owned()),
+                fix_label: Some(info.action.label().to_owned()),
                 local_model: None,
             }
         }
@@ -555,19 +557,6 @@ pub struct ConnectionResult {
     pub message: String,
 }
 
-/// The code for a failed key test.
-#[must_use]
-pub fn connection_code(kind: KeyTestKind) -> ErrorCode {
-    match kind {
-        KeyTestKind::NoKey => ErrorCode::KeyMissing,
-        KeyTestKind::InvalidKey => ErrorCode::KeyRejected,
-        KeyTestKind::RateLimited => ErrorCode::ProviderQuota,
-        KeyTestKind::Network => ErrorCode::NetworkUnreachable,
-        KeyTestKind::Server => ErrorCode::EngineFailed,
-        KeyTestKind::Keychain => ErrorCode::KeyUnreadable,
-    }
-}
-
 /// Asks the selected provider whether it answers and accepts the saved key,
 /// with a short silent clip (the key test). Only when the user presses the
 /// button; never for the on-device engine.
@@ -594,13 +583,12 @@ pub async fn test_connection(
             code: None,
             message: "The provider answered and accepted your key.".to_owned(),
         },
-        Err(error) => {
-            let code = connection_code(error.kind);
+        Err(code) => {
             lock(&diagnostics.0.log).record_code(code, now());
             ConnectionResult {
                 ok: false,
                 code: Some(code),
-                message: format!("{} {}", code.info().message, code.info().next_step),
+                message: code.user_text(),
             }
         }
     })
@@ -769,7 +757,7 @@ mod tests {
         assert!(!mic.ok);
         assert_eq!(mic.code, Some(ErrorCode::MicDenied));
         assert_eq!(mic.fix, Some(FixAction::OpenMicrophoneSettings));
-        assert_eq!(mic.fix_label.as_deref(), Some("Open Microphone Settings"));
+        assert_eq!(mic.fix_label.as_deref(), Some("Open Microphone settings"));
         assert!(mic.detail.contains("use the microphone"), "{}", mic.detail);
         assert!(by_id(&rows, CheckId::Accessibility).ok);
     }
@@ -862,9 +850,7 @@ mod tests {
     /// "Ready", in the check or in the report.
     #[test]
     fn a_present_model_that_fails_to_load_is_not_ready() {
-        let failed = Engine::Unavailable(TranscribeError::Engine(
-            "couldn't load the on-device model: out of memory".into(),
-        ));
+        let failed = Engine::Unavailable(TranscribeError::ModelLoadFailed("out of memory".into()));
         let state = local_state(EngineView::of(&failed), ModelState::Ready);
         assert_eq!(state, LocalState::LoadFailed);
         let mut data = input();
@@ -873,8 +859,8 @@ mod tests {
         let row = by_id(&rows, CheckId::Engine);
         assert!(!row.ok);
         assert_eq!(row.code, Some(ErrorCode::ModelLoadingFailed));
-        assert_eq!(row.fix, Some(FixAction::OpenSettings));
-        assert!(row.detail.contains("download another"), "{}", row.detail);
+        assert_eq!(row.fix, Some(FixAction::DownloadModel));
+        assert!(row.detail.contains("Download it again"), "{}", row.detail);
         assert!(data.engine.problem().is_some());
     }
 
@@ -950,27 +936,7 @@ mod tests {
         );
         // U12 criterion 2: the sentence holds no code; it goes in Details.
         assert!(!last.detail.contains("key_rejected"), "{}", last.detail);
-        assert_eq!(last.fix, Some(FixAction::OpenSettings));
-    }
-
-    #[test]
-    fn a_failed_key_test_has_a_code_for_every_kind() {
-        use KeyTestKind::{InvalidKey, Keychain, Network, NoKey, RateLimited, Server};
-        let codes: Vec<ErrorCode> = [NoKey, InvalidKey, RateLimited, Network, Server, Keychain]
-            .into_iter()
-            .map(connection_code)
-            .collect();
-        assert_eq!(
-            codes,
-            [
-                ErrorCode::KeyMissing,
-                ErrorCode::KeyRejected,
-                ErrorCode::ProviderQuota,
-                ErrorCode::NetworkUnreachable,
-                ErrorCode::EngineFailed,
-                ErrorCode::KeyUnreadable,
-            ]
-        );
+        assert_eq!(last.fix, Some(FixAction::OpenSpeechSettings));
     }
 
     #[test]
@@ -1019,11 +985,9 @@ mod tests {
         // and a provider's body; only the code is kept.
         let diagnostics = Diagnostics::default();
         for error in [
-            DictationError::TranscriptionFailed {
-                reason: format!("{transcript} {key} {registered} {home}/x.wav {log_line}"),
-            },
+            DictationError::TranscriptionFailed(ErrorCode::EngineFailed),
             DictationError::InsertFailed {
-                reason: format!("{app_name} refused {clipboard}"),
+                reason: format!("{app_name} refused {clipboard} {transcript} {key} {log_line}"),
             },
             DictationError::HotkeyFailed,
             DictationError::EmptyTranscript,
