@@ -1285,32 +1285,34 @@ mod tests {
 
     #[test]
     fn the_ui_default_models_match_core() {
-        let providers = std::fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/providers.ts"),
+        let names = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/settings/modelRow.ts"),
         )
         .unwrap();
-        for provider in Provider::ALL {
-            for entry in [
-                format!("id: \"{provider}\""),
-                format!("name: \"{}\"", provider_name(provider)),
-                format!("defaultModel: \"{}\"", provider.default_model()),
-            ] {
-                assert!(providers.contains(&entry), "src/providers.ts lacks {entry}");
-            }
-        }
-        for (field, id) in [
+        let provider = format!(
+            "PROVIDER_NAME = \"{}\"",
+            provider_name(Provider::OpenRouter)
+        );
+        assert!(
+            names.contains(&provider),
+            "src/settings/modelRow.ts lacks {provider}"
+        );
+        for (constant, id) in [
             (
-                "speechModelName",
+                "SPEECH_MODEL_NAME",
                 dictation_core::cloud_models::DEFAULT_SPEECH,
             ),
             (
-                "cleanupModelName",
+                "CLEANUP_MODEL_NAME",
                 dictation_core::cloud_models::DEFAULT_CLEANUP,
             ),
         ] {
             let name = dictation_core::cloud_models::find(id).unwrap().display_name;
-            let entry = format!("{field}: \"{name}\"");
-            assert!(providers.contains(&entry), "src/providers.ts lacks {entry}");
+            let entry = format!("{constant} = \"{name}\"");
+            assert!(
+                names.contains(&entry),
+                "src/settings/modelRow.ts lacks {entry}"
+            );
         }
     }
 

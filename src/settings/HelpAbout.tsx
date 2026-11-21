@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { commands } from "../bindings";
 import type { Link } from "../bindings";
-import { BROKEN, messageOf } from "../keyTest";
+import { BROKEN, messageOf } from "../messages";
 import { Group, Row } from "./ui";
 
 /** What Help's buttons open; the app supplies each one it supports. */

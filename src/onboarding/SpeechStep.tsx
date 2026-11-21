@@ -1,33 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { commands } from "../bindings";
-import type {
-  LocalModelInfo_Serialize,
-  Provider,
-  Settings_Serialize,
-  SpeechChoice,
-} from "../bindings";
-import { BROKEN, messageOf, testKey } from "../keyTest";
+import type { LocalModelInfo_Serialize, Settings_Serialize, SpeechChoice } from "../bindings";
+import { BROKEN, messageOf } from "../messages";
 import { LanguagePicker } from "../LanguagePicker";
 import { cloudLanguages, englishName } from "../languages";
 import { modelLabel } from "../settings/modelRow";
-import { OwnKeyPanel, useOwnKey } from "../settings/ownKey";
-import type { OwnKey } from "../settings/ownKey";
+import { ConnectPanel, useConnection } from "../settings/connection";
+import type { Connection } from "../settings/connection";
 import { recommendedModel } from "./logic";
 import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";
 
 export const MODEL_COPY = "Runs on this Mac. Works offline after a one-time download.";
-export const KEY_REASON = "Continue unlocks after Test & Save succeeds";
+export const KEY_REASON = "Continue unlocks once OpenRouter is connected";
 export const KEY_CARD_COPY =
-  "About 100 languages. Needs internet. Your speech is sent to the provider you choose.";
-export const KEY_SCREEN_COPY =
-  "Vocet sends your speech to this provider, using your own account with them.";
-export const KEY_SAVED = "✓ Key saved";
-export const KEY_SAVED_COPY = "In your macOS Keychain. It's never shown again.";
+  "About 100 languages. Needs internet. Your speech is sent to OpenRouter, using your own account.";
+export const KEY_SAVED = "✓ Connected to OpenRouter";
+export const KEY_SAVED_COPY = "The key is in your macOS Keychain. It's never shown in full.";
+export const LOCAL_ONLY = "I'll use Vocet on this Mac only";
 
 /** The line for a language no on-device model covers. */
 export function uncoveredCopy(code: string): string {
-  return `${englishName(code)} needs your own key. Vocet's on-device models don't cover it yet.`;
+  return `${englishName(code)} needs OpenRouter. Vocet's on-device models don't cover it yet.`;
 }
 
 /** How long to wait for a cancelled download to let go, before saying so. */
@@ -104,18 +98,12 @@ function SpeechForm({
     }
   }
 
-  // Setup changes the engine only on Continue, once the key has worked: changing
-  // the Provider row here never switches it, whichever engine is in use now.
-  const ownKey = useOwnKey({
-    settings,
-    onDevice: true,
-    switchToCloud: () => Promise.resolve(),
-    refreshEngine,
-  });
+  // Setup changes the engine only on Continue, once OpenRouter is connected.
+  const connection = useConnection({ refreshEngine });
 
   const [keyScreen, setKeyScreen] = useState(false);
 
-  // The Continue running, as `keyRun` is for Test & Save in `ownKey.tsx`: anything
+  // The Continue running: anything
   // that changes what it was for makes it the old one, and an old one neither
   // switches the engine, nor moves on, nor reports. In the component: nothing can
   // come back to a step that's gone, so going away just drops it.
@@ -145,7 +133,9 @@ function SpeechForm({
   const choice: Choice = uncovered
     ? "key"
     : (picked ??
-      (settings.transcription === "cloud" && ownKey.keyStatus.state === "saved" ? "key" : "local"));
+      (settings.transcription === "cloud" && connection.status.state === "connected"
+        ? "key"
+        : "local"));
 
   async function chooseLanguage(code: string) {
     setLanguage(code);
@@ -192,14 +182,7 @@ function SpeechForm({
   }
 
   async function continueWithKey(dropped: () => boolean) {
-    // A key saved earlier hasn't been through Test & Save here: test it now.
-    if (!ownKey.connected) {
-      const outcome = await testKey(ownKey.provider, null);
-      if (dropped()) return null;
-      if (outcome.kind === "error") return outcome.text;
-    }
-    if (dropped()) return null;
-    const used = await commands.useCloudEngine(ownKey.provider);
+    const used = await commands.useCloudEngine("openrouter");
     if (dropped()) return null;
     if (used.status === "error") return messageOf(used.error);
     await makeRoomFor(null);
@@ -247,7 +230,8 @@ function SpeechForm({
 
   function backFromKey() {
     dropContinue();
-    ownKey.abandon();
+    if (connection.busy === "connecting") void connection.cancel();
+    connection.clearNotice();
     setProblem(null);
     setKeyScreen(false);
   }
@@ -256,24 +240,14 @@ function SpeechForm({
     return (
       <KeyScreen
         parts={parts}
-        ownKey={{
-          ...ownKey,
-          changeProvider: (next) => {
-            dropContinue();
-            ownKey.changeProvider(next);
-          },
-          editKey: (value) => {
-            dropContinue();
-            ownKey.editKey(value);
-          },
-          testAndSave: () => {
-            dropContinue();
-            return ownKey.testAndSave();
-          },
-        }}
+        connection={connection}
         problem={problem}
         working={working}
         onBack={backFromKey}
+        onLocalOnly={() => {
+          backFromKey();
+          pick("local");
+        }}
         onContinue={() => void go()}
       />
     );
@@ -381,14 +355,14 @@ function SpeechForm({
         <input
           type="radio"
           name="ob-engine"
-          aria-label="Use my own OpenRouter key"
+          aria-label="Use OpenRouter"
           checked={choice === "key"}
           onChange={() => {
             pick("key");
           }}
         />
         <span className="ob-option-text">
-          <span className="ob-card-title">Use my own OpenRouter key</span>
+          <span className="ob-card-title">Use OpenRouter</span>
           <span className="ob-caption">{KEY_CARD_COPY}</span>
         </span>
       </label>
@@ -403,65 +377,48 @@ function SpeechForm({
 }
 
 /**
- * Connect your key: its own screen under Speech, so the rail doesn't move (U11).
- * The form is Settings' own (`ownKey.tsx`), in a page and without Remove key. A
- * saved key shows no field until Replace. Whichever key Continue would use has
- * either just passed Test & Save or is tested first, and a failure stays here.
+ * Connect OpenRouter: its own screen under Speech, so the rail doesn't move
+ * (U11). The panel is Settings' own (`connection.tsx`), in a page and without
+ * Disconnect. Continue unlocks once a key is saved, and a failure stays here.
  */
 function KeyScreen({
   parts,
-  ownKey,
+  connection,
   problem,
   working,
   onBack,
+  onLocalOnly,
   onContinue,
 }: {
   parts: FrameParts;
-  ownKey: OwnKey;
+  connection: Connection;
   problem: string | null;
   working: boolean;
   onBack: () => void;
+  onLocalOnly: () => void;
   onContinue: () => void;
 }) {
-  const { provider, keyInput, keyStatus, keyBusy, connected } = ownKey;
-  // For one provider: another one starts from what it has saved.
-  const [replacing, setReplacing] = useState<Provider | null>(null);
-  const saved = keyStatus.state === "saved";
-  // A Test & Save that worked is the end of replacing.
-  const showField = !saved || (replacing === provider && !connected);
-  const panel = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (keyStatus.state === "checking" || !showField) return;
-    panel.current?.querySelector<HTMLInputElement>("#api-key")?.focus();
-  }, [keyStatus.state, showField, provider]);
-
-  const checking = keyStatus.state === "checking";
-  // What's typed isn't saved: Continue would quietly use the old key.
+  const { status, busy } = connection;
+  const connected = status.state === "connected";
   const blockedBecause = working
     ? "One moment…"
-    : checking
+    : status.state === "checking"
       ? "Checking for a saved key…"
-      : saved && keyInput.trim() === ""
+      : connected
         ? null
         : KEY_REASON;
-
   return (
     <StepFrame
       parts={{
         ...parts,
         back: onBack,
         // Once the key is being written nothing leaves, as in Settings' sheet.
-        exitBlock: parts.exitBlock ?? (keyBusy === "saving" ? "Saving your key…" : null),
+        exitBlock: parts.exitBlock ?? (busy === "saving" ? "Saving your key…" : null),
       }}
-      title="Connect your key"
+      title="Connect OpenRouter"
       primary={{ label: "Continue", onClick: onContinue, blockedBecause }}
     >
-      <p className="ob-sub">{KEY_SCREEN_COPY}</p>
-      <div className="ob-key-panel" ref={panel}>
-        <OwnKeyPanel ownKey={ownKey} canRemove={false} providerOnly={checking || !showField} />
-      </div>
-      {saved && !showField && (
+      {connected && !connection.justConnected && (
         <div className="ob-key-saved">
           <div className="ob-card-text">
             <span role="status" className="ob-key-saved-title">
@@ -469,18 +426,14 @@ function KeyScreen({
             </span>
             <span className="ob-caption">{KEY_SAVED_COPY}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              // Clears the last result, which is what ended the replacing before.
-              ownKey.editKey("");
-              setReplacing(provider);
-            }}
-          >
-            Replace
-          </button>
         </div>
       )}
+      <div className="ob-key-panel">
+        <ConnectPanel connection={connection} canDisconnect={false} />
+      </div>
+      <button type="button" className="link" onClick={onLocalOnly}>
+        {LOCAL_ONLY}
+      </button>
       {problem !== null && (
         <p role="alert" className="notice error">
           {problem}

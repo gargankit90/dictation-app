@@ -454,10 +454,10 @@ fn run_fix(app: &AppHandle, fix: Fix) {
             refresh(app);
         }
         Effect::OpenLink(link) => {
-            if let Some(opener) = app.try_state::<diagnostics::AppOpener>() {
-                if let Err(error) = opener.0.open_url(&link.url()) {
-                    tracing::warn!(%error, "couldn't open the browser");
-                }
+            if let Some(opener) = app.try_state::<diagnostics::AppOpener>()
+                && let Err(error) = opener.0.open_url(&link.url())
+            {
+                tracing::warn!(%error, "couldn't open the browser");
             }
         }
         Effect::Relaunch => {

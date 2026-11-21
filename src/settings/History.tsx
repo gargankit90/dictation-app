@@ -3,7 +3,7 @@ import type { KeyboardEvent, RefObject } from "react";
 import { commands } from "../bindings";
 import type { HistoryList, Settings_Serialize } from "../bindings";
 import { keycapLabel } from "../hotkeyKeys";
-import { BROKEN, messageOf } from "../keyTest";
+import { BROKEN, messageOf } from "../messages";
 import { Chip, Group, Row, SAVED_FOR_MS, SaveStatus, useSave } from "./ui";
 
 /** How often the list is read while this section shows, so a dictation appears. */

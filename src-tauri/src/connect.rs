@@ -130,7 +130,6 @@ mod tests {
     use std::time::Duration;
 
     use dictation_platform::fakes::{FakeOpener, MemSecretStore};
-    use dictation_ports::SecretStore as _;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 

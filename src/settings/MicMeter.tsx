@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { commands } from "../bindings";
-import { BROKEN, messageOf } from "../keyTest";
+import { BROKEN, messageOf } from "../messages";
 import { SILENT_LEVELS, barHeight, pushLevel } from "../overlay/view";
 
 /** How often the test's level is read: as often as the pill's (U4). */

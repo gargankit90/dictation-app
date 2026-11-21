@@ -141,6 +141,13 @@ class Backend {
         return null;
       case "has_api_key":
         return this.keys[args.provider as Provider];
+      case "saved_key_hint":
+        return this.keys[args.provider as Provider] ? "sk-or-…cdef" : null;
+      case "connect_openrouter":
+        this.keys.openrouter = true;
+        return null;
+      case "cancel_connect":
+        return null;
       case "test_api_key":
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         if (this.testResult !== null) throw this.testResult;
@@ -296,7 +303,7 @@ describe("criterion_u6_1 sections, keyboard and names", () => {
 
   it("gives every control in every section an accessible name", async () => {
     await open("speech");
-    expect(screen.getByRole("button", { name: "Add key…" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Connect…" })).toBeTruthy();
     click("Done");
     for (const name of Object.values(SECTION_NAMES)) {
       fireEvent.click(screen.getByRole("tab", { name }));
@@ -557,7 +564,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     await open("speech");
     expect(radio(/^English/)).toBeTruthy();
     expect(radio(/^3 languages/)).toBeTruthy();
-    expect(radio(/^Your own key/)).toBeTruthy();
+    expect(radio(/^OpenRouter/)).toBeTruthy();
     expect(
       within(screen.getByRole("radiogroup", { name: "Speech engine" })).getAllByRole("radio"),
     ).toHaveLength(3);
@@ -575,7 +582,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
   it("exactly one row is selected", async () => {
     backend.models = [ready(ENGLISH), ready(MULTI)];
     await open("speech");
-    expect(checked().map((row) => row.id)).toEqual(["engine-own-key"]);
+    expect(checked().map((row) => row.id)).toEqual(["engine-openrouter"]);
   });
 
   it("U11 criterion 5: its names and sizes are setup's, from one function", async () => {
@@ -646,7 +653,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     expect(await screen.findByText("Loading…")).toBeTruthy();
     expect(checked().map((row) => row.id)).toEqual([`engine-${ENGLISH}`]);
     expect(radio(/^3 languages/).disabled).toBe(true);
-    expect(radio(/^Your own key/).disabled).toBe(true);
+    expect(radio(/^OpenRouter/).disabled).toBe(true);
     expect(screen.getByTestId("blocked-reason").textContent).toBe("Wait until English has loaded.");
     loading.open();
     await waitFor(() => {
@@ -663,7 +670,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     fireEvent.click(radio(/^English/));
     expect(await screen.findByText("! Couldn't load")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("file is damaged");
-    expect(checked().map((row) => row.id)).toEqual(["engine-own-key"]);
+    expect(checked().map((row) => row.id)).toEqual(["engine-openrouter"]);
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     click("More actions for English");
     expect(screen.getByRole("menuitem", { name: "Delete model" })).toBeTruthy();
@@ -694,408 +701,221 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     expect(checked().map((row) => row.id)).toEqual([`engine-${ENGLISH}`]);
   });
 
-  it("selecting the own key with a key saved switches at once, without the sheet", async () => {
+  it("selecting OpenRouter with a key saved switches at once, without the sheet", async () => {
     backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
     backend.models = [ready(ENGLISH)];
     await open("speech");
-    fireEvent.click(radio(/^Your own key/));
+    fireEvent.click(radio(/^OpenRouter/));
     await waitFor(() => {
       expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
     });
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => {
-      expect(checked().map((row) => row.id)).toEqual(["engine-own-key"]);
+      expect(checked().map((row) => row.id)).toEqual(["engine-openrouter"]);
     });
   });
 });
 
-describe("u12_criterion_4 the key sheet", () => {
+describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
   const radio = (name: string | RegExp) => screen.getByRole<HTMLInputElement>("radio", { name });
   const onDevice = () => {
     backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
     backend.models = [model(ENGLISH, { state: "ready", downloaded_bytes: 477_274_496 })];
   };
 
-  it("selecting the own key with no key opens the sheet and doesn't switch until one works", async () => {
+  it("selecting OpenRouter with no key opens the sheet and switches once Connect works", async () => {
     onDevice();
     await open("speech");
     expect(screen.queryByRole("dialog")).toBeNull();
-    fireEvent.click(radio(/^Your own key/));
-    expect(await screen.findByRole("dialog", { name: "Your own key" })).toBeTruthy();
+    fireEvent.click(radio(/^OpenRouter/));
+    expect(await screen.findByRole("dialog", { name: "OpenRouter" })).toBeTruthy();
     expect(backend.named("use_cloud_engine")).toHaveLength(0);
-    expect(radio(/^Your own key/).checked).toBe(false);
-    // A key the provider rejects switches nothing.
-    backend.testResult = { kind: "invalid_key", message: "OpenRouter rejected this key." };
-    fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
-    click("Test & Save");
-    await screen.findByText("OpenRouter rejected this key.");
-    expect(backend.named("use_cloud_engine")).toHaveLength(0);
-    // One that works does.
-    backend.testResult = null;
-    click("Test & Save");
+    expect(radio(/^OpenRouter/).checked).toBe(false);
+    click("Connect OpenRouter");
     expect(await screen.findByText(CONNECTED)).toBeTruthy();
+    expect(backend.named("connect_openrouter")).toHaveLength(1);
     await waitFor(() => {
       expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
     });
     await waitFor(() => {
-      expect(radio(/^Your own key/).checked).toBe(true);
+      expect(radio(/^OpenRouter/).checked).toBe(true);
     });
   });
 
-  it("Done without a working key leaves the engine, and a later key doesn't switch it", async () => {
+  it("a failed sign-in says why and saves and switches nothing", async () => {
     onDevice();
+    backend.failing.set("connect_openrouter", "Connecting took too long. Try again.");
     await open("speech");
-    fireEvent.click(radio(/^Your own key/));
+    fireEvent.click(radio(/^OpenRouter/));
     await screen.findByRole("dialog");
+    click("Connect OpenRouter");
+    expect(await screen.findByText("Connecting took too long. Try again.")).toBeTruthy();
+    expect(backend.named("use_cloud_engine")).toHaveLength(0);
+    expect(backend.keys.openrouter).toBe(false);
+  });
+
+  it("Cancel ends the wait, and a cancelled attempt is not shown as an error", async () => {
+    onDevice();
+    const hold = gate();
+    backend.holds.set("connect_openrouter", hold.closed);
+    await open("speech");
+    fireEvent.click(radio(/^OpenRouter/));
+    await screen.findByRole("dialog");
+    click("Connect OpenRouter");
+    expect(await screen.findByText("Waiting for OpenRouter in your browser…")).toBeTruthy();
+    click("Cancel");
+    await waitFor(() => {
+      expect(backend.named("cancel_connect")).toHaveLength(1);
+    });
+    backend.failing.set("connect_openrouter", "Connecting was cancelled.");
+    await act(async () => {
+      hold.open();
+      await Promise.resolve();
+    });
+    await screen.findByRole("button", { name: "Connect OpenRouter" });
+    expect(screen.queryByText("Connecting was cancelled.")).toBeNull();
+    expect(backend.keys.openrouter).toBe(false);
+  });
+
+  it("Done during the wait cancels it", async () => {
+    onDevice();
+    backend.holds.set("connect_openrouter", gate().closed);
+    await open("speech");
+    fireEvent.click(radio(/^OpenRouter/));
+    await screen.findByRole("dialog");
+    click("Connect OpenRouter");
+    await screen.findByText("Waiting for OpenRouter in your browser…");
+    click("Done");
+    await waitFor(() => {
+      expect(backend.named("cancel_connect")).toHaveLength(1);
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("opens by itself when OpenRouter is the engine and not connected, once", async () => {
+    backend.keys.openrouter = false;
+    await open("speech");
+    expect(await screen.findByRole("dialog", { name: "OpenRouter" })).toBeTruthy();
     click("Done");
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(radio(/^English/).checked).toBe(true);
-    click("Add key…");
-    fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
-    click("Test & Save");
-    expect(await screen.findByText(CONNECTED)).toBeTruthy();
-    expect(backend.named("use_cloud_engine")).toHaveLength(0);
   });
 
   it("closed unless asked for, while another engine is in use", async () => {
     onDevice();
     await open("speech");
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.queryByLabelText(/API key/)).toBeNull();
   });
 
-  it("opens by itself when the own key is the engine and needs a key", async () => {
-    await open("speech");
-    expect(await screen.findByRole("dialog", { name: "Your own key" })).toBeTruthy();
-    expect(screen.getByText("! Needs a key")).toBeTruthy();
-    expect(screen.getByText("About 100 languages · uses internet")).toBeTruthy();
-    click("Done");
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByText("! Needs a key")).toBeTruthy();
-  });
-
-  it("opens by itself once, not on every return to Speech", async () => {
-    await open("speech");
-    click("Done");
-    fireEvent.click(screen.getByRole("tab", { name: "General" }));
-    await screen.findByRole("heading", { level: 1, name: "General" });
-    fireEvent.click(screen.getByRole("tab", { name: "Speech" }));
-    await screen.findByText("! Needs a key");
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("shows one status line: saved, or connected after a test", async () => {
+  it("a connected account shows the masked key, Disconnect, Add credits, and no full key", async () => {
     backend.keys.openrouter = true;
     await open("speech");
-    click("Change key…");
-    expect(await screen.findByText("A key is saved in your Keychain.")).toBeTruthy();
-    expect(screen.queryByText(/never shown again/)).toBeNull();
-    fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
-    click("Test & Save");
-    expect(await screen.findByText(CONNECTED)).toBeTruthy();
-    expect(screen.queryByText("A key is saved in your Keychain.")).toBeNull();
-    expect(screen.queryByText(/never shown again/)).toBeNull();
+    expect(await screen.findByRole("button", { name: "Manage…" })).toBeTruthy();
+    click("Manage…");
+    expect(await screen.findByText("Connected: sk-or-…cdef")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add credits" })).toBeTruthy();
+    expect(document.body.textContent).not.toContain(KEY);
+    expect(backend.named("saved_key_hint")).toHaveLength(1);
   });
 
-  it("names OpenRouter, has the how-to, the field, Test & Save, Remove key and Done", async () => {
+  it("Add credits opens OpenRouter's credits page through the app", async () => {
     backend.keys.openrouter = true;
     await open("speech");
-    click("Change key…");
-    const sheet = within(await screen.findByRole("dialog"));
-    expect(sheet.getByText("Your OpenRouter key")).toBeTruthy();
-    expect(sheet.queryByLabelText("Provider")).toBeNull();
-    expect(sheet.getByRole("button", { name: "openrouter.ai" })).toBeTruthy();
-    expect(sheet.getByLabelText("OpenRouter API key")).toBeTruthy();
-    for (const name of ["Test & Save", "Remove key", "Done"]) {
-      expect(sheet.getByRole("button", { name })).toBeTruthy();
-    }
-  });
-
-  it("the keyboard stays inside; Esc closes it and drops what was typed", async () => {
-    backend.keys.openrouter = true;
-    await open("speech");
-    const opener = screen.getByRole("button", { name: "Change key…" });
-    opener.focus();
-    fireEvent.click(opener);
-    const dialog = await screen.findByRole("dialog");
-    const field = screen.getByLabelText<HTMLInputElement>(/API key/);
-    expect(document.activeElement).toBe(field);
-    const done = screen.getByRole("button", { name: "Done" });
-    done.focus();
-    fireEvent.keyDown(done, { key: "Tab" });
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "openrouter.ai" }));
-    fireEvent.change(field, { target: { value: KEY } });
-    fireEvent.keyDown(dialog, { key: "Escape" });
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(document.activeElement).toBe(opener);
-    click("Change key…");
-    expect(screen.getByLabelText<HTMLInputElement>(/API key/).value).toBe("");
-  });
-
-  it("closing it during a test drops the test, so its key isn't saved", async () => {
-    backend.keys.openrouter = true;
-    await open("speech");
-    click("Change key…");
-    const slow = gate();
-    backend.holds.set("test_api_key", slow.closed);
-    fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
-    click("Test & Save");
+    click("Manage…");
+    click("Add credits");
     await waitFor(() => {
-      expect(backend.named("test_api_key")).toHaveLength(1);
-    });
-    click("Done");
-    slow.open();
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-    expect(backend.named("set_api_key")).toHaveLength(0);
-  });
-
-  // Review round 1, finding 2.
-  describe("Remove key is committed once it starts", () => {
-    const removing = async () => {
-      backend.keys.openrouter = true;
-      await open("speech");
-      click("Change key…");
-      await screen.findByText("A key is saved in your Keychain.");
-      const slow = gate();
-      backend.holds.set("delete_api_key", slow.closed);
-      click("Remove key");
-      await screen.findByRole("button", { name: "Removing…" });
-      return slow;
-    };
-
-    it("Done and Esc wait for it, then the sheet says no key is saved", async () => {
-      const slow = await removing();
-      const done = screen.getByRole<HTMLButtonElement>("button", { name: "Done" });
-      expect(done.disabled).toBe(true);
-      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-      expect(screen.getByRole("dialog")).toBeTruthy();
-      slow.open();
-      expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
-      click("Done");
-      click("Add key…");
-      expect(await screen.findByText("No key saved yet.")).toBeTruthy();
-    });
-
-    it("the field and popup wait too, and the outcome still shows", async () => {
-      const slow = await removing();
-      expect(screen.getByLabelText<HTMLInputElement>(/API key/).readOnly).toBe(true);
-      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
-      expect(screen.getByLabelText<HTMLInputElement>(/API key/).value).toBe("");
-      slow.open();
-      expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
-    });
-
-    it("a failed removal says so and the key still shows as saved", async () => {
-      backend.failing.set("delete_api_key", "The keychain refused.");
-      const slow = await removing();
-      slow.open();
-      expect((await screen.findByRole("alert")).textContent).toContain("The keychain refused.");
-      expect(backend.keys.openrouter).toBe(true);
-      click("Done");
-      click("Change key…");
-      expect(await screen.findByText("A key is saved in your Keychain.")).toBeTruthy();
-    });
-
-    it("Speech reopened during it doesn't say saved about the deleted key", async () => {
-      const slow = await removing();
-      fireEvent.click(screen.getByRole("tab", { name: "General" }));
-      await screen.findByRole("heading", { level: 1, name: "General" });
-      fireEvent.click(screen.getByRole("tab", { name: "Speech" }));
-      await screen.findByRole("heading", { level: 1, name: "Speech" });
-      slow.open();
-      expect(await screen.findByRole("button", { name: "Add key…" })).toBeTruthy();
-      expect(
-        screen.queryByText(
-          "OpenRouter · about 100 languages · speech is sent to OpenRouter · speech: GPT-4o mini Transcribe (OpenAI) · cleanup: GLM 5.3 Flash (Z.ai)",
-        ),
-      ).toBeNull();
+      expect(backend.named("open_link")[0]?.args).toEqual({ link: "openrouter_credits" });
     });
   });
 
-  it("the row says Add key… with no key saved, and Change key… with one", async () => {
+  it("Disconnect deletes the key and the row goes back to Connect…", async () => {
+    backend.keys.openrouter = true;
+    await open("speech");
+    click("Manage…");
+    click("Disconnect");
+    await screen.findByText("Disconnected. The key is removed.");
+    expect(backend.named("delete_api_key")[0]?.args).toEqual({ provider: "openrouter" });
+    expect(backend.keys.openrouter).toBe(false);
+    expect(await screen.findByRole("button", { name: "Connect OpenRouter" })).toBeTruthy();
+  });
+
+  it("a failed Disconnect says so and the key still shows as connected", async () => {
+    backend.keys.openrouter = true;
+    backend.failing.set("delete_api_key", "the Keychain didn't answer");
+    await open("speech");
+    click("Manage…");
+    click("Disconnect");
+    await screen.findByText("the Keychain didn't answer");
+    expect(await screen.findByText("Connected: sk-or-…cdef")).toBeTruthy();
+  });
+
+  it("Esc closes the sheet and the keyboard stays inside it", async () => {
+    backend.keys.openrouter = false;
     onDevice();
     await open("speech");
-    expect(await screen.findByRole("button", { name: "Add key…" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Change key…" })).toBeNull();
-    cleanup();
+    click("Connect…");
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  describe("Paste a key instead", () => {
+    async function openPaste() {
+      onDevice();
+      await open("speech");
+      click("Connect…");
+      await screen.findByRole("dialog");
+      click("Paste a key instead");
+    }
+
+    it("tests, then saves; success only after both, and the key is never shown back", async () => {
+      await openPaste();
+      const field = screen.getByLabelText(/API key/);
+      expect((field as HTMLInputElement).type).toBe("password");
+      fireEvent.change(field, { target: { value: KEY } });
+      click("Test & Save");
+      expect(await screen.findByText(CONNECTED)).toBeTruthy();
+      expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "openrouter", key: KEY });
+      expect(backend.named("set_api_key")[0]?.args).toEqual({ provider: "openrouter", key: KEY });
+      expect(document.body.textContent).not.toContain(KEY);
+      expect(screen.getByLabelText<HTMLInputElement>(/API key/).value).toBe("");
+    });
+
+    it("a key the provider rejects is not saved", async () => {
+      backend.testResult = { kind: "invalid_key", message: "OpenRouter rejected this key." };
+      await openPaste();
+      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+      click("Test & Save");
+      await screen.findByText("OpenRouter rejected this key.");
+      expect(backend.named("set_api_key")).toHaveLength(0);
+    });
+
+    it("a Keychain failure after a good test is its own error", async () => {
+      backend.failing.set("set_api_key", "the Keychain is locked");
+      await openPaste();
+      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: KEY } });
+      click("Test & Save");
+      expect(await screen.findByText(`${KEY_NOT_SAVED}: the Keychain is locked`)).toBeTruthy();
+    });
+
+    it("an empty or malformed key is refused before anything is sent", async () => {
+      await openPaste();
+      click("Test & Save");
+      await screen.findByText("Paste your API key.");
+      fireEvent.change(screen.getByLabelText(/API key/), { target: { value: "two words" } });
+      click("Test & Save");
+      await screen.findByText("A key has no spaces; check what you pasted.");
+      expect(backend.named("test_api_key")).toHaveLength(0);
+    });
+  });
+
+  it("asks the app for a hint, never for the key", async () => {
     backend.keys.openrouter = true;
     await open("speech");
-    expect(await screen.findByRole("button", { name: "Change key…" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Add key…" })).toBeNull();
-  });
-});
-
-describe("criterion_u6_5 own key: Test & Save", () => {
-  const keyBox = () => screen.getByLabelText<HTMLInputElement>(/API key/);
-  const OLD = "sk-or-dummy-OLDER-TEST-NOT-REAL-000000";
-  const savedKeys = () => backend.named("set_api_key").map((call) => call.args.key);
-
-  // Review round 1, finding 1: an obsolete test must not write its key.
-  it("a test still running when the key is removed doesn't put its key back", async () => {
-    await openWithKey();
-    const slow = gate();
-    backend.holds.set("test_api_key", slow.closed);
-    fireEvent.change(keyBox(), { target: { value: OLD } });
-    click("Test & Save");
-    // The user changes their mind: edits the field, then removes the key.
-    fireEvent.change(keyBox(), { target: { value: "" } });
-    click("Remove key");
-    expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
-    slow.open();
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-    expect(savedKeys()).toEqual([]);
-    expect(backend.keys.openrouter).toBe(false);
-    expect(screen.queryByText(CONNECTED)).toBeNull();
-  });
-
-  // Review round 2: the check must survive leaving Speech and coming back.
-  const leaveAndReturn = async () => {
-    fireEvent.click(screen.getByRole("tab", { name: "General" }));
-    await screen.findByRole("heading", { level: 1, name: "General" });
-    fireEvent.click(screen.getByRole("tab", { name: "Speech" }));
-    await screen.findByRole("button", { name: "Change key…" });
-    click("Change key…");
-    await screen.findByText("A key is saved in your Keychain.");
-  };
-  const openWithKey = async () => {
-    backend.keys.openrouter = true;
-    await open("speech");
-    click("Change key…");
-    await screen.findByText("A key is saved in your Keychain.");
-  };
-
-  it("after leaving Speech and coming back, an old test doesn't undo Remove key", async () => {
-    await openWithKey();
-    const slow = gate();
-    backend.holds.set("test_api_key", slow.closed);
-    fireEvent.change(keyBox(), { target: { value: OLD } });
-    click("Test & Save");
-    await leaveAndReturn();
-    click("Remove key");
-    expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
-    slow.open();
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-    expect(savedKeys()).toEqual([]);
-    expect(backend.keys.openrouter).toBe(false);
-  });
-
-  it("after leaving Speech and coming back, an old test can't replace a newer key", async () => {
-    await openWithKey();
-    const slow = gate();
-    backend.holds.set("test_api_key", slow.closed);
-    fireEvent.change(keyBox(), { target: { value: OLD } });
-    click("Test & Save");
-    await waitFor(() => {
-      expect(backend.named("test_api_key")).toHaveLength(1);
-    });
-    await leaveAndReturn();
-    backend.holds.delete("test_api_key");
-    fireEvent.change(keyBox(), { target: { value: KEY } });
-    click("Test & Save");
-    expect((await screen.findByRole("status")).textContent).toBe(CONNECTED);
-    slow.open();
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-    expect(savedKeys()).toEqual([KEY]);
-  });
-
-  it("a slow test can't overwrite a newer key that was saved", async () => {
-    await open("speech");
-    const slow = gate();
-    backend.holds.set("test_api_key", slow.closed);
-    fireEvent.change(keyBox(), { target: { value: OLD } });
-    click("Test & Save");
-    // Only the first test is slow.
-    await waitFor(() => {
-      expect(backend.named("test_api_key")).toHaveLength(1);
-    });
-    backend.holds.delete("test_api_key");
-    fireEvent.change(keyBox(), { target: { value: KEY } });
-    click("Test & Save");
-    expect((await screen.findByRole("status")).textContent).toBe(CONNECTED);
-    slow.open();
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-    expect(savedKeys()).toEqual([KEY]);
-  });
-
-  it("tests, then saves; success only after both, and the key is never shown back", async () => {
-    await open("speech");
-    fireEvent.change(keyBox(), { target: { value: KEY } });
-    click("Test & Save");
-    expect((await screen.findByRole("status")).textContent).toBe(CONNECTED);
-    const order = backend.calls
-      .map((call) => call.command)
-      .filter((c) => c === "test_api_key" || c === "set_api_key");
-    expect(order).toEqual(["test_api_key", "set_api_key"]);
-    expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "openrouter", key: KEY });
-    expect(keyBox().value).toBe("");
-    expect(document.body.innerHTML).not.toContain(KEY);
-  });
-
-  it("a key the provider rejects is not saved", async () => {
-    backend.testResult = { kind: "invalid_key", message: "OpenRouter rejected this key." };
-    await open("speech");
-    fireEvent.change(keyBox(), { target: { value: KEY } });
-    click("Test & Save");
-    expect((await screen.findByRole("alert")).textContent).toBe("OpenRouter rejected this key.");
-    expect(backend.named("set_api_key")).toHaveLength(0);
-    expect(screen.queryByText(CONNECTED)).toBeNull();
-  });
-
-  it("a Keychain failure after a good test is its own error", async () => {
-    backend.failing.set("set_api_key", "The keychain refused the write.");
-    await open("speech");
-    fireEvent.change(keyBox(), { target: { value: KEY } });
-    click("Test & Save");
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain(KEY_NOT_SAVED);
-    expect(alert.textContent).not.toContain(KEY);
-    expect(screen.queryByText(CONNECTED)).toBeNull();
-  });
-
-  it("an empty or malformed key is refused before anything is sent", async () => {
-    await open("speech");
-    click("Test & Save");
-    expect((await screen.findByRole("alert")).textContent).toBe("Paste your API key.");
-    fireEvent.change(keyBox(), { target: { value: "has spaces in it" } });
-    click("Test & Save");
-    await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).not.toBe("Paste your API key.");
-    });
-    expect(backend.named("test_api_key")).toHaveLength(0);
-  });
-
-  it("Remove key deletes the saved key", async () => {
-    await openWithKey();
-    click("Remove key");
-    expect(await screen.findByText("Key removed from your Keychain.")).toBeTruthy();
-    expect(backend.named("delete_api_key")[0]?.args).toEqual({ provider: "openrouter" });
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
-    });
-  });
-
-  it("the how-to links to the provider's key page through the app", async () => {
-    await open("speech");
-    click("openrouter.ai");
-    await waitFor(() => {
-      expect(backend.named("open_link")[0]?.args).toEqual({ link: "openrouter_keys" });
-    });
-  });
-
-  it("asks the app only whether a key exists, never for the key", async () => {
-    await openWithKey();
-    expect(keyBox().value).toBe("");
-    expect(backend.calls.every((call) => !("key" in call.args) || call.command === "test_api_key"));
+    await screen.findByRole("button", { name: "Manage…" });
+    for (const call of backend.calls) {
+      expect(call.command).not.toBe("get_api_key");
+    }
   });
 });
 
@@ -1241,7 +1061,7 @@ describe("loading", () => {
   it("the Keychain notice doesn't show with no key saved", async () => {
     backend.launchNotice = KEYCHAIN_NOTICE;
     await open("speech");
-    await screen.findByText("! Needs a key");
+    await screen.findByText("! Not connected");
     expect(screen.queryByTestId("launch-notice")).toBeNull();
   });
 
@@ -1255,7 +1075,7 @@ describe("loading", () => {
     expect(window.localStorage.getItem(NOTICE_DISMISSED_KEY)).toBe("1");
     cleanup();
     await open("speech");
-    await screen.findByRole("button", { name: "Change key…" });
+    await screen.findByRole("button", { name: "Manage…" });
     expect(screen.queryByTestId("launch-notice")).toBeNull();
     window.localStorage.removeItem(NOTICE_DISMISSED_KEY);
   });

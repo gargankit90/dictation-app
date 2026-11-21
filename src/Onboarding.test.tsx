@@ -28,7 +28,15 @@ import {
   FINISH_REASON,
   NOT_TESTED,
 } from "./onboarding/ReadyStep";
-import { KEY_REASON, MODEL_COPY } from "./onboarding/SpeechStep";
+import { EXPLAINER } from "./settings/connection";
+import {
+  KEY_CARD_COPY,
+  KEY_REASON,
+  KEY_SAVED,
+  KEY_SAVED_COPY,
+  LOCAL_ONLY,
+  MODEL_COPY,
+} from "./onboarding/SpeechStep";
 import {
   ASKED_AGAIN,
   BOTH_REASON,
@@ -132,6 +140,10 @@ class Backend {
   progress: DictationProgressView = { ...NO_PROGRESS };
   words: string | null = null;
   testResult: KeyTestError | null = null;
+  /** Fails the command named, with the message (a string, as the app sends). */
+  failing = new Map<string, string>();
+  /** Holds the command named until the promise settles. */
+  holds = new Map<string, Promise<void>>();
   calls: Call[] = [];
 
   status(): OnboardingStatus {
@@ -230,6 +242,19 @@ class Backend {
         return args.enabled;
       case "has_api_key":
         return this.keys[args.provider as Provider];
+      case "saved_key_hint":
+        return this.keys[args.provider as Provider] ? "sk-or-…cdef" : null;
+      case "connect_openrouter": {
+        const failure = this.failing.get(command);
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        if (failure !== undefined) throw failure;
+        const held = this.holds.get(command);
+        if (held !== undefined) return held.then(() => null);
+        this.keys.openrouter = true;
+        return null;
+      }
+      case "cancel_connect":
+        return null;
       case "set_api_key":
         this.keys[args.provider as Provider] = true;
         return null;
@@ -392,7 +417,7 @@ describe("the frame", () => {
     backend.settings = { ...backend.settings, language: "gu" };
     show();
     // A long sentence is rendered as text in the wrapping column.
-    const line = await screen.findByText(/needs your own key/);
+    const line = await screen.findByText(/needs OpenRouter/);
     expect(line.closest(".ob-content")).not.toBeNull();
   });
 });
@@ -917,25 +942,22 @@ describe("Speech", () => {
   it("finding 3: the own key choice survives a quit, with no key saved and none kept", async () => {
     const { unmount } = show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: /Use my own OpenRouter key/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Use OpenRouter/ }));
     await waitFor(() => {
       expect(backend.speechChoice).toBe("own_key");
     });
     fireEvent.click(primary("Continue"));
-    fireEvent.change(await screen.findByLabelText("OpenRouter API key"), {
-      target: { value: KEY },
-    });
+    await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
     unmount();
 
-    // The relaunch: the app's status has the choice, and the typed key is gone.
+    // The relaunch: the app's status has the choice.
     show();
     await screen.findByText("English · 477 MB");
-    expect(screen.getByRole<HTMLInputElement>("radio", { name: /own OpenRouter/ }).checked).toBe(
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: /Use OpenRouter/ }).checked).toBe(
       true,
     );
     fireEvent.click(primary("Continue"));
-    const field = await screen.findByLabelText<HTMLInputElement>("OpenRouter API key");
-    expect(field.value).toBe("");
+    await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
     expect(JSON.stringify(backend.named("set_speech_choice"))).not.toContain(KEY);
   });
 
@@ -943,7 +965,7 @@ describe("Speech", () => {
     backend.keys.openrouter = true;
     const { unmount } = show();
     await waitFor(() => {
-      expect(screen.getByRole<HTMLInputElement>("radio", { name: /own OpenRouter/ }).checked).toBe(
+      expect(screen.getByRole<HTMLInputElement>("radio", { name: /Use OpenRouter/ }).checked).toBe(
         true,
       );
     });
@@ -1027,49 +1049,40 @@ describe("Speech", () => {
     expect(backend.step).toBe("speech");
   });
 
-  /** Selects the own key on the two choices, and nothing else happens. */
-  async function selectOwnKey() {
+  /** Selects OpenRouter on the two choices, and nothing else happens. */
+  async function selectCloud() {
     show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: /Use my own OpenRouter key/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Use OpenRouter/ }));
   }
 
-  async function chooseOwnKey() {
-    await selectOwnKey();
+  /** On the Connect OpenRouter screen. */
+  async function openConnectScreen() {
+    await selectCloud();
     fireEvent.click(primary("Continue"));
-    await screen.findByText("Connect your key");
-    return await screen.findByLabelText("OpenRouter API key");
+    await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
   }
 
-  /** The screen with a key already saved: no field. */
-  async function chooseSavedKey() {
-    backend.keys.openrouter = true;
-    await selectOwnKey();
-    fireEvent.click(primary("Continue"));
-    await screen.findByText("✓ Key saved");
-  }
-
-  it("U11 criterion 4: selecting the own key shows no form, only Continue", async () => {
-    await selectOwnKey();
+  it("Q3: selecting OpenRouter shows no form, only Continue", async () => {
+    await selectCloud();
     await waitFor(() => {
       expect(backend.speechChoice).toBe("own_key");
     });
-    expect(screen.queryByLabelText("OpenRouter API key")).toBeNull();
-    expect(screen.queryByText("Test & Save")).toBeNull();
+    expect(screen.queryByText("Connect OpenRouter", { selector: "button" })).toBeNull();
     expect(primary("Continue").disabled).toBe(false);
     expect(document.querySelector(".ob-reason")?.textContent).toBe("");
     expect(backend.step).toBe("speech");
   });
 
-  it("U11 criterion 4: Continue opens the screen, Back returns with all as it was", async () => {
+  it("Q3: Continue opens the screen, Back returns with all as it was", async () => {
     show();
     await screen.findByText("English · 477 MB");
     fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
     await screen.findByText("30 languages · 590 MB");
-    fireEvent.click(screen.getByRole("radio", { name: /Use my own OpenRouter key/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Use OpenRouter/ }));
     fireEvent.click(primary("Continue"));
-    await screen.findByText("Connect your key");
-    screen.getByText("Vocet sends your speech to this provider, using your own account with them.");
+    await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
+    screen.getByText(EXPLAINER);
     const current = () => document.querySelector('[aria-current="step"]')?.textContent;
     expect(current()).toContain("Speech");
     expect(backend.step).toBe("speech");
@@ -1080,78 +1093,98 @@ describe("Speech", () => {
     expect(backend.step).toBe("speech");
     expect(backend.named("set_onboarding_step")).toEqual([]);
     expect(screen.getByRole("radio", { name: "Hindi" }).getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByRole<HTMLInputElement>("radio", { name: /own OpenRouter/ }).checked).toBe(
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: /Use OpenRouter/ }).checked).toBe(
       true,
     );
   });
 
-  it("U11: Back drops what was typed and a test still running", async () => {
-    let resolve: (value: null) => void = () => undefined;
-    const promise = new Promise<null>((settled) => {
-      resolve = settled;
-    });
-    const original = backend.handle;
-    mockIPC((command, payload) =>
-      command === "test_api_key" ? promise : original(command, payload),
-    );
-    const field = await chooseOwnKey();
-    fireEvent.change(field, { target: { value: KEY } });
-    fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
-    await screen.findByText("Testing…");
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    await screen.findByText("Which language will you mostly speak?");
-    await act(async () => {
-      resolve(null);
-      await promise;
-    });
-    expect(backend.named("set_api_key")).toEqual([]);
-    fireEvent.click(primary("Continue"));
-    expect((await screen.findByLabelText<HTMLInputElement>("OpenRouter API key")).value).toBe("");
-  });
-
-  it("U11 criterion 6: no key: the field, and Continue waits for Test & Save", async () => {
-    const field = await chooseOwnKey();
-    await screen.findByText("No key saved yet.", { exact: false });
+  it("Q3: the explainer says what OpenRouter costs, and Continue waits for the connection", async () => {
+    await openConnectScreen();
+    expect(EXPLAINER).toContain("about $0.70 per 1,000 dictations");
+    expect(EXPLAINER).toContain("a few dollars of credit");
     expect(primary("Continue").disabled).toBe(true);
     expect(screen.getByText(KEY_REASON)).toBeTruthy();
-    expect(field.getAttribute("type")).toBe("password");
-    expect(screen.getByText("Your OpenRouter key")).toBeTruthy();
-    expect(screen.getByText("openrouter.ai")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Disconnect" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Add credits" })).toBeTruthy();
   });
 
-  it("U11 criterion 6: a saved key shows Key saved and Replace, with no field", async () => {
-    await chooseSavedKey();
-    screen.getByText("In your macOS Keychain. It's never shown again.");
-    expect(screen.queryByLabelText("OpenRouter API key")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Test & Save" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
+  it("Q3: Connect OpenRouter saves the key, unlocks Continue, and the provider is the engine", async () => {
+    await openConnectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Connect OpenRouter" }));
+    await screen.findByText(KEY_SAVED);
+    expect(backend.named("connect_openrouter")).toHaveLength(1);
     expect(primary("Continue").disabled).toBe(false);
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Two permissions");
+    expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
+    expect(backend.named("download_local_model")).toEqual([]);
   });
 
-  it("U11 criterion 6: Replace reveals the field, still with no Remove key", async () => {
-    await chooseSavedKey();
-    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+  it("Q3: a failed sign-in says why and keeps Continue locked", async () => {
+    backend.failing.set("connect_openrouter", "Connecting took too long. Try again.");
+    await openConnectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Connect OpenRouter" }));
+    await screen.findByText("Connecting took too long. Try again.");
+    expect(primary("Continue").disabled).toBe(true);
+    expect(backend.keys.openrouter).toBe(false);
+  });
+
+  it("Q3: Back during the wait cancels it", async () => {
+    backend.holds.set("connect_openrouter", new Promise<void>(() => undefined));
+    await openConnectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Connect OpenRouter" }));
+    await screen.findByText("Waiting for OpenRouter in your browser…");
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await screen.findByText("Which language will you mostly speak?");
+    expect(backend.named("cancel_connect")).toHaveLength(1);
+  });
+
+  it('Q3: "I\'ll use Vocet on this Mac only" goes back with the on-device model chosen', async () => {
+    await openConnectScreen();
+    fireEvent.click(screen.getByRole("button", { name: LOCAL_ONLY }));
+    await screen.findByText("Which language will you mostly speak?");
+    await waitFor(() => {
+      expect(backend.speechChoice).toBe("local");
+    });
+    expect(
+      screen.getByRole<HTMLInputElement>("radio", { name: "Recommended for your language" })
+        .checked,
+    ).toBe(true);
+  });
+
+  it("Q3: a saved key shows Connected with the masked key, and Continue is open", async () => {
+    backend.keys.openrouter = true;
+    await openConnectScreen();
+    await screen.findByText(KEY_SAVED);
+    screen.getByText(KEY_SAVED_COPY);
+    await screen.findByText("Connected: sk-or-…cdef");
+    expect(primary("Continue").disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: "Disconnect" })).toBeNull();
+  });
+
+  it("Q3: Paste a key instead tests and saves a typed key", async () => {
+    await openConnectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Paste a key instead" }));
     const field = await screen.findByLabelText("OpenRouter API key");
-    expect(document.activeElement).toBe(field);
-    expect(screen.getByRole("button", { name: "Test & Save" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
-    expect(screen.queryByText("✓ Key saved")).toBeNull();
+    expect(field.getAttribute("type")).toBe("password");
+    fireEvent.change(field, { target: { value: KEY } });
+    fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
+    await screen.findByText(KEY_SAVED);
+    expect(backend.named("set_api_key")).toHaveLength(1);
+    expect(document.body.textContent).not.toContain(KEY);
   });
 
-  it("U11: a typed replacement has to be saved before Continue", async () => {
-    await chooseSavedKey();
-    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+  it("Q3: a pasted key the provider rejects keeps Continue locked, and saves nothing", async () => {
+    backend.testResult = { kind: "invalid_key", message: "OpenRouter rejected this API key." };
+    await openConnectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Paste a key instead" }));
     fireEvent.change(await screen.findByLabelText("OpenRouter API key"), {
       target: { value: KEY },
     });
-    expect(primary("Continue").disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
-    await screen.findByText("✓ Key saved");
-    expect(primary("Continue").disabled).toBe(false);
-    expect(backend.named("set_api_key")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
-    await screen.findByLabelText("OpenRouter API key");
+    await screen.findByText("OpenRouter rejected this API key.");
+    expect(backend.named("set_api_key")).toEqual([]);
+    expect(primary("Continue").disabled).toBe(true);
   });
 
   describe("U11 criterion 5: the cards' exact wording", () => {
@@ -1159,10 +1192,8 @@ describe("Speech", () => {
       show();
       await screen.findByText("English · 477 MB");
       screen.getByText("Runs on this Mac. Works offline after a one-time download.");
-      screen.getByText("Use my own OpenRouter key");
-      screen.getByText(
-        "About 100 languages. Needs internet. Your speech is sent to the provider you choose.",
-      );
+      screen.getByText("Use OpenRouter");
+      screen.getByText(KEY_CARD_COPY);
     });
 
     it("Hindi, with the count from the model's language codes", async () => {
@@ -1178,15 +1209,15 @@ describe("Speech", () => {
       backend.settings = { ...backend.settings, language: "gu" };
       show();
       await screen.findByText(
-        "Gujarati needs your own key. Vocet's on-device models don't cover it yet.",
+        "Gujarati needs OpenRouter. Vocet's on-device models don't cover it yet.",
       );
-      expect(screen.getByRole<HTMLInputElement>("radio", { name: /own OpenRouter/ }).checked).toBe(
+      expect(screen.getByRole<HTMLInputElement>("radio", { name: /Use OpenRouter/ }).checked).toBe(
         true,
       );
       expect(screen.queryByRole("radio", { name: "Recommended for your language" })).toBeNull();
       expect(primary("Continue").disabled).toBe(false);
       fireEvent.click(primary("Continue"));
-      await screen.findByText("Connect your key");
+      await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
       expect(backend.speechChoice).toBe("own_key");
     });
 
@@ -1208,127 +1239,6 @@ describe("Speech", () => {
       await screen.findByText("Downloading 30 languages · 0 of 590 MB");
       clean();
     });
-  });
-
-  it("criterion 3: a bad key keeps Continue locked, and saves nothing", async () => {
-    backend.testResult = { kind: "invalid_key", message: "OpenRouter rejected this API key." };
-    const field = await chooseOwnKey();
-    fireEvent.change(field, { target: { value: KEY } });
-    fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
-    await screen.findByText("OpenRouter rejected this API key.");
-    expect(backend.named("set_api_key")).toEqual([]);
-    expect(primary("Continue").disabled).toBe(true);
-  });
-
-  it("criterion 3: a good key unlocks Continue, and the provider is the engine", async () => {
-    const field = await chooseOwnKey();
-    fireEvent.change(field, { target: { value: KEY } });
-    fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
-    await screen.findByText("✓ Key saved");
-    expect(primary("Continue").disabled).toBe(false);
-    fireEvent.click(primary("Continue"));
-    await screen.findByText("Two permissions");
-    // It has just passed: not tested a second time.
-    expect(backend.named("test_api_key")).toHaveLength(1);
-    expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
-    expect(backend.named("download_local_model")).toEqual([]);
-    expect(document.body.textContent).not.toContain(KEY);
-  });
-
-  describe("Continue with a saved key, while its test is out (round 2)", () => {
-    /** A saved key, Continue pressed, the provider not answering yet. */
-    async function continuePending() {
-      let answer: (result: KeyTestError | null) => void = () => undefined;
-      const pending = new Promise<KeyTestError | null>((resolve) => {
-        answer = resolve;
-      });
-      const original = backend.handle;
-      mockIPC((command, payload) => {
-        if (command !== "test_api_key") return original(command, payload);
-        return pending.then((result) => {
-          if (result === null) return null;
-          // eslint-disable-next-line @typescript-eslint/only-throw-error
-          throw result;
-        });
-      });
-      await chooseSavedKey();
-      await waitFor(() => {
-        expect(primary("Continue").disabled).toBe(false);
-      });
-      fireEvent.click(primary("Continue"));
-      await screen.findByText("One moment…");
-      return async (result: KeyTestError | null) => {
-        await act(async () => {
-          answer(result);
-          await pending;
-          await new Promise((resolve) => setTimeout(resolve, 0));
-        });
-      };
-    }
-
-    const REJECTED: KeyTestError = {
-      kind: "invalid_key",
-      message: "OpenRouter rejected this API key.",
-    };
-
-    it("Back drops it: no engine switch and no moving on, however late it answers", async () => {
-      const answer = await continuePending();
-      fireEvent.click(screen.getByRole("button", { name: "Back" }));
-      await screen.findByText("Which language will you mostly speak?");
-      await answer(null);
-      expect(backend.named("use_cloud_engine")).toEqual([]);
-      expect(backend.step).toBe("speech");
-      screen.getByText("Which language will you mostly speak?");
-      expect(document.querySelector(".ob-reason")?.textContent).toBe("");
-    });
-
-    it("Back drops a failure too: it isn't shown on the choices", async () => {
-      const answer = await continuePending();
-      fireEvent.click(screen.getByRole("button", { name: "Back" }));
-      await screen.findByText("Which language will you mostly speak?");
-      await answer(REJECTED);
-      expect(screen.queryByText("OpenRouter rejected this API key.")).toBeNull();
-    });
-
-    it("Replace drops it: the screen stays for the new key", async () => {
-      const answer = await continuePending();
-      fireEvent.click(screen.getByRole("button", { name: "Replace" }));
-      await screen.findByLabelText("OpenRouter API key");
-      await answer(null);
-      expect(backend.named("use_cloud_engine")).toEqual([]);
-      expect(backend.step).toBe("speech");
-    });
-
-    it("leaving the step drops it", async () => {
-      const answer = await continuePending();
-      cleanup();
-      await answer(null);
-      expect(backend.named("use_cloud_engine")).toEqual([]);
-      expect(backend.step).toBe("speech");
-    });
-
-    it("left alone, it still goes through", async () => {
-      const answer = await continuePending();
-      await answer(null);
-      await screen.findByText("Two permissions");
-      expect(backend.named("use_cloud_engine")[0]?.args).toEqual({ provider: "openrouter" });
-    });
-  });
-
-  it("criterion 3: a key saved earlier is tested before moving on", async () => {
-    backend.keys.openrouter = true;
-    backend.testResult = { kind: "invalid_key", message: "OpenRouter rejected this API key." };
-    await chooseSavedKey();
-    await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(false);
-    });
-    fireEvent.click(primary("Continue"));
-    await screen.findByText("OpenRouter rejected this API key.");
-    // The failure stays on this screen.
-    screen.getByText("Connect your key");
-    screen.getByText("✓ Key saved");
-    expect(backend.step).toBe("speech");
-    expect(backend.named("test_api_key")[0]?.args).toEqual({ provider: "openrouter", key: null });
   });
 });
 

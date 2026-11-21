@@ -8,6 +8,11 @@ testers: short lines, no HTML).
 
 ## [Unreleased]
 
+- **Connect OpenRouter in one click.** Setup and Settings, Speech now have a
+  Connect OpenRouter button: sign in at OpenRouter in your browser and Vocet
+  keeps the key in your Keychain. Add credits opens OpenRouter's credits
+  page, and a dictation that fails for lack of credits offers the same.
+  Pasting a key still works.
 - **Your own key is now an OpenRouter key.** Groq and OpenAI keys are no
   longer used. Paste an OpenRouter key in Settings, Speech. Speech goes
   through OpenRouter to OpenAI's gpt-4o-mini-transcribe model.
