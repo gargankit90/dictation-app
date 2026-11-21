@@ -32,6 +32,8 @@ interface Props {
   settings: Settings_Serialize | null;
   onStored: (settings: Settings_Serialize) => void;
   models: LocalModelInfo_Serialize[] | null;
+  /** The cleanup model (Gemma): the second part of "On this Mac"'s one download. */
+  cleanup: LocalModelInfo_Serialize | null;
   modelsError: string | null;
   refreshModels: () => Promise<void>;
   refreshEngine: () => Promise<void>;
@@ -64,6 +66,7 @@ function SpeechForm({
   onPick,
   onStored,
   models,
+  cleanup,
   modelsError,
   refreshModels,
   refreshEngine,
@@ -132,11 +135,30 @@ function SpeechForm({
     return null;
   }
 
+  /** The cleanup model as the app says now; the last poll if it can't be read. */
+  async function currentCleanup(): Promise<LocalModelInfo_Serialize | null> {
+    try {
+      const result = await commands.listCleanupModels();
+      if (result.status === "ok") return result.data[0] ?? null;
+    } catch {
+      // The last poll stands.
+    }
+    return cleanup;
+  }
+
   async function continueLocal(chosen: LocalModelInfo_Serialize) {
     const picked = await commands.chooseLocalModel(chosen.id);
     if (picked.status === "error") return messageOf(picked.error);
     await makeRoomFor(chosen.id);
-    if (chosen.state !== "ready") {
+    // The download is speech, then cleanup: resume it while either is missing
+    // (a restart during the cleanup part leaves the speech model ready). A
+    // running cleanup download needs nothing started, but a missing speech
+    // model always starts one.
+    const gemma = await currentCleanup();
+    const speechMissing = chosen.state !== "ready";
+    const cleanupMissing =
+      gemma !== null && gemma.state !== "ready" && gemma.state !== "downloading";
+    if (speechMissing || cleanupMissing) {
       const failed = await startDownload(chosen.id);
       if (failed !== null) return failed;
     }
@@ -186,7 +208,10 @@ function SpeechForm({
       : model === null
         ? "Loading the models…"
         : null;
-  const needsDownload = choice === "local" && model !== null && model.state !== "ready";
+  const needsDownload =
+    choice === "local" &&
+    model !== null &&
+    (model.state !== "ready" || (cleanup !== null && cleanup.state !== "ready"));
 
   /** Back to the choices. `false` if a key is being saved: stay and show it. */
   async function backFromKey(): Promise<boolean> {
@@ -244,6 +269,11 @@ function SpeechForm({
           checked={choice === "key"}
           onChange={() => {
             pick("key");
+          }}
+          // A click on the preselected card changes nothing, so it fires no
+          // change: record the choice anyway (a fresh install's default).
+          onClick={() => {
+            if (choice === "key") pick("key");
           }}
         />
         <span className="ob-option-text">

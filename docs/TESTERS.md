@@ -10,12 +10,12 @@ You need an **Apple Silicon Mac (M1 or newer; Intel Macs are not supported)**
 with **macOS 13 (Ventura) or newer**, and one of two ways to turn speech into
 text:
 
-- **On this Mac**: you download the on-device models once (OrukQwen turns
-  speech into text, Gemma cleans it up). Your speech then stays on the Mac.
-- **OpenRouter** (the default in setup): an internet connection and an
-  OpenRouter account (you pay OpenRouter for what you use; Connect OpenRouter
-  makes the key). Your speech goes through OpenRouter to
+- **OpenRouter** (the default): an internet connection and an OpenRouter account (you
+  pay OpenRouter for what you use; Connect OpenRouter makes the key). Your speech goes through OpenRouter to
   OpenAI for transcription, and the text to a cleanup model that keeps no data.
+- **On this Mac**: one download (about 4.4 GB: English speech recognition,
+  then a cleanup model that adds punctuation and removes fillers). Your
+  speech then stays on the Mac. It is a choice in setup, not the default.
 
 ## 1. Install
 
@@ -66,6 +66,10 @@ buttons. A permission step moves on by itself once you have allowed it.
      OpenRouter makes is kept in your macOS Keychain and never shown in
      full. If the browser can't come back, **Paste a key instead**. It is sent only to
      OpenRouter.
+   - **On this Mac only** (not selected by default): select it, then click
+     **Download and continue**. One download of about 4.4 GB (speech, then
+     cleanup) with one progress bar; it keeps going while you do the next
+     steps. A language the on-device models don't cover needs OpenRouter.
 3. **Permissions.** Click **Allow** for the **Microphone** (macOS asks once;
    choose **Allow**) and for **Accessibility** (the dictation key and typing
    into other apps need it). For Accessibility, switch **Vocet** on under
@@ -87,9 +91,11 @@ Menu-bar icon > **Settings…** has these sections:
 - **General**: open Vocet at login, and **Check for updates** (**Check now**).
 - **Dictation**: the **dictation key** (hold it to talk, release to paste),
   and where the microphone is chosen (System Settings → Sound).
-- **Speech**: the list of engines. Select a row to use it: a model on this
-  Mac (download it first), or **OpenRouter** (its own sheet:
-  **Connect OpenRouter**, **Add credits**, **Disconnect**).
+- **Speech**: the list of engines. Select a row to use it: **OpenRouter**
+  (first; its own sheet: **Connect OpenRouter**, **Add credits**,
+  **Disconnect**), or **On this Mac** (download it first: one download of
+  speech and cleanup models, about 4.4 GB, with one progress bar and one
+  **Pause**).
 - **Privacy**: the **Share usage and error events** switch.
 - **History**: your recent dictations, with **Copy** and **Delete** on each,
   how many to **Keep** (10, 25, 50 or 100, or off) and **Clear history…**.

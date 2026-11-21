@@ -38,7 +38,7 @@ e2e_onboarding_first_run() {
   expect "Speech asks for the engine" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "How should Vocet transcribe" 10
   expect "the local model is recommended" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "English · 477 MB" 10
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "English · 1320 MB" 10
   expect "choose my own key" \
     ax_ok radio-press "$APP_NAME" "$ONBOARDING_WINDOW" "Use OpenRouter"
   expect "selecting it opens no form" \

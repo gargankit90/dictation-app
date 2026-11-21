@@ -45,6 +45,7 @@
 //! Vocet" (M5.2's restart), since a grant made in System Settings
 //! reaches the app only after a relaunch.
 
+pub mod cleanup;
 // Only the build script and the capability tests need the list.
 #[cfg(test)]
 mod command_names;
@@ -412,7 +413,9 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
         models_dir,
         Arc::new(dictation_platform::disk::available_space),
     ) {
-        Ok(store) => live.with_local(engine::LocalModels::new(store)),
+        Ok(store) => live
+            .with_local(engine::LocalModels::new(store.clone()))
+            .with_cleanup(cleanup::LocalCleanup::new(store, cleanup::bundled_helper())),
         Err(error) => {
             tracing::error!(%error, "on-device models are unavailable");
             live
@@ -456,11 +459,15 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     // The character before the cursor gives the smart leading space (#93);
     // it is read for one dictation at a time and never logged.
     let cursor = CursorReader::new(SystemTextBeforeCursor::new());
-    // Each cloud transcript is cleaned before the paste (Q2); the engine
+    // Each transcript is cleaned before the paste: on this Mac by Gemma
+    // while its helper runs (Q4), else by the cloud engine (Q2), whose
     // handle says "off" for the mock and on-device engines.
     let extras = Extras {
         cursor: Some(cursor),
-        cleanup: Some(CleanupStep::new(transcribers.clone())),
+        cleanup: Some(CleanupStep::new(cleanup::AppCleaner::new(
+            transcribers.clone(),
+            live.cleanup().cloned(),
+        ))),
     };
     // Pipeline::spawn needs to run inside the tokio runtime Tauri owns.
     let (pipeline, ui_events) = tauri::async_runtime::block_on(async {

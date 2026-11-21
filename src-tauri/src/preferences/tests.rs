@@ -185,33 +185,39 @@ fn criterion_4_a_model_that_fails_to_load_leaves_the_previous_engine_chosen() {
     );
 }
 
-/// U6 review round 1, finding 2: from on-device model A, choosing B loads B
-/// first (and frees A); if the settings then can't be written, A must be
-/// the engine again, as the file and the window still say.
+/// U6 review round 1, finding 2: choosing the on-device model loads it
+/// first; if the settings then can't be written, what they still choose
+/// (the cloud) must be the engine again, as the file and the window say.
+/// (Q4 left one speech model, so this goes cloud → local, not A → B.)
 #[test]
 #[cfg(unix)]
-fn criterion_4_a_failed_write_after_loading_puts_the_old_model_back() {
+fn criterion_4_a_failed_write_after_loading_puts_the_old_engine_back() {
     use std::os::unix::fs::PermissionsExt as _;
 
-    const MULTI: &str = "qwen3-asr-0.6b-q4_k_m";
     let rig = rig("write-fails", loads());
     downloaded(&rig, ENGLISH);
-    downloaded(&rig, MULTI);
-    switch_to_local(&rig.config, &rig.live, &rig.control, ENGLISH).unwrap();
-    let local = rig.live.local().unwrap();
-    assert_eq!(local.loaded(), Some(ENGLISH));
+    rig.config.save_settings(&Settings::default()).unwrap();
+    assert_eq!(
+        rig.config.settings().unwrap().transcription,
+        Transcription::Cloud
+    );
 
     // A full disk: nothing can be written in the settings folder.
     let folder = rig.dir.0.join("config");
     let mode = |bits| std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(bits));
     mode(0o500).unwrap();
-    let error = switch_to_local(&rig.config, &rig.live, &rig.control, MULTI);
+    let error = switch_to_local(&rig.config, &rig.live, &rig.control, ENGLISH);
     mode(0o700).unwrap();
 
     assert!(error.is_err(), "the write was refused, so the switch fails");
-    assert_eq!(rig.config.settings().unwrap().local_model, ENGLISH);
-    assert_eq!(local.loaded(), Some(ENGLISH), "the live model is A again");
-    assert!(matches!(*rig.transcribers.current(), Engine::Local(_)));
+    assert_eq!(
+        rig.config.settings().unwrap().transcription,
+        Transcription::Cloud
+    );
+    assert!(
+        !matches!(*rig.transcribers.current(), Engine::Local(_)),
+        "the cloud engine is current again"
+    );
 }
 
 #[test]

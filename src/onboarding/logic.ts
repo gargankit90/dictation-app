@@ -3,7 +3,7 @@
 // comes only from what the app reports.
 
 import type { EngineStatus, LocalModelInfo_Serialize, Settings_Serialize } from "../bindings";
-import { megabytes, modelTitle } from "../settings/modelRow";
+import { DOWNLOADING, megabytes } from "../settings/modelRow";
 
 /** The bindings allow null for sizes (NaN); the app never sends it. */
 function size(model: LocalModelInfo_Serialize): number {
@@ -71,7 +71,7 @@ export function stripView(
       note = `Continued from ${megabytes(running.resumed_from_bytes)}.`;
     }
     return {
-      text: `Downloading ${modelTitle(running)} · ${progressText(running)}`,
+      text: `${DOWNLOADING} · ${progressText(running)}`,
       note,
       percent: total > 0 ? Math.min(100, Math.round((bytes / total) * 100)) : 0,
       actions: ["cancel"],
@@ -81,7 +81,7 @@ export function stripView(
   if (chosen === null || chosen.state === "ready") return null;
   if (chosen.error !== null) {
     return {
-      text: `Download of ${modelTitle(chosen)} stopped: ${chosen.error}`,
+      text: `Download of the on-device models stopped: ${chosen.error}`,
       note: null,
       percent: null,
       actions: ["retry", "use-key"],
@@ -92,7 +92,7 @@ export function stripView(
     text:
       chosen.state === "partial"
         ? `Download paused · ${progressText(chosen)}`
-        : `${modelTitle(chosen)} isn't downloaded yet`,
+        : "The on-device models aren't downloaded yet",
     note: null,
     percent: null,
     actions: ["resume", "use-key"],

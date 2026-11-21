@@ -188,7 +188,7 @@ struct Message {
 /// isn't a finished chat reply with text. A reply cut off by the token limit
 /// or a filter (any `finish_reason` but `stop`, or none) could be a clean
 /// prefix the guard accepts, so it counts as no reply: the raw text is pasted.
-fn parse_reply(body: &[u8]) -> Option<String> {
+pub(crate) fn parse_reply(body: &[u8]) -> Option<String> {
     let reply: ChatReply = serde_json::from_slice(body).ok()?;
     let choice = reply.choices.into_iter().next()?;
     if choice.finish_reason.as_deref() != Some("stop") {

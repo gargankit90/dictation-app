@@ -4,14 +4,16 @@ import { commands } from "../bindings";
 import type { EngineStatus, LocalModelInfo_Serialize, Settings_Serialize } from "../bindings";
 import { BROKEN, messageOf } from "../messages";
 import {
-  MODEL_CAPTION,
+  downloadingText,
   megabytes,
+  localCaption,
+  localTitle,
   modelDetails,
   modelRow,
-  modelTitle,
   cloudCaption,
 } from "./modelRow";
 import type { ModelAction } from "./modelRow";
+import { useCleanupModels, withCleanup } from "./CleanupModel";
 import { ConnectSheet, useConnection } from "./connection";
 import { Chip, Group, Row, SaveStatus, useSave } from "./ui";
 
@@ -129,6 +131,8 @@ export function Speech({
   onSheetOffered,
 }: Props) {
   const onDevice = settings.transcription === "local";
+  // Gemma: part of the "On this Mac" row's one download (Q4).
+  const cleanup = useCleanupModels(true)?.[0];
   const [switching, setSwitching] = useState<string | null>(null);
   const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<string | null>(null);
@@ -266,12 +270,31 @@ export function Speech({
   const busy = switching !== null || cloud.save.state === "saving";
   const switchingName = models?.find((model) => model.id === switching);
   const waitReason =
-    switchingName === undefined ? null : `Wait until ${modelTitle(switchingName)} has loaded.`;
+    switchingName === undefined ? null : `Wait until ${localTitle(switchingName)} has loaded.`;
 
   return (
     <>
       <Group title="Speech engine">
         <div role="radiogroup" aria-label="Speech engine">
+          <EngineRow
+            id="engine-openrouter"
+            name="OpenRouter"
+            caption={cloudCaption(status.state === "connected")}
+            checked={cloudActive && switching === null}
+            blockedBecause={busy && !cloudActive ? waitReason : null}
+            disabled={busy}
+            onPick={() => void chooseCloud()}
+            below={<SaveStatus save={cloud.save} />}
+          >
+            {!cloudActive ? null : stored === "checking" ? (
+              <Chip tone="plain">Checking…</Chip>
+            ) : stored === "connected" ? null : (
+              <Chip tone="attention">! Not connected</Chip>
+            )}
+            <button type="button" aria-description="OpenRouter" onClick={openSheet}>
+              {status.state === "connected" ? "Manage…" : "Connect…"}
+            </button>
+          </EngineRow>
           {models === null ? (
             modelsError === null ? (
               <Row label="On this Mac" caption="Loading the models…" />
@@ -288,13 +311,15 @@ export function Speech({
           ) : (
             models.map((model) => {
               const chosen = onDevice && settings.local_model === model.id;
-              const row = modelRow(model, {
+              // One row, one download: speech then cleanup (Q4).
+              const shown = withCleanup(model, cleanup);
+              const row = modelRow(shown, {
                 chosen,
                 engine,
                 switching: switching === model.id,
                 loadError: loadErrors[model.id] ?? null,
               });
-              const title = modelTitle(model);
+              const title = localTitle(model);
               const error =
                 loadErrors[model.id] ??
                 (row.chip?.text === "! Couldn't load" && engine?.message ? engine.message : null);
@@ -306,7 +331,9 @@ export function Speech({
                   key={model.id}
                   id={`engine-${model.id}`}
                   name={title}
-                  caption={MODEL_CAPTION}
+                  caption={
+                    shown.state === "downloading" ? downloadingText(shown) : localCaption(model)
+                  }
                   checked={checked}
                   blockedBecause={reason}
                   disabled={row.blockedBecause !== null || busy}
@@ -333,39 +360,7 @@ export function Speech({
                           {reason}
                         </p>
                       )}
-                    </>
-                  }
-                >
-                  {row.chip === null ? null : (
-                    <span aria-live="polite">
-                      <Chip tone={row.chip.tone}>{row.chip.text}</Chip>
-                    </span>
-                  )}
-                  {row.actions.map((action) => (
-                    <button
-                      key={action}
-                      type="button"
-                      aria-description={title}
-                      disabled={switching !== null && action === "retry-load"}
-                      onClick={() => void modelAction(action, model)}
-                    >
-                      {actionLabel(action, model)}
-                    </button>
-                  ))}
-                  {row.hasMenu && (
-                    <span className="row-menu">
-                      <button
-                        type="button"
-                        className="menu-button"
-                        aria-label={`More actions for ${title}`}
-                        aria-haspopup="menu"
-                        aria-expanded={menuOpen === model.id}
-                        onClick={() => {
-                          setMenuOpen((open) => (open === model.id ? null : model.id));
-                        }}
-                      >
-                        …
-                      </button>
+                      {/* In the row's flow, under its text: it never covers it. */}
                       {menuOpen === model.id && (
                         <span role="menu" className="row-popover">
                           <span role="presentation" className="row-popover-info">
@@ -387,31 +382,45 @@ export function Speech({
                           )}
                         </span>
                       )}
+                    </>
+                  }
+                >
+                  {row.chip === null ? null : (
+                    <span aria-live="polite">
+                      <Chip tone={row.chip.tone}>{row.chip.text}</Chip>
+                    </span>
+                  )}
+                  {row.actions.map((action) => (
+                    <button
+                      key={action}
+                      type="button"
+                      aria-description={title}
+                      disabled={switching !== null && action === "retry-load"}
+                      onClick={() => void modelAction(action, model)}
+                    >
+                      {actionLabel(action, shown)}
+                    </button>
+                  ))}
+                  {row.hasMenu && (
+                    <span className="row-menu">
+                      <button
+                        type="button"
+                        className="menu-button"
+                        aria-label={`More actions for ${title}`}
+                        aria-haspopup="menu"
+                        aria-expanded={menuOpen === model.id}
+                        onClick={() => {
+                          setMenuOpen((open) => (open === model.id ? null : model.id));
+                        }}
+                      >
+                        …
+                      </button>
                     </span>
                   )}
                 </EngineRow>
               );
             })
           )}
-          <EngineRow
-            id="engine-openrouter"
-            name="OpenRouter"
-            caption={cloudCaption(status.state === "connected")}
-            checked={cloudActive && switching === null}
-            blockedBecause={busy && !cloudActive ? waitReason : null}
-            disabled={busy}
-            onPick={() => void chooseCloud()}
-            below={<SaveStatus save={cloud.save} />}
-          >
-            {!cloudActive ? null : stored === "checking" ? (
-              <Chip tone="plain">Checking…</Chip>
-            ) : stored === "connected" ? null : (
-              <Chip tone="attention">! Not connected</Chip>
-            )}
-            <button type="button" aria-description="OpenRouter" onClick={openSheet}>
-              {status.state === "connected" ? "Manage…" : "Connect…"}
-            </button>
-          </EngineRow>
         </div>
       </Group>
       {actionError !== null && (

@@ -177,7 +177,7 @@ impl Cleaner for Engine {
 }
 
 /// The language hint for `model`: the saved language if the model speaks
-/// it, else `None` (its default). Parakeet is English only, so a saved
+/// it, else `None` (its default). OrukQwen is English only, so a saved
 /// `de` must not reach it.
 #[must_use]
 pub fn local_language(model: &LocalModel, language: Option<&str>) -> Option<String> {
@@ -381,12 +381,10 @@ mod tests {
 
     #[test]
     fn only_a_language_the_model_speaks_is_passed_on() {
-        let parakeet = local_models::find("parakeet-unified-en-0.6b-q4_k_m").unwrap();
-        let qwen = local_models::find("qwen3-asr-0.6b-q4_k_m").unwrap();
-        assert_eq!(local_language(parakeet, Some("en")).as_deref(), Some("en"));
-        assert_eq!(local_language(parakeet, Some("hi")), None);
-        assert_eq!(local_language(qwen, Some("hi")).as_deref(), Some("hi"));
-        assert_eq!(local_language(qwen, None), None);
+        let oruk = local_models::find(local_models::DEFAULT_MODEL).unwrap();
+        assert_eq!(local_language(oruk, Some("en")).as_deref(), Some("en"));
+        assert_eq!(local_language(oruk, Some("hi")), None);
+        assert_eq!(local_language(oruk, None), None);
     }
 
     #[tokio::test(flavor = "multi_thread")]

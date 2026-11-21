@@ -196,6 +196,14 @@ jobs:
       # the C++ build between runs.
       - run: cargo clippy -p dictation-transcribe --all-targets -- -D warnings
       - run: cargo nextest run -p dictation-transcribe --profile ci
+      # The cleanup helper the app bundles (Q4): llama.cpp's llama-server at
+      # the pinned tag, its source checked by SHA-256, built static for macOS
+      # 13, then checked (architecture, minimum macOS, system libraries only,
+      # version). src-tauri/build.rs needs it before the workspace builds.
+      - name: Build and check the llama-server helper
+        run: |
+          scripts/build-llama-server.sh
+          scripts/build-llama-server.sh --check
       # The whole workspace on a Mac (G2), as scripts/gate.sh runs it: core,
       # ports, pipeline, telemetry and the Tauri shell had tests only on Linux.
       - run: cargo clippy --workspace --all-targets -- -D warnings

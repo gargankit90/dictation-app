@@ -890,6 +890,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         finish_onboarding,
         relaunch_app,
         crate::models::list_local_models,
+        crate::models::list_cleanup_models,
         crate::models::download_local_model,
         crate::models::cancel_local_model_download,
         crate::models::delete_local_model,
@@ -3089,6 +3090,7 @@ mod capability_tests {
                 | "finish_onboarding"
                 | "relaunch_app"
                 | "list_local_models"
+                | "list_cleanup_models"
                 | "practice_paste_missed" => invoke(main, command, args(command)).map(|_| ()),
                 _ => match invoke(main, command, unusable_args()) {
                     Err(error) if error.to_string().contains("invalid args") => Ok(()),

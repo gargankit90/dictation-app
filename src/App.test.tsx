@@ -72,7 +72,7 @@ describe("App", () => {
           hotkey: "RightAlt",
           launch_at_login: false,
           transcription: "cloud",
-          local_model: "parakeet-unified-en-0.6b-q4_k_m",
+          local_model: "orukqwen-asr-1.7b-q4_k_m",
           share_usage_events: true,
         };
       }
@@ -127,7 +127,7 @@ describe("App", () => {
             hotkey: "RightAlt",
             launch_at_login: false,
             transcription: "cloud",
-            local_model: "parakeet-unified-en-0.6b-q4_k_m",
+            local_model: "orukqwen-asr-1.7b-q4_k_m",
             share_usage_events: true,
             history_limit: 25,
           };
@@ -308,7 +308,7 @@ describe("App", () => {
             hotkey: "RightAlt",
             launch_at_login: false,
             transcription: "cloud",
-            local_model: "parakeet-unified-en-0.6b-q4_k_m",
+            local_model: "orukqwen-asr-1.7b-q4_k_m",
             share_usage_events: true,
           };
         default:

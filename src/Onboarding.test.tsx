@@ -32,6 +32,7 @@ import {
   KEY_SAVED_COPY,
   LOCAL_ONLY,
   MODEL_COPY,
+  SpeechStep,
 } from "./onboarding/SpeechStep";
 import {
   ASKED_AGAIN,
@@ -68,6 +69,20 @@ const THIRTY_LANGUAGES = [
   ),
 ];
 
+const GEMMA: LocalModelInfo_Serialize = {
+  id: "gemma-4-e2b-it-q4_k_m",
+  name: "Gemma 4 E2B",
+  languages: "English only",
+  language_codes: ["en"],
+  size_bytes: 3_106_738_272,
+  downloaded_bytes: 0,
+  state: "missing",
+  error: null,
+  default: true,
+  resumed_from_bytes: null,
+  restarted: false,
+};
+
 const QWEN: LocalModelInfo_Serialize = {
   id: "qwen3-asr-0.6b-q4_k_m",
   name: "Qwen3-ASR 0.6B",
@@ -102,6 +117,8 @@ class Backend {
   micAnswer: PermissionState = "granted";
   keys: Record<Provider, boolean> = { openrouter: false };
   models: LocalModelInfo_Serialize[] = [{ ...PARAKEET }, { ...QWEN }];
+  /** The cleanup model (Gemma): "On this Mac"'s second part. None until a test adds it. */
+  cleanup: LocalModelInfo_Serialize[] = [];
   settings: Settings_Serialize = {
     version: 2,
     provider: "openrouter",
@@ -238,6 +255,12 @@ class Backend {
       case "download_local_model": {
         const model = this.model(args.id as string);
         const part = model.downloaded_bytes ?? 0;
+        if (model.state === "ready") {
+          // A ready speech model: the app goes on to the cleanup model.
+          for (const gemma of this.cleanup)
+            if (gemma.state !== "ready") gemma.state = "downloading";
+          return null;
+        }
         model.state = "downloading";
         if (part > 0 && this.ignoresRange) model.restarted = true;
         else if (part > 0) model.resumed_from_bytes = part;
@@ -246,8 +269,16 @@ class Backend {
       case "cancel_local_model_download": {
         const model = this.model(args.id as string);
         model.state = model.downloaded_bytes ? "partial" : "missing";
+        // One download: cancelling the speech model cancels the cleanup model too.
+        for (const gemma of this.cleanup) {
+          if (gemma.state === "downloading") {
+            gemma.state = gemma.downloaded_bytes ? "partial" : "missing";
+          }
+        }
         return null;
       }
+      case "list_cleanup_models":
+        return this.cleanup.map((model) => ({ ...model }));
       case "list_local_models":
         // A new list each time, as the app sends.
         return this.models.map((model) => ({ ...model }));
@@ -929,6 +960,48 @@ describe("Speech", () => {
     expect(backend.settings.transcription).toBe("local");
   });
 
+  it("Q4 round 6: a restart during the cleanup part resumes the download", async () => {
+    // OrukQwen is in; Gemma was cut off by a quit, and the Mac is chosen already.
+    backend.model(PARAKEET.id).state = "ready";
+    backend.model(PARAKEET.id).downloaded_bytes = PARAKEET.size_bytes;
+    backend.cleanup = [{ ...GEMMA, state: "partial", downloaded_bytes: 1_000_000_000 }];
+    backend.settings = { ...backend.settings, transcription: "local" };
+    show();
+    await screen.findByText("English · 477 MB");
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
+    // The label says a download is left.
+    await waitFor(() => {
+      expect(primary("Download and continue").disabled).toBe(false);
+    });
+    fireEvent.click(primary("Download and continue"));
+    await screen.findByText("Two permissions");
+    expect(backend.named("download_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
+    expect(backend.cleanup[0]?.state).toBe("downloading");
+  });
+
+  it("Q4 round 6: with the cleanup model still downloading, Continue starts nothing", async () => {
+    backend.model(PARAKEET.id).state = "ready";
+    backend.model(PARAKEET.id).downloaded_bytes = PARAKEET.size_bytes;
+    backend.cleanup = [{ ...GEMMA, state: "downloading", downloaded_bytes: 1_000_000_000 }];
+    backend.settings = { ...backend.settings, transcription: "local" };
+    show();
+    await screen.findByText("English · 477 MB");
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Download and continue" }));
+    await screen.findByText("Two permissions");
+    expect(backend.named("download_local_model")).toEqual([]);
+  });
+
+  it("Q4 round 7: a missing speech model starts the download even while the cleanup model downloads", async () => {
+    backend.cleanup = [{ ...GEMMA, state: "downloading", downloaded_bytes: 1_000_000_000 }];
+    show();
+    await screen.findByText("English · 477 MB");
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Download and continue" }));
+    await screen.findByText("Two permissions");
+    expect(backend.named("download_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
+  });
+
   it("stays on the step and says why when the download can't start", async () => {
     backend.handle = ((original) => (command: string, payload: unknown) => {
       if (command === "choose_local_model") {
@@ -965,6 +1038,49 @@ describe("Speech", () => {
       expect(screen.queryByText("Checking for a saved key…")).toBeNull();
     });
   }
+
+  it("Q4 round 6: pressing the preselected OpenRouter card records the choice in state", () => {
+    // A click on a checked radio fires no change, so the card records it on click.
+    const picks: string[] = [];
+    render(
+      <SpeechStep
+        parts={{ back: null, strip: null, error: null, busy: false, exitBlock: null }}
+        kept={null}
+        onPick={(choice) => picks.push(choice)}
+        settings={backend.settings}
+        onStored={() => undefined}
+        models={backend.models}
+        cleanup={null}
+        modelsError={null}
+        refreshModels={() => Promise.resolve()}
+        refreshEngine={() => Promise.resolve()}
+        onContinue={() => undefined}
+      />,
+    );
+    const card = screen.getByRole<HTMLInputElement>("radio", { name: "Use OpenRouter" });
+    expect(card.checked).toBe(true);
+    expect(picks).toEqual([]);
+    fireEvent.click(card);
+    expect(picks).toEqual(["key"]);
+    expect(card.checked).toBe(true);
+  });
+
+  it("Q4 round 6: pressing the preselected OpenRouter card keeps the choice after Back", async () => {
+    // A click on a checked radio fires no change, so the card records it on click.
+    show();
+    await screen.findByText("English · 477 MB");
+    const card = () => screen.getByRole<HTMLInputElement>("radio", { name: /Use OpenRouter/ });
+    expect(card().checked).toBe(true);
+    fireEvent.click(card());
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await screen.findByText("How should Vocet transcribe?");
+    expect(card().checked).toBe(true);
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: "Use this Mac" }).checked).toBe(
+      false,
+    );
+  });
 
   it("Q3: selecting OpenRouter shows no form, only Continue", async () => {
     await selectCloud();
@@ -1136,7 +1252,7 @@ describe("Speech", () => {
       };
       clean();
       fireEvent.click(primary("Download and continue"));
-      await screen.findByText("Downloading English · 0 of 477 MB");
+      await screen.findByText("Downloading on-device models (speech + cleanup) · 0 of 477 MB");
       clean();
     });
   });
@@ -1172,21 +1288,41 @@ describe("the download strip", () => {
       backend.microphone = "granted";
       backend.accessibility = "granted";
       const { unmount } = show();
-      await screen.findByText("Downloading English · 212 of 477 MB");
+      await screen.findByText("Downloading on-device models (speech + cleanup) · 212 of 477 MB");
       expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
       expect(screen.getByText("Download running")).toBeTruthy();
       unmount();
     }
   });
 
+  it("Q4: the cleanup part shows in the one strip, practice stays available, Cancel stops it", async () => {
+    backend.allSet("try");
+    backend.cleanup = [{ ...GEMMA, state: "downloading", downloaded_bytes: 1_000_000_000 }];
+    show();
+    // One download: the speech model's 477 MB plus Gemma's progress, one bar.
+    await screen.findByText("Downloading on-device models (speech + cleanup) · 1477 of 3584 MB");
+    expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+    // The speech model is in, so practice doesn't wait for cleanup.
+    expect(screen.queryByText(/Getting the model ready/)).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLTextAreaElement>(/Hold the key, say/).disabled).toBe(false);
+    });
+    // The strip's one Cancel stops the Gemma phase too.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await screen.findByText("Download paused · 1477 of 3584 MB");
+    expect(backend.named("cancel_local_model_download")[0]?.args).toEqual({ id: PARAKEET.id });
+    expect(backend.cleanup[0]?.state).toBe("partial");
+    expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+
   it("Cancel stops it and offers Resume", async () => {
     downloading();
     show();
-    await screen.findByText("Downloading English · 212 of 477 MB");
+    await screen.findByText("Downloading on-device models (speech + cleanup) · 212 of 477 MB");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await screen.findByText("Download paused · 212 of 477 MB");
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
-    await screen.findByText("Downloading English · 212 of 477 MB");
+    await screen.findByText("Downloading on-device models (speech + cleanup) · 212 of 477 MB");
   });
 
   it("a failed download offers Retry and the own key", async () => {

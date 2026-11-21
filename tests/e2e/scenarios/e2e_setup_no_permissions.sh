@@ -55,8 +55,8 @@ e2e_setup_no_permissions() {
     wait_for_log 'PermissionMissing' 15
   expect "press Get started" ax_ok press "$APP_NAME" "$NOPERM_WINDOW" "Get started"
 
-  expect "Speech recommends the English model" \
-    ax_ok wait-text "$APP_NAME" "$NOPERM_WINDOW" "English · 477 MB" 15
+  expect "Speech offers the English model" \
+    ax_ok wait-text "$APP_NAME" "$NOPERM_WINDOW" "English · 1320 MB" 15
   expect "step 2 doesn't mention the hotkey" noperm_listen_message_absent
   expect "choose this Mac" ax_ok radio-press "$APP_NAME" "$NOPERM_WINDOW" "Use this Mac"
   expect "press Download and continue" \
@@ -65,7 +65,7 @@ e2e_setup_no_permissions() {
   expect "it moves to Permissions" \
     ax_ok wait-text "$APP_NAME" "$NOPERM_WINDOW" "Records only while you hold your key" 15
   expect "the download started: the strip shows it" \
-    ax_ok wait-text "$APP_NAME" "$NOPERM_WINDOW" "Downloading English" 15
+    ax_ok wait-text "$APP_NAME" "$NOPERM_WINDOW" "Downloading on-device models" 15
   expect "the settings choose the model" settings_file_has transcription local
   ax press "$APP_NAME" "$NOPERM_WINDOW" Cancel >/dev/null 2>&1 || true
   expect "the window never showed the hotkey's raw name" noperm_listen_message_absent

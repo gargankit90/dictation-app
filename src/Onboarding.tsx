@@ -14,6 +14,7 @@ import type { FrameParts } from "./onboarding/StepFrame";
 import { FINISH_REASON } from "./onboarding/ReadyStep";
 import { sharingBlock, useSharingSwitch } from "./settings/Privacy";
 import { useEngineStatus, useModels } from "./Settings";
+import { useCleanupModels, withCleanup } from "./settings/CleanupModel";
 import "./settings.css";
 
 export const STEPS: readonly { id: Step; name: string }[] = [
@@ -55,6 +56,9 @@ export function Onboarding({ onFinished }: Props) {
   const [settings, setSettings] = useState<Settings_Serialize | null>(null);
   const { models, error: modelsError, refresh: refreshModels } = useModels();
   const { engine, refresh: refreshEngine } = useEngineStatus();
+  const cleanupModels = useCleanupModels(
+    settings?.transcription === "local" || status?.step === "speech",
+  );
   const [downPolls, setDownPolls] = useState(0);
   // The engine picked on Speech, kept while the window is open.
   const [speechChoice, setSpeechChoice] = useState<SpeechChoice | null>(null);
@@ -151,8 +155,6 @@ export function Onboarding({ onFinished }: Props) {
     };
   }, [refresh, rereadSettings, refreshEngine, refreshModels]);
 
-  const chosen = chosenModel(settings, models);
-
   const download = useCallback(
     async (id: string) => {
       try {
@@ -218,7 +220,9 @@ export function Onboarding({ onFinished }: Props) {
   const index = STEPS.findIndex((item) => item.id === status.step);
   const previous = STEPS[index - 1];
   const next = STEPS[index + 1];
-  const strip = stripView(models, chosen);
+  // "On this Mac" is one download: speech, then cleanup (Q4).
+  const onDevice = models?.map((model) => withCleanup(model, cleanupModels?.[0])) ?? null;
+  const strip = stripView(onDevice, chosenModel(settings, onDevice));
   // A strip only for a running download on the first two steps: until the
   // user has chosen, a stopped one isn't news.
   const stripShown =
@@ -301,6 +305,7 @@ export function Onboarding({ onFinished }: Props) {
           settings={settings}
           onStored={setSettings}
           models={models}
+          cleanup={cleanupModels?.[0] ?? null}
           modelsError={modelsError}
           refreshModels={refreshModels}
           refreshEngine={refreshEngine}

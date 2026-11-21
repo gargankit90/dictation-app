@@ -210,7 +210,7 @@ impl CleanupStep {
         }
     }
 
-    /// Uses `timeout` instead (tests).
+    /// Uses `timeout` for cleaners without their own deadline (tests).
     #[must_use]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
@@ -221,9 +221,14 @@ impl CleanupStep {
     /// is off).
     async fn run(&self, raw: &str) -> (Option<String>, Option<CleanupOutcome>) {
         let started = tokio::time::Instant::now();
-        let reply = tokio::time::timeout(self.timeout, self.cleaner.clean_boxed(raw)).await;
+        let timeout = self.cleaner.deadline_boxed().unwrap_or(self.timeout);
+        let prompt = self
+            .cleaner
+            .prompt_boxed()
+            .unwrap_or_else(cleanup_rules::prompt);
+        let reply = tokio::time::timeout(timeout, self.cleaner.clean_boxed(raw)).await;
         let (cleaned, outcome) = match reply {
-            Ok(Ok(reply)) => match cleanup_rules::judge(raw, &reply, cleanup_rules::prompt()) {
+            Ok(Ok(reply)) => match cleanup_rules::judge(raw, &reply, prompt) {
                 Judgement::Accepted => (Some(reply), CleanupOutcome::Applied),
                 refused => {
                     tracing::debug!(reason = refused.name(), "cleanup refused");
@@ -231,7 +236,10 @@ impl CleanupStep {
                 }
             },
             Ok(Err(CleanupError::Off)) => return (None, None),
-            Ok(Err(CleanupError::Timeout)) | Err(_) => (None, CleanupOutcome::FallbackTimeout),
+            Ok(Err(CleanupError::Timeout)) | Err(_) => {
+                tracing::debug!(?timeout, "cleanup timed out; pasting the raw text");
+                (None, CleanupOutcome::FallbackTimeout)
+            }
             Ok(Err(error)) => {
                 tracing::debug!(%error, "cleanup failed");
                 (None, CleanupOutcome::FallbackError)
@@ -264,11 +272,19 @@ type CleanupFuture<'a> = Pin<Box<dyn Future<Output = Result<String, CleanupError
 /// dictation).
 trait BoxedCleaner: Send + Sync {
     fn clean_boxed<'a>(&'a self, text: &'a str) -> CleanupFuture<'a>;
+    fn deadline_boxed(&self) -> Option<Duration>;
+    fn prompt_boxed(&self) -> Option<&'static str>;
 }
 
 impl<C: Cleaner> BoxedCleaner for C {
     fn clean_boxed<'a>(&'a self, text: &'a str) -> CleanupFuture<'a> {
         Box::pin(self.clean(text))
+    }
+    fn deadline_boxed(&self) -> Option<Duration> {
+        self.deadline()
+    }
+    fn prompt_boxed(&self) -> Option<&'static str> {
+        self.prompt()
     }
 }
 

@@ -51,15 +51,15 @@ e2e_onboarding_five_steps() {
   expect "press Get started" ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Get started"
 
   expect "Speech recommends the English model" \
-    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "English · 477 MB" 15
-  expect "with its real size" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "477 MB" 5
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "English · 1320 MB" 15
+  expect "with its real size" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "1320 MB" 5
   # OpenRouter is the default choice now: pick the model first.
   expect "choose this Mac" ax_ok radio-press "$APP_NAME" "$FIVE_WINDOW" "Use this Mac"
   expect "press Download and continue" \
     ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Download and continue"
   expect "Permissions" \
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Records only while you hold your key" 15
-  expect "the strip shows the download" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading English" 15
+  expect "the strip shows the download" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading on-device models" 15
   expect "the rail says it runs" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Download running" 5
   expect "the settings choose the model already" settings_file_has transcription local
   expect "some of it is on disk" wait_for_part
@@ -85,7 +85,7 @@ e2e_onboarding_five_steps() {
   expect "press Download and continue again" \
     ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Download and continue"
   expect "the download picks up" \
-    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading English" 30
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading on-device models" 30
   expect "and the server answered about the earlier part" five_download_picked_up
   expect "the server was asked for the rest only" model_server_saw_resume
   expect "allowed" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Allowed" 10
@@ -95,7 +95,7 @@ e2e_onboarding_five_steps() {
   expect "press Cancel in the strip" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Cancel
   expect "the download pauses" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Download paused" 15
   vm "rm -rf $(q "$FIVE_MODELS")"
-  expect "the strip offers to resume" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "isn't downloaded yet" 15
+  expect "the strip offers to resume" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "aren't downloaded yet" 15
   expect "press Continue" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Continue
   expect "Try it blocks practice while the model is missing" \
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Practice starts once it is" 15

@@ -44,6 +44,7 @@ use dictation_transcribe::engine::{Engine, Transcribers, local_language};
 use dictation_transcribe::local::{CppModel, LocalTranscriber, SpeechModel};
 use dictation_transcribe::models::{DownloadError, ModelStore};
 
+use crate::cleanup::LocalCleanup;
 use crate::key_writes::KeyWrites;
 
 /// How long a keychain read may take before the key counts as unreadable.
@@ -75,6 +76,8 @@ pub struct LiveEngine {
     writes: KeyWrites,
     /// The on-device models, if this build has a models folder (L1).
     local: Option<LocalModels>,
+    /// The on-device cleanup helper's keeper (Q4), with the models.
+    cleanup: Option<LocalCleanup>,
 }
 
 /// Loads a model file; [`CppModel::load`] in the app, a fake in tests.
@@ -149,16 +152,16 @@ impl LocalModels {
         &self.store
     }
 
-    /// The engine for the catalogue model `id`, with the saved `language`
-    /// if the model speaks it. Reuses the loaded model when it is the same
+    /// The engine for the catalogue model `id` (the default model for an id
+    /// the catalogue no longer has, Q4), with the saved `language` if the
+    /// model speaks it. Reuses the loaded model when it is the same
     /// file. Otherwise (seconds; call it from a blocking thread) it first
     /// makes "the model is loading" current through `stage`, so neither the
     /// app nor this cache holds the old model any more, then checks the
     /// file's SHA-256 ([`ModelStore::verified_path`]) and loads it.
     pub fn engine(&self, id: &str, language: Option<&str>, stage: &dyn Fn(Engine)) -> Engine {
-        let ready = local_models::find(id)
-            .and_then(|model| self.store.ready_path(model).map(|path| (model, path)));
-        let Some((model, path)) = ready else {
+        let model = local_models::resolve(id);
+        let Some(path) = self.store.ready_path(model) else {
             self.release();
             return Engine::Unavailable(TranscribeError::ModelMissing);
         };
@@ -231,6 +234,7 @@ impl LiveEngine {
             reads: KeyReads::default(),
             writes: KeyWrites::default(),
             local: None,
+            cleanup: None,
         }
     }
 
@@ -240,6 +244,20 @@ impl LiveEngine {
     pub fn with_local(mut self, local: LocalModels) -> Self {
         self.local = Some(local);
         self
+    }
+
+    /// Keeps the on-device cleanup helper running while the settings want
+    /// it (Q4): every rebuild tells `cleanup` the settings.
+    #[must_use]
+    pub fn with_cleanup(mut self, cleanup: LocalCleanup) -> Self {
+        self.cleanup = Some(cleanup);
+        self
+    }
+
+    /// The cleanup helper's keeper, if this build has a models folder.
+    #[must_use]
+    pub fn cleanup(&self) -> Option<&LocalCleanup> {
+        self.cleanup.as_ref()
     }
 
     /// The engine now current, if the engine follows the settings (E1:
@@ -265,6 +283,7 @@ impl LiveEngine {
             reads: KeyReads::default(),
             writes: KeyWrites::default(),
             local: None,
+            cleanup: None,
         }
     }
 
@@ -492,6 +511,9 @@ impl LiveEngine {
             )
         });
         tracing::info!(engine = transcribers.name(), "engine rebuilt");
+        if let (Some(cleanup), Ok(settings)) = (&self.cleanup, config.settings()) {
+            cleanup.follow(&settings);
+        }
     }
 
     /// [`rebuild`](Self::rebuild) on a thread of its own, so the caller (app
@@ -1046,6 +1068,7 @@ mod tests {
             reads: rig.live.reads.clone(),
             writes: rig.live.writes.clone(),
             local: None,
+            cleanup: None,
         };
         changed(&rig.config, &dead, |c| {
             c.set_api_key(Provider::OpenRouter, KEY)
@@ -2113,7 +2136,7 @@ mod tests {
         }
 
         #[test]
-        fn an_unknown_model_id_is_missing_and_releases_the_loaded_one() {
+        fn an_unknown_model_id_runs_the_default_and_a_missing_file_releases_it() {
             let dir = TempDir::new("unknown-model");
             download_default(&dir.0);
             let loads = Arc::new(AtomicUsize::new(0));
@@ -2126,9 +2149,24 @@ mod tests {
             let Engine::Local(engine) = engine else {
                 panic!("not local");
             };
-            // Parakeet is English only: Hindi isn't passed on.
+            // OrukQwen is English only: Hindi isn't passed on.
             assert_eq!(engine.language(), None);
             assert!(local.loaded().is_some());
+            // A saved id Q4 removed runs OrukQwen, the model already loaded.
+            assert!(matches!(
+                local.engine("parakeet-unified-en-0.6b-q4_k_m", None, &|_| {}),
+                Engine::Local(_)
+            ));
+            assert_eq!(loads.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                local.loaded(),
+                Some(dictation_core::local_models::DEFAULT_MODEL)
+            );
+            // The file gone: missing, and the loaded model is let go.
+            let model =
+                dictation_core::local_models::find(dictation_core::local_models::DEFAULT_MODEL)
+                    .unwrap();
+            std::fs::remove_file(dir.0.join(model.file_name)).unwrap();
             assert!(matches!(
                 local.engine("retired-model", None, &|_| {}),
                 Engine::Unavailable(TranscribeError::ModelMissing)
@@ -2176,13 +2214,13 @@ mod tests {
 
         /// Review round 1, major 3: with no dictation running, the old model
         /// is gone before the next one loads, and dictation meanwhile says
-        /// the model is loading.
+        /// the model is loading. With one speech model (Q4), switching to
+        /// the cloud releases it and switching back loads it afresh.
         #[test]
-        fn switching_models_frees_the_old_one_before_loading_the_next() {
+        fn switching_away_frees_the_model_and_switching_back_loads_it() {
             let dir = TempDir::new("switch-models");
             let models_dir = dir.0.join("models");
-            put(&models_dir, "parakeet-unified-en-0.6b-q4_k_m");
-            put(&models_dir, "qwen3-asr-0.6b-q4_k_m");
+            put(&models_dir, dictation_core::local_models::DEFAULT_MODEL);
             let config = Arc::new(Config::new(dir.0.join("config"), MemSecretStore::new()));
             let transcribers = Transcribers::new(starting());
             let events: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -2201,23 +2239,24 @@ mod tests {
             let store = ModelStore::new(models_dir, Arc::new(|_| Ok(u64::MAX))).unwrap();
             let live = LiveEngine::follow(transcribers.clone())
                 .with_local(LocalModels::trusting(store, loader));
-            let pick = |id: &str| {
+            let pick = |transcription: Transcription| {
                 let settings = Settings {
-                    transcription: Transcription::Local,
-                    local_model: id.to_owned(),
+                    transcription,
+                    local_model: dictation_core::local_models::DEFAULT_MODEL.to_owned(),
                     ..Settings::default()
                 };
                 changed(&config, &live, |c| c.save_settings(&settings)).unwrap();
             };
 
-            pick("parakeet-unified-en-0.6b-q4_k_m");
-            pick("qwen3-asr-0.6b-q4_k_m");
+            pick(Transcription::Local);
+            pick(Transcription::Cloud);
+            pick(Transcription::Local);
             assert_eq!(
                 *events.lock().unwrap(),
                 [
-                    "load parakeet-unified-en-0.6b-Q4_K_M.gguf while ModelLoading",
-                    "drop parakeet-unified-en-0.6b-Q4_K_M.gguf",
-                    "load Qwen3-ASR-0.6B-Q4_K_M.gguf while ModelLoading",
+                    "load orukqwen-asr-1.7b-Q4_K_M.gguf while ModelLoading",
+                    "drop orukqwen-asr-1.7b-Q4_K_M.gguf",
+                    "load orukqwen-asr-1.7b-Q4_K_M.gguf while ModelLoading",
                 ]
             );
             assert_eq!(transcribers.name(), "local");
