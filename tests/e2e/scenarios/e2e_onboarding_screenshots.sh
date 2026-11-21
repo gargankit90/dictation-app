@@ -80,10 +80,10 @@ obs_mode() {
   obs_shot "2-speech-hindi-680x520-$mode"
   obs_size 740 560
   ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" English
-  ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" "Use my own OpenRouter key"
+  ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" "Use OpenRouter"
   obs_shot "2-speech-own-key-selected-$mode"
   ax_ok press "$APP_NAME" "$OBS_WINDOW" Continue
-  expect "$mode: Connect your key" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Continue unlocks after Test" 10
+  expect "$mode: Connect your key" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Continue unlocks once OpenRouter" 10
   obs_shot "2-key-none-$mode"
   obs_size 680 520
   obs_shot "2-key-none-680x520-$mode"

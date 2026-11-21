@@ -94,9 +94,11 @@ e2e_settings_key_provider_recovery() {
   # Fix it in Settings, as a user would.
   expect "Settings… in the tray opens the window" open_settings
   expect "the Speech section opens" ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Speech
-  expect "Change key… opens the sheet" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Change key…"
-  expect "it says a key is saved" \
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "A key is saved in your Keychain." 10
+  expect "Manage… opens the sheet" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Manage…"
+  expect "it says OpenRouter is connected" \
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "Connected" 10
+  expect "Paste a key instead opens the field" \
+    ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Paste a key instead"
   expect "there is no Save button" sh -c '! ax press "$1" "$2" Save >/dev/null 2>&1' _ "$APP_NAME" "$SETTINGS_WINDOW"
   # The wrong key again: Test & Save tests it and saves nothing.
   expect "type the wrong key into the key field" \
@@ -106,13 +108,13 @@ e2e_settings_key_provider_recovery() {
     ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "rejected" 15
   expect "the test reached the local provider with the typed key" provider_request_has 2 auth=bad
   expect "and it did not say saved" \
-    sh -c '! ax wait-text "$1" "$2" "saved in Keychain" 2 >/dev/null 2>&1' _ "$APP_NAME" "$SETTINGS_WINDOW"
+    sh -c '! ax wait-text "$1" "$2" "Connected to OpenRouter" 2 >/dev/null 2>&1' _ "$APP_NAME" "$SETTINGS_WINDOW"
   rebuilt=$(log_count 'engine rebuilt')
   expect "type the right key into the key field" \
     ax_ok secret-set "$APP_NAME" "$SETTINGS_WINDOW" api-key "$PROVIDER_GOOD_KEY"
   expect "press Test & Save" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Test & Save"
   expect "the window says it is connected and saved" \
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "✓ Connected · saved in Keychain" 15
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "✓ Connected to OpenRouter" 15
   expect "the test reached the local provider with the typed key" provider_request_has 3 auth=good
   expect "the engine was rebuilt from the new key" \
     wait_for_log_count 'engine rebuilt' $((rebuilt + 1)) 10

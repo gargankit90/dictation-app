@@ -20,8 +20,12 @@ e2e_onboarding_round2() {
   expect "Welcome" ax_ok wait-text "$APP_NAME" "$R2_WINDOW" "Talk instead of type" 15
   ax press "$APP_NAME" "$R2_WINDOW" "Get started" >/dev/null 2>&1 || true
   expect "Speech" ax_ok wait-text "$APP_NAME" "$R2_WINDOW" "Which language" 15
-  expect "choose my own key" \
-    ax_ok radio-press "$APP_NAME" "$R2_WINDOW" "Use my own OpenRouter key"
+  # OpenRouter is the default, and pressing a selected radio changes nothing:
+  # pick the on-device model first, then OpenRouter, as a person changing their mind.
+  expect "choose the on-device model" \
+    ax_ok radio-press "$APP_NAME" "$R2_WINDOW" "Recommended for your language"
+  expect "choose OpenRouter" \
+    ax_ok radio-press "$APP_NAME" "$R2_WINDOW" "Use OpenRouter"
   expect "the choice is saved before any quit" wait_until_progress own_key
   expect "quit from the tray" quit_from_tray
   clear_app_log
@@ -29,8 +33,8 @@ e2e_onboarding_round2() {
   expect "it comes back at Speech" wait_for_log 'onboarding shown at launch step=Speech' 30
   expect "the own key is still the choice: Continue opens its screen" \
     ax_ok press "$APP_NAME" "$R2_WINDOW" Continue
-  expect "which waits for Test & Save" \
-    ax_ok wait-text "$APP_NAME" "$R2_WINDOW" "Continue unlocks after Test" 15
+  expect "which waits for a connection" \
+    ax_ok wait-text "$APP_NAME" "$R2_WINDOW" "Continue unlocks once OpenRouter" 15
   ax dump "$APP_NAME" 2>/dev/null | grep -a -i -E "resum|continue|earlier|picked|kept" | head -10 |
     while IFS= read -r line; do log "  UI: $line"; done
   [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_onboarding_round2
