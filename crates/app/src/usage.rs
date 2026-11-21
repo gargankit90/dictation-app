@@ -18,21 +18,37 @@ use dictation_ports::{
 
 use crate::pipeline::UiEvent;
 
-/// Lets usage events through while sharing is on (U10): from the first moment
-/// of a launch, and only the stored choice or the switch changes that.
+/// Lets usage events through while sharing is on and the person has agreed to
+/// the Terms (TOS1): nothing passes before Get started, and after it only the
+/// stored choice or the switch changes that.
 pub struct SharingGate {
     telemetry: Arc<dyn Telemetry>,
     share: AtomicBool,
+    terms: AtomicBool,
 }
 
 impl SharingGate {
-    /// A gate in front of `telemetry`, starting from the stored choice.
+    /// A gate in front of `telemetry`, starting from the stored choice, with
+    /// the Terms agreed to.
     #[must_use]
     pub fn new(telemetry: Arc<dyn Telemetry>, share: bool) -> Self {
+        Self::starting(telemetry, share, true)
+    }
+
+    /// A gate for a launch: `terms_accepted` is false on a fresh install,
+    /// which holds everything back until [`accept_terms`](Self::accept_terms).
+    #[must_use]
+    pub fn starting(telemetry: Arc<dyn Telemetry>, share: bool, terms_accepted: bool) -> Self {
         Self {
             telemetry,
             share: AtomicBool::new(share),
+            terms: AtomicBool::new(terms_accepted),
         }
+    }
+
+    /// The person pressed Get started.
+    pub fn accept_terms(&self) {
+        self.terms.store(true, Ordering::SeqCst);
     }
 
     /// The user turned sharing on or off.
@@ -43,7 +59,7 @@ impl SharingGate {
     /// Whether anything may be sent now.
     #[must_use]
     pub fn allows(&self) -> bool {
-        self.share.load(Ordering::SeqCst)
+        self.share.load(Ordering::SeqCst) && self.terms.load(Ordering::SeqCst)
     }
 }
 

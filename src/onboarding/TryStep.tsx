@@ -17,15 +17,18 @@ interface Props {
   onStored: (settings: Settings_Serialize) => void;
   /** Why practice has to wait, or `null` if it can run. */
   wait: string | null;
-  onDone: () => void;
+  /** Ends setup; `openAtLogin` is the checkbox, applied by the shell. */
+  onDone: (openAtLogin: boolean) => void;
 }
 
 /**
- * Try it: the key, the words to say, a box the dictation pastes into, and
- * Done. Nothing checks the box: what landed there is for the user to see.
+ * Try it: the key, the words to say, a box the dictation pastes into, "Open
+ * Vocet when I log in" (on unless unchecked) and Done, which ends setup.
+ * Nothing checks the box: what landed there is for the user to see.
  */
 export function TryStep({ parts, settings, onStored, wait, onDone }: Props) {
   const [box, setBox] = useState("");
+  const [openAtLogin, setOpenAtLogin] = useState(true);
   const field = useRef<HTMLTextAreaElement>(null);
   const blocked = wait !== null;
 
@@ -56,7 +59,13 @@ export function TryStep({ parts, settings, onStored, wait, onDone }: Props) {
     <StepFrame
       parts={parts}
       title="Try it"
-      primary={{ label: "Done", onClick: onDone, blockedBecause: null }}
+      primary={{
+        label: "Done",
+        onClick: () => {
+          onDone(openAtLogin);
+        },
+        blockedBecause: null,
+      }}
     >
       <div className="ob-key-row">
         <span className="ob-label">Your dictation key</span>
@@ -97,6 +106,20 @@ export function TryStep({ parts, settings, onStored, wait, onDone }: Props) {
           {wait}
         </p>
       )}
+      <label className="ob-check">
+        <input
+          id="ob-login"
+          type="checkbox"
+          checked={openAtLogin}
+          onChange={(event) => {
+            setOpenAtLogin(event.target.checked);
+          }}
+        />
+        <span>Open Vocet when I log in</span>
+      </label>
+      <p className="ob-menubar">
+        Done closes this window. Find Vocet in the menu bar <span aria-hidden="true">↗</span>
+      </p>
     </StepFrame>
   );
 }

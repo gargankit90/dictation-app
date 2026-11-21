@@ -150,10 +150,29 @@ export const LOCAL_CAPTION = `${MODEL_TITLE} · works offline · nothing leaves 
 /** What one on-device download is (owner, Q4). */
 export const DOWNLOADING = "Downloading on-device models (speech + cleanup)";
 
+/** `bytes` as gigabytes with one decimal ("4.4 GB"). */
+export function gigabytes(bytes: number): string {
+  return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+}
+
 /** "Downloading on-device models (speech + cleanup) · 4.4 GB". */
 export function downloadingText(model: LocalModelInfo_Serialize): string {
-  const gigabytes = (model.size_bytes ?? 0) / 1_000_000_000;
-  return `${DOWNLOADING} · ${gigabytes.toFixed(1)} GB`;
+  return `${DOWNLOADING} · ${gigabytes(model.size_bytes ?? 0)}`;
+}
+
+/**
+ * Setup's on-device card: the language and the whole download, speech plus
+ * cleanup, summed from the catalogue ("English · 4.4 GB download (speech +
+ * cleanup)"). Until the cleanup model is listed there is no true size, so the
+ * card says only the language.
+ */
+export function wholeDownloadLabel(
+  speech: LocalModelInfo_Serialize,
+  cleanup: LocalModelInfo_Serialize | null,
+): string {
+  if (cleanup === null) return MODEL_TITLE;
+  const bytes = (speech.size_bytes ?? 0) + (cleanup.size_bytes ?? 0);
+  return `${MODEL_TITLE} · ${gigabytes(bytes)} download (speech + cleanup)`;
 }
 
 /** The cloud provider's name (Q2: `OpenRouter` only). */

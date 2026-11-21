@@ -11,8 +11,8 @@ export function WhatsSent() {
     <details className="row-details">
       <summary>What&apos;s sent</summary>
       <p className="hint">
-        Sent while this is on, from the first setup screen (setup events go out before the switch is
-        shown on the last screen). Off stops it at once and deletes what is waiting and the ID
+        Sent while this is on, starting when you press Get started on the first setup screen.
+        Nothing is sent before that. Off stops it at once and deletes what is waiting and the ID
         below; it can&apos;t recall what was already sent.
       </p>
       <ul className="hint">
@@ -102,16 +102,6 @@ export function useSharingSwitch(
 export type SharingSwitch = ReturnType<typeof useSharingSwitch>;
 
 /**
- * What a step's way forward must say while the switch isn't settled: leaving
- * can send events, so it waits for the user's choice to be saved. `failed` is
- * what to say about a failed write, or `null` if this step can't hold on one.
- */
-export function sharingBlock(save: SaveState, failed: string | null): string | null {
-  if (save.state === "saving") return "Saving your choice…";
-  return save.state === "error" ? failed : null;
-}
-
-/**
  * Privacy: "Share usage and error events" (A1's own command: off stops
  * sending at once), what is sent (from docs/privacy.md), and a link to the
  * full list.
@@ -136,15 +126,26 @@ export function Privacy({
         label="Where your dictation goes"
         caption={flow}
         below={
-          <button
-            type="button"
-            className="link"
-            onClick={() => {
-              void commands.openLink("privacy").catch(() => undefined);
-            }}
-          >
-            Read the privacy policy
-          </button>
+          <>
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                void commands.openLink("privacy").catch(() => undefined);
+              }}
+            >
+              Read the privacy policy
+            </button>{" "}
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                void commands.openLink("terms").catch(() => undefined);
+              }}
+            >
+              Read the Terms
+            </button>
+          </>
         }
       />
       <Row

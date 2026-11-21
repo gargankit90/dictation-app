@@ -15,6 +15,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "cancel_connect",
     "saved_key_hint",
     "get_onboarding",
+    "accept_terms",
     "request_permission",
     "open_setup",
     "set_onboarding_step",

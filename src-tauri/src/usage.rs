@@ -5,9 +5,10 @@
 //! The project key is read at build time from `DICTATION_POSTHOG_KEY`. A
 //! build without it (dev, CI, forks) sends nothing and writes no install ID.
 //!
-//! Sending follows the stored choice from the moment the app starts (U10):
-//! setup is measured from its first screen, and a stored "off" sends nothing
-//! at any step.
+//! Nothing is sent until the person presses Get started on the first setup
+//! screen (TOS1), which agrees to the Terms and Privacy Policy. After that
+//! sending follows the stored choice, and a stored "off" sends nothing at any
+//! step.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -66,7 +67,19 @@ impl Usage {
     #[cfg(test)]
     #[must_use]
     pub fn recording(telemetry: Arc<dyn Telemetry>, share: bool) -> Self {
-        let gate = SharingGate::new(telemetry, share);
+        Self::recording_from(telemetry, share, true)
+    }
+
+    /// [`recording`](Self::recording), for a launch where the Terms haven't
+    /// been accepted yet when `terms_accepted` is false.
+    #[cfg(test)]
+    #[must_use]
+    pub fn recording_from(
+        telemetry: Arc<dyn Telemetry>,
+        share: bool,
+        terms_accepted: bool,
+    ) -> Self {
+        let gate = SharingGate::starting(telemetry, share, terms_accepted);
         Self(
             PostHogTelemetry::disabled(),
             SentryReporter::disabled(),
@@ -75,11 +88,24 @@ impl Usage {
     }
 
     /// The one sharing switch: the gate first, so nothing passes it while the
-    /// adapters clear what they hold.
+    /// adapters clear what they hold. Before the Terms are accepted the
+    /// adapters stay off whatever the switch says.
     pub fn set_enabled(&self, enabled: bool) {
         self.2.set_share(enabled);
-        self.0.set_enabled(enabled);
-        self.1.set_enabled(enabled);
+        let on = self.2.allows();
+        self.0.set_enabled(on);
+        self.1.set_enabled(on);
+    }
+
+    /// Get started: sending may begin, if the stored choice is on. True if
+    /// this turned it on, so the caller records that the app was opened.
+    pub fn accept_terms(&self) -> bool {
+        let before = self.2.allows();
+        self.2.accept_terms();
+        let on = self.2.allows();
+        self.0.set_enabled(on);
+        self.1.set_enabled(on);
+        on && !before
     }
 
     /// Records `event`, if sharing is on.
@@ -96,6 +122,7 @@ impl Usage {
 
 /// The stored sharing choice, for a launch: on for a fresh install (no file
 /// yet), and off if the file can't be read, since it may hold an opt-out.
+/// Whether it may be used yet is [`Onboarding::terms_accepted`].
 pub fn stored_choice<S: SecretStore>(config: &AppSettingsFile<S>) -> bool {
     config
         .settings()
@@ -103,15 +130,22 @@ pub fn stored_choice<S: SecretStore>(config: &AppSettingsFile<S>) -> bool {
 }
 
 /// Starts the adapter for a launch. `scripted` launches (the e2e test hooks)
-/// send nothing, whatever the build key. With `share` on, sending starts now,
-/// from the first setup screen (U10); with it off, nothing is sent and no
-/// install ID is made.
-pub fn start(data_dir: &Path, share: bool, scripted: bool, version: &str) -> Usage {
+/// send nothing, whatever the build key. With `share` on and the Terms
+/// accepted, sending starts now; otherwise nothing is sent and no install ID
+/// is made (a fresh install waits for Get started).
+pub fn start(
+    data_dir: &Path,
+    share: bool,
+    terms_accepted: bool,
+    scripted: bool,
+    version: &str,
+) -> Usage {
     let key = if scripted { None } else { BUILD_KEY };
     let config = Config::new(key, data_dir);
     let handle = tauri::async_runtime::handle();
     let runtime = handle.inner().clone();
-    let posthog = PostHogTelemetry::start(config, share, &runtime);
+    let on = share && terms_accepted;
+    let posthog = PostHogTelemetry::start(config, on, &runtime);
     let dsn = if scripted { None } else { BUILD_DSN };
     let errors = match Version::new(version) {
         Some(release) if dsn.is_some() => {
@@ -121,14 +155,22 @@ pub fn start(data_dir: &Path, share: bool, scripted: bool, version: &str) -> Usa
                 "production"
             };
             let config = errors::Config::new(dsn, &release, environment, macos_major(), data_dir);
-            let reporter = SentryReporter::start(config, share, &runtime);
+            let reporter = SentryReporter::start(config, on, &runtime);
             reporter.install_panic_hook();
             reporter
         }
         _ => SentryReporter::disabled(),
     };
-    let gate = SharingGate::new(posthog.clone(), share);
+    let gate = SharingGate::starting(posthog.clone(), share, terms_accepted);
     Usage(posthog, errors, Arc::new(gate))
+}
+
+/// Get started: sending may begin. The `app_opened` of this launch was held
+/// back with everything else, so it is recorded now.
+pub fn terms_accepted(usage: &Usage, version: &str) {
+    if usage.accept_terms() {
+        launched(usage.clone(), version);
+    }
 }
 
 /// Records `app_opened`. Reads the macOS version, so it runs on the
@@ -246,10 +288,10 @@ pub fn onboarding_step(usage: &Usage, step: Step) {
     });
 }
 
-/// Records onboarding finished.
+/// Records onboarding finished (Done on Try it).
 pub fn onboarding_completed(usage: &Usage) {
     usage.record(Event::OnboardingCompleted {
-        step: OnboardingStep::from(Step::Ready),
+        step: OnboardingStep::from(Step::Try),
     });
 }
 
@@ -258,9 +300,6 @@ pub fn onboarding_completed(usage: &Usage) {
 /// screen shows up (U10).
 pub fn setup_opened(usage: &Usage, onboarding: &Onboarding, readiness: Readiness) -> Step {
     let step = onboarding.open(readiness);
-    if !usage.2.allows() {
-        onboarding.note_sharing_off();
-    }
     onboarding_step(usage, step);
     step
 }
@@ -435,7 +474,7 @@ mod tests {
         if BUILD_KEY.is_none() {
             let usage = Usage::disabled();
             usage.record(Event::OnboardingCompleted {
-                step: OnboardingStep::Ready,
+                step: OnboardingStep::Try,
             });
             assert!(!usage.0.is_enabled());
             assert_eq!(usage.0.queued(), 0);
@@ -473,7 +512,7 @@ mod tests {
         #[test]
         fn u10_every_step_shows_from_the_first_screen() {
             let (usage, fake, onboarding) = walking(true);
-            walk_to(&usage, &onboarding, Step::Ready);
+            walk_to(&usage, &onboarding, Step::Try);
             onboarding_completed(&usage);
             assert_eq!(
                 fake.events(),
@@ -482,9 +521,8 @@ mod tests {
                     reached(OnboardingStep::Speech),
                     reached(OnboardingStep::Permissions),
                     reached(OnboardingStep::Try),
-                    reached(OnboardingStep::Ready),
                     Event::OnboardingCompleted {
-                        step: OnboardingStep::Ready
+                        step: OnboardingStep::Try
                     },
                 ]
             );
@@ -510,7 +548,7 @@ mod tests {
         /// U10 criterion 2: closing the window and then quitting is one stop,
         /// and opening setup again can stop again.
         #[test]
-        fn u10_a_stop_before_ready_counts_once_until_setup_opens_again() {
+        fn u10_a_stop_before_done_counts_once_until_setup_opens_again() {
             let (usage, fake, onboarding) = walking(true);
             walk_to(&usage, &onboarding, Step::Try);
             let permissions = FakePermissions::new();
@@ -528,7 +566,7 @@ mod tests {
         #[test]
         fn u10_finishing_is_not_a_stop() {
             let (usage, fake, onboarding) = walking(true);
-            walk_to(&usage, &onboarding, Step::Ready);
+            walk_to(&usage, &onboarding, Step::Try);
             onboarding.finish();
             setup_left(&usage, &onboarding, &FakePermissions::new());
             assert!(
@@ -544,7 +582,7 @@ mod tests {
         #[test]
         fn u10_stored_off_records_nothing_at_any_step() {
             let (usage, fake, onboarding) = walking(false);
-            walk_to(&usage, &onboarding, Step::Ready);
+            walk_to(&usage, &onboarding, Step::Try);
             for problem in P::ALL {
                 setup_problem(&usage, &onboarding, problem);
             }
@@ -554,20 +592,46 @@ mod tests {
             assert_eq!(fake.events(), []);
         }
 
-        /// Round 2: Ready's caption reads this. Stored off, it can't say sharing
-        /// has been on since setup began, even once it is turned on.
+        /// TOS1: nothing is recorded before Get started, whatever the stored
+        /// choice, and the first launch's `app_opened` isn't lost: Get started
+        /// is what records it (the shell does that through [`terms_accepted`]).
         #[test]
-        fn u10_a_stored_off_is_noted_when_setup_opens() {
-            let permissions = FakePermissions::new();
-            let (usage, _, onboarding) = walking(false);
+        fn tos1_nothing_is_recorded_before_get_started() {
+            let fake = FakeTelemetry::new();
+            let usage = Usage::recording_from(Arc::new(fake.clone()), true, false);
+            let onboarding = Onboarding::new();
             setup_opened(&usage, &onboarding, Readiness::default());
-            assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
-            usage.set_enabled(true);
-            assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
+            setup_problem(&usage, &onboarding, P::RelaunchNeeded);
+            setup_left(&usage, &onboarding, &FakePermissions::new());
+            assert_eq!(fake.events(), [], "nothing on the first screen");
 
-            let (usage, _, onboarding) = walking(true);
-            setup_opened(&usage, &onboarding, Readiness::default());
-            assert!(onboarding.status(&permissions, false).sharing_on_throughout);
+            assert!(usage.accept_terms(), "Get started turns sending on");
+            onboarding_step(&usage, Step::Speech);
+            assert_eq!(fake.events(), [reached(OnboardingStep::Speech)]);
+            assert!(!usage.accept_terms(), "once");
+        }
+
+        /// TOS1: a stored "off" stays off after Get started.
+        #[test]
+        fn tos1_get_started_doesnt_override_an_off_switch() {
+            let fake = FakeTelemetry::new();
+            let usage = Usage::recording_from(Arc::new(fake.clone()), false, false);
+            assert!(!usage.accept_terms(), "nothing turned on");
+            onboarding_step(&usage, Step::Speech);
+            assert_eq!(fake.events(), []);
+            usage.set_enabled(true);
+            onboarding_step(&usage, Step::Speech);
+            assert_eq!(fake.events().len(), 1, "the switch still works");
+        }
+
+        /// The Settings switch, turned on before Get started, sends nothing.
+        #[test]
+        fn tos1_the_switch_cant_start_sending_before_get_started() {
+            let fake = FakeTelemetry::new();
+            let usage = Usage::recording_from(Arc::new(fake.clone()), false, false);
+            usage.set_enabled(true);
+            onboarding_step(&usage, Step::Speech);
+            assert_eq!(fake.events(), []);
         }
 
         /// U10 criterion 4: a problem in Settings isn't a setup problem.

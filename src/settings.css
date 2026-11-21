@@ -1282,69 +1282,46 @@ main.ob {
   clip-path: inset(50%);
 }
 
-.ob-summary {
+.ob-check {
   display: flex;
-  flex-direction: column;
-  gap: var(--vc-space-2);
-  margin: 0;
-  padding: var(--vc-space-3) var(--vc-space-4);
-  border: 1px solid var(--vc-line);
-  border-radius: var(--vc-radius-lg);
-}
-
-.ob-summary > div {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--vc-space-1) var(--vc-space-3);
-}
-
-.ob-summary dt {
-  color: var(--vc-muted);
-}
-
-.ob-summary dd {
-  min-width: 0;
-  margin: 0;
-}
-
-.ob-summary > .ob-summary-switch {
   align-items: center;
-}
-
-.ob-summary-switch > dt {
-  color: inherit;
-}
-
-.ob-summary-note {
-  flex-basis: 100%;
-}
-
-.ob-summary-note:empty {
-  display: none;
-}
-
-.ob-summary-note .ob-caption {
-  margin: 0;
-}
-
-.ob-notes {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: var(--vc-space-1) var(--vc-space-3);
+  gap: var(--vc-space-2);
   margin-top: var(--vc-space-3);
 }
 
-.ob-notes p {
-  margin-block: 0;
+.ob-menubar {
+  margin: var(--vc-space-2) 0 0;
+  color: var(--vc-muted);
 }
 
-.ob-menubar {
-  margin-left: auto;
-  font-weight: 600;
+/* Welcome: the Terms line under Get started. */
+.ob-below {
+  flex: 0 0 auto;
+  padding: 0 var(--vc-space-4) var(--vc-space-3);
   text-align: right;
+}
+
+.ob-terms {
+  margin: 0;
+  color: var(--vc-muted);
+  font-size: var(--vc-text-sm);
+}
+
+/* Connect OpenRouter: the one explainer, the button and the quiet link. */
+.ob-connect {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--vc-space-3);
+}
+
+.ob-connect p {
+  margin: 0;
+}
+
+.ob-connect .ob-small {
+  color: var(--vc-muted);
+  font-size: var(--vc-text-sm);
 }
 
 /* U7: Settings → History. */

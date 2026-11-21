@@ -22,9 +22,10 @@ SETTINGS_WINDOW=Settings
 # The finished-setup marker goes too: a scenario must not inherit another's
 # finished setup.
 SETUP_DONE_VM="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/onboarding-completed"
+TERMS_VM="/Users/$VM_USER/Library/Application Support/com.dictationapp.desktop/accepted_terms"
 
 settings_reset() {
-  vm "rm -f $(q "$SETTINGS_FILE_VM" "$SETUP_DONE_VM")"
+  vm "rm -f $(q "$SETTINGS_FILE_VM" "$SETUP_DONE_VM" "$TERMS_VM")"
 }
 
 # settings_file_has <key> <string value>: the saved settings file has

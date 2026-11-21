@@ -200,6 +200,8 @@ pub enum Link {
     OpenrouterCredits,
     /// The privacy policy on the website.
     Privacy,
+    /// The Terms on the website.
+    Terms,
     /// The source code.
     Repository,
     /// The FSL-1.1-ALv2 licence.
@@ -217,6 +219,7 @@ impl Link {
         match self {
             Self::OpenrouterCredits => "https://openrouter.ai/settings/credits".to_owned(),
             Self::Privacy => "https://vocetlabs.com/privacy".to_owned(),
+            Self::Terms => "https://vocetlabs.com/terms".to_owned(),
             Self::Repository => REPOSITORY.to_owned(),
             Self::Licence => format!("{REPOSITORY}/blob/main/LICENSE"),
             Self::Notice => format!("{REPOSITORY}/blob/main/NOTICE"),

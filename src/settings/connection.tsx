@@ -204,20 +204,96 @@ export function useConnection({ onConnected, refreshEngine }: Options) {
 export type Connection = ReturnType<typeof useConnection>;
 
 /**
- * The panel: the explainer and Connect OpenRouter, or what is connected with
- * Disconnect and Add credits; "Paste a key instead" under either.
+ * What the last attempt said, and why the saved key couldn't be read.
+ * `errorsOnly`: setup says "Connected" itself, so it wants only the problems.
  */
-export function ConnectPanel({
+export function ConnectNotices({
   connection,
-  canDisconnect = true,
+  errorsOnly = false,
 }: {
   connection: Connection;
-  /** Setup has no Disconnect; it stays in Settings. */
-  canDisconnect?: boolean;
+  errorsOnly?: boolean;
 }) {
-  const { status, notice, busy } = connection;
+  const { status, notice } = connection;
+  return (
+    <>
+      {notice !== null && !(errorsOnly && notice.kind === "ok") && (
+        <p
+          id="connect-notice"
+          role={notice.kind === "error" ? "alert" : "status"}
+          className={`notice ${notice.kind}`}
+        >
+          {notice.text}
+        </p>
+      )}
+      {status.state === "error" && (
+        <p role="alert" className="notice error">
+          Couldn&apos;t check for a saved key: {status.message}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** "Paste a key instead": a small link that opens the key field. */
+export function PasteKey({ connection }: { connection: Connection }) {
+  const { busy } = connection;
   const [pasting, setPasting] = useState(false);
   const [typed, setTyped] = useState("");
+  const working = busy !== null;
+  return pasting ? (
+    <div className="panel-row">
+      <label htmlFor="api-key">{PROVIDER_NAME} API key</label>
+      <input
+        id="api-key"
+        type="password"
+        value={typed}
+        autoComplete="off"
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+        placeholder="Paste your key"
+        readOnly={busy === "saving"}
+        onChange={(event) => {
+          setTyped(event.target.value);
+          connection.clearNotice();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") void connection.pasteKey(typed);
+        }}
+      />
+      <button
+        type="button"
+        disabled={working}
+        onClick={() => {
+          void connection.pasteKey(typed).then(() => {
+            setTyped("");
+          });
+        }}
+      >
+        {busy === "saving" ? "Saving…" : "Test & Save"}
+      </button>
+    </div>
+  ) : (
+    <button
+      type="button"
+      className="link"
+      onClick={() => {
+        setPasting(true);
+      }}
+    >
+      Paste a key instead
+    </button>
+  );
+}
+
+/**
+ * Settings' panel: the explainer and Connect OpenRouter, or what is connected
+ * with Disconnect and Add credits; "Paste a key instead" under either.
+ * (Setup's calmer screen is its own, in `onboarding/SpeechStep.tsx`.)
+ */
+export function ConnectPanel({ connection }: { connection: Connection }) {
+  const { status, busy } = connection;
   const connected = status.state === "connected";
   const working = busy !== null;
   return (
@@ -254,7 +330,7 @@ export function ConnectPanel({
         <button type="button" onClick={connection.addCredits}>
           Add credits
         </button>
-        {canDisconnect && connected && (
+        {connected && (
           <button
             type="button"
             className="destructive"
@@ -270,64 +346,8 @@ export function ConnectPanel({
           </button>
         )}
       </div>
-      {notice !== null && (
-        <p
-          id="connect-notice"
-          role={notice.kind === "error" ? "alert" : "status"}
-          className={`notice ${notice.kind}`}
-        >
-          {notice.text}
-        </p>
-      )}
-      {status.state === "error" && (
-        <p role="alert" className="notice error">
-          Couldn&apos;t check for a saved key: {status.message}
-        </p>
-      )}
-      {pasting ? (
-        <div className="panel-row">
-          <label htmlFor="api-key">{PROVIDER_NAME} API key</label>
-          <input
-            id="api-key"
-            type="password"
-            value={typed}
-            autoComplete="off"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            placeholder="Paste your key"
-            readOnly={busy === "saving"}
-            onChange={(event) => {
-              setTyped(event.target.value);
-              connection.clearNotice();
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void connection.pasteKey(typed);
-            }}
-          />
-          <button
-            type="button"
-            disabled={working}
-            onClick={() => {
-              void connection.pasteKey(typed).then(() => {
-                setTyped("");
-              });
-            }}
-          >
-            {busy === "saving" ? "Saving…" : "Test & Save"}
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          className="link"
-          onClick={() => {
-            setPasting(true);
-          }}
-        >
-          Paste a key instead
-        </button>
-      )}
+      <ConnectNotices connection={connection} />
+      <PasteKey connection={connection} />
     </div>
   );
 }

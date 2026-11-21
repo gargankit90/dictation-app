@@ -385,35 +385,23 @@ pub async fn get_hotkey_notice(hotkey: State<'_, ActiveHotkey>) -> Result<Option
 pub async fn set_share_usage_events(
     state: State<'_, AppConfig>,
     usage: State<'_, Usage>,
-    onboarding: State<'_, Arc<Onboarding>>,
     share: bool,
 ) -> Result<(), String> {
     let usage = usage.inner().clone();
-    let onboarding = Arc::clone(&onboarding);
-    on_config(&state, move |config| {
-        choose_sharing(config, &usage, &onboarding, share)
-    })
-    .await
+    on_config(&state, move |config| choose_sharing(config, &usage, share)).await
 }
 
 /// The user's choice. Off reaches both adapters before any file is touched, so
-/// neither the settings lock nor a stalled disk can keep sending going. Whether
-/// the note about setup's caption is written doesn't change what is sent, so
-/// it comes last, and a failed save still counts as off for it.
+/// neither the settings lock nor a stalled disk can keep sending going.
 fn choose_sharing<S: SecretStore>(
     config: &Config<S>,
     usage: &Usage,
-    onboarding: &Onboarding,
     share: bool,
 ) -> Result<(), ConfigError> {
     if !share {
         usage.set_enabled(false);
     }
-    let saved = write_sharing(config, usage, share);
-    if !share {
-        onboarding.note_sharing_off();
-    }
-    saved
+    write_sharing(config, usage, share)
 }
 
 fn write_sharing<S: SecretStore>(
@@ -563,6 +551,7 @@ pub async fn test_api_key(
 #[tauri::command]
 #[specta::specta]
 pub async fn get_onboarding(
+    shell: State<'_, AppShell>,
     onboarding: State<'_, Arc<Onboarding>>,
     permissions: State<'_, OsPermissions>,
     diagnostics: State<'_, Diagnostics>,
@@ -570,7 +559,30 @@ pub async fn get_onboarding(
 ) -> Result<OnboardingStatus, String> {
     let status = onboarding.status(&*permissions.0, diagnostics.hotkey_is_down());
     usage::setup_status_read(&usage, &onboarding, &status);
+    // The person allowed a permission in System Settings, which is in front:
+    // bring setup back over it.
+    if onboarding.take_grant() {
+        shell.0.show_onboarding_window();
+    }
     Ok(status)
+}
+
+/// Get started on Welcome: the person agrees to the Terms and Privacy Policy.
+/// The date of the Terms is kept, and usage reports start (if the switch in
+/// Settings → Privacy is on): nothing is sent before this.
+#[tauri::command]
+#[specta::specta]
+pub async fn accept_terms(
+    onboarding: State<'_, Arc<Onboarding>>,
+    usage: State<'_, Usage>,
+) -> Result<(), String> {
+    let (onboarding, usage) = (Arc::clone(&onboarding), usage.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        onboarding.accept_terms();
+        usage::terms_accepted(&usage, env!("CARGO_PKG_VERSION"));
+    })
+    .await
+    .map_err(|_| "the onboarding task crashed".to_owned())
 }
 
 /// Settings, Help, "Run setup again" (U5, U6): opens the first-run steps,
@@ -733,6 +745,7 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
             crate::connect::cancel_connect,
             crate::connect::saved_key_hint,
             get_onboarding,
+            accept_terms,
             request_permission,
             open_setup,
             set_onboarding_step,
@@ -1083,10 +1096,10 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
         }
 
-        /// U10 criterion 5: off right before Start dictating. The waiting events
+        /// U10 criterion 5: off right before Done. The waiting events
         /// and the ID go, the file says off, and finishing records nothing.
         #[tokio::test(flavor = "multi_thread")]
-        async fn u10_off_right_before_start_dictating_stops_and_deletes_everything() {
+        async fn u10_off_right_before_done_stops_and_deletes_everything() {
             let dir = temp("ready");
             let server = server().await;
             let settings = config(&dir, true);
@@ -1145,22 +1158,17 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
         }
 
-        /// A save that fails still counts as off for the caption: sending
-        /// stopped.
+        /// A save that fails still stops sending.
         #[test]
-        fn u10_a_failed_off_is_still_noted() {
+        fn u10_a_failed_off_still_stops_sending() {
             let dir = temp("failed-off");
             let settings = config(&dir, true);
             std::fs::write(settings.path(), "{ not json").unwrap();
-            let onboarding = Onboarding::new();
-            onboarding.open(dictation_core::onboarding::Readiness::READY);
             let fake = FakeTelemetry::new();
             let usage = Usage::recording(Arc::new(fake.clone()), true);
-            assert!(choose_sharing(&settings, &usage, &onboarding, false).is_err());
+            assert!(choose_sharing(&settings, &usage, false).is_err());
             usage.record(step());
             assert_eq!(fake.events(), []);
-            let permissions = dictation_platform::fakes::FakePermissions::new();
-            assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
             let _ = std::fs::remove_dir_all(&dir);
         }
 
@@ -2455,38 +2463,10 @@ mod capability_tests {
                 [
                     problem(SetupProblem::RelaunchNeeded),
                     Event::OnboardingCompleted {
-                        step: OnboardingStep::Ready
+                        step: OnboardingStep::Try
                     },
                 ]
             );
-        }
-
-        /// Round 2: Off through the real command, on Ready or in Settings.
-        #[test]
-        fn u10_turning_it_off_is_noted_for_readys_caption() {
-            let fixture = app_with_usage(&[MAIN], Usage::disabled());
-            let main = &fixture.windows[0];
-            let onboarding = fixture._app.state::<Arc<Onboarding>>();
-            onboarding.open(Readiness::READY);
-            let on_throughout = || {
-                let permissions = dictation_platform::fakes::FakePermissions::new();
-                onboarding.status(&permissions, false).sharing_on_throughout
-            };
-            assert!(on_throughout());
-            invoke(
-                main,
-                "set_share_usage_events",
-                serde_json::json!({ "share": true }),
-            )
-            .unwrap();
-            assert!(on_throughout(), "on doesn't count");
-            invoke(
-                main,
-                "set_share_usage_events",
-                serde_json::json!({ "share": false }),
-            )
-            .unwrap();
-            assert!(!on_throughout());
         }
 
         #[test]
@@ -2690,6 +2670,7 @@ mod capability_tests {
                 // run on fakes (granted permissions, no shell).
                 "get_settings"
                 | "get_onboarding"
+                | "accept_terms"
                 | "finish_onboarding"
                 | "relaunch_app"
                 | "list_local_models"
