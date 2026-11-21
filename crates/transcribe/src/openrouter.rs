@@ -44,6 +44,10 @@ use serde::Deserialize;
 /// [`TranscribeError::RateLimited`] instead of a long silent wait.
 pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 
+/// A clip this long or longer gets one retry after a timeout, not the whole
+/// retry policy: each attempt can wait minutes.
+pub const LONG_CLIP: Duration = Duration::from_secs(60);
+
 /// How long one request may take before it counts as a timeout, before
 /// [`Config::timeout_grows_with_audio`] adds time for a long clip.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -118,6 +122,9 @@ pub struct Config {
     /// Whether each request gets half a second more per second of audio.
     /// On for dictation; off for the key check, which has a fixed budget.
     pub timeout_grows_with_audio: bool,
+    /// From this clip length, a timeout is retried at most once ([`LONG_CLIP`]
+    /// in the app; a test shortens it rather than wait out a real limit).
+    pub long_clip: Duration,
     /// Retries for rate limits, server errors, timeouts and network errors.
     pub retry: RetryPolicy,
 }
@@ -133,6 +140,7 @@ impl Config {
             privacy: PrivacyFilter::DenyDataCollection,
             timeout: DEFAULT_TIMEOUT,
             timeout_grows_with_audio: true,
+            long_clip: LONG_CLIP,
             retry: RetryPolicy::default(),
         }
     }
@@ -207,6 +215,7 @@ impl<W: Wait> OpenRouter<W> {
         let audio_b64 = base64(&wav);
         tracing::debug!(bytes = wav.len(), model = %self.config.model, ?timeout, "transcribing");
         let mut failures = 0u32;
+        let mut timeouts = 0u32;
         loop {
             let error = match self.attempt(&audio_b64, timeout).await {
                 Ok(text) => {
@@ -216,6 +225,13 @@ impl<W: Wait> OpenRouter<W> {
                 Err(failure) => failure,
             };
             failures = failures.saturating_add(1);
+            if error.error == TranscribeError::Timeout {
+                timeouts += 1;
+                if timeouts > 1 && audio.duration() >= self.config.long_clip {
+                    tracing::debug!(failures, "a long clip timed out again; giving up");
+                    return Err(error.error);
+                }
+            }
             let Some(delay) = self.retry_delay(&error, failures) else {
                 tracing::debug!(failures, error = %error.error, "giving up");
                 return Err(error.error);

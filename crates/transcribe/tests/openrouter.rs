@@ -50,6 +50,7 @@ fn config(server: &MockServer) -> Config {
         privacy: dictation_core::cloud_models::PrivacyFilter::DenyDataCollection,
         timeout: Duration::from_secs(5),
         timeout_grows_with_audio: false,
+        long_clip: Duration::MAX,
         retry: RetryPolicy {
             max_attempts: 3,
             base_delay: ms(100),

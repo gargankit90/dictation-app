@@ -68,6 +68,7 @@ fn check_config(config: Config, timeout: Duration) -> Config {
         timeout,
         // The check's budget is fixed, whatever the (tiny) clip.
         timeout_grows_with_audio: false,
+        long_clip: Duration::MAX,
         retry: RetryPolicy {
             max_attempts: 1,
             ..config.retry
