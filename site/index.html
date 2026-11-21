@@ -490,6 +490,14 @@
         grid-template-columns: 1fr 1fr;
         gap: 16px;
       }
+      .ticks {
+        margin: 12px 0 0;
+        padding-left: 20px;
+        color: var(--vc-ink-2);
+      }
+      .ticks li + li {
+        margin-top: 8px;
+      }
       details {
         border-top: 1px solid var(--vc-line);
         padding: 14px 0;
@@ -2014,33 +2022,43 @@
         </div>
       </section>
 
-      <section class="band">
+      <section class="band" id="data">
         <div class="wrap">
           <h2>Two ways to run</h2>
-          <p>
-            No Vocet account and no Vocet server: your audio goes through your own OpenRouter
-            account, or never leaves your Mac. Read the <a href="privacy.html">privacy policy</a>.
-          </p>
-        </div>
-      </section>
-
-      <section id="data">
-        <div class="wrap">
-          <h2>Where your data goes</h2>
           <div class="cols">
             <div class="card">
-              <h3>Connect OpenRouter</h3>
-              <p>
-                OpenRouter sends your audio to OpenAI to turn it into text and sends the text to a
-                cleanup model on a zero-data-retention host. Vocet doesn’t run a server that
-                receives your dictations.
-              </p>
+              <h3>On this Mac</h3>
+              <ul class="ticks">
+                <li>Runs on your Mac’s own chip: free, no account, no credits.</li>
+                <li>
+                  Fast, with no network round trip: about 1 second from key-up to paste on Apple
+                  silicon (measured on 16 GB).
+                </li>
+                <li>Works offline after a one-time 4.4 GB download.</li>
+                <li>Good English accuracy.</li>
+                <li>Your audio and text never leave your Mac.</li>
+              </ul>
             </div>
             <div class="card">
-              <h3>On this Mac</h3>
-              <p>Your audio and dictation text stay on your Mac.</p>
+              <h3>Connect OpenRouter <span class="brand-tag">Default</span></h3>
+              <ul class="ticks">
+                <li>The most accurate option: a speech model plus a cleanup model.</li>
+                <li>Fast, but needs internet: each dictation goes to the service and back.</li>
+                <li>
+                  Pay as you go with your own OpenRouter account: a few cents per hour of dictation.
+                </li>
+                <li>
+                  OpenRouter sends your audio to OpenAI and the text to a cleanup model on a
+                  zero-data-retention host.
+                </li>
+                <li>Vocet doesn’t run a server that receives your dictations.</li>
+              </ul>
             </div>
           </div>
+          <p class="note">
+            No Vocet account and no Vocet server. Read the
+            <a href="privacy.html">privacy policy</a>.
+          </p>
         </div>
       </section>
 
