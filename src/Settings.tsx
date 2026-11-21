@@ -3,11 +3,8 @@ import type { KeyboardEvent } from "react";
 import { commands } from "./bindings";
 import type { EngineStatus, LocalModelInfo_Serialize, Settings_Serialize } from "./bindings";
 import { BROKEN, messageOf } from "./messages";
-import { cloudLanguages } from "./languages";
-import { PROVIDER_NAME, modelTitle } from "./settings/modelRow";
 import "./settings.css";
 import { Dictation } from "./settings/Dictation";
-import type { LanguageChoice } from "./settings/Dictation";
 import { General, useLaunchAtLogin } from "./settings/General";
 import { About, Help } from "./settings/HelpAbout";
 import { History } from "./settings/History";
@@ -119,31 +116,6 @@ export function useEngineStatus() {
     };
   }, [loading, refresh]);
   return { engine, refresh };
-}
-
-/** The languages the engine in use offers (U2). */
-function languageChoice(
-  settings: Settings_Serialize,
-  models: LocalModelInfo_Serialize[] | null,
-): LanguageChoice {
-  if (settings.transcription === "cloud") {
-    return {
-      supported: cloudLanguages(settings.provider),
-      engineName: PROVIDER_NAME,
-      englishOnly: false,
-    };
-  }
-  const model = models?.find((candidate) => candidate.id === settings.local_model);
-  // Before the list has been read, nothing is filtered or flagged.
-  if (model === undefined) {
-    return { supported: cloudLanguages(settings.provider), engineName: null, englishOnly: false };
-  }
-  const englishOnly = model.language_codes.join() === "en";
-  return {
-    supported: model.language_codes,
-    engineName: `the ${modelTitle(model)} model`,
-    englishOnly,
-  };
 }
 
 interface Props extends HelpActions {
@@ -263,16 +235,7 @@ export function Settings({ open = null, onOpened, ...help }: Props) {
         pane = <General launch={launch} />;
         break;
       case "dictation":
-        pane = (
-          <Dictation
-            settings={settings}
-            onStored={setSettings}
-            languages={languageChoice(settings, models)}
-            onOpenSpeech={() => {
-              choose("speech");
-            }}
-          />
-        );
+        pane = <Dictation settings={settings} onStored={setSettings} />;
         break;
       case "speech":
         pane = (

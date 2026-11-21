@@ -28,21 +28,11 @@ export function progressText(model: LocalModelInfo_Serialize): string {
   return `${String(Math.round(done(model) / 1_000_000))} of ${megabytes(size(model))}`;
 }
 
-/**
- * The model to recommend for `language` (an ISO code, `""` for automatic):
- * the English model for English, otherwise the multilingual one that speaks
- * it. `null` if no on-device model does.
- */
+/** The model to recommend (0.2.0 is English-only): the English model, else the first. */
 export function recommendedModel(
   models: readonly LocalModelInfo_Serialize[],
-  language: string,
 ): LocalModelInfo_Serialize | null {
-  if (language === "en") {
-    return models.find(englishOnly) ?? null;
-  }
-  const multilingual = models.filter((model) => !englishOnly(model));
-  if (language === "") return multilingual[0] ?? null;
-  return multilingual.find((model) => model.language_codes.includes(language)) ?? null;
+  return models.find(englishOnly) ?? models[0] ?? null;
 }
 
 /** The on-device model the settings choose, if they choose one. */

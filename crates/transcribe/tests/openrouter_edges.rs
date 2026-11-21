@@ -31,7 +31,6 @@ fn config(server: &MockServer, max_attempts: u32) -> Config {
     Config {
         base_url: format!("{}/v1", server.uri()),
         model: "m".into(),
-        language: None,
         prompt: None,
         privacy: dictation_core::cloud_models::PrivacyFilter::DenyDataCollection,
         timeout: Duration::from_secs(5),

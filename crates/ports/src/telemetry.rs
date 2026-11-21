@@ -139,7 +139,7 @@ impl EngineChoice {
 pub enum OnboardingStep {
     /// What the app does.
     Welcome,
-    /// Choose the language and the engine.
+    /// Choose the engine.
     Speech,
     /// Allow the microphone and Accessibility.
     Permissions,
@@ -280,8 +280,6 @@ pub enum SettingName {
     Provider,
     /// The model name.
     Model,
-    /// The language.
-    Language,
     /// The hotkey.
     Hotkey,
     /// Launch at login.

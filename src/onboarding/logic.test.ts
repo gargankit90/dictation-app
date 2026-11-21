@@ -56,15 +56,10 @@ const SETTINGS = {
 };
 
 describe("recommendedModel", () => {
-  it("is the English model for English", () => {
-    expect(recommendedModel([QWEN, PARAKEET], "en")?.id).toBe("parakeet");
-  });
-  it("is the multilingual model for Hindi, and for automatic", () => {
-    expect(recommendedModel([PARAKEET, QWEN], "hi")?.id).toBe("qwen");
-    expect(recommendedModel([PARAKEET, QWEN], "")?.id).toBe("qwen");
-  });
-  it("is nothing for a language no model speaks", () => {
-    expect(recommendedModel([PARAKEET, QWEN], "xx")).toBeNull();
+  it("is the English model, else the first", () => {
+    expect(recommendedModel([QWEN, PARAKEET])?.id).toBe("parakeet");
+    expect(recommendedModel([QWEN])?.id).toBe("qwen");
+    expect(recommendedModel([])).toBeNull();
   });
 });
 

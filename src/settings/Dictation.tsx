@@ -3,7 +3,6 @@ import { commands } from "../bindings";
 import type { Settings_Serialize } from "../bindings";
 import { HotkeyRecorder } from "../HotkeyRecorder";
 import { BROKEN, messageOf } from "../messages";
-import { LanguagePicker } from "../LanguagePicker";
 import { SILENT_LEVELS, pushLevel } from "../overlay/view";
 import { saveHotkey, setHotkeyRecording } from "../saveHotkey";
 import { MIC_POLL_MS, MicMeter } from "./MicMeter";
@@ -17,22 +16,10 @@ export const SOUND_DBFS = -50;
 /** How often the Dictation key row asks whether the hotkey still waits. */
 export const HOTKEY_NOTICE_POLL_MS = 2_000;
 
-export interface LanguageChoice {
-  /** The codes the engine in use offers. */
-  supported: readonly string[];
-  /** The engine's name, in plain words, or `null` if not known yet. */
-  engineName: string | null;
-  /** The engine is the English-only model. */
-  englishOnly: boolean;
-}
-
 interface Props {
   settings: Settings_Serialize;
   /** The app's settings after a change (what Settings shows from now). */
   onStored: (settings: Settings_Serialize) => void;
-  languages: LanguageChoice;
-  /** Opens the Speech section (to pick a model with more languages). */
-  onOpenSpeech: () => void;
 }
 
 type MicTest =
@@ -43,12 +30,11 @@ type MicTest =
   | { state: "error"; message: string };
 
 /**
- * Dictation: the dictation key (K1's recorder, applied at once), the language
- * (saved on change) and the microphone with a 5 s level test.
+ * Dictation: the dictation key (K1's recorder, applied at once) and the
+ * microphone with a 5 s level test.
  */
-export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props) {
+export function Dictation({ settings, onStored }: Props) {
   const hotkey = useSave();
-  const language = useSave();
   const [mic, setMic] = useState<MicTest>({ state: "idle" });
   const [device, setDevice] = useState<string | null>(null);
   // Bumped by every test, so an old one's timers stop.
@@ -96,15 +82,6 @@ export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props
     if (outcome.problem !== null) hotkey.clear();
     void readHotkeyNotice();
     return outcome.problem;
-  }
-
-  async function changeLanguage(code: string) {
-    await language.track(async () => {
-      const result = await commands.setLanguage(code === "" ? null : code);
-      const reread = await commands.getSettings();
-      if (reread.status === "ok") onStored(reread.data);
-      return result.status === "error" ? messageOf(result.error) : null;
-    });
   }
 
   async function testMicrophone() {
@@ -180,33 +157,6 @@ export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props
             onChange={recordHotkey}
             onRecording={setHotkeyRecording}
             describedBy="hotkey-label"
-          />
-        </Row>
-        <Row
-          label={<label htmlFor="language">Language</label>}
-          caption={
-            languages.englishOnly ? (
-              <>
-                The English model understands English only. For Hindi and other languages,{" "}
-                <button type="button" className="link" onClick={onOpenSpeech}>
-                  choose a model with more languages in Speech.
-                </button>
-              </>
-            ) : (
-              "Choose the language you speak, or let Vocet detect it."
-            )
-          }
-          captionId="language-hint"
-          below={<SaveStatus save={language.save} id="language-status" />}
-        >
-          <LanguagePicker
-            id="language"
-            value={settings.language ?? ""}
-            onChange={(code) => void changeLanguage(code)}
-            supported={languages.supported}
-            engineName={languages.engineName}
-            describedBy="language-hint language-status"
-            invalid={language.save.state === "error"}
           />
         </Row>
       </Group>

@@ -1,7 +1,6 @@
 //! The commands U6's Settings needs besides the ones it shares with
 //! onboarding: every control saves on change through a command that writes
-//! only its own field ([`set_language`], [`use_cloud_engine`],
-//! [`use_local_model`]), like K1's `set_hotkey`, A1's
+//! only its own field ([`use_cloud_engine`], [`use_local_model`]), like K1's `set_hotkey`, A1's
 //! `set_share_usage_events` and S1's `set_launch_at_login`; so there is no
 //! form whose older values could overwrite another control's newer one.
 //!
@@ -55,44 +54,6 @@ async fn write<S: SecretStore + 'static>(
         usage::settings_saved(usage, change);
     }
     Ok(())
-}
-
-/// `language` as stored: trimmed, and `None` (detect it) when empty.
-fn normalized(language: Option<String>) -> Option<String> {
-    language
-        .map(|code| code.trim().to_owned())
-        .filter(|code| !code.is_empty())
-}
-
-/// Sets the language and nothing else (`None` or empty: detect it). The
-/// engine follows at once.
-#[tauri::command]
-#[specta::specta]
-pub async fn set_language(
-    state: State<'_, AppConfig>,
-    engine: State<'_, LiveEngine>,
-    hotkey: State<'_, ActiveHotkey>,
-    usage: State<'_, Usage>,
-    language: Option<String>,
-) -> Result<(), String> {
-    let (live, control) = (engine.inner().clone(), hotkey.0.clone());
-    write(Arc::clone(&state.0), &usage, move |config| {
-        language_change(config, &live, &control, language)
-    })
-    .await
-}
-
-fn language_change<S: SecretStore + 'static>(
-    config: &Arc<Config<S>>,
-    live: &LiveEngine,
-    control: &HotkeyControl,
-    language: Option<String>,
-) -> Result<Changed, String> {
-    let language = normalized(language);
-    commands::write_change(config, live, control, |settings| {
-        settings.language = language;
-    })
-    .map_err(|error| error.to_string())
 }
 
 /// Dictates with `provider` and the user's own key from now on. Switching
@@ -189,11 +150,7 @@ fn switch_to_local<S: SecretStore + 'static>(
 ) -> Result<Changed, String> {
     let model =
         local_models::find(id).ok_or_else(|| format!("There is no on-device model {id:?}."))?;
-    let language = config
-        .settings()
-        .map_err(|error| error.to_string())?
-        .language;
-    if let Err(error) = live.preload_local(model.id, language.as_deref()) {
+    if let Err(error) = live.preload_local(model.id, None) {
         // Whatever the settings still choose becomes current again.
         live.rebuild(config);
         return Err(format!(

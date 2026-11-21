@@ -37,7 +37,6 @@ pub const COMMAND_NAMES: &[&str] = &[
     "take_window_request",
     "reveal_log_file",
     "dictation_progress",
-    "set_language",
     "use_cloud_engine",
     "use_local_model",
     "get_engine_status",

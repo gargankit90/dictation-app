@@ -2,7 +2,7 @@
 //! on, and what is kept across launches.
 //!
 //! The steps come in a fixed order: [`Welcome`](Step::Welcome) (what the app
-//! does), [`Speech`](Step::Speech) (language and
+//! does), [`Speech`](Step::Speech) (the
 //! engine), [`Permissions`](Step::Permissions) (microphone and
 //! Accessibility), [`Try`](Step::Try) (a practice dictation) and
 //! [`Ready`](Step::Ready) (a summary, and the events switch). A step is done when its condition
@@ -25,7 +25,7 @@ pub enum Step {
     /// What the app does.
     #[default]
     Welcome,
-    /// The language, and the on-device model or the user's own key.
+    /// The on-device model or the user's own key.
     Speech,
     /// Allow the microphone and Accessibility.
     Permissions,

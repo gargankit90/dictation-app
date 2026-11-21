@@ -33,7 +33,6 @@
     "allow-take-window-request",
     "allow-reveal-log-file",
     "allow-dictation-progress",
-    "allow-set-language",
     "allow-use-cloud-engine",
     "allow-use-local-model",
     "allow-get-engine-status",

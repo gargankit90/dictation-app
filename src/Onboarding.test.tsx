@@ -125,7 +125,6 @@ class Backend {
     version: 2,
     provider: "openrouter",
     model: "openai/gpt-4o-mini-transcribe",
-    language: null,
     hotkey: "RightAlt",
     launch_at_login: false,
     transcription: "cloud",
@@ -233,9 +232,6 @@ class Backend {
       case "set_share_usage_events":
         this.settings = { ...this.settings, share_usage_events: args.share as boolean };
         return null;
-      case "set_language":
-        this.settings = { ...this.settings, language: args.language as string | null };
-        return null;
       case "set_hotkey":
         this.settings = { ...this.settings, hotkey: args.spec as string };
         return null;
@@ -317,7 +313,7 @@ class Backend {
     this.welcomePassed = true;
     this.microphone = "granted";
     this.accessibility = "granted";
-    this.settings = { ...this.settings, transcription: "local", language: "en" };
+    this.settings = { ...this.settings, transcription: "local" };
     this.model(PARAKEET.id).state = "ready";
     this.model(PARAKEET.id).downloaded_bytes = PARAKEET.size_bytes;
   }
@@ -415,16 +411,6 @@ describe("the frame", () => {
     expect(rule(".ob-footer")).toContain("flex: 0 0 auto");
     expect(rule(".ob-reason")).toContain("overflow-wrap: anywhere");
   });
-
-  it("criterion 1: pseudo-long labels stay inside their elements", async () => {
-    backend.step = "speech";
-    backend.welcomePassed = true;
-    backend.settings = { ...backend.settings, language: "gu" };
-    show();
-    // A long sentence is rendered as text in the wrapping column.
-    const line = await screen.findByText(/needs OpenRouter/);
-    expect(line.closest(".ob-content")).not.toBeNull();
-  });
 });
 
 describe("Welcome", () => {
@@ -498,7 +484,7 @@ describe("Welcome", () => {
       expect(primary("Get started").disabled).toBe(false);
     });
     fireEvent.click(primary("Get started"));
-    await screen.findByText("Which language will you mostly speak?");
+    await screen.findByText("How should Vocet transcribe?");
     expect(backend.step).toBe("speech");
   });
 });
@@ -675,7 +661,7 @@ describe("the sharing switch across setup (U10)", () => {
       expect(primary("Get started").disabled).toBe(false);
     });
     fireEvent.click(primary("Get started"));
-    await screen.findByText("Which language will you mostly speak?");
+    await screen.findByText("How should Vocet transcribe?");
   });
 });
 
@@ -947,7 +933,7 @@ describe("Speech", () => {
   it("finding 3: the own key choice survives a quit, with no key saved and none kept", async () => {
     const { unmount } = show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     fireEvent.click(screen.getByRole("radio", { name: /Use OpenRouter/ }));
     await waitFor(() => {
       expect(backend.speechChoice).toBe("own_key");
@@ -975,7 +961,7 @@ describe("Speech", () => {
         true,
       );
     });
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     await waitFor(() => {
       expect(backend.speechChoice).toBe("local");
     });
@@ -985,17 +971,16 @@ describe("Speech", () => {
     await waitFor(() => {
       expect(backend.named("saved_key_hint").length).toBeGreaterThan(1);
     });
-    expect(
-      screen.getByRole<HTMLInputElement>("radio", { name: "Recommended for your language" })
-        .checked,
-    ).toBe(true);
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: "Use this Mac" }).checked).toBe(
+      true,
+    );
   });
 
   it("Q3: a fresh install selects OpenRouter, listed first, with Continue to Connect", async () => {
     show();
     await screen.findByText("English · 477 MB");
     const radios = screen.getAllByRole<HTMLInputElement>("radio", {
-      name: /OpenRouter|Recommended/,
+      name: /OpenRouter|Use this Mac/,
     });
     expect(radios.map((radio) => radio.checked)).toEqual([true, false]);
     expect(radios[0]?.getAttribute("aria-label")).toBe("Use OpenRouter");
@@ -1006,35 +991,17 @@ describe("Speech", () => {
   it("criterion 3: English preselects Parakeet English, with its real size", async () => {
     show();
     const name = await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     expect(name).toBeTruthy();
-    expect(screen.getByText("Recommended for your language")).toBeTruthy();
+    expect(screen.getByText("On this Mac")).toBeTruthy();
     expect(screen.getByText(MODEL_COPY)).toBeTruthy();
     expect(primary("Download and continue").disabled).toBe(false);
-  });
-
-  it("criterion 3: Hindi recommends the multilingual model, with its real size", async () => {
-    show();
-    await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
-    await screen.findByText("30 languages · 590 MB");
-    await waitFor(() => {
-      expect(backend.settings.language).toBe("hi");
-    });
-  });
-
-  it("criterion 3: More… offers the searchable picker", async () => {
-    show();
-    await screen.findByText("English · 477 MB");
-    expect(screen.queryByRole("combobox")).toBeNull();
-    fireEvent.click(screen.getByRole("radio", { name: "More…" }));
-    expect(screen.getByRole("combobox")).toBeTruthy();
   });
 
   it("criterion 3: Download and continue chooses, starts the download and moves on", async () => {
     show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     fireEvent.click(primary("Download and continue"));
     await screen.findByText("Two permissions");
     expect(backend.named("choose_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
@@ -1047,7 +1014,7 @@ describe("Speech", () => {
     backend.model(PARAKEET.id).state = "ready";
     show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     fireEvent.click(primary("Continue"));
     await screen.findByText("Two permissions");
     expect(backend.named("download_local_model")).toEqual([]);
@@ -1065,7 +1032,7 @@ describe("Speech", () => {
     mockIPC(backend.handle);
     show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     fireEvent.click(primary("Download and continue"));
     await screen.findByText("The disk is full.");
     expect(backend.step).toBe("speech");
@@ -1076,7 +1043,7 @@ describe("Speech", () => {
     show();
     await screen.findByText("English · 477 MB");
     // OpenRouter is the default: move off it and back, so the choice is written.
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     fireEvent.click(screen.getByRole("radio", { name: /Use OpenRouter/ }));
   }
 
@@ -1105,8 +1072,6 @@ describe("Speech", () => {
   it("Q3: Continue opens the screen, Back returns with all as it was", async () => {
     show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
-    await screen.findByText("30 languages · 590 MB");
     fireEvent.click(screen.getByRole("radio", { name: /Use OpenRouter/ }));
     fireEvent.click(primary("Continue"));
     await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
@@ -1116,11 +1081,10 @@ describe("Speech", () => {
     expect(backend.step).toBe("speech");
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    await screen.findByText("Which language will you mostly speak?");
+    await screen.findByText("How should Vocet transcribe?");
     expect(current()).toContain("Speech");
     expect(backend.step).toBe("speech");
     expect(backend.named("set_onboarding_step")).toEqual([]);
-    expect(screen.getByRole("radio", { name: "Hindi" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole<HTMLInputElement>("radio", { name: /Use OpenRouter/ }).checked).toBe(
       true,
     );
@@ -1170,7 +1134,7 @@ describe("Speech", () => {
       await screen.findByText("Waiting for OpenRouter in your browser…");
       leave();
       expect((await screen.findAllByText("Saving your key…")).length).toBeGreaterThan(0);
-      expect(screen.queryByText("Which language will you mostly speak?")).toBeNull();
+      expect(screen.queryByText("How should Vocet transcribe?")).toBeNull();
       expect(backend.speechChoice).not.toBe("local");
       await act(async () => {
         release();
@@ -1198,21 +1162,20 @@ describe("Speech", () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect OpenRouter" }));
     await screen.findByText("Waiting for OpenRouter in your browser…");
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    await screen.findByText("Which language will you mostly speak?");
+    await screen.findByText("How should Vocet transcribe?");
     expect(backend.named("cancel_connect")).toHaveLength(1);
   });
 
   it('Q3: "I\'ll use Vocet on this Mac only" goes back with the on-device model chosen', async () => {
     await openConnectScreen();
     fireEvent.click(screen.getByRole("button", { name: LOCAL_ONLY }));
-    await screen.findByText("Which language will you mostly speak?");
+    await screen.findByText("How should Vocet transcribe?");
     await waitFor(() => {
       expect(backend.speechChoice).toBe("local");
     });
-    expect(
-      screen.getByRole<HTMLInputElement>("radio", { name: "Recommended for your language" })
-        .checked,
-    ).toBe(true);
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: "Use this Mac" }).checked).toBe(
+      true,
+    );
   });
 
   it("Q3: a saved key shows Connected with the masked key, and Continue is open", async () => {
@@ -1259,35 +1222,10 @@ describe("Speech", () => {
       screen.getByText(KEY_CARD_COPY);
     });
 
-    it("Hindi, with the count from the model's language codes", async () => {
-      show();
-      await screen.findByText("English · 477 MB");
-      fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
-      await screen.findByText(`${String(THIRTY_LANGUAGES.length)} languages · 590 MB`);
-      expect(THIRTY_LANGUAGES).toHaveLength(30);
-      screen.getByText("Runs on this Mac. Works offline after a one-time download.");
-    });
-
-    it("a language no on-device model covers: the key is the selected choice", async () => {
-      backend.settings = { ...backend.settings, language: "gu" };
-      show();
-      await screen.findByText(
-        "Gujarati needs OpenRouter. Vocet's on-device models don't cover it yet.",
-      );
-      expect(screen.getByRole<HTMLInputElement>("radio", { name: /Use OpenRouter/ }).checked).toBe(
-        true,
-      );
-      expect(screen.queryByRole("radio", { name: "Recommended for your language" })).toBeNull();
-      expect(primary("Continue").disabled).toBe(false);
-      fireEvent.click(primary("Continue"));
-      await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
-      expect(backend.speechChoice).toBe("own_key");
-    });
-
     it("no catalogue name and no refused wording, on any of the screens", async () => {
       show();
       await screen.findByText("English · 477 MB");
-      fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+      fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
       const shown = () => document.querySelector(".ob-main")?.textContent ?? "";
       const clean = () => {
         for (const gone of [PARAKEET.name, QWEN.name, "Parakeet", "Qwen", "Multilingual"]) {
@@ -1296,11 +1234,8 @@ describe("Speech", () => {
         expect(shown()).not.toMatch(/All languages|100\+/);
       };
       clean();
-      fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
-      await screen.findByText("30 languages · 590 MB");
-      clean();
       fireEvent.click(primary("Download and continue"));
-      await screen.findByText("Downloading 30 languages · 0 of 590 MB");
+      await screen.findByText("Downloading English · 0 of 477 MB");
       clean();
     });
   });
@@ -1314,27 +1249,6 @@ describe("the form's and the chip's looks (round 2)", () => {
     expect(css.indexOf(".ob-key-panel button.primary")).toBeGreaterThan(
       css.indexOf(".onboarding button.primary"),
     );
-  });
-
-  it("the selected chip has the primary colours in every state", () => {
-    const rules = [...css.matchAll(/button\.ob-chip\[aria-checked="true"\][^{]*\{([^}]*)\}/g)];
-    expect(rules.length).toBeGreaterThan(0);
-    for (const [, body = ""] of rules) {
-      expect(body).toContain("--vc-primary-");
-      expect(body).not.toContain("--vc-accent");
-    }
-  });
-});
-
-describe("Speech with More… open (U9, Design Lead's fix 2)", () => {
-  it("gives no reason in the footer before a language is chosen", async () => {
-    backend.step = "speech";
-    show();
-    fireEvent.click(await screen.findByRole("radio", { name: "More…" }));
-    await screen.findByRole("combobox");
-    const reason = document.querySelector(".ob-reason");
-    expect(reason?.textContent).toBe("");
-    expect(screen.queryByText(/No on-device model speaks this language/)).toBeNull();
   });
 });
 
@@ -1385,7 +1299,7 @@ describe("the download strip", () => {
     await screen.findByText(/stopped: The disk is full\./);
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Use my own key" }));
-    await screen.findByText("Which language will you mostly speak?");
+    await screen.findByText("How should Vocet transcribe?");
   });
 
   it("criterion 7: a part left by a quit picks up by itself, and says so", async () => {
@@ -1582,7 +1496,7 @@ describe("Permissions", () => {
       expect(backend.named("start_microphone_test").length).toBeGreaterThan(0);
     });
     fireEvent.click(primary("Back"));
-    await screen.findByText("Which language will you mostly speak?");
+    await screen.findByText("How should Vocet transcribe?");
     // The meter's cleanup is a passive effect: it runs after the new step shows.
     await waitFor(() => {
       expect(backend.named("stop_microphone_test").length).toBeGreaterThan(0);
@@ -1866,7 +1780,7 @@ describe("Try it", () => {
     });
     await screen.findByText("OpenRouter rejected the key.", undefined, { timeout: 2000 });
     fireEvent.click(screen.getByRole("button", { name: "Back to Speech" }));
-    await screen.findByText("Which language will you mostly speak?");
+    await screen.findByText("How should Vocet transcribe?");
   });
 
   it("criterion 5: Skip for now leads to Ready with Not tested yet", async () => {

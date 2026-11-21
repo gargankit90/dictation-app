@@ -10,7 +10,7 @@
 //!
 //! The settings writers and `set_api_key` also rebuild the speech-to-text engine
 //! from what was saved (M4.4, [`crate::engine`]), so the next dictation uses
-//! the new provider, model, language or key without a restart.
+//! the new provider, model or key without a restart.
 //! `set_hotkey` also switches the hotkey to the saved one (T2,
 //! `dictation_pipeline::hotkey_setting`); if it can't, the old hotkey keeps
 //! listening, the file keeps it too, and the error says so. `get_settings`
@@ -1016,7 +1016,6 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::diagnostics::take_window_request,
         crate::diagnostics::reveal_log_file,
         crate::diagnostics::dictation_progress,
-        crate::preferences::set_language,
         crate::preferences::use_cloud_engine,
         crate::preferences::use_local_model,
         crate::preferences::get_engine_status,
@@ -1149,7 +1148,6 @@ mod tests {
             "takeWindowRequest",
             "revealLogFile",
             "dictationProgress",
-            "setLanguage",
             "useCloudEngine",
             "useLocalModel",
             "getEngineStatus",
@@ -1180,7 +1178,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 53,
+            commands, 52,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1283,7 +1281,6 @@ mod tests {
                 "version",
                 "provider",
                 "model",
-                "language",
                 "hotkey",
                 "launch_at_login",
                 "transcription",
@@ -1340,7 +1337,7 @@ mod tests {
             let (config, dir) = config("only");
             config
                 .save_settings(&Settings {
-                    language: Some("de".into()),
+                    history_limit: 50,
                     ..Settings::default()
                 })
                 .unwrap();
@@ -1348,7 +1345,7 @@ mod tests {
             write_sharing(&config, &usage, false).unwrap();
             let after = config.settings().unwrap();
             assert!(!after.share_usage_events);
-            assert_eq!(after.language.as_deref(), Some("de"));
+            assert_eq!(after.history_limit, 50);
             write_sharing(&config, &usage, true).unwrap();
             assert!(stored(&config));
             let _ = std::fs::remove_dir_all(dir);
@@ -1704,7 +1701,7 @@ mod tests {
             let (hotkey, _keys) = listening();
             config
                 .save_settings(&Settings {
-                    language: Some("de".into()),
+                    history_limit: 50,
                     ..Settings::default()
                 })
                 .unwrap();
@@ -1713,7 +1710,7 @@ mod tests {
             assert_eq!(saved.problem(), None);
             let stored = config.settings().unwrap();
             assert_eq!(stored.hotkey, "RightCmd");
-            assert_eq!(stored.language.as_deref(), Some("de"));
+            assert_eq!(stored.history_limit, 50);
             assert_eq!(hotkey.spec(), "RightCmd".parse().unwrap());
             let _ = std::fs::remove_dir_all(dir);
         }
@@ -1842,11 +1839,6 @@ mod tests {
             for bad in [
                 Settings {
                     model: String::new(),
-                    hotkey: "F6".into(),
-                    ..on()
-                },
-                Settings {
-                    language: Some("EN!".into()),
                     hotkey: "F6".into(),
                     ..on()
                 },
@@ -2181,7 +2173,7 @@ mod tests {
         fn with_hotkey(hotkey: &str) -> Settings {
             Settings {
                 hotkey: hotkey.into(),
-                language: Some("de".into()),
+                history_limit: 50,
                 ..Settings::default()
             }
         }
@@ -2215,7 +2207,7 @@ mod tests {
             // The other settings are saved; the hotkey in the file is the
             // one still listening.
             let stored = config.settings().unwrap();
-            assert_eq!(stored.language.as_deref(), Some("de"));
+            assert_eq!(stored.history_limit, 50);
             assert_eq!(stored.hotkey, "RightAlt");
             assert!(keys.listening("RightAlt"));
             let _ = std::fs::remove_dir_all(dir);
@@ -2272,7 +2264,7 @@ mod tests {
             let (config, dir) = config("undo-fails");
             config
                 .save_settings(&Settings {
-                    language: Some("fr".into()),
+                    history_limit: 10,
                     ..Settings::default()
                 })
                 .unwrap();
@@ -2307,7 +2299,7 @@ mod tests {
             // The keyboard: F6 listens, RightAlt doesn't.
             assert_eq!(hotkey.spec(), "F6".parse().unwrap());
             assert!(keys.listening("F6") && !keys.listening("RightAlt"));
-            // The file still has RightAlt and the old language; what
+            // The file still has RightAlt and the old limit; what
             // Settings shows is the hotkey that works, with the rest as saved.
             assert_eq!(config.settings().unwrap().hotkey, "RightAlt");
             let shown = read_settings(
@@ -2317,7 +2309,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(shown.hotkey, "F6");
-            assert_eq!(shown.language.as_deref(), Some("fr"));
+            assert_eq!(shown.history_limit, 10);
             let _ = std::fs::remove_dir_all(dir);
         }
 
@@ -3319,7 +3311,6 @@ mod capability_tests {
             "permission": "camera",
             "step": "done",
             "id": 0,
-            "language": 0,
             "link": 0,
         })
     }

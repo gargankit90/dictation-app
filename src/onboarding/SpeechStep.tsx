@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { commands } from "../bindings";
 import type { LocalModelInfo_Serialize, Settings_Serialize, SpeechChoice } from "../bindings";
 import { BROKEN, messageOf } from "../messages";
-import { LanguagePicker } from "../LanguagePicker";
-import { cloudLanguages, englishName } from "../languages";
 import { modelLabel } from "../settings/modelRow";
 import { ConnectPanel, useConnection } from "../settings/connection";
 import type { Connection } from "../settings/connection";
@@ -14,15 +12,13 @@ import type { FrameParts } from "./StepFrame";
 export const MODEL_COPY = "Runs on this Mac. Works offline after a one-time download.";
 export const KEY_REASON = "Continue unlocks once OpenRouter is connected";
 export const KEY_CARD_COPY =
-  "About 100 languages. Needs internet. Your speech is sent to OpenRouter, using your own account.";
+  "Needs internet. Your speech is sent to OpenRouter, using your own account.";
 export const KEY_SAVED = "✓ Connected to OpenRouter";
 export const KEY_SAVED_COPY = "The key is in your macOS Keychain. It's never shown in full.";
 export const LOCAL_ONLY = "I'll use Vocet on this Mac only";
 
-/** The line for a language no on-device model covers. */
-export function uncoveredCopy(code: string): string {
-  return `${englishName(code)} needs OpenRouter. Vocet's on-device models don't cover it yet.`;
-}
+/** The step's title. */
+export const SPEECH_TITLE = "How should Vocet transcribe?";
 
 /** How long to wait for a cancelled download to let go, before saying so. */
 const CANCEL_TRIES = 15;
@@ -49,31 +45,26 @@ export function SpeechStep(props: Props) {
     return (
       <StepFrame
         parts={props.parts}
-        title="Which language will you mostly speak?"
+        title={SPEECH_TITLE}
         primary={{ label: "Continue", onClick: () => undefined, blockedBecause: "Loading…" }}
       >
         <p>Loading…</p>
       </StepFrame>
     );
   }
-  return <SpeechForm {...props} settings={props.settings} />;
+  return <SpeechForm {...props} />;
 }
 
 function SpeechForm({
   parts,
   kept,
-  settings,
   onStored,
   models,
   modelsError,
   refreshModels,
   refreshEngine,
   onContinue,
-}: Props & { settings: Settings_Serialize }) {
-  const [language, setLanguage] = useState(settings.language ?? "en");
-  const [more, setMore] = useState(
-    settings.language !== null && settings.language !== "en" && settings.language !== "hi",
-  );
+}: Props) {
   // What the user picked here. Until they do: the recommendation, or the key
   // they already chose (coming back to the step).
   const [picked, setPicked] = useState<Choice | null>(
@@ -119,31 +110,9 @@ function SpeechForm({
     setWorking(false);
   }
 
-  const supported = useMemo(() => {
-    const codes = new Set<string>(cloudLanguages(settings.provider));
-    for (const model of models ?? []) {
-      for (const code of model.language_codes) codes.add(code);
-    }
-    return [...codes];
-  }, [models, settings.provider]);
-
-  const model = models === null ? null : recommendedModel(models, language);
-  // Known, not just not loaded yet: OpenRouter is then the only choice. Otherwise
-  // it is the default too (owner decision, Q3); the on-device model is the other.
-  const uncovered = models !== null && model === null;
-  const choice: Choice = uncovered ? "key" : (picked ?? "key");
-
-  async function chooseLanguage(code: string) {
-    setLanguage(code);
-    setProblem(null);
-    try {
-      const result = await commands.setLanguage(code === "" ? null : code);
-      if (result.status === "error") setProblem(messageOf(result.error));
-    } catch {
-      setProblem(BROKEN);
-    }
-    await reread();
-  }
+  const model = models === null ? null : recommendedModel(models);
+  // OpenRouter is the default (owner decision, Q3); the on-device model is the other.
+  const choice: Choice = picked ?? "key";
 
   /** Stops a download of another model: one model downloads at a time. */
   async function makeRoomFor(wanted: string | null) {
@@ -195,11 +164,6 @@ function SpeechForm({
     setProblem(null);
     let failed: string | null;
     try {
-      // The language on screen is the user's choice, even if they never
-      // pressed it: English by default.
-      if ((settings.language ?? "") !== language) {
-        await commands.setLanguage(language === "" ? null : language);
-      }
       if (choice === "key") failed = await continueWithKey(dropped);
       else failed = model === null ? null : await continueLocal(model);
     } catch {
@@ -257,7 +221,7 @@ function SpeechForm({
   return (
     <StepFrame
       parts={parts}
-      title="Which language will you mostly speak?"
+      title={SPEECH_TITLE}
       primary={{
         label: needsDownload ? "Download and continue" : "Continue",
         onClick: () => {
@@ -273,49 +237,6 @@ function SpeechForm({
         blockedBecause,
       }}
     >
-      <div className="ob-languages" role="radiogroup" aria-label="Language">
-        {(
-          [
-            ["en", "English"],
-            ["hi", "Hindi"],
-          ] as const
-        ).map(([code, name]) => (
-          <button
-            key={code}
-            type="button"
-            className="ob-chip"
-            role="radio"
-            aria-checked={!more && language === code}
-            onClick={() => {
-              setMore(false);
-              void chooseLanguage(code);
-            }}
-          >
-            {name}
-          </button>
-        ))}
-        <button
-          type="button"
-          className="ob-chip"
-          role="radio"
-          aria-checked={more}
-          onClick={() => {
-            setMore(true);
-          }}
-        >
-          More…
-        </button>
-      </div>
-      {more && (
-        <LanguagePicker
-          id="ob-language"
-          value={language}
-          onChange={(code) => void chooseLanguage(code)}
-          supported={supported}
-          engineName={null}
-        />
-      )}
-
       <label className={`ob-card ob-option${choice === "key" ? " selected" : ""}`}>
         <input
           type="radio"
@@ -332,41 +253,35 @@ function SpeechForm({
         </span>
       </label>
 
-      {uncovered ? (
-        <p role="status" className="ob-sub">
-          {uncoveredCopy(language)}
-        </p>
-      ) : (
-        <label className={`ob-card ob-option${choice === "local" ? " selected" : ""}`}>
-          <input
-            type="radio"
-            name="ob-engine"
-            aria-label="Recommended for your language"
-            checked={choice === "local"}
-            disabled={model === null}
-            onChange={() => {
-              pick("local");
-            }}
-          />
-          <span className="ob-option-text">
-            <span className="ob-eyebrow">Recommended for your language</span>
-            {model === null ? (
-              modelsError === null ? (
-                <span className="ob-card-title">Loading the models…</span>
-              ) : (
-                <span role="alert" className="error">
-                  Couldn&apos;t list the models: {modelsError}
-                </span>
-              )
+      <label className={`ob-card ob-option${choice === "local" ? " selected" : ""}`}>
+        <input
+          type="radio"
+          name="ob-engine"
+          aria-label="Use this Mac"
+          checked={choice === "local"}
+          disabled={model === null}
+          onChange={() => {
+            pick("local");
+          }}
+        />
+        <span className="ob-option-text">
+          <span className="ob-eyebrow">On this Mac</span>
+          {model === null ? (
+            modelsError === null ? (
+              <span className="ob-card-title">Loading the models…</span>
             ) : (
-              <>
-                <span className="ob-card-title">{modelLabel(model)}</span>
-                <span className="ob-caption">{MODEL_COPY}</span>
-              </>
-            )}
-          </span>
-        </label>
-      )}
+              <span role="alert" className="error">
+                Couldn&apos;t list the models: {modelsError}
+              </span>
+            )
+          ) : (
+            <>
+              <span className="ob-card-title">{modelLabel(model)}</span>
+              <span className="ob-caption">{MODEL_COPY}</span>
+            </>
+          )}
+        </span>
+      </label>
 
       {problem !== null && (
         <p role="alert" className="notice error">

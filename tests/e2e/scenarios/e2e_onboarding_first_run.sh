@@ -35,8 +35,8 @@ e2e_onboarding_first_run() {
   expect "with no choice to make, only Get started" \
     ax_ok wait-no-text "$APP_NAME" "$ONBOARDING_WINDOW" "Share usage" 2
   expect "press Get started" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" "Get started"
-  expect "Speech asks for the language" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Which language" 10
+  expect "Speech asks for the engine" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "How should Vocet transcribe" 10
   expect "the local model is recommended" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "English · 477 MB" 10
   expect "choose my own key" \

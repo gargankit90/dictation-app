@@ -30,8 +30,8 @@ pub const TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Sends a silent clip to `config`'s endpoint with `key`.
 ///
-/// `config`'s language, timeout and retry policy are replaced: no
-/// language, [`TIMEOUT`] and a single attempt.
+/// `config`'s timeout and retry policy are replaced: [`TIMEOUT`] and a
+/// single attempt.
 ///
 /// # Errors
 ///
@@ -61,11 +61,10 @@ pub async fn check_key_within(
     engine.transcribe_verbose(&clip()).await.map(|_| ())
 }
 
-/// What the check sends, whatever the dictation `config` says: no language
-/// (the clip is silence), its own `timeout` and a single attempt.
+/// What the check sends, whatever the dictation `config` says: its own
+/// `timeout` and a single attempt.
 fn check_config(config: Config, timeout: Duration) -> Config {
     Config {
-        language: None,
         timeout,
         // The check's budget is fixed, whatever the (tiny) clip.
         timeout_grows_with_audio: false,
@@ -127,9 +126,8 @@ mod tests {
 
     /// The check's own policy replaces the dictation's, field by field.
     #[test]
-    fn the_check_replaces_language_timeout_and_retries() {
+    fn the_check_replaces_timeout_and_retries() {
         let dictation = Config {
-            language: Some("de".into()),
             timeout: Duration::from_secs(600),
             retry: RetryPolicy {
                 max_attempts: 5,
@@ -138,7 +136,6 @@ mod tests {
             ..Config::openrouter()
         };
         let checked = check_config(dictation.clone(), TIMEOUT);
-        assert_eq!(checked.language, None);
         assert_eq!(checked.timeout, TIMEOUT);
         assert_eq!(checked.retry.max_attempts, 1);
         // Everything else is the caller's.
@@ -175,13 +172,12 @@ mod tests {
 
     /// The upload is exactly what the provider needs to judge the key: 0.25 s
     /// of 16 kHz mono 16-bit silence, the check's model and privacy filter,
-    /// and no language, even when the dictation is set to one.
+    /// and no language.
     #[tokio::test]
     async fn check_key_uploads_exactly_250ms_mono_silence() {
         let server =
             serve(ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": ""}))).await;
         let dictation = Config {
-            language: Some("de".into()),
             timeout: Duration::from_secs(600),
             ..config(&server)
         };

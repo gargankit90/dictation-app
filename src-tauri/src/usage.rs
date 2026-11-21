@@ -192,9 +192,6 @@ pub fn settings_change(before: &Settings, after: &Settings) -> SettingsChange {
     if before.model != after.model {
         changed(SettingName::Model);
     }
-    if before.language != after.language {
-        changed(SettingName::Language);
-    }
     if before.hotkey != after.hotkey {
         changed(SettingName::Hotkey);
     }

@@ -155,11 +155,6 @@ export const commands = {
 	 */
 	dictationProgress: () => typedError<DictationProgressView_Serialize, string>(__TAURI_INVOKE("dictation_progress")),
 	/**
-	 *  Sets the language and nothing else (`None` or empty: detect it). The
-	 *  engine follows at once.
-	 */
-	setLanguage: (language: string | null) => typedError<null, string>(__TAURI_INVOKE("set_language", { language })),
-	/**
 	 *  Dictates with `provider` and the user's own key from now on. Switching
 	 *  provider also switches to its default model.
 	 */
@@ -826,11 +821,6 @@ export type Settings_Deserialize = {
 	 *  (a model shut down, or one from before Q2) loads as the default.
 	 */
 	model?: string,
-	/**
-	 *  An ISO 639-1 (or 639-3) language code such as `en`, or `None` to let
-	 *  the engine detect the language.
-	 */
-	language?: string | null,
 	/**  The dictation hotkey, as [`HotkeySpec`] writes it (`RightAlt`). */
 	hotkey?: string,
 	/**
@@ -871,11 +861,6 @@ export type Settings_Serialize = {
 	 *  (a model shut down, or one from before Q2) loads as the default.
 	 */
 	model: string,
-	/**
-	 *  An ISO 639-1 (or 639-3) language code such as `en`, or `None` to let
-	 *  the engine detect the language.
-	 */
-	language: string | null,
 	/**  The dictation hotkey, as [`HotkeySpec`] writes it (`RightAlt`). */
 	hotkey: string,
 	/**
@@ -915,7 +900,7 @@ export type SpeechChoice =
 export type Step = 
 /**  What the app does. */
 "welcome" | 
-/**  The language, and the on-device model or the user's own key. */
+/**  The on-device model or the user's own key. */
 "speech" | 
 /**  Allow the microphone and Accessibility. */
 "permissions" | 

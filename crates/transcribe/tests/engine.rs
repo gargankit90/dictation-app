@@ -25,10 +25,9 @@ fn audio() -> Audio {
     }
 }
 
-fn settings(model: &str, language: Option<&str>) -> Settings {
+fn settings(model: &str) -> Settings {
     Settings {
         model: model.into(),
-        language: language.map(str::to_owned),
         ..Settings::default()
     }
 }
@@ -64,25 +63,15 @@ async fn with_a_key_the_settings_decide_the_request() {
         .and(|request: &Request| {
             // The body holds the WAV bytes too, so it isn't valid UTF-8.
             let body = String::from_utf8_lossy(&request.body);
-            body.contains("whisper-test-model") && body.contains(r#""language":"de""#)
+            body.contains("whisper-test-model") && !body.contains(r#""language""#)
         })
         .respond_with(reply())
         .expect(1)
         .mount(&server)
         .await;
-    let engine = engine_at(&server, &settings("whisper-test-model", Some("de")), KEY);
+    let engine = engine_at(&server, &settings("whisper-test-model"), KEY);
     assert_eq!(engine.name(), "remote");
     assert_eq!(engine.transcribe(&audio()).await.unwrap(), TRANSCRIPT);
-}
-
-#[tokio::test]
-async fn no_language_setting_lets_the_provider_detect_it() {
-    let server = provider(reply()).await;
-    let engine = engine_at(&server, &settings("m", None), KEY);
-    engine.transcribe(&audio()).await.unwrap();
-    let requests = server.received_requests().await.unwrap();
-    let body = String::from_utf8_lossy(&requests[0].body);
-    assert!(!body.contains(r#""language""#), "{body}");
 }
 
 #[tokio::test]
@@ -215,13 +204,7 @@ async fn a_new_engine_replaces_the_old_one_for_the_next_dictation() {
 
     // The settings change (another server stands in for another provider):
     // the very next dictation uses it, with the new key.
-    transcribers.update(|| {
-        engine_at(
-            &second,
-            &settings("mistralai/voxtral-mini-3b-2507", Some("en")),
-            KEY,
-        )
-    });
+    transcribers.update(|| engine_at(&second, &settings("mistralai/voxtral-mini-3b-2507"), KEY));
     assert_eq!(transcribers.transcribe(&audio()).await.unwrap(), TRANSCRIPT);
     assert_eq!(first.received_requests().await.unwrap().len(), 1);
     let sent = second.received_requests().await.unwrap();

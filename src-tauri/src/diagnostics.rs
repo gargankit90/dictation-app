@@ -1113,7 +1113,6 @@ mod tests {
         let settings = Settings {
             hotkey: format!("{home}/.ssh/{key}"),
             model: format!("{transcript} {key}"),
-            language: Some(transcript.to_owned()),
             local_model: format!("{home}/Library/{registered}"),
             ..Settings::default()
         };

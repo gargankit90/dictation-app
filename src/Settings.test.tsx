@@ -51,7 +51,6 @@ class Backend {
     version: 2,
     provider: "openrouter",
     model: "openai/gpt-4o-mini-transcribe",
-    language: null,
     hotkey: "RightAlt",
     launch_at_login: false,
     transcription: "cloud",
@@ -95,9 +94,6 @@ class Backend {
         this.settings = { ...this.settings, hotkey: args.spec as string };
         return null;
       case "set_hotkey_recording":
-        return null;
-      case "set_language":
-        this.settings = { ...this.settings, language: args.language as string | null };
         return null;
       case "set_launch_at_login":
         this.settings = { ...this.settings, launch_at_login: args.enabled as boolean };
@@ -223,14 +219,6 @@ const click = (name: string | RegExp) => {
   fireEvent.click(screen.getByRole("button", { name }));
 };
 
-/** Chooses a language the way a person does: search by name, press Enter. */
-const pick = (name: string) => {
-  const box = screen.getByLabelText("Language");
-  fireEvent.focus(box);
-  fireEvent.change(box, { target: { value: name } });
-  fireEvent.keyDown(box, { key: "Enter" });
-};
-
 /** What assistive tech would call `element`: enough of the accessible-name rules for these controls. */
 function accessibleName(element: Element): string {
   const label = element.getAttribute("aria-label");
@@ -346,24 +334,6 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌥");
   });
 
-  it("language: choosing one saves only the language", async () => {
-    await open("dictation");
-    pick("German");
-    expect((await screen.findByRole("status")).textContent).toBe("Saved");
-    expect(backend.named("set_language")[0]?.args).toEqual({ language: "de" });
-    pick("Detect");
-    await waitFor(() => {
-      expect(backend.named("set_language").at(-1)?.args).toEqual({ language: null });
-    });
-  });
-
-  it("language: a refused language shows the app's error next to it", async () => {
-    await open("dictation");
-    backend.failing.set("set_language", "That isn't a language code.");
-    pick("German");
-    expect((await screen.findByRole("alert")).textContent).toContain("isn't a language code");
-  });
-
   it("launch at login: the switch writes through its own command", async () => {
     await open("general");
     fireEvent.click(screen.getByRole("switch", { name: "Open Vocet at login" }));
@@ -397,9 +367,8 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     });
   });
 
-  it("closing and reopening shows the saved values, and nothing ever calls save_settings", async () => {
+  it("closing and reopening shows the saved values", async () => {
     await open("dictation");
-    pick("German");
     click("Change…");
     keyDown("F6");
     await waitFor(() => {
@@ -413,24 +382,11 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     cleanup();
     await open("dictation");
     expect(screen.getByLabelText("Dictation key").textContent).toBe("F6");
-    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toContain("German");
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
     expect(
       screen.getByRole<HTMLInputElement>("switch", { name: "Share usage and error events" })
         .checked,
     ).toBe(false);
-  });
-
-  it("a change made elsewhere is never put back by another control", async () => {
-    await open("dictation");
-    // The hotkey changes behind the window's back (another window, the tray).
-    backend.settings = { ...backend.settings, hotkey: "F7" };
-    pick("German");
-    await waitFor(() => {
-      expect(backend.settings.language).toBe("de");
-    });
-    expect(backend.settings.hotkey).toBe("F7");
-    expect(screen.getByLabelText("Dictation key").textContent).toBe("F7");
   });
 });
 
@@ -486,9 +442,10 @@ describe("criterion_u6_3 launch at login never blocks", () => {
     expect((await screen.findByRole("status")).textContent).toContain("Applying…");
     // Another section works meanwhile.
     fireEvent.click(screen.getByRole("tab", { name: "Dictation" }));
-    pick("German");
+    click("Change…");
+    keyDown("F6");
     await waitFor(() => {
-      expect(backend.settings.language).toBe("de");
+      expect(backend.settings.hotkey).toBe("F6");
     });
     fireEvent.click(screen.getByRole("tab", { name: "General" }));
     slow.open();

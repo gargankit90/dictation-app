@@ -19,11 +19,11 @@ e2e_onboarding_round2() {
   expect "onboarding shows at Welcome" wait_for_log 'onboarding shown at launch step=Welcome' 30
   expect "Welcome" ax_ok wait-text "$APP_NAME" "$R2_WINDOW" "Talk instead of type" 15
   ax press "$APP_NAME" "$R2_WINDOW" "Get started" >/dev/null 2>&1 || true
-  expect "Speech" ax_ok wait-text "$APP_NAME" "$R2_WINDOW" "Which language" 15
+  expect "Speech" ax_ok wait-text "$APP_NAME" "$R2_WINDOW" "How should Vocet transcribe" 15
   # OpenRouter is the default, and pressing a selected radio changes nothing:
   # pick the on-device model first, then OpenRouter, as a person changing their mind.
   expect "choose the on-device model" \
-    ax_ok radio-press "$APP_NAME" "$R2_WINDOW" "Recommended for your language"
+    ax_ok radio-press "$APP_NAME" "$R2_WINDOW" "Use this Mac"
   expect "choose OpenRouter" \
     ax_ok radio-press "$APP_NAME" "$R2_WINDOW" "Use OpenRouter"
   expect "the choice is saved before any quit" wait_until_progress own_key
