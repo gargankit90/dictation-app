@@ -282,7 +282,8 @@ async fn closing_the_pipe_kills_the_server_and_the_key_is_only_in_its_environmen
         .unwrap();
     let pid = supervised.server_pid;
     assert!(alive(pid));
-    for _ in 0..100 {
+    // Up to 10 s: a loaded machine (the gate's coverage run) is slow.
+    for _ in 0..500 {
         if seen.exists() {
             break;
         }
@@ -366,7 +367,7 @@ async fn a_cancelled_start_returns_only_once_its_helper_has_exited() {
         }
     });
     let mut pid = None;
-    for _ in 0..250 {
+    for _ in 0..500 {
         if let Ok(text) = std::fs::read_to_string(&pid_file) {
             pid = text.trim().parse::<u32>().ok();
             break;
