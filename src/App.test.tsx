@@ -28,7 +28,6 @@ describe("App", () => {
           version: 2,
           provider: "openrouter",
           model: "openai/gpt-4o-mini-transcribe",
-          language: null,
           hotkey: "RightAlt",
           launch_at_login: false,
           share_usage_events: true,
@@ -70,11 +69,10 @@ describe("App", () => {
           version: 2,
           provider: "openrouter",
           model: "openai/gpt-4o-mini-transcribe",
-          language: null,
           hotkey: "RightAlt",
           launch_at_login: false,
           transcription: "cloud",
-          local_model: "parakeet-unified-en-0.6b-q4_k_m",
+          local_model: "orukqwen-asr-1.7b-q4_k_m",
           share_usage_events: true,
         };
       }
@@ -96,14 +94,11 @@ describe("App", () => {
   });
 
   /** A backend whose first window request is `request`; returns how to ask again. */
-  function backendAsking(request: string, seen: string[] = [], pages: unknown[] = []) {
+  function backendAsking(request: string, seen: string[] = []) {
     let asked = request;
-    mockIPC((command, payload) => {
+    mockIPC((command) => {
       seen.push(command);
       switch (command) {
-        case "set_window_page":
-          pages.push((payload as { page: unknown }).page);
-          return null;
         case "get_onboarding":
           return {
             view: "settings",
@@ -129,11 +124,10 @@ describe("App", () => {
             version: 2,
             provider: "openrouter",
             model: "openai/gpt-4o-mini-transcribe",
-            language: null,
             hotkey: "RightAlt",
             launch_at_login: false,
             transcription: "cloud",
-            local_model: "parakeet-unified-en-0.6b-q4_k_m",
+            local_model: "orukqwen-asr-1.7b-q4_k_m",
             share_usage_events: true,
             history_limit: 25,
           };
@@ -265,21 +259,6 @@ describe("App", () => {
     expect(await heading()).toBe("Troubleshoot");
   });
 
-  it("u12_criterion_2 each screen gives the window its title", async () => {
-    const pages: unknown[] = [];
-    window.localStorage.clear();
-    backendAsking("help", [], pages);
-    render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Open…" }));
-    expect(await heading()).toBe("Troubleshoot");
-    fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Preview…" }));
-    expect(await heading()).toBe("Report a problem");
-    await waitFor(() => {
-      expect(pages).toEqual(["settings", "troubleshoot", "settings", "report"]);
-    });
-  });
-
   // U12 criterion 7: the menu's Help… and Settings….
   it("u12_criterion_7 opens Help when the tray's Help… asked", async () => {
     backendAsking("help");
@@ -326,11 +305,10 @@ describe("App", () => {
             version: 2,
             provider: "openrouter",
             model: "openai/gpt-4o-mini-transcribe",
-            language: null,
             hotkey: "RightAlt",
             launch_at_login: false,
             transcription: "cloud",
-            local_model: "parakeet-unified-en-0.6b-q4_k_m",
+            local_model: "orukqwen-asr-1.7b-q4_k_m",
             share_usage_events: true,
           };
         default:

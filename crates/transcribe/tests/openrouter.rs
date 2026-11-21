@@ -3,7 +3,9 @@
 
 #![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
 
-use std::io::Write;
+mod common;
+
+use common::Captured;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -54,7 +56,6 @@ fn config(server: &MockServer) -> Config {
     Config {
         base_url: format!("{}/api/v1/", server.uri()),
         model: "openai/gpt-4o-mini-transcribe".into(),
-        language: Some("en".into()),
         prompt: None,
         privacy: dictation_core::cloud_models::PrivacyFilter::DenyDataCollection,
         timeout: Duration::from_secs(5),
@@ -101,7 +102,7 @@ async fn requests(server: &MockServer) -> usize {
 
 // Criterion 1 (Q2: a JSON body with the WAV in base64).
 #[tokio::test]
-async fn request_carries_audio_model_language_and_filter() {
+async fn request_carries_audio_model_and_filter_and_no_language() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path(ENDPOINT))
@@ -122,7 +123,7 @@ async fn request_carries_audio_model_language_and_filter() {
     assert_eq!(content_type, "application/json");
     let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
     assert_eq!(body["model"], "openai/gpt-4o-mini-transcribe");
-    assert_eq!(body["language"], "en");
+    assert!(body.get("language").is_none(), "{body}");
     assert_eq!(body["input_audio"]["format"], "wav");
     assert_eq!(
         body["provider"],
@@ -133,25 +134,6 @@ async fn request_carries_audio_model_language_and_filter() {
     let data = body["input_audio"]["data"].as_str().unwrap();
     assert_eq!(data.len(), 4 * 3_244_usize.div_ceil(3));
     assert!(data.starts_with("UklGR"), "RIFF");
-}
-
-#[tokio::test]
-async fn no_language_field_without_a_language() {
-    let server = MockServer::start().await;
-    mount(
-        &server,
-        ResponseTemplate::new(200).set_body_json(reply()),
-        None,
-    )
-    .await;
-    let (engine, _) = engine(Config {
-        language: None,
-        ..config(&server)
-    });
-    engine.transcribe(&audio()).await.unwrap();
-    let body = server.received_requests().await.unwrap()[0].body.clone();
-    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(body.get("language").is_none(), "{body}");
 }
 
 // Criterion 2.
@@ -388,39 +370,12 @@ async fn audio_that_cant_be_encoded_is_an_engine_error() {
     assert_eq!(requests(&server).await, 0);
 }
 
-/// A `MakeWriter` that appends everything to a shared buffer.
-#[derive(Clone, Default)]
-struct Captured(Arc<Mutex<Vec<u8>>>);
-
-impl Write for Captured {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
-    type Writer = Self;
-    fn make_writer(&'a self) -> Self::Writer {
-        self.clone()
-    }
-}
-
 // Criterion 4: across success and every error path, at every log level,
 // neither logs nor errors (Display or Debug) contain the key, and the
 // transcript never reaches the log.
 #[tokio::test]
 async fn the_key_never_appears_in_logs_or_errors() {
-    let captured = Captured::default();
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
-        .with_ansi(false)
-        .with_writer(captured.clone())
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let (captured, _guard) = Captured::install();
 
     let key_body =
         serde_json::json!({"error": {"message": format!("Incorrect API key provided: {KEY}")}});

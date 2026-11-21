@@ -113,14 +113,18 @@ e2e_dmg_guide_steps() {
   expect "with no key saved yet" wait_for_log 'engine settings provider=openrouter .*has_key=false'
   expect "section 4: Settings… opens from the tray" open_settings
   expect "the Speech section opens" ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" Speech
+  # With OpenRouter chosen and no key, the connection sheet opens by itself.
+  expect "Paste a key instead opens the field (the browser sign-in can't run here)" \
+    ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Paste a key instead"
   expect "the key is typed into the key field" \
     ax_ok secret-set "$APP_NAME" "$SETTINGS_WINDOW" api-key "$PROVIDER_GOOD_KEY"
   expect "Test & Save" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" "Test & Save"
   expect "says it is connected and saved" \
-    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "✓ Connected · saved in Keychain" 15
+    ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "✓ Connected to OpenRouter" 15
   expect "the test reached the local provider with the typed key" provider_request_has 1 auth=good
   API_KEY_STORED=1
   expect "the engine is rebuilt with the key" wait_for_log 'engine settings provider=openrouter .*has_key=true'
+  expect "Done closes the sheet" ax_ok press "$APP_NAME" "$SETTINGS_WINDOW" Done
   expect "closing the window hides it" close_settings
 
   # Section 5: dictate.

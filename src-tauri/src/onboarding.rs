@@ -7,10 +7,11 @@
 //! "the app's commands and nothing else".
 //!
 //! The steps and their order are `dictation_core::onboarding`. The app keeps
-//! where the user is ([`Onboarding`]) in a file in the config directory
-//! (U8), so going back, reopening from the tray and quitting all resume at
-//! the same step, unless a permission has been turned off since (then that
-//! step comes back). The conditions are read each time: the permissions from
+//! where the user is ([`Onboarding`]) in memory, so going back and reopening
+//! from the tray resume at the same step, unless a permission has been turned
+//! off since (then that step comes back). Only finishing is kept across a quit,
+//! as an empty marker file ([`COMPLETED_MARKER`]); an unfinished setup starts
+//! again at the first step that isn't done. The conditions are read each time: the permissions from
 //! the OS (cheap, never blocks), the key from the keychain only when the user
 //! moves past the Speech step (bounded like the other key reads).
 //!
@@ -21,11 +22,10 @@
 //! `relaunch_app` leaves a marker in the config directory and restarts the
 //! app, and the new launch shows onboarding again ([`take_resume_marker`]).
 
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use dictation_core::onboarding::{Readiness, SetupProgress, SpeechChoice, Step, TryOutcome};
+use dictation_core::onboarding::{Readiness, Step};
 use dictation_pipeline::config::{Config, SETTINGS_FILE};
 use dictation_ports::{Permission, PermissionStatus, Permissions, SecretStore, SetupProblem};
 use serde::{Deserialize, Serialize};
@@ -36,8 +36,8 @@ use crate::engine::LiveEngine;
 /// Relaunch, removed by the launch that reads it.
 const RESUME_MARKER: &str = "onboarding-resume";
 
-/// The file that keeps [`SetupProgress`] across launches.
-pub const PROGRESS_FILE: &str = "onboarding-progress.json";
+/// The empty file whose presence says setup was finished.
+pub const COMPLETED_MARKER: &str = "onboarding-completed";
 
 /// What the settings window shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
@@ -105,12 +105,6 @@ pub struct OnboardingStatus {
     /// macOS says Accessibility is allowed but the hotkey can't use it: a
     /// relaunch makes it take.
     pub needs_relaunch: bool,
-    /// How the practice dictation went.
-    pub try_outcome: TryOutcome,
-    /// The user cancelled the model download.
-    pub download_paused: bool,
-    /// The engine selected on the Speech step, if one was.
-    pub speech_choice: Option<SpeechChoice>,
     /// Sharing has been on for the whole of this walk through setup.
     pub sharing_on_throughout: bool,
     /// Setup was finished, then a permission went missing: by a person's hand,
@@ -122,21 +116,36 @@ pub struct OnboardingStatus {
 /// The OS's permissions, for the onboarding commands.
 pub struct OsPermissions(pub Arc<dyn Permissions>);
 
-/// Where the user is in onboarding. Managed state; what matters across
-/// launches is in [`PROGRESS_FILE`].
+/// Where the user is in onboarding. Managed state, in memory; only finishing
+/// is kept across launches ([`COMPLETED_MARKER`]).
 #[derive(Debug)]
 pub struct Onboarding {
     state: Mutex<State>,
-    /// `None`: kept in memory only (tests).
-    file: Option<PathBuf>,
+    /// `None`: nothing is kept (tests).
+    marker: Option<PathBuf>,
 }
 
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent facts about this walk through setup"
+)]
 #[derive(Debug)]
 struct State {
     view: View,
-    progress: SetupProgress,
-    /// Onboarding was opened at some point, here or in an earlier launch. A
-    /// scripted test launch that never opens it isn't setting anything up.
+    /// The step the user is on.
+    step: Step,
+    /// The user has continued past Welcome.
+    welcome_passed: bool,
+    /// "Start dictating" was pressed, here or in an earlier launch.
+    completed: bool,
+    /// Sharing was off at some point of this walk through setup, so Ready
+    /// can't say it has been on since setup began (U10).
+    sharing_was_off: bool,
+    /// Setup was finished, then a permission went missing (N1, #206): the
+    /// window says so and closes when both are back.
+    asked_again: bool,
+    /// Onboarding was opened in this launch. A scripted test launch that never
+    /// opens it isn't setting anything up.
     opened: bool,
     /// Problems already recorded this launch, for those read over and over.
     told: Vec<SetupProblem>,
@@ -145,13 +154,13 @@ struct State {
     /// Leaving was recorded, and setup hasn't been opened again since.
     left_told: bool,
     /// How many reads in a row found a permission missing after setup was
-    /// finished. One read is no proof it has gone, and what it decides is kept.
+    /// finished. One read is no proof it has gone.
     lost_reads: u8,
 }
 
 impl Default for Onboarding {
     fn default() -> Self {
-        Self::with(SetupProgress::default(), false, None)
+        Self::with(false, false, None)
     }
 }
 
@@ -172,82 +181,59 @@ impl std::fmt::Display for NotYet {
 }
 
 impl Onboarding {
-    /// The settings view, onboarding not started, kept in memory only.
+    /// The settings view, onboarding not started, nothing kept.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    fn with(progress: SetupProgress, opened: bool, file: Option<PathBuf>) -> Self {
+    /// A new setup starts at Welcome. Past it (`welcome_passed`), setup opens
+    /// at the first step that isn't done: the summary once it was finished.
+    fn with(completed: bool, welcome_passed: bool, marker: Option<PathBuf>) -> Self {
+        let welcome_passed = completed || welcome_passed;
         Self {
             state: Mutex::new(State {
                 view: View::Settings,
-                progress,
-                opened,
+                step: if welcome_passed {
+                    Step::Ready
+                } else {
+                    Step::Welcome
+                },
+                welcome_passed,
+                completed,
+                sharing_was_off: false,
+                asked_again: false,
+                opened: false,
                 told: Vec::new(),
                 accessibility_asked: false,
                 left_told: false,
                 lost_reads: 0,
             }),
-            file,
+            marker,
         }
     }
 
-    /// What the last launch kept in `config_dir`. With no file, someone with
-    /// a settings file set the app up before these steps existed; anyone else
-    /// is new.
+    /// Whether setup was finished, as the marker in `config_dir` says.
+    /// Welcome counts as passed once the app has settings (a fresh install has
+    /// none) or after Relaunch, so setup comes back at the step that isn't done.
     #[must_use]
     pub fn load(config_dir: &Path) -> Self {
-        let file = config_dir.join(PROGRESS_FILE);
-        let read = std::fs::read_to_string(&file);
-        // Only "there is no file" says nothing was kept. Any other failure hides
-        // what the file said about sharing.
-        let unknown = matches!(&read, Err(error) if error.kind() != ErrorKind::NotFound);
-        let (mut progress, opened) = match read.ok() {
-            // A file that can't be understood starts over, and what it said
-            // about sharing is unknown.
-            Some(text) => (
-                SetupProgress::from_json(&text).unwrap_or(SetupProgress {
-                    sharing_was_off: true,
-                    ..SetupProgress::default()
-                }),
-                true,
-            ),
-            None if config_dir.join(SETTINGS_FILE).exists() => {
-                (SetupProgress::ALREADY_SET_UP, false)
-            }
-            None => (SetupProgress::default(), false),
-        };
-        progress.sharing_was_off |= unknown;
-        Self::with(progress, opened, Some(file))
+        let marker = config_dir.join(COMPLETED_MARKER);
+        let welcome_passed =
+            config_dir.join(SETTINGS_FILE).exists() || resume_marker(config_dir).exists();
+        Self::with(marker.exists(), welcome_passed, Some(marker))
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Writes `progress` to the file (to a temporary file first, so a crash
-    /// can't leave half of it). A failure only costs resuming, so it is
-    /// logged and the app goes on.
-    fn keep(&self, progress: &SetupProgress) {
-        let Some(file) = &self.file else { return };
-        let temporary = file.with_extension("json.tmp");
-        let written = file
-            .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&temporary, progress.to_json()))
-            .and_then(|()| std::fs::rename(&temporary, file));
-        if let Err(error) = written {
-            tracing::warn!(%error, "couldn't keep the setup progress");
-        }
-    }
-
     /// Switches the window to onboarding, at the step the user was on, and
     /// returns that step.
     pub fn open(&self, readiness: Readiness) -> Step {
         let mut state = self.lock();
-        state.progress.step = readiness.resume_at(state.progress.step);
-        if state.progress.completed && !(readiness.microphone && readiness.accessibility) {
+        state.step = readiness.resume_at(state.step);
+        if state.completed && !(readiness.microphone && readiness.accessibility) {
             // This read counts, so the window that opens because of it says why
             // from its first status, not a poll later.
             state.lost_reads = state.lost_reads.max(1);
@@ -255,10 +241,7 @@ impl Onboarding {
         state.view = View::Onboarding;
         state.opened = true;
         state.left_told = false;
-        let (step, progress) = (state.progress.step, state.progress);
-        drop(state);
-        self.keep(&progress);
-        step
+        state.step
     }
 
     /// "Run setup again": setup that was finished goes through the steps from
@@ -266,16 +249,13 @@ impl Onboarding {
     /// setup…", and Welcome stays passed.
     pub fn start_over_if_finished(&self) {
         let mut state = self.lock();
-        if !state.progress.completed {
+        if !state.completed {
             return;
         }
-        state.progress.step = Step::Welcome;
-        state.progress.asked_again = false;
+        state.step = Step::Welcome;
+        state.asked_again = false;
         // A new walk: whether sharing is off now is noted when it opens.
-        state.progress.sharing_was_off = false;
-        let progress = state.progress;
-        drop(state);
-        self.keep(&progress);
+        state.sharing_was_off = false;
     }
 
     /// Switches the window back to the settings view; the step is kept for
@@ -285,15 +265,22 @@ impl Onboarding {
     }
 
     /// "Start dictating": setup is done, and the window goes back to the
-    /// settings view.
+    /// settings view. The marker is written; a failure only costs showing
+    /// setup again at the next launch, so it is logged and the app goes on.
     pub fn finish(&self) {
         let mut state = self.lock();
         state.view = View::Settings;
-        state.progress.completed = true;
-        state.progress.asked_again = false;
-        let progress = state.progress;
+        state.completed = true;
+        state.asked_again = false;
         drop(state);
-        self.keep(&progress);
+        let Some(marker) = &self.marker else { return };
+        let written = marker
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(marker, b""));
+        if let Err(error) = written {
+            tracing::warn!(%error, "couldn't note that setup is finished");
+        }
     }
 
     /// The view.
@@ -305,34 +292,25 @@ impl Onboarding {
     /// Whether the user has continued past Welcome.
     #[must_use]
     pub fn welcome_passed(&self) -> bool {
-        self.lock().progress.welcome_passed
+        self.lock().welcome_passed
     }
 
     /// Whether setup was finished.
     #[must_use]
     pub fn completed(&self) -> bool {
-        self.lock().progress.completed
+        self.lock().completed
     }
 
-    /// Whether setup was started and not finished: the tray then offers
-    /// "Resume setup…".
+    /// Whether setup isn't finished: the tray then offers "Resume setup…".
     #[must_use]
     pub fn in_progress(&self) -> bool {
-        let state = self.lock();
-        state.opened && !state.progress.completed
+        !self.lock().completed
     }
 
     /// The user continued past Welcome. True the first time.
     pub fn pass_welcome(&self) -> bool {
         let mut state = self.lock();
-        if state.progress.welcome_passed {
-            return false;
-        }
-        state.progress.welcome_passed = true;
-        let progress = state.progress;
-        drop(state);
-        self.keep(&progress);
-        true
+        !std::mem::replace(&mut state.welcome_passed, true)
     }
 
     /// Whether `problem` hasn't been recorded yet this launch; it now has.
@@ -346,18 +324,13 @@ impl Onboarding {
     }
 
     /// Sharing is off, or was just turned off: Ready can't say it has been on
-    /// since setup began. Kept across a quit, since a relaunch reads the switch
-    /// afresh. Nothing to keep for someone who has never opened setup: opening
-    /// it notes the choice then.
+    /// since setup began. Nothing to note for someone who has never opened
+    /// setup: opening it notes the choice then.
     pub fn note_sharing_off(&self) {
         let mut state = self.lock();
-        if !state.opened || state.progress.sharing_was_off {
-            return;
+        if state.opened {
+            state.sharing_was_off = true;
         }
-        state.progress.sharing_was_off = true;
-        let progress = state.progress;
-        drop(state);
-        self.keep(&progress);
     }
 
     /// The user asked for Accessibility.
@@ -373,34 +346,7 @@ impl Onboarding {
             return None;
         }
         state.left_told = true;
-        Some((state.progress.step, state.accessibility_asked))
-    }
-
-    /// Keeps how the practice dictation went.
-    pub fn set_try_outcome(&self, outcome: TryOutcome) {
-        let mut state = self.lock();
-        state.progress.try_outcome = outcome;
-        let progress = state.progress;
-        drop(state);
-        self.keep(&progress);
-    }
-
-    /// Keeps whether the user cancelled the model download.
-    pub fn set_download_paused(&self, paused: bool) {
-        let mut state = self.lock();
-        state.progress.download_paused = paused;
-        let progress = state.progress;
-        drop(state);
-        self.keep(&progress);
-    }
-
-    /// Keeps the engine selected on the Speech step.
-    pub fn set_speech_choice(&self, choice: SpeechChoice) {
-        let mut state = self.lock();
-        state.progress.speech_choice = Some(choice);
-        let progress = state.progress;
-        drop(state);
-        self.keep(&progress);
+        Some((state.step, state.accessibility_asked))
     }
 
     /// What the window shows. A step whose permission was turned off since
@@ -411,13 +357,13 @@ impl Onboarding {
         let accessibility = permissions.check(Permission::Accessibility);
         let mut state = self.lock();
         let readiness = Readiness {
-            welcome_passed: state.progress.welcome_passed,
+            welcome_passed: state.welcome_passed,
             speech_chosen: true,
             microphone: microphone == PermissionStatus::Granted,
             accessibility: accessibility == PermissionStatus::Granted,
         };
-        let step = readiness.resume_at(state.progress.step);
-        let missing = state.progress.completed
+        let step = readiness.resume_at(state.step);
+        let missing = state.completed
             && (microphone != PermissionStatus::Granted
                 || accessibility != PermissionStatus::Granted);
         state.lost_reads = if missing {
@@ -425,30 +371,17 @@ impl Onboarding {
         } else {
             0
         };
-        let lost = state.lost_reads >= 2;
-        let moved = step != state.progress.step || (lost && !state.progress.asked_again);
-        state.progress.step = step;
-        state.progress.asked_again |= lost;
-        let (status, progress) = (
-            OnboardingStatus {
-                view: state.view,
-                step,
-                microphone: microphone.into(),
-                accessibility: accessibility.into(),
-                needs_relaunch: accessibility == PermissionStatus::Granted && hotkey_down,
-                try_outcome: state.progress.try_outcome,
-                download_paused: state.progress.download_paused,
-                speech_choice: state.progress.speech_choice,
-                sharing_on_throughout: !state.progress.sharing_was_off,
-                asked_again: state.progress.asked_again,
-            },
-            state.progress,
-        );
-        drop(state);
-        if moved {
-            self.keep(&progress);
+        state.step = step;
+        state.asked_again |= state.lost_reads >= 2;
+        OnboardingStatus {
+            view: state.view,
+            step,
+            microphone: microphone.into(),
+            accessibility: accessibility.into(),
+            needs_relaunch: accessibility == PermissionStatus::Granted && hotkey_down,
+            sharing_on_throughout: !state.sharing_was_off,
+            asked_again: state.asked_again,
         }
-        status
     }
 
     /// Moves to `step` if every step before it is done.
@@ -461,11 +394,7 @@ impl Onboarding {
         if !readiness.allows(step) {
             return Err(NotYet(readiness.first_unmet()));
         }
-        let mut state = self.lock();
-        state.progress.step = step;
-        let progress = state.progress;
-        drop(state);
-        self.keep(&progress);
+        self.lock().step = step;
         Ok(step)
     }
 }
@@ -636,22 +565,19 @@ mod tests {
 
     #[test]
     fn n1_a_permission_lost_after_finishing_is_said_until_setup_is_finished_again() {
-        let dir = temp("asked-again");
         let (lost, back) = (granted(false, false), granted(true, true));
         assert!(
-            !Onboarding::load(&dir).status(&lost, false).asked_again,
+            !Onboarding::new().status(&lost, false).asked_again,
             "a first run hasn't lost anything"
         );
 
-        std::fs::create_dir_all(&dir).unwrap();
-        let finished = SetupProgress::ALREADY_SET_UP.to_json();
-        std::fs::write(dir.join(PROGRESS_FILE), &finished).unwrap();
+        let finished = || Onboarding::with(true, false, None);
         assert!(
-            !Onboarding::load(&dir).status(&back, false).asked_again,
+            !finished().status(&back, false).asked_again,
             "nothing has gone"
         );
 
-        let blip = Onboarding::load(&dir);
+        let blip = finished();
         assert!(
             !blip.status(&lost, false).asked_again,
             "one read is no proof"
@@ -664,30 +590,23 @@ mod tests {
             !blip.status(&lost, false).asked_again,
             "so reads have to be in a row"
         );
-        assert!(
-            !Onboarding::load(&dir).status(&back, false).asked_again,
-            "nothing was kept"
-        );
 
-        let polled = Onboarding::load(&dir);
+        let polled = finished();
         polled.status(&lost, false);
         let status = polled.status(&lost, false);
         assert!(status.asked_again, "two in a row, as the window polls");
         assert_eq!(status.step, Step::Permissions, "its step comes back");
-
-        let relaunched = Onboarding::load(&dir);
         assert!(
-            relaunched.status(&back, false).asked_again,
-            "still so after a relaunch, with both allowed by then"
+            polled.status(&back, false).asked_again,
+            "until setup is finished"
         );
-        relaunched.finish();
+        polled.finish();
         assert!(
-            !Onboarding::load(&dir).status(&back, false).asked_again,
+            !polled.status(&back, false).asked_again,
             "finishing ends it"
         );
 
-        std::fs::write(dir.join(PROGRESS_FILE), &finished).unwrap();
-        let again = Onboarding::load(&dir);
+        let again = finished();
         again.open(Readiness {
             microphone: false,
             ..Readiness::READY
@@ -701,102 +620,70 @@ mod tests {
             !again.status(&back, false).asked_again,
             "Run setup again is a new walk"
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn u10_unknown_sharing_history_never_claims_on_since_setup_began() {
-        let permissions = granted(true, true);
-        let throughout = |dir: &Path| {
-            let onboarding = Onboarding::load(dir);
-            onboarding.open(Readiness::READY);
-            onboarding.status(&permissions, false).sharing_on_throughout
-        };
-
-        let dir = temp("history-legacy");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join(PROGRESS_FILE),
-            r#"{"step":"ready","welcome_passed":true}"#,
-        )
-        .unwrap();
-        assert!(!throughout(&dir), "a file from before the field");
-        assert!(!throughout(&dir), "and it stays so across another launch");
-        let _ = std::fs::remove_dir_all(&dir);
-
-        let dir = temp("history-unreadable");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(PROGRESS_FILE), "{ not json").unwrap();
-        assert!(!throughout(&dir), "a file that can't be read");
-        let _ = std::fs::remove_dir_all(&dir);
-
-        // Read failures, not just bad contents: not UTF-8, and a directory in
-        // the file's place; with no settings file, and with one.
-        for settings_file in [false, true] {
-            let dir = temp(&format!("history-not-utf8-{settings_file}"));
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join(PROGRESS_FILE), [0xff, 0xfe, 0x00]).unwrap();
-            if settings_file {
-                std::fs::write(dir.join(SETTINGS_FILE), "{}").unwrap();
-            }
-            assert!(!throughout(&dir), "not UTF-8, settings {settings_file}");
-            let _ = std::fs::remove_dir_all(&dir);
-
-            let dir = temp(&format!("history-directory-{settings_file}"));
-            std::fs::create_dir_all(dir.join(PROGRESS_FILE)).unwrap();
-            if settings_file {
-                std::fs::write(dir.join(SETTINGS_FILE), "{}").unwrap();
-            }
-            assert!(!throughout(&dir), "a directory, settings {settings_file}");
-            let _ = std::fs::remove_dir_all(&dir);
-        }
-
-        let dir = temp("history-fresh");
-        assert!(throughout(&dir), "a fresh install has no unknown history");
-        let _ = std::fs::remove_dir_all(&dir);
-
-        // Run setup again is a new walk, whatever an old file said.
-        let dir = temp("history-again");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join(PROGRESS_FILE),
-            r#"{"step":"ready","welcome_passed":true,"completed":true}"#,
-        )
-        .unwrap();
-        let onboarding = Onboarding::load(&dir);
-        onboarding.start_over_if_finished();
-        onboarding.open(Readiness::READY);
-        assert!(onboarding.status(&permissions, false).sharing_on_throughout);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn u10_a_note_that_sharing_was_off_survives_a_quit_and_ends_with_the_walk() {
-        let dir = temp("sharing-off");
-        let onboarding = Onboarding::load(&dir);
+    fn u10_a_note_that_sharing_was_off_lasts_until_the_walk_ends() {
+        let onboarding = Onboarding::new();
         onboarding.note_sharing_off();
-        assert!(
-            !dir.join(PROGRESS_FILE).exists(),
-            "setup never opened: nothing to keep"
-        );
-        onboarding.open(Readiness::READY);
         let permissions = granted(true, true);
-        assert!(onboarding.status(&permissions, false).sharing_on_throughout);
-
+        onboarding.open(Readiness::READY);
+        assert!(
+            onboarding.status(&permissions, false).sharing_on_throughout,
+            "setup never opened: nothing to note"
+        );
         onboarding.note_sharing_off();
         assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
-        let relaunched = Onboarding::load(&dir);
-        relaunched.open(Readiness::READY);
+        onboarding.finish();
+        onboarding.start_over_if_finished();
         assert!(
-            !relaunched.status(&permissions, false).sharing_on_throughout,
-            "a relaunch mustn't forget it"
-        );
-
-        relaunched.finish();
-        relaunched.start_over_if_finished();
-        assert!(
-            relaunched.status(&permissions, false).sharing_on_throughout,
+            onboarding.status(&permissions, false).sharing_on_throughout,
             "Run setup again is a new walk"
+        );
+    }
+
+    /// An unfinished setup starts again at the first step that isn't done;
+    /// one that was finished is reopened at the summary, past Welcome.
+    #[test]
+    fn only_finishing_is_kept_across_launches() {
+        let dir = temp("marker");
+        let onboarding = Onboarding::load(&dir);
+        assert!(onboarding.in_progress());
+        assert!(!onboarding.welcome_passed(), "a fresh install");
+        onboarding.open(Readiness::default());
+        onboarding.pass_welcome();
+        onboarding.go_to(Step::Try, Readiness::READY).unwrap();
+        assert!(onboarding.in_progress());
+        drop(onboarding);
+
+        let relaunched = Onboarding::load(&dir);
+        assert!(!relaunched.welcome_passed());
+        assert_eq!(relaunched.open(Readiness::default()), Step::Welcome);
+        drop(relaunched);
+
+        // With settings saved, or after Relaunch, Welcome is behind the user.
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(SETTINGS_FILE), "{}").unwrap();
+        let with_settings = Onboarding::load(&dir);
+        assert!(with_settings.welcome_passed());
+        let missing = Readiness {
+            accessibility: false,
+            ..Readiness::READY
+        };
+        assert_eq!(with_settings.open(missing), Step::Permissions);
+        with_settings.finish();
+        assert!(dir.join(COMPLETED_MARKER).exists());
+
+        let finished = Onboarding::load(&dir);
+        assert!(finished.completed() && finished.welcome_passed());
+        assert!(!finished.in_progress());
+        assert_eq!(finished.open(Readiness::READY), Step::Ready);
+        assert_eq!(
+            finished.open(Readiness {
+                accessibility: false,
+                ..Readiness::READY
+            }),
+            Step::Permissions
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -924,45 +811,6 @@ mod tests {
         );
     }
 
-    /// U8 criterion 7: every step survives a quit, with the choices made.
-    #[test]
-    fn quitting_at_any_step_resumes_at_that_step() {
-        for step in Step::ALL {
-            let dir = temp(&format!("resume-{step:?}"));
-            let onboarding = Onboarding::load(&dir);
-            onboarding.open(Readiness::default());
-            onboarding.pass_welcome();
-            onboarding.go_to(step, Readiness::READY).unwrap();
-            onboarding.set_try_outcome(TryOutcome::Skipped);
-            onboarding.set_download_paused(true);
-            onboarding.set_speech_choice(SpeechChoice::OwnKey);
-            drop(onboarding);
-
-            let relaunched = Onboarding::load(&dir);
-            assert_eq!(relaunched.open(Readiness::READY), step);
-            assert!(relaunched.welcome_passed());
-            assert!(relaunched.in_progress());
-            let status = relaunched.status(&granted(true, true), false);
-            assert_eq!(status.try_outcome, TryOutcome::Skipped);
-            assert!(status.download_paused);
-            assert_eq!(status.speech_choice, Some(SpeechChoice::OwnKey));
-            let _ = std::fs::remove_dir_all(&dir);
-        }
-    }
-
-    #[test]
-    fn a_new_user_who_quits_on_welcome_is_still_held_at_welcome() {
-        let dir = temp("welcome");
-        let onboarding = Onboarding::load(&dir);
-        onboarding.open(Readiness::default());
-        drop(onboarding);
-        let relaunched = Onboarding::load(&dir);
-        assert!(!relaunched.welcome_passed());
-        assert!(relaunched.in_progress());
-        assert_eq!(relaunched.open(Readiness::default()), Step::Welcome);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     /// U8 criterion 6.
     #[test]
     fn finishing_marks_setup_complete_across_launches() {
@@ -996,46 +844,6 @@ mod tests {
         assert!(onboarding.completed());
         assert!(onboarding.welcome_passed());
         assert!(!onboarding.in_progress());
-    }
-
-    #[test]
-    fn someone_who_set_up_before_these_steps_counts_as_done() {
-        let dir = temp("legacy");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(SETTINGS_FILE), "{}").unwrap();
-        let onboarding = Onboarding::load(&dir);
-        assert!(onboarding.welcome_passed());
-        assert!(onboarding.completed());
-        assert!(!onboarding.in_progress());
-        // Reopened from Settings, Help, they get the summary, or what broke.
-        assert_eq!(onboarding.open(Readiness::READY), Step::Ready);
-        assert_eq!(
-            onboarding.open(Readiness {
-                accessibility: false,
-                ..Readiness::READY
-            }),
-            Step::Permissions
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_launch_that_never_opens_onboarding_is_not_in_progress() {
-        let dir = temp("scripted");
-        assert!(!Onboarding::load(&dir).in_progress());
-        assert!(!dir.join(PROGRESS_FILE).exists());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_progress_file_that_cannot_be_read_starts_over() {
-        let dir = temp("bad");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(PROGRESS_FILE), "not json").unwrap();
-        let onboarding = Onboarding::load(&dir);
-        assert!(!onboarding.welcome_passed());
-        assert!(!onboarding.completed());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

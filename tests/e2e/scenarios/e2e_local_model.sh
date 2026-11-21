@@ -4,7 +4,7 @@
 # speech (a `say` clip, --debug-audio-file) into TextEdit with the real
 # on-device engine, then do it again with the VM's network off if the VM
 # allows it. Records release-to-text latency. In ALL_SCENARIOS since L1
-# round 2, so post-merge runs keep checking it; it downloads ~477 MB each
+# round 2, so post-merge runs keep checking it; it downloads ~1.3 GB each
 # run. The offline half needs passwordless sudo in the VM (#222).
 
 textedit_has_phrase() { textedit_text | grep -qi "dictation test"; }
@@ -16,10 +16,11 @@ textedit_has_phrase() { textedit_text | grep -qi "dictation test"; }
 # than VM_TERMINAL_TIMEOUT (30 s by default) is killed, which is what ended
 # the old single 1500 s wait early.
 download_wait() {
-  local deadline=$((SECONDS + 1500))
+  # One download of both models (Q4): speech, then cleanup, about 4.4 GB.
+  local deadline=$((SECONDS + 3000))
   while [ "$SECONDS" -lt "$deadline" ]; do
     # U12: a finished row says nothing, but has its "…" menu and no progress.
-    if VM_TERMINAL_TIMEOUT=90 ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "More actions for English" 60 &&
+    if VM_TERMINAL_TIMEOUT=90 ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "More actions for On this Mac" 60 &&
       ! ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "↓ " 1 &&
       ! ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "aused" 1; then
       return 0
@@ -51,7 +52,7 @@ e2e_local_model() {
   expect "press Download (first model)" ax_ok press-first "$APP_NAME" "$SETTINGS_WINDOW" Download
   expect "progress is shown" ax_ok wait-text "$APP_NAME" "$SETTINGS_WINDOW" "↓ " 30
   expect "the model finishes downloading" download_wait
-  expect "select English (first model)" ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" English
+  expect "select On this Mac" ax_ok radio-press "$APP_NAME" "$SETTINGS_WINDOW" "On this Mac"
   expect "the model loads" wait_for_log 'on-device model loaded' 120
   expect "the settings choose it" settings_file_has transcription local
   expect "closing hides Settings" close_settings

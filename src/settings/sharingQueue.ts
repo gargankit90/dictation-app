@@ -6,7 +6,7 @@
 
 import { commands } from "../bindings";
 import type { Settings_Serialize } from "../bindings";
-import { BROKEN, messageOf } from "../keyTest";
+import { BROKEN, messageOf } from "../messages";
 
 export interface SharingQueueState {
   /** A write is running or waiting. */

@@ -5,9 +5,10 @@
 # build (pointed here with --debug-provider-url) goes through its real HTTP
 # client, keychain key, retries and JSON parsing, with no network and no
 # real key. `POST …/chat/completions` (the cleanup pass) answers with the
-# transcript it was sent, unchanged, so cleanup is applied and the paste is
-# what the speech reply said; it is logged as `cleanup`, not `request`, so
-# the request numbers stay the speech requests'. It is never held.
+# transcript it was sent, unchanged (or with `cleanup-text`, below), so
+# cleanup is applied and the paste is what the speech reply said; it is logged
+# as `cleanup`, not `request`, so the request numbers stay the speech
+# requests'. It is held only while `cleanup-gate` exists (QT1).
 #
 #   perl local-provider.pl <state-dir> [port]      # default port 18731
 #
@@ -22,6 +23,11 @@
 #   gate               while this file exists, a reply is held after its
 #                      request has been read whole ("the gate"); removing it
 #                      releases every held reply.
+#   cleanup-gate       like `gate`, for the cleanup (chat) reply only: it is
+#                      held while this file exists, so the app's 1.5 s
+#                      deadline passes and it pastes the raw transcript.
+#   cleanup-text       what the cleanup answers instead of echoing its input
+#                      (UTF-8, as is); read when the request arrives.
 #   reply-text         the transcript to answer with (UTF-8, as is: leading
 #                      and trailing whitespace and newlines are kept);
 #                      "hello world" when absent. Read when the request
@@ -31,6 +37,8 @@
 #                        request n=<n> path=<p> auth=good|bad|none model=<m>
 #                          language=<l> format=<f> audio_bytes=<b>
 #                        cleanup auth=good|bad|none status=<s>
+#                        cleanup_held       the cleanup reply is held
+#                        cleanup_closed     the client hung up while held
 #                        held n=<n>
 #                        closed n=<n>       the client hung up while held
 #                        released n=<n> closed=0|1
@@ -38,6 +46,20 @@
 #                      <n> counts requests from 1. Never a key or a
 #                      transcript.
 #   pid                the listener's pid
+#   connect-key        the key `POST …/auth/keys` hands out (Q3, Connect
+#                      OpenRouter); a made-up one, which accept-key.sha256
+#                      should accept. Without the file the exchange fails (500).
+#   force-status       a status code (402, ...): every speech and cleanup
+#                      request with the good key gets that status, with
+#                      OpenRouter's error body, instead of its answer.
+#
+# Connect OpenRouter (Q3), as the app's test build (--debug-provider-url) drives
+# it: `GET …/auth?callback_url=…&code_challenge=…&state=…` plays OpenRouter's
+# sign-in page and the user who agrees: it calls the callback back at once
+# with a code and the same state. `POST …/auth/keys` checks the code and the
+# PKCE pair (S256 of the verifier must be the challenge) and answers
+# {"key": <connect-key>}. Events: `auth-start`, `auth-callback status=<s>`,
+# `exchange pkce=ok|bad code=ok|bad`; never the key, code or verifier.
 #
 # GET /health answers 200 "ok" and isn't counted.
 use strict;
@@ -47,6 +69,7 @@ use Fcntl qw(:flock O_WRONLY O_APPEND O_CREAT);
 use IO::Select;
 use IO::Socket::INET;
 use JSON::PP;
+use MIME::Base64 ();
 
 my ($dir, $port) = @ARGV;
 die "usage: local-provider.pl <state-dir> [port]\n" unless defined $dir && -d $dir;
@@ -238,31 +261,34 @@ sub respond {
 # Holds the reply while the gate file exists; says when the client hangs
 # up. Returns whether it did.
 sub hold {
-  my ($sock, $n) = @_;
-  return 0 unless -e "$dir/gate";
-  event("held n=$n");
+  my ($sock, $n, $gate, $label) = @_;
+  $gate //= 'gate';
+  return 0 unless -e "$dir/$gate";
+  event($label ? "${label}_held" : "held n=$n");
   my $select = IO::Select->new($sock);
   my $closed = 0;
   my $until = time + $MAX_HOLD;
-  while (-e "$dir/gate" && time < $until) {
+  while (-e "$dir/$gate" && time < $until) {
     if (!$closed && $select->can_read(0.05)) {
       my $got = sysread $sock, my $chunk, 4096;
       if (!$got) {
         $closed = 1;
-        event("closed n=$n");
+        event($label ? "${label}_closed" : "closed n=$n");
       }
     } elsif ($closed) {
       select undef, undef, undef, 0.05;
     }
   }
-  event("released n=$n closed=$closed");
+  event("released n=$n closed=$closed") unless $label;
   return $closed;
 }
 
 sub reply_text {
-  my $path = "$dir/reply-text";
-  return $DEFAULT_TEXT unless -e $path;
-  open my $fh, '<:raw', $path or return $DEFAULT_TEXT;
+  my ($name, $default) = @_;
+  my $path = "$dir/" . ($name // 'reply-text');
+  $default //= $DEFAULT_TEXT;
+  return $default unless -e $path;
+  open my $fh, '<:raw', $path or return $default;
   local $/;
   my $bytes = <$fh>;
   close $fh;
@@ -276,6 +302,14 @@ sub serve {
   return unless defined $method;
   if ($method eq 'GET' && $path eq '/health') {
     respond($sock, 200, 'OK', '"ok"');
+    return;
+  }
+  if ($method eq 'GET' && $path =~ m{/auth\?}) {
+    sign_in($sock, $path);
+    return;
+  }
+  if ($method eq 'POST' && $path =~ m{/auth/keys$}) {
+    exchange($sock, $body);
     return;
   }
   my $auth = 'none';
@@ -292,13 +326,18 @@ sub serve {
   if ($method eq 'POST' && $path =~ m{/chat/completions$}) {
     my ($status, $reply) = (401,
       '{"error":{"message":"Invalid API Key","code":401}}');
-    if ($auth eq 'good') {
+    if ($auth eq 'good' && forced_status()) {
+      $status = forced_status();
+      $reply = '{"error":{"message":"Insufficient credits","code":' . $status . '}}';
+    } elsif ($auth eq 'good') {
+      my $content = reply_text('cleanup-text', cleanup_input($json));
+      hold($sock, 0, 'cleanup-gate', 'cleanup');
       $reply = JSON::PP->new->ascii->canonical->encode({
-        choices => [{ message => { role => 'assistant', content => cleanup_input($json) }, finish_reason => 'stop' }],
+        choices => [{ message => { role => 'assistant', content => $content }, finish_reason => 'stop' }],
       });
       $status = 200;
     }
-    respond($sock, $status, $status == 200 ? 'OK' : 'Unauthorized', $reply);
+    respond($sock, $status, $status == 200 ? 'OK' : 'Error', $reply);
     event("cleanup auth=$auth status=$status");
     return;
   }
@@ -313,6 +352,10 @@ sub serve {
   my ($status, $reason, $reply);
   if ($method ne 'POST' || $path !~ m{/audio/transcriptions$}) {
     ($status, $reason, $reply) = (404, 'Not Found', '{"error":{"message":"not found"}}');
+  } elsif ($auth eq 'good' && forced_status()) {
+    $status = forced_status();
+    ($status, $reason, $reply) = ($status, 'Error',
+      '{"error":{"message":"Insufficient credits","code":' . $status . '}}');
   } elsif ($auth ne 'good') {
     ($status, $reason, $reply) = (401, 'Unauthorized',
       '{"error":{"message":"Invalid API Key","type":"invalid_request_error","code":"invalid_api_key"}}');
@@ -329,4 +372,61 @@ sub serve {
   }
   respond($sock, $status, $reason, $reply);
   event("replied n=$n status=$status");
+}
+
+# The status in the force-status file, or 0.
+sub forced_status {
+  open my $fh, '<', "$dir/force-status" or return 0;
+  my $code = <$fh> // '';
+  close $fh;
+  return $code =~ /^\s*(\d{3})\s*$/ ? $1 : 0;
+}
+
+sub url_decode {
+  my ($v) = @_;
+  $v =~ tr/+/ /;
+  $v =~ s/%([0-9a-fA-F]{2})/chr hex $1/ge;
+  return $v;
+}
+
+# OpenRouter's sign-in page, with the user agreeing: calls the callback back.
+sub sign_in {
+  my ($sock, $path) = @_;
+  my ($query) = $path =~ /\?(.*)$/;
+  my %q = map { my ($k, $v) = split /=/, $_, 2; (url_decode($k), url_decode($v // '')) } split /&/, $query;
+  event("auth-start");
+  write_file("$dir/challenge", ($q{code_challenge} // '') . "\n");
+  respond($sock, 200, 'OK', '"signed in"');
+  close $sock;
+  my $callback = $q{callback_url} // '';
+  my ($port, $cb_path) = $callback =~ m{^http://(?:localhost|127\.0\.0\.1):(\d+)(/[^?]*)$} or return;
+  my $conn = IO::Socket::INET->new(PeerAddr => '127.0.0.1', PeerPort => $port, Proto => 'tcp', Timeout => 5) or return;
+  my $state = $q{state} // '';
+  syswrite $conn, "GET $cb_path?code=e2efakecode&state=$state HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+  my $answer = '';
+  while (sysread $conn, my $chunk, 4096) { $answer .= $chunk; }
+  my ($status) = $answer =~ m{^HTTP/1\.[01] (\d+)};
+  event("auth-callback status=" . ($status // 0));
+}
+
+# The code-for-key exchange.
+sub exchange {
+  my ($sock, $body) = @_;
+  my $json = json_body($body) || {};
+  my $want = '';
+  if (open my $fh, '<', "$dir/challenge") { $want = <$fh> // ''; close $fh; $want =~ s/\s+//g; }
+  my $verifier = $json->{code_verifier} // '';
+  my $made = MIME::Base64::encode_base64url(Digest::SHA::sha256($verifier));
+  my $pkce = ($want ne '' && $made eq $want && ($json->{code_challenge_method} // '') eq 'S256') ? 'ok' : 'bad';
+  my $code = ($json->{code} // '') eq 'e2efakecode' ? 'ok' : 'bad';
+  event("exchange pkce=$pkce code=$code");
+  my $key = '';
+  if (open my $fh, '<', "$dir/connect-key") { $key = <$fh> // ''; close $fh; $key =~ s/\s+//g; }
+  if ($pkce ne 'ok' || $code ne 'ok') {
+    respond($sock, 400, 'Bad Request', '{"error":{"message":"bad code","code":400}}');
+  } elsif ($key eq '') {
+    respond($sock, 500, 'Error', '{"error":{"message":"no key","code":500}}');
+  } else {
+    respond($sock, 200, 'OK', JSON::PP->new->canonical->encode({ key => $key, user_id => 'e2e' }));
+  }
 }

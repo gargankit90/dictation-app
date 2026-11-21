@@ -78,12 +78,12 @@ fn unknown_fields_load_but_are_dropped_on_the_next_save() {
     let config = Config::new(&d, MemSecretStore::default());
     std::fs::write(
         config.path(),
-        r#"{"version":2,"provider":"openrouter","model":"openai/gpt-4o-mini-transcribe","language":"de","hotkey":"RightAlt","future":{"x":1}}"#,
+        r#"{"version":2,"provider":"openrouter","model":"openai/gpt-4o-mini-transcribe","hotkey":"F6","future":{"x":1}}"#,
     )
     .unwrap();
     let s = config.settings().unwrap();
     assert_eq!(s.provider, Provider::OpenRouter);
-    assert_eq!(s.language.as_deref(), Some("de"));
+    assert_eq!(s.hotkey, "F6");
     config.save_settings(&s).unwrap();
     let file = std::fs::read_to_string(config.path()).unwrap();
     assert!(!file.contains("future")); // documents the Developer's stated behaviour
@@ -101,10 +101,6 @@ fn bad_settings_values_are_rejected_and_leave_the_old_file_alone() {
         (|s: &mut Settings| s.model = String::new()) as fn(&mut Settings),
         |s| s.model = "has space".into(),
         |s| s.model = "m".repeat(101),
-        |s| s.language = Some("EN".into()),
-        |s| s.language = Some("e".into()),
-        |s| s.language = Some("english".into()),
-        |s| s.language = Some(String::new()),
         |s| s.hotkey = "NotAKey".into(),
         |s| s.version = 1,
     ] {

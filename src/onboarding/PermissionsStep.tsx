@@ -2,8 +2,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { commands } from "../bindings";
 import type { AppPermission, OnboardingStatus, PermissionState } from "../bindings";
-import { BROKEN, messageOf } from "../keyTest";
-import { MicMeter, useLiveMeter } from "../settings/MicMeter";
+import { BROKEN, messageOf } from "../messages";
 import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";
 
@@ -70,7 +69,6 @@ export function PermissionsStep({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const micAllowed = status.microphone === "granted";
-  const meter = useLiveMeter(micAllowed);
 
   async function ask(which: AppPermission) {
     setBusy(true);
@@ -155,22 +153,6 @@ export function PermissionsStep({
           </span>
           {badge(status.microphone, "microphone")}
         </div>
-        {micAllowed && (
-          <div className="ob-meter">
-            <div className="mic-test">
-              <MicMeter levels={meter.levels} />
-              <span>
-                {meter.device ?? "The Mac's default input"}: say something, the bars should move.
-              </span>
-            </div>
-            {meter.error !== null && (
-              <p role="alert" className="error">
-                {meter.error}
-              </p>
-            )}
-            <p className="ob-caption">No sound? Check System Settings → Sound.</p>
-          </div>
-        )}
         {status.microphone === "denied" && (
           <>
             <p className="ob-caption">{MIC_PATH}</p>

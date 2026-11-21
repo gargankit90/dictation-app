@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use dictation_core::local_models::{self, LocalModel};
+use dictation_core::local_models::{self, LocalModel, Role};
 use dictation_pipeline::config::Config;
 use dictation_ports::SecretStore;
 use dictation_transcribe::models::{DownloadCancel, DownloadError, ModelStatus, Progress, Resume};
@@ -101,7 +101,7 @@ pub const ONE_AT_A_TIME: &str =
     "Another model is downloading. Wait for it to finish, or cancel it, then try again.";
 
 fn find(id: &str) -> Result<&'static LocalModel, String> {
-    local_models::find(id).ok_or_else(|| format!("there is no on-device model {id:?}"))
+    local_models::find_any(id).ok_or_else(|| format!("there is no on-device model {id:?}"))
 }
 
 fn no_local() -> String {
@@ -117,11 +117,30 @@ impl ModelDownloads {
         self
     }
 
-    /// Every catalogue model with its status.
+    /// Every speech model with its status.
     #[must_use]
     pub fn list(&self, live: &LiveEngine) -> Vec<LocalModelInfo> {
+        self.list_of(live, local_models::CATALOGUE, local_models::DEFAULT_MODEL)
+    }
+
+    /// Every cleanup model with its status (Q4).
+    #[must_use]
+    pub fn list_cleanup(&self, live: &LiveEngine) -> Vec<LocalModelInfo> {
+        self.list_of(
+            live,
+            local_models::CLEANUP_CATALOGUE,
+            local_models::DEFAULT_CLEANUP_MODEL,
+        )
+    }
+
+    fn list_of(
+        &self,
+        live: &LiveEngine,
+        catalogue: &'static [LocalModel],
+        default: &str,
+    ) -> Vec<LocalModelInfo> {
         let downloads = lock(&self.inner);
-        local_models::CATALOGUE
+        catalogue
             .iter()
             .map(|model| {
                 let (state, downloaded) = match downloads.running.get(model.id) {
@@ -156,7 +175,7 @@ impl ModelDownloads {
                     },
                     restarted: resume == Resume::Restarted,
                     error: downloads.failed.get(model.id).cloned(),
-                    default: model.id == local_models::DEFAULT_MODEL,
+                    default: model.id == default,
                 }
             })
             .collect()
@@ -239,8 +258,37 @@ impl ModelDownloads {
     /// Cancels `id`'s download, if one runs. What was fetched stays, so the
     /// next download continues it.
     pub fn cancel(&self, id: &str) {
-        if let Some(running) = lock(&self.inner).running.get(id) {
+        let downloads = lock(&self.inner);
+        if let Some(running) = downloads.running.get(id) {
             running.cancel.cancel();
+        }
+        // "On this Mac" is one download (Q4): cancelling the speech model
+        // cancels the cleanup model that follows it too.
+        if local_models::find(id).is_some()
+            && let Some(running) = downloads.running.get(local_models::DEFAULT_CLEANUP_MODEL)
+        {
+            running.cancel.cancel();
+        }
+    }
+
+    /// Starts downloading the default cleanup model if it isn't on this
+    /// Mac yet (Q4): after a speech model download the user started, so
+    /// choosing on-device fetches both (about 4.4 GB). Nothing downloads
+    /// unless the user picks on-device. A failure shows on its Settings row, where Download
+    /// tries again.
+    pub fn then_cleanup(&self, live: &LiveEngine) {
+        let id = local_models::DEFAULT_CLEANUP_MODEL;
+        let ready = live
+            .local()
+            .and_then(|local| find(id).ok().map(|model| local.store().status(model)))
+            == Some(ModelStatus::Ready);
+        if ready {
+            return;
+        }
+        let after = live.clone();
+        let done = move |result: Result<(), DownloadError>| cleanup_downloaded(&after, &result);
+        if let Err(error) = self.start(live, id, None, done) {
+            tracing::warn!(%error, "cleanup model download didn't start");
         }
     }
 
@@ -264,11 +312,31 @@ impl ModelDownloads {
         if local.loaded() == Some(model.id) {
             local.release();
         }
+        if let Some(cleanup) = live.cleanup()
+            && cleanup.model().id == model.id
+        {
+            cleanup.release();
+        }
         lock(&self.inner).failed.remove(model.id);
         local
             .store()
             .delete(model)
-            .map_err(|error| error.user_message())
+            .map_err(|error| error.user_message())?;
+        // "On this Mac" is one choice (Q4): its cleanup model goes with it.
+        if model.role == Role::Speech {
+            self.delete(live, local_models::DEFAULT_CLEANUP_MODEL)?;
+        }
+        Ok(())
+    }
+}
+
+/// The cleanup model is in (Q4): the helper starts now if on-device speech
+/// is selected, with no settings change or restart needed.
+fn cleanup_downloaded(live: &LiveEngine, result: &Result<(), DownloadError>) {
+    if result.is_ok()
+        && let Some(cleanup) = live.cleanup()
+    {
+        cleanup.refresh();
     }
 }
 
@@ -287,7 +355,18 @@ pub async fn list_local_models(
     Ok(downloads.list(engine.inner()))
 }
 
-/// Starts downloading model `id`; poll [`list_local_models`] for progress.
+/// Every on-device cleanup model (Q4) with its status and download progress.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_cleanup_models(
+    engine: State<'_, LiveEngine>,
+    downloads: State<'_, ModelDownloads>,
+) -> Result<Vec<LocalModelInfo>, String> {
+    Ok(downloads.list_cleanup(engine.inner()))
+}
+
+/// Starts downloading model `id` (speech or cleanup); poll
+/// [`list_local_models`] or [`list_cleanup_models`] for progress.
 #[tauri::command]
 #[specta::specta]
 pub async fn download_local_model(
@@ -300,8 +379,17 @@ pub async fn download_local_model(
 ) -> Result<(), String> {
     let (config, live) = (Arc::clone(&state.0), engine.inner().clone());
     let (onboarding, usage) = (Arc::clone(&onboarding), usage.inner().clone());
+    let chain = downloads.inner().clone();
+    let speech = local_models::find(&id).is_some();
     downloads.start(engine.inner(), &id, None, move |result| match result {
-        Ok(()) => rebuild_later(config, live),
+        Ok(()) => {
+            // The speech model is in: the cleanup model follows (Q4), one
+            // download at a time. Dictation works meanwhile, uncleaned.
+            if speech {
+                chain.then_cleanup(&live);
+            }
+            rebuild_later(config, live);
+        }
         Err(error) => {
             if let Some(problem) = usage::download_problem(&error) {
                 usage::setup_problem(&usage, &onboarding, problem);

@@ -181,6 +181,25 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 
+  it("Q3: an out-of-credits error offers Add credits, which opens OpenRouter's page", async () => {
+    checks = [
+      check({
+        id: "last_error",
+        label: "Last error",
+        ok: false,
+        detail: "Your OpenRouter credits ran out. Add credits.",
+        code: "out_of_credits",
+        fix: "add_credits",
+        fix_label: "Add credits",
+      }),
+    ];
+    view();
+    fireEvent.click(await screen.findByRole("button", { name: "Add credits" }));
+    await waitFor(() => {
+      expect(args[calls.indexOf("open_link")]).toEqual({ link: "openrouter_credits" });
+    });
+  });
+
   it("tests the connection only when asked, and shows the code of a failure", async () => {
     connection = {
       ok: false,

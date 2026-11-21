@@ -15,7 +15,7 @@ adapter. Tauri is a thin layer on top.
 | `crates/core` | `dictation-core` | coordinator state machine, events, text cleanup, audio maths, WAV, settings, hotkey specs, retry policy, errors | nothing in the workspace |
 | `crates/ports` | `dictation-ports` | traits: `HotkeySource`, `AudioSource`, `Transcriber`, `TextInserter`, `Clipboard`, `SecretStore`, `Permissions`, `Clock` | `core` |
 | `crates/platform` | `dictation-platform` | OS adapters; fakes behind feature `testing` | `core`, `ports` |
-| `crates/transcribe` | `dictation-transcribe` | `Transcriber` and `Cleaner` implementations: OpenRouter speech and cleanup, the on-device engine, mock | `core`, `ports` |
+| `crates/transcribe` | `dictation-transcribe` | `Transcriber` and `Cleaner` implementations: OpenRouter speech and cleanup, the on-device engine and cleaner (llama.cpp helper, Q4), mock | `core`, `ports` |
 | `crates/telemetry` | `dictation-telemetry` | PostHog adapter for the `Telemetry` port, Sentry adapter for `ErrorReporter`, and the install ID | `ports` |
 | `crates/app` | `dictation-pipeline` | async pipeline that runs the coordinator against the ports; no Tauri types | `core`, `ports` |
 | `src-tauri` | `dictation-app` | Tauri commands, events, tray, windows, plugins, CLI flags | everything above |
@@ -119,7 +119,46 @@ adapter. Tauri is a thin layer on top.
   `docs/privacy.md` and the "What's sent" list.
 - Skip pasting when a password field (Secure Input) is focused.
 - New network calls go only to the configured transcription provider, the
-  update server and the usage-events host above.
+  update server and the usage-events host above, and to the on-device
+  cleanup helper on the loopback interface (below).
+
+## On-device cleanup helper (Q4)
+
+On-device cleanup runs Gemma 4 E2B in llama.cpp's `llama-server`, a second
+process shipped in the bundle as `Contents/MacOS/llama-server`. It is a
+process and not a library because transcribe.cpp links its own ggml
+statically, and a second static ggml in one binary would clash; a crash in
+the helper also can't take the app down.
+
+- **Build:** `scripts/build-llama-server.sh` builds the pinned llama.cpp
+  tag from its source tarball, checked by SHA-256 (it fails closed), as one
+  static binary for macOS 13 with the Metal library embedded and no web UI.
+  Nothing else is downloaded. It is cached per user;
+  `src-tauri/build.rs` runs it on macOS when
+  `src-tauri/binaries/llama-server-<triple>` is missing, and the macOS CI
+  job builds and checks it. `tauri.macos.conf.json` bundles it as
+  `externalBin`, so Tauri signs it with the app's identity and the hardened
+  runtime, and `scripts/release.sh`'s `codesign --verify --deep --strict`
+  and notarisation cover it.
+- **Network:** it listens on `127.0.0.1` only, on a free port picked at
+  each launch, and needs a random API key made for that launch, passed in
+  its environment (never its command line), so other local programs can't
+  use it. No web UI, slots endpoint or log. The transcript goes only to it.
+- **Lifetime:** it runs while on-device transcription is selected and the
+  cleanup model is downloaded, with the model loaded (warm); switching away,
+  deleting the model or quitting stops it. It runs under a `/bin/sh`
+  supervisor that holds a pipe from the app and kills it when the pipe
+  closes, so it never outlives the app, even after a crash. A helper that
+  dies after starting is started again at the next dictation (which pastes
+  the raw text).
+- **In the pipeline:** `LocalCleaner` is one more `Cleaner` on Q2's port,
+  sending prompt v3 (the prompt behind the 76.8 eval result). The app's
+  cleaner uses it while the helper runs, else the cloud engine's. Q2's
+  cleanup step does the rest for both: the guard (here against prompt v3),
+  the finished-reply check, and the deadline, which is the cleaner's own
+  `local_cleanup::TIMEOUT` (slower Macs need more than the cloud's): a
+  late request is dropped, which closes its connection and stops the
+  generation, and the raw transcript is pasted.
 
 ## Code reuse and licences
 
@@ -148,7 +187,7 @@ adapter. Tauri is a thin layer on top.
 - Every build has the hardened runtime. It has one entitlement, the microphone.
 - A build signed by another certificate loses both permissions (the update
   itself and the settings, history and key survive). The app notices and asks
-  again, in the setup window (N1, `e2e_update_to_new_certificate`).
+  again, in the setup window (N1).
 
 ## OS behaviour rules
 
@@ -321,7 +360,7 @@ The rule stays: run the gate before you push. `scripts/gate.sh` (helpers in
 
 ## CI
 
-CI (`.github/workflows/ci.yml`, `dmg.yml`) runs on GitHub-hosted runners for
+CI (`.github/workflows/ci.yml`) runs on GitHub-hosted runners for
 every pull request (forks included) and every push to `main`. The repository
 is public, and a pull request can edit workflow files, so **no workflow may
 reach the owner's Mac**: there is no self-hosted runner, and
@@ -336,19 +375,19 @@ reach the owner's Mac**: there is no self-hosted runner, and
   builds, lints and tests `dictation-platform` and `dictation-transcribe` (the Metal build of the on-device engine, #219) on `macos-15` (Apple Silicon,
   checked with `uname -m`), the `#[cfg(target_os = "macos")]` code Linux
   compiles out, then also runs workspace clippy, nextest and doctests with
-  `DICTATION_NO_LAUNCH=1` (G2), so every crate's tests run on a Mac too. `dmg.yml` builds the tester DMG on `macos-15`, signed ad hoc
-  (`DMG_ADHOC=1`): there is no certificate and no secret in CI.
+  `DICTATION_NO_LAUNCH=1` (G2), so every crate's tests run on a Mac too. The
+  tester DMG is built on the owner's Mac (`scripts/build-dmg.sh`,
+  `scripts/release.sh`), not in CI.
 - **Job names are stable** (they become required status checks): `Quality gate (Linux)`,
-  `Platform crate (macOS)` and, for packaging changes, `DMG (macOS)`. Renaming
-  one breaks the required check.
+  `Platform crate (macOS)`. Renaming one breaks the required check.
 - **Rules for every workflow** (checked by `scripts/check-workflows.sh`):
   top-level `permissions: contents: read`; every action pinned to a full
   commit SHA (with the version in a comment); `actions/checkout` with
   `persist-credentials: false`; no `pull_request_target`, no `workflow_run`,
   no `secrets.` reads; `runs-on` one hosted image. `workflow_dispatch` stays
-  only where it is harmless on a hosted runner (CI, DMG).
+  only where it is harmless on a hosted runner (CI).
 - **When a pinned tool version changes,** update the `tool:` line in
-  `ci.yml` (and `dmg.yml` for cargo-about) with it.
+  `ci.yml` with it.
 - **One run per PR:** a new push cancels the superseded run. The concurrency
   group is the PR number for pull requests and the run id for everything
   else, so pushes to `main` and manual runs are never cancelled.

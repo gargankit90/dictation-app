@@ -1,6 +1,7 @@
 //! Cleanup after transcription (Q2): text in, cleaned text out.
 
 use std::future::Future;
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -61,6 +62,20 @@ pub trait Cleaner: Send + Sync {
     /// A [`CleanupError`] as documented on each variant;
     /// [`CleanupError::Off`] when cleanup isn't configured.
     fn clean(&self, text: &str) -> impl Future<Output = Result<String, CleanupError>> + Send;
+
+    /// How long this cleaner may take; `None` for the pipeline's default
+    /// (`dictation_core::cleanup::TIMEOUT`). The on-device cleaner (Q4)
+    /// needs longer on slower Macs.
+    fn deadline(&self) -> Option<Duration> {
+        None
+    }
+
+    /// The system prompt this cleaner sends, which the guard checks the
+    /// reply doesn't echo; `None` for the cloud prompt
+    /// (`dictation_core::cleanup::prompt`).
+    fn prompt(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 /// A [`Cleaner`] that is always off.

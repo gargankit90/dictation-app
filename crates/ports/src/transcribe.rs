@@ -122,7 +122,7 @@ impl TranscribeError {
             Self::RateLimited => {
                 "The provider is limiting requests right now. Try again in a minute.".to_owned()
             }
-            Self::OutOfCredits => "Add credits on OpenRouter, then try again.".to_owned(),
+            Self::OutOfCredits => "Your OpenRouter credits ran out. Add credits.".to_owned(),
             Self::NoRoute => "No provider can take this dictation with Vocet's privacy settings \
                  right now. Try again in a few minutes."
                 .to_owned(),
@@ -213,7 +213,7 @@ mod tests {
             ),
             (
                 TranscribeError::OutOfCredits,
-                "Add credits on OpenRouter, then try again.",
+                "Your OpenRouter credits ran out. Add credits.",
             ),
             (
                 TranscribeError::NoRoute,
@@ -269,7 +269,7 @@ mod tests {
             ),
             (TranscribeError::InvalidKey, ErrorCode::KeyRejected),
             (TranscribeError::RateLimited, ErrorCode::ProviderQuota),
-            (TranscribeError::OutOfCredits, ErrorCode::ProviderQuota),
+            (TranscribeError::OutOfCredits, ErrorCode::OutOfCredits),
             (TranscribeError::NoRoute, ErrorCode::EngineFailed),
             (TranscribeError::Timeout, ErrorCode::NetworkUnreachable),
             (

@@ -4,9 +4,9 @@
 
 #![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
 
-use std::io::Write;
-use std::sync::{Arc, Mutex};
+mod common;
 
+use common::Captured;
 use dictation_core::settings::Settings;
 use dictation_ports::{Audio, Secret, SecretError, Transcriber};
 use dictation_transcribe::engine::{Engine, Transcribers};
@@ -16,26 +16,6 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const KEY: &str = "gsk_leakcheck-NOT-REAL-77aa";
 const KEY2: &str = "gsk_leakcheck2-NOT-REAL-88bb";
 const TRANSCRIPT: &str = "zebra marmalade transcript";
-
-#[derive(Clone, Default)]
-struct Captured(Arc<Mutex<Vec<u8>>>);
-
-impl Write for Captured {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
-    type Writer = Self;
-    fn make_writer(&'a self) -> Self::Writer {
-        self.clone()
-    }
-}
 
 fn audio() -> Audio {
     Audio {
@@ -54,13 +34,7 @@ fn built(server: &MockServer, key: &str) -> Engine {
 
 #[tokio::test]
 async fn the_key_and_transcript_stay_out_of_logs_and_messages_through_transcribers() {
-    let captured = Captured::default();
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
-        .with_ansi(false)
-        .with_writer(captured.clone())
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let (captured, _guard) = Captured::install();
 
     let echo = serde_json::json!({"error": {"message": format!("bad key {KEY} / {KEY2}")}});
     let responses = vec![

@@ -1,4 +1,4 @@
-# Helpers shared by e2e_real_openrouter and e2e_error_bad_key (M4.4). Sourced by
+# Helpers for e2e_real_openrouter (M4.4). Sourced by
 # run.sh with the scenarios (every scenarios/*.sh), but defines no scenario.
 #
 # The app reads its API key from the login keychain, so a test has the app
