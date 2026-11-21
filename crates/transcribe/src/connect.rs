@@ -5,7 +5,9 @@
 //!
 //! 1. a random `code_verifier` (kept in memory only) and its S256
 //!    `code_challenge`, and a random `state`;
-//! 2. a one-shot HTTP listener on `127.0.0.1`, on a free port;
+//! 2. a one-shot HTTP listener on `127.0.0.1` and, where the machine has it,
+//!    `[::1]`, on one free port (`localhost`, the host `OpenRouter` documents
+//!    for callbacks, may resolve to either);
 //! 3. the caller opens the sign-in address in the browser;
 //! 4. the browser comes back to `http://localhost:<port>/callback?code=…&state=…`;
 //!    only a request with this attempt's `state` counts, anything else gets
@@ -179,13 +181,12 @@ pub async fn connect(
 ) -> Result<Secret, ConnectError> {
     let pkce = Pkce::new()?;
     let state = base64url(&random::<16>()?);
-    let listener = TcpListener::bind(("127.0.0.1", 0))
-        .await
-        .map_err(|e| ConnectError::Start(e.to_string()))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| ConnectError::Start(e.to_string()))?
-        .port();
+    let listeners = bind_loopback().await?;
+    let port = listeners
+        .first()
+        .and_then(|l| l.local_addr().ok())
+        .map(|a| a.port())
+        .ok_or_else(|| ConnectError::Start("no listener".to_owned()))?;
     let callback = format!("http://localhost:{port}{CALLBACK_PATH}");
     let url = format!(
         "{}?callback_url={}&code_challenge={}&code_challenge_method=S256&state={}&key_label={}",
@@ -197,23 +198,58 @@ pub async fn connect(
     );
     open(&url).map_err(ConnectError::Start)?;
     tokio::select! {
-        outcome = tokio::time::timeout(config.timeout, wait(&listener, &state, config, &pkce)) => {
+        outcome = tokio::time::timeout(config.timeout, wait(&listeners, &state, config, &pkce)) => {
             outcome.unwrap_or(Err(ConnectError::TimedOut))
         }
         () = cancel => Err(ConnectError::Cancelled),
     }
 }
 
+/// Binds `127.0.0.1` on a free port, then `[::1]` on the same port. Without
+/// IPv6 (or with that port taken there) the IPv4 listener serves alone;
+/// neither is ever reachable from another machine.
+async fn bind_loopback() -> Result<Vec<TcpListener>, ConnectError> {
+    let v4 = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .map_err(|e| ConnectError::Start(e.to_string()))?;
+    let port = v4
+        .local_addr()
+        .map_err(|e| ConnectError::Start(e.to_string()))?
+        .port();
+    let mut listeners = vec![v4];
+    if let Ok(v6) = TcpListener::bind(("::1", port)).await {
+        listeners.push(v6);
+    }
+    Ok(listeners)
+}
+
+/// The next connection on any of `listeners` (one or two).
+async fn accept_any(listeners: &[TcpListener]) -> Option<TcpStream> {
+    let accepted = match listeners {
+        [one] => one.accept().await,
+        [first, second] => {
+            tokio::select! {
+                result = first.accept() => result,
+                result = second.accept() => result,
+            }
+        }
+        _ => return None,
+    };
+    accepted.ok().map(|(stream, _)| stream)
+}
+
 /// Accepts connections until one is the callback of this attempt, then
 /// exchanges its code.
 async fn wait(
-    listener: &TcpListener,
+    listeners: &[TcpListener],
     state: &str,
     config: &Config,
     pkce: &Pkce,
 ) -> Result<Secret, ConnectError> {
     loop {
-        let Ok((mut stream, _)) = listener.accept().await else {
+        let Some(mut stream) = accept_any(listeners).await else {
+            // A failed accept (out of descriptors, say): don't spin.
+            tokio::time::sleep(Duration::from_millis(50)).await;
             continue;
         };
         let Some(code) = tokio::time::timeout(READ_TIMEOUT, read_callback(&mut stream, state))
@@ -588,6 +624,26 @@ mod tests {
         // socket itself is on 127.0.0.1 only (the test above reaches it there).
         let callback = seen.lock().unwrap().clone().unwrap();
         assert!(callback.starts_with("http://localhost:"));
+    }
+
+    /// `localhost` may resolve to `::1`: where the machine has IPv6, the
+    /// callback works there too, on the same port.
+    #[tokio::test]
+    async fn the_callback_also_works_on_ipv6_loopback_where_there_is_one() {
+        let listeners = bind_loopback().await.unwrap();
+        let port = listeners[0].local_addr().unwrap().port();
+        assert!(listeners[0].local_addr().unwrap().ip().is_loopback());
+        if listeners.len() == 2 {
+            assert_eq!(listeners[1].local_addr().unwrap().port(), port);
+            assert!(listeners[1].local_addr().unwrap().is_ipv6());
+            assert!(listeners[1].local_addr().unwrap().ip().is_loopback());
+            let client = tokio::spawn(async move {
+                let mut stream = TcpStream::connect(("::1", port)).await.unwrap();
+                stream.write_all(b"GET /x HTTP/1.1\r\n\r\n").await.unwrap();
+            });
+            assert!(accept_any(&listeners).await.is_some());
+            client.await.unwrap();
+        }
     }
 
     #[tokio::test]

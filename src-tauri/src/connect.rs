@@ -42,11 +42,12 @@ pub async fn connect_openrouter(
     let (cancel, cancelled) = oneshot::channel::<()>();
     // A newer attempt replaces the older one, which ends as cancelled.
     *attempt.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(cancel);
+    let (connect_config, browser) = plan(engine.inner(), &opener.0);
     connect_and_save(
         &state.0,
         engine.inner(),
-        &connect::Config::openrouter(),
-        opener.0.as_ref(),
+        &connect_config,
+        browser.as_ref(),
         async {
             let _ = cancelled.await;
         },
@@ -69,6 +70,55 @@ pub fn cancel_connect(attempt: State<'_, AppConnect>) -> Result<(), String> {
         let _ = cancel.send(());
     }
     Ok(())
+}
+
+/// Where to sign in and what plays the browser. Normally `OpenRouter` and
+/// the system browser. A test build pointed at a fake provider
+/// (`--debug-provider-url <base>`, loopback `http` only) signs in at
+/// `<base>/auth` and exchanges at `<base>/auth/keys`, and "opens the
+/// browser" by requesting the sign-in address itself, so the fake (which
+/// reads `callback_url` and `state` from it) can call the callback back.
+fn plan(live: &LiveEngine, opener: &Arc<dyn Opener>) -> (connect::Config, Arc<dyn Opener>) {
+    let base = live.provider_base_url(Provider::OpenRouter);
+    if base == dictation_transcribe::openrouter::BASE_URL {
+        return (connect::Config::openrouter(), Arc::clone(opener));
+    }
+    let config = connect::Config {
+        auth_url: format!("{base}/auth"),
+        exchange_url: format!("{base}/auth/keys"),
+        ..connect::Config::openrouter()
+    };
+    (config, Arc::new(FakeBrowser))
+}
+
+/// The debug-only browser: one plain `GET` of the sign-in address.
+struct FakeBrowser;
+
+impl Opener for FakeBrowser {
+    fn open_url(&self, url: &str) -> Result<(), String> {
+        use std::io::Write as _;
+        let parsed = reqwest::Url::parse(url).map_err(|e| e.to_string())?;
+        let host = parsed.host_str().ok_or("no host")?.to_owned();
+        let port = parsed.port_or_known_default().ok_or("no port")?;
+        let target = match parsed.query() {
+            Some(query) => format!("{}?{query}", parsed.path()),
+            None => parsed.path().to_owned(),
+        };
+        std::thread::spawn(move || {
+            if let Ok(mut stream) = std::net::TcpStream::connect((host.as_str(), port)) {
+                let _ = write!(
+                    stream,
+                    "GET {target} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+                );
+                let _ = std::io::Read::read_to_end(&mut stream, &mut Vec::new());
+            }
+        });
+        Ok(())
+    }
+
+    fn reveal_folder(&self, _dir: &std::path::Path) -> Result<(), String> {
+        Err("no file manager in a test build".to_owned())
+    }
 }
 
 /// The sign-in and the save, with the pieces a test replaces.
@@ -265,6 +315,168 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    /// A test build's fake provider: `<base>/auth` gets the sign-in request
+    /// (from the debug browser) and calls the callback back; `<base>/auth/keys`
+    /// answers the exchange.
+    struct FakeAuth;
+
+    impl wiremock::Respond for FakeAuth {
+        fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
+            let get = |name: &str| {
+                request
+                    .url
+                    .query_pairs()
+                    .find(|(k, _)| k == name)
+                    .map(|(_, v)| v.into_owned())
+                    .unwrap()
+            };
+            let callback = reqwest::Url::parse(&get("callback_url")).unwrap();
+            let target = format!("127.0.0.1:{}", callback.port().unwrap());
+            let state = get("state");
+            std::thread::spawn(move || {
+                use std::io::{Read, Write};
+                let mut stream = std::net::TcpStream::connect(target).unwrap();
+                write!(
+                    stream,
+                    "GET /callback?code=fake-code&state={state} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+                )
+                .unwrap();
+                let _ = stream.read_to_string(&mut String::new());
+            });
+            ResponseTemplate::new(200)
+        }
+    }
+
+    async fn fake_provider() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/auth"))
+            .respond_with(FakeAuth)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/auth/keys"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "key": KEY })),
+            )
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[test]
+    fn a_real_provider_signs_in_at_openrouter_with_the_system_browser() {
+        let opener: Arc<dyn Opener> = Arc::new(FakeOpener::new());
+        let (config, _) = plan(&LiveEngine::fixed(), &opener);
+        assert_eq!(config.auth_url, "https://openrouter.ai/auth");
+        assert_eq!(
+            config.exchange_url,
+            "https://openrouter.ai/api/v1/auth/keys"
+        );
+    }
+
+    /// Q3 e2e hook: with `--debug-provider-url`, Connect goes through the
+    /// fake provider alone and saves its key, with the real opener never used.
+    #[tokio::test]
+    async fn a_test_build_connects_through_the_fake_provider() {
+        let server = fake_provider().await;
+        let opener = FakeOpener::new();
+        let shared: Arc<dyn Opener> = Arc::new(opener.clone());
+        let live = LiveEngine::fixed().at(&server.uri());
+        let (connect_config, browser) = plan(&live, &shared);
+        assert_eq!(connect_config.auth_url, format!("{}/auth", server.uri()));
+        let store = MemSecretStore::new();
+        let config = Arc::new(Config::new(temp(), store.clone()));
+        connect_and_save(
+            &config,
+            &live,
+            &connect_config,
+            browser.as_ref(),
+            std::future::pending(),
+        )
+        .await
+        .unwrap();
+        let saved = store.get(Provider::OpenRouter.key_name()).unwrap().unwrap();
+        assert_eq!(saved.expose(), KEY);
+        assert!(opener.urls().is_empty(), "the system browser was used");
+    }
+
+    /// Q3 privacy: the key, the code and the verifier reach no log line, on
+    /// success or failure.
+    #[tokio::test]
+    async fn the_connect_path_never_logs_the_key_the_code_or_the_verifier() {
+        use std::sync::Mutex;
+        use tracing_subscriber::fmt::MakeWriter;
+
+        #[derive(Clone, Default)]
+        struct Sink(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Sink {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl<'a> MakeWriter<'a> for Sink {
+            type Writer = Sink;
+            fn make_writer(&'a self) -> Sink {
+                self.clone()
+            }
+        }
+
+        let sink = Sink::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(sink.clone())
+            .with_max_level(tracing::Level::TRACE)
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        // Under `cargo test` threads, other tests ran these log calls with no
+        // subscriber and cached "off"; the gate's nextest runs one test per
+        // process, where this is exact.
+        tracing::callsite::rebuild_interest_cache();
+
+        // Success.
+        let server = fake_provider().await;
+        let live = LiveEngine::fixed().at(&server.uri());
+        let shared: Arc<dyn Opener> = Arc::new(FakeOpener::new());
+        let (connect_config, browser) = plan(&live, &shared);
+        let config = Arc::new(Config::new(temp(), MemSecretStore::new()));
+        connect_and_save(
+            &config,
+            &live,
+            &connect_config,
+            browser.as_ref(),
+            std::future::pending(),
+        )
+        .await
+        .unwrap();
+        // A refused exchange, which does log a warning.
+        let (_refusing, refused_config) = exchange(ResponseTemplate::new(403)).await;
+        let browser = Browser {
+            inner: FakeOpener::new(),
+            state_ok: true,
+        };
+        connect_and_save(
+            &config,
+            &LiveEngine::fixed(),
+            &refused_config,
+            &browser,
+            std::future::pending(),
+        )
+        .await
+        .unwrap_err();
+
+        let logged = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
+        assert!(logged.contains("connecting OpenRouter failed"), "{logged}");
+        for secret in [KEY, "NOT-REAL-q3", "fake-code", "code_verifier"] {
+            assert!(!logged.contains(secret), "{secret} in the log: {logged}");
+        }
+        // The one-time challenge and state never appear either.
+        assert!(!logged.contains("code_challenge"), "{logged}");
     }
 
     #[tokio::test]
