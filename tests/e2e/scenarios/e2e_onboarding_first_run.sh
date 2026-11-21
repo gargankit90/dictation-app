@@ -37,8 +37,8 @@ e2e_onboarding_first_run() {
   expect "press Get started" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" "Get started"
   expect "Speech asks for the language" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Which language" 10
-  expect "the local model is recommended" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "English · 477 MB" 10
+  expect "the local model is offered" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "English · 1320 MB" 10
   expect "choose my own key" \
     ax_ok radio-press "$APP_NAME" "$ONBOARDING_WINDOW" "Use my own Groq or OpenAI key"
   expect "selecting it opens no form" \

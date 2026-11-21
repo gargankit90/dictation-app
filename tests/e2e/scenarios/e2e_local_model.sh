@@ -4,7 +4,7 @@
 # speech (a `say` clip, --debug-audio-file) into TextEdit with the real
 # on-device engine, then do it again with the VM's network off if the VM
 # allows it. Records release-to-text latency. In ALL_SCENARIOS since L1
-# round 2, so post-merge runs keep checking it; it downloads ~477 MB each
+# round 2, so post-merge runs keep checking it; it downloads ~1.3 GB each
 # run. The offline half needs passwordless sudo in the VM (#222).
 
 textedit_has_phrase() { textedit_text | grep -qi "dictation test"; }

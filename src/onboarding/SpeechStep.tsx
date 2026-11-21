@@ -80,8 +80,8 @@ function SpeechForm({
   const [more, setMore] = useState(
     settings.language !== null && settings.language !== "en" && settings.language !== "hi",
   );
-  // What the user picked here. Until they do: the recommendation, or the key
-  // they already chose (coming back to the step).
+  // What the user picked here. Until they do: the key, or what they
+  // already chose (coming back to the step).
   const [picked, setPicked] = useState<Choice | null>(
     kept === null ? null : kept === "own_key" ? "key" : "local",
   );
@@ -142,10 +142,11 @@ function SpeechForm({
   const model = models === null ? null : recommendedModel(models, language);
   // Known, not just not loaded yet: the key is then the only choice.
   const uncovered = models !== null && model === null;
+  // On this Mac is a choice, never the default (owner, Q4): it downloads
+  // about 4.4 GB (speech model, then cleanup model), so only a pick starts it.
   const choice: Choice = uncovered
     ? "key"
-    : (picked ??
-      (settings.transcription === "cloud" && ownKey.keyStatus.state === "saved" ? "key" : "local"));
+    : (picked ?? (settings.transcription === "local" ? "local" : "key"));
 
   async function chooseLanguage(code: string) {
     setLanguage(code);
@@ -350,7 +351,7 @@ function SpeechForm({
           <input
             type="radio"
             name="ob-engine"
-            aria-label="Recommended for your language"
+            aria-label="On this Mac only"
             checked={choice === "local"}
             disabled={model === null}
             onChange={() => {
@@ -358,7 +359,7 @@ function SpeechForm({
             }}
           />
           <span className="ob-option-text">
-            <span className="ob-eyebrow">Recommended for your language</span>
+            <span className="ob-eyebrow">On this Mac only</span>
             {model === null ? (
               modelsError === null ? (
                 <span className="ob-card-title">Loading the models…</span>

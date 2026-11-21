@@ -58,10 +58,11 @@ buttons. A permission step moves on by itself once you have allowed it.
 1. **Welcome.** Click **Get started**.
 2. **Speech.** Pick the language you will mostly speak (English, Hindi, or
    **More…**). Then choose how to turn speech into text:
-   - **Recommended for your language** (on this Mac): click **Download and
-     continue**. The model downloads once; it can keep going while you do
-     the next steps. A language the on-device models don't cover needs your
-     own key.
+   - **On this Mac only** (not selected by default): select it, then click
+     **Download and continue**. The speech model (about 1.3 GB) and then the
+     cleanup model (about 3.1 GB) download once; they keep going while you
+     do the next steps. A language the on-device models don't cover needs
+     your own key.
    - **Use my own Groq or OpenAI key**: click **Continue**, pick the provider,
      paste your key and click **Test & Save**. Groq: go to
      <https://console.groq.com/keys>, sign up (free), click **Create API

@@ -264,8 +264,9 @@ impl ModelDownloads {
     }
 
     /// Starts downloading the default cleanup model if it isn't on this
-    /// Mac yet (Q4): after the speech model, so a fresh install fetches both
-    /// (about 4.4 GB). A failure shows on its Settings row, where Download
+    /// Mac yet (Q4): after a speech model download the user started, so
+    /// choosing on-device fetches both (about 4.4 GB). Nothing downloads
+    /// unless the user picks on-device. A failure shows on its Settings row, where Download
     /// tries again.
     pub fn then_cleanup(&self, live: &LiveEngine) {
         let id = local_models::DEFAULT_CLEANUP_MODEL;

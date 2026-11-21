@@ -67,7 +67,7 @@ srs_mode() {
   expect "$mode: Reduce Motion off" srs_reduce_motion false
 
   ax_ok press "$APP_NAME" "$SRS_WINDOW" "Get started"
-  expect "$mode: Speech" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "English · 477 MB" 15
+  expect "$mode: Speech" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "English · 1320 MB" 15
   srs_settled_shot "speech-english-$mode"
   ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" Hindi
   expect "$mode: Hindi" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "30 languages · 590 MB" 10

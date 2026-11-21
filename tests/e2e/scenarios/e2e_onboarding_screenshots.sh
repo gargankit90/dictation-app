@@ -70,7 +70,7 @@ obs_mode() {
   expect "$mode: Welcome" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Talk instead of type" 30
   obs_shot "1-welcome-$mode"
   ax_ok press "$APP_NAME" "$OBS_WINDOW" "Get started"
-  expect "$mode: Speech" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "English · 477 MB" 15
+  expect "$mode: Speech" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "English · 1320 MB" 15
   obs_shot "2-speech-english-$mode"
   ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" Hindi
   expect "$mode: Hindi" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "30 languages · 590 MB" 10
@@ -90,7 +90,7 @@ obs_mode() {
   obs_size 740 560
   ax_ok press "$APP_NAME" "$OBS_WINDOW" Back
   ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Which language" 10
-  ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" "Recommended for your language"
+  ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" "On this Mac only"
   ax_ok press "$APP_NAME" "$OBS_WINDOW" "Download and continue"
   # The server holds the download part way, so each state below stays on screen
   # until the picture is taken.

@@ -920,12 +920,11 @@ describe("Speech", () => {
   it("finding 3: the own key choice survives a quit, with no key saved and none kept", async () => {
     const { unmount } = show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: /Use my own Groq or OpenAI key/ }));
-    await waitFor(() => {
-      expect(backend.speechChoice).toBe("own_key");
-    });
+    // The key is the default choice (Q4); Continue records it.
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
     fireEvent.click(primary("Continue"));
     fireEvent.change(await screen.findByLabelText("Groq API key"), { target: { value: KEY } });
+    expect(backend.speechChoice).toBe("own_key");
     unmount();
 
     // The relaunch: the app's status has the choice, and the typed key is gone.
@@ -944,7 +943,7 @@ describe("Speech", () => {
     await waitFor(() => {
       expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
     });
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "On this Mac only" }));
     await waitFor(() => {
       expect(backend.speechChoice).toBe("local");
     });
@@ -954,19 +953,25 @@ describe("Speech", () => {
     await waitFor(() => {
       expect(backend.named("has_api_key").length).toBeGreaterThan(1);
     });
-    expect(
-      screen.getByRole<HTMLInputElement>("radio", { name: "Recommended for your language" })
-        .checked,
-    ).toBe(true);
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: "On this Mac only" }).checked).toBe(
+      true,
+    );
   });
 
-  it("criterion 3: English preselects the English model, with its real size", async () => {
+  it("criterion 3: English offers the English model, with its real size, unselected", async () => {
     show();
     const name = await screen.findByText("English · 477 MB");
     expect(name).toBeTruthy();
-    expect(screen.getByText("Recommended for your language")).toBeTruthy();
+    expect(screen.getByText("On this Mac only")).toBeTruthy();
     expect(screen.getByText(MODEL_COPY)).toBeTruthy();
+    // Q4: on this Mac is a choice, never the default; nothing downloads unasked.
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: "On this Mac only" }).checked).toBe(
+      false,
+    );
+    expect(screen.queryByRole("button", { name: "Download and continue" })).toBeNull();
+    pickLocal();
     expect(primary("Download and continue").disabled).toBe(false);
+    expect(backend.named("download_local_model")).toEqual([]);
   });
 
   it("criterion 3: Hindi recommends the multilingual model, with its real size", async () => {
@@ -990,6 +995,7 @@ describe("Speech", () => {
   it("criterion 3: Download and continue chooses, starts the download and moves on", async () => {
     show();
     await screen.findByText("English · 477 MB");
+    pickLocal();
     fireEvent.click(primary("Download and continue"));
     await screen.findByText("Two permissions");
     expect(backend.named("choose_local_model")[0]?.args).toEqual({ id: ENGLISH_MODEL.id });
@@ -1002,6 +1008,7 @@ describe("Speech", () => {
     backend.model(ENGLISH_MODEL.id).state = "ready";
     show();
     await screen.findByText("English · 477 MB");
+    pickLocal();
     fireEvent.click(primary("Continue"));
     await screen.findByText("Two permissions");
     expect(backend.named("download_local_model")).toEqual([]);
@@ -1019,10 +1026,16 @@ describe("Speech", () => {
     mockIPC(backend.handle);
     show();
     await screen.findByText("English · 477 MB");
+    pickLocal();
     fireEvent.click(primary("Download and continue"));
     await screen.findByText("The disk is full.");
     expect(backend.step).toBe("speech");
   });
+
+  /** Picks the on-device card: it is never the default (Q4). */
+  function pickLocal() {
+    fireEvent.click(screen.getByRole("radio", { name: "On this Mac only" }));
+  }
 
   /** Selects the own key on the two choices, and nothing else happens. */
   async function selectOwnKey() {
@@ -1048,9 +1061,7 @@ describe("Speech", () => {
 
   it("U11 criterion 4: selecting the own key shows no form, only Continue", async () => {
     await selectOwnKey();
-    await waitFor(() => {
-      expect(backend.speechChoice).toBe("own_key");
-    });
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
     expect(screen.queryByLabelText("Groq API key")).toBeNull();
     expect(screen.queryByText("Test & Save")).toBeNull();
     expect(primary("Continue").disabled).toBe(false);
@@ -1201,7 +1212,7 @@ describe("Speech", () => {
         "Gujarati needs your own key. Vocet's on-device models don't cover it yet.",
       );
       expect(screen.getByRole<HTMLInputElement>("radio", { name: /own Groq/ }).checked).toBe(true);
-      expect(screen.queryByRole("radio", { name: "Recommended for your language" })).toBeNull();
+      expect(screen.queryByRole("radio", { name: "On this Mac only" })).toBeNull();
       expect(primary("Continue").disabled).toBe(false);
       fireEvent.click(primary("Continue"));
       await screen.findByText("Connect your key");
@@ -1228,6 +1239,7 @@ describe("Speech", () => {
       fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
       await screen.findByText("30 languages · 590 MB");
       clean();
+      pickLocal();
       fireEvent.click(primary("Download and continue"));
       await screen.findByText("Downloading 30 languages · 0 of 590 MB");
       clean();

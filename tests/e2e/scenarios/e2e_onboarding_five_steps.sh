@@ -53,9 +53,11 @@ e2e_onboarding_five_steps() {
   expect "the rail has the five steps" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Permissions" 5
   expect "press Get started" ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Get started"
 
-  expect "Speech recommends the English model" \
-    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "English · 477 MB" 15
-  expect "with its real size" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "477 MB" 5
+  expect "Speech offers the English model" \
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "English · 1320 MB" 15
+  expect "with its real size" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "1320 MB" 5
+  # On this Mac is never the default (Q4): pick it first.
+  expect "pick On this Mac only" ax_ok radio-press "$APP_NAME" "$FIVE_WINDOW" "On this Mac only"
   expect "press Download and continue" \
     ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Download and continue"
   expect "Permissions" \
