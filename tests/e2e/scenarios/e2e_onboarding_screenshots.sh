@@ -73,7 +73,7 @@ obs_mode() {
   expect "$mode: Speech" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "English · 1320 MB" 15
   obs_shot "2-speech-english-$mode"
   ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" Hindi
-  expect "$mode: Hindi" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "30 languages · 590 MB" 10
+  expect "$mode: Hindi" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Hindi needs" 10
   obs_shot "2-speech-hindi-$mode"
   # The longest labels, at the smallest window.
   obs_size 680 520
