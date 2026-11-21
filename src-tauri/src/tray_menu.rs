@@ -15,6 +15,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use crate::preferences::Link;
 use dictation_core::diagnostics::ErrorCode;
 use dictation_core::local_models;
 use dictation_core::settings::{Provider, Settings, Transcription};
@@ -124,6 +125,8 @@ pub enum Effect {
     SystemSettings(Permission),
     /// Restart the app.
     Relaunch,
+    /// Open this page in the browser.
+    OpenLink(Link),
 }
 
 /// The effect of `fix`.
@@ -136,6 +139,7 @@ pub const fn effect_of(fix: Fix) -> Effect {
         Fix::OpenMicrophoneSettings => Effect::SystemSettings(Permission::Microphone),
         Fix::OpenAccessibilitySettings => Effect::SystemSettings(Permission::Accessibility),
         Fix::Relaunch => Effect::Relaunch,
+        Fix::AddCredits => Effect::OpenLink(Link::OpenrouterCredits),
     }
 }
 
@@ -449,6 +453,13 @@ fn run_fix(app: &AppHandle, fix: Fix) {
             }
             refresh(app);
         }
+        Effect::OpenLink(link) => {
+            if let Some(opener) = app.try_state::<diagnostics::AppOpener>() {
+                if let Err(error) = opener.0.open_url(&link.url()) {
+                    tracing::warn!(%error, "couldn't open the browser");
+                }
+            }
+        }
         Effect::Relaunch => {
             if let Some(shell) = app.try_state::<commands::AppShell>() {
                 commands::relaunch_from_tray(&shell);
@@ -540,6 +551,7 @@ mod tests {
                 Effect::SystemSettings(Permission::Accessibility),
             ),
             (Fix::Relaunch, Effect::Relaunch),
+            (Fix::AddCredits, Effect::OpenLink(Link::OpenrouterCredits)),
         ];
         for (fix, effect) in table {
             assert_eq!(effect_of(fix), effect, "{fix:?}");

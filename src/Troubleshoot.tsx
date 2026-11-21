@@ -97,6 +97,9 @@ export function Troubleshoot({ onBack, onOpenSettings, onReport }: Props) {
         case "open_settings":
           onOpenSettings();
           break;
+        case "add_credits":
+          await commands.openLink("openrouter_credits");
+          break;
         case "open_troubleshoot":
         case "try_again":
           break;

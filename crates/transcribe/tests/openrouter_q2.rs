@@ -142,7 +142,7 @@ async fn speech_statuses_map_to_typed_errors_without_the_key() {
 async fn out_of_credits_tells_the_user_to_add_credits() {
     assert_eq!(
         TranscribeError::OutOfCredits.user_message(),
-        "Add credits on OpenRouter, then try again."
+        "Your OpenRouter credits ran out. Add credits."
     );
 }
 

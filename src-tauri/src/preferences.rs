@@ -368,6 +368,8 @@ pub fn stop_microphone_test(test: State<'_, AppMicTest>) -> Result<(), String> {
 pub enum Link {
     /// `OpenRouter`'s page for creating an API key.
     OpenrouterKeys,
+    /// `OpenRouter`'s page for adding credits.
+    OpenrouterCredits,
     /// The privacy notice: what the app sends.
     Privacy,
     /// The source code.
@@ -386,6 +388,7 @@ impl Link {
     pub fn url(self) -> String {
         match self {
             Self::OpenrouterKeys => "https://openrouter.ai/settings/keys".to_owned(),
+            Self::OpenrouterCredits => "https://openrouter.ai/settings/credits".to_owned(),
             Self::Privacy => format!("{REPOSITORY}/blob/main/docs/privacy.md"),
             Self::Repository => REPOSITORY.to_owned(),
             Self::Licence => format!("{REPOSITORY}/blob/main/LICENSE"),
