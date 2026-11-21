@@ -59,18 +59,16 @@ buttons. A permission step moves on by itself once you have allowed it.
 1. **Welcome.** Click **Get started**.
 2. **Speech.** Choose how to turn speech into text (Vocet 0.2 is for
    English):
-   - **Use this Mac**: click **Download and continue**. The models download
-     once; they can keep going while you do the next steps.
-   - **Use OpenRouter**: click **Continue**, then **Connect OpenRouter**.
+   - **Use OpenRouter** (selected by default): click **Continue**, then **Connect OpenRouter**.
      Your browser opens OpenRouter; sign in and allow it. A new account needs
      a few dollars of credit: **Add credits** opens that page. The key
      OpenRouter makes is kept in your macOS Keychain and never shown in
      full. If the browser can't come back, **Paste a key instead**. It is sent only to
      OpenRouter.
-   - **On this Mac only** (not selected by default): select it, then click
+   - **Use this Mac** (not selected by default): select it, then click
      **Download and continue**. One download of about 4.4 GB (speech, then
      cleanup) with one progress bar; it keeps going while you do the next
-     steps. A language the on-device models don't cover needs OpenRouter.
+     steps.
 3. **Permissions.** Click **Allow** for the **Microphone** (macOS asks once;
    choose **Allow**) and for **Accessibility** (the dictation key and typing
    into other apps need it). For Accessibility, switch **Vocet** on under
