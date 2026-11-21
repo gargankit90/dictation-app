@@ -1,0 +1,19 @@
+# Only for the eval harness (eval/): `uv run pytest eval` runs its tests with the packages they need.
+# The app itself is Rust and TypeScript; nothing here is shipped.
+[project]
+name = "vocet-eval"
+version = "0.0.0"
+description = "Evaluation harness for Vocet (eval/); not shipped"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8", "numpy", "soundfile>=0.12", "soxr>=0.3", "amend-va==0.2.1", "jiwer>=3.0"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["eval", "tests/e2e"]
+python_files = ["test_*.py"]
+addopts = "-p no:cacheprovider -W ignore::ResourceWarning"

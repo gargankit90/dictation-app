@@ -234,6 +234,7 @@ Every testable behaviour gets a test, at the cheapest level that catches it.
 | Unit | next to the code (`#[cfg(test)]`), Vitest for UI | milliseconds, no OS or network |
 | Integration | `crates/*/tests/` with fakes and `wiremock` | seconds, no real OS or network |
 | End-to-end | `tests/e2e/`, the built app inside the Lume VM | minutes, scripted |
+| Eval harness | `eval/test_*.py`, Python standard library | seconds, no network, no key (`eval/test.sh`) |
 
 - Tests go in the same commit as the code, or the commit before it (red, then
   green).
@@ -242,6 +243,20 @@ Every testable behaviour gets a test, at the cheapest level that catches it.
 - No sleeps for timing in unit tests: inject a `Clock`.
 - Only these stay manual: real key timing, real mic quality, macOS permission
   prompts, and pasting into other apps (Slack, Chrome, VS Code, Terminal).
+
+### Evaluation harness and the prompt regression check (Q1)
+
+`eval/` measures speech engines, cleanup prompts and models on Voice Arena's public dictation set
+(`eval/README.md`: what is in it, which result supports which product default). The gate runs only its
+offline tests (`eval/test.sh`: no network, no key, under 30 s); `uv run pytest eval` runs them with every
+dependency. The dataset is CC BY-NC: its audio, reference texts and transcripts are never committed (the
+`eval/` tests check that, and for API keys).
+
+**Before merging any change to the cleanup prompt or to a model default**, run `eval/regress.sh` (the Lead
+or the Developer, with `OPENROUTER_API_KEY` in the environment) and put its ZER line in the PR. It runs the
+app's current cleanup prompt on a fixed 40-clip subset and compares ZER with the stored baseline; it fails
+if ZER drops by more than 5 points. It costs about $0.03 and some judge calls, so it is not in the gate:
+`eval/regress.sh --dry-run` prints the plan and the estimate first.
 
 ## Quality gate
 
@@ -257,6 +272,7 @@ every finding is fixed. Locally it skips work it has already done, see below.
 | Coverage | `cargo llvm-cov` | thresholds above |
 | TS | `tsc --noEmit`, `eslint --max-warnings 0`, `vitest run` | all green |
 | Spelling | `typos` | must pass |
+| Eval harness | `eval/test.sh` (Python, offline) | all green |
 
 A suppression (`#[allow]`, `eslint-disable`) needs a comment explaining why,
 and the Code Reviewer must agree.
