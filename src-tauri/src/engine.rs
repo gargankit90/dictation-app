@@ -581,7 +581,7 @@ pub fn engine_for<S: SecretStore + 'static>(
     }
     // Whether a key exists, never the key. The e2e scenarios wait for this.
     tracing::info!(
-        provider = "openrouter",
+        provider = %"openrouter",
         has_key = matches!(key, Ok(Some(_))),
         "engine settings"
     );
