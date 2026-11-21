@@ -92,6 +92,9 @@ pub enum LlamaError {
     /// The helper answered with an HTTP error.
     #[error("the on-device cleanup answered HTTP {0}")]
     Status(u16),
+    /// The start was given up because it was no longer wanted.
+    #[error("the on-device cleanup start was cancelled")]
+    Cancelled,
     /// The answer wasn't a finished chat completion with text (any
     /// `finish_reason` but `stop` counts as unfinished).
     #[error("the on-device cleanup sent an unexpected answer")]
@@ -171,6 +174,7 @@ impl<R: ChatRunner> Cleaner for LocalCleaner<R> {
                 LlamaError::HelperMissing
                 | LlamaError::Start(_)
                 | LlamaError::StartTimeout
+                | LlamaError::Cancelled
                 | LlamaError::Request(_) => CleanupError::Network,
             })
     }
@@ -286,6 +290,22 @@ impl LlamaServer {
     /// launched, or exited) or [`LlamaError::StartTimeout`]. The helper is
     /// stopped on every error.
     pub async fn start(helper: &Path, model: &Path) -> Result<Self, LlamaError> {
+        Self::start_until(helper, model, std::future::pending()).await
+    }
+
+    /// As [`start`](Self::start), given up when `cancel` finishes first:
+    /// the helper is stopped and has exited (its model's memory is free)
+    /// before this returns [`LlamaError::Cancelled`], so a start that
+    /// follows never loads a second model beside it.
+    ///
+    /// # Errors
+    ///
+    /// As [`start`](Self::start), or [`LlamaError::Cancelled`].
+    pub async fn start_until(
+        helper: &Path,
+        model: &Path,
+        cancel: impl Future<Output = ()> + Send,
+    ) -> Result<Self, LlamaError> {
         if !helper.is_file() {
             return Err(LlamaError::HelperMissing);
         }
@@ -301,8 +321,23 @@ impl LlamaServer {
             client,
             supervisor: Mutex::new(Some(supervised)),
         };
-        server.wait_ready(STARTUP_TIMEOUT).await?;
-        Ok(server)
+        tokio::select! {
+            ready = server.wait_ready(STARTUP_TIMEOUT) => ready.map(|()| server),
+            () = cancel => {
+                server.stop_and_wait().await;
+                Err(LlamaError::Cancelled)
+            }
+        }
+    }
+
+    /// Stops the helper and waits (up to a few seconds) for its supervisor
+    /// to exit, which it does only once the server has.
+    async fn stop_and_wait(&self) {
+        let supervised = lock(&self.supervisor).take();
+        if let Some(mut supervised) = supervised {
+            supervised.stdin.take();
+            let _ = tokio::time::timeout(Duration::from_secs(5), supervised.child.wait()).await;
+        }
     }
 
     /// Waits until `/health` says ok, the helper exits, or `limit` passes.

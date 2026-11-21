@@ -4,7 +4,8 @@
 //! Set `DICTATION_LLAMA_SERVER` to a `llama-server` binary (what
 //! `scripts/build-llama-server.sh` builds) and `DICTATION_CLEANUP_MODEL` to
 //! the Gemma 4 E2B GGUF to run it. It starts the helper, cleans one
-//! invented transcript, checks the fillers are gone and the words kept, and
+//! invented transcript, checks the fillers are gone and the words kept,
+//! that a cancelled long generation doesn't hold up the next cleanup, and
 //! that stopping it ends the process.
 
 #![allow(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
@@ -14,7 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dictation_ports::Cleaner;
-use dictation_transcribe::llama::{LlamaServer, LocalCleaner};
+use dictation_transcribe::llama::{ChatRunner, LlamaServer, LocalCleaner};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_real_helper_cleans_a_transcript() {
@@ -50,6 +51,26 @@ async fn the_real_helper_cleans_a_transcript() {
         .await
         .unwrap();
     eprintln!("second in {:?}", started.elapsed());
+
+    // Criterion 2 on the real helper: a long generation cancelled by the
+    // deadline (its request dropped) stops, so the one slot is free and
+    // the next cleanup answers promptly instead of queueing behind it.
+    let long = server.complete(
+        "Write a very long story, at least two thousand words.",
+        "Begin.",
+        3_000,
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), long)
+            .await
+            .is_err(),
+        "the long generation finished before it could be cancelled"
+    );
+    let started = Instant::now();
+    cleaner.clean("um yes see you then").await.unwrap();
+    let next = started.elapsed();
+    eprintln!("after a cancelled generation, next in {next:?}");
+    assert!(next < Duration::from_secs(5), "queued behind: {next:?}");
 
     server.stop();
     for _ in 0..250 {

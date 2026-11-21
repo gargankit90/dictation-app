@@ -5,9 +5,12 @@
 //! with the settings whenever the engine is rebuilt: it starts the helper in
 //! the background (the model's SHA-256 is checked first, then it loads in a
 //! few seconds) or stops it. Dictations meanwhile get no cleaner and paste
-//! the raw transcript. A start that finishes after the settings changed
-//! again is thrown away, so a quick switch back and forth never leaves two
-//! helpers running.
+//! the raw transcript. One helper per app: starts run one at a time, and a
+//! start the settings have moved on from is cancelled, its helper stopped
+//! and gone before the next one loads, so a quick switch back and forth
+//! never loads two models. [`LocalCleanup::refresh`] decides again when the
+//! cleanup model finishes downloading after the speech model, with no
+//! settings change to say so.
 //!
 //! Stopping is dropping the last handle (`LlamaServer`'s `Drop` closes its
 //! supervisor's pipe). A cleanup in flight holds a handle until it ends,
@@ -20,6 +23,8 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use tokio::sync::watch;
+
 use dictation_core::local_models::{self, LocalModel};
 use dictation_core::settings::{Settings, Transcription};
 use dictation_ports::{Cleaner, CleanupError};
@@ -29,9 +34,11 @@ use dictation_transcribe::models::{DownloadError, ModelStore};
 /// A boxed future, for the injected starter and spawner.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
-/// Starts the helper with the model at a path: [`LlamaServer::start`] in
-/// the app, a fake in tests.
-pub type Starter<R> = Arc<dyn Fn(PathBuf) -> BoxFuture<Result<R, LlamaError>> + Send + Sync>;
+/// Starts the helper with the model at a path, giving up (and stopping it)
+/// when the second future finishes: [`LlamaServer::start_until`] in the
+/// app, a fake in tests.
+pub type Starter<R> =
+    Arc<dyn Fn(PathBuf, BoxFuture<()>) -> BoxFuture<Result<R, LlamaError>> + Send + Sync>;
 
 /// Runs a task in the background: `tauri::async_runtime::spawn` in the app.
 pub type Spawner = Arc<dyn Fn(BoxFuture<()>) + Send + Sync>;
@@ -49,6 +56,10 @@ pub struct LocalCleanup<R = LlamaServer> {
     spawn: Spawner,
     check: Check,
     state: Arc<Mutex<State<R>>>,
+    /// The generation, for starts to see they've been superseded.
+    generations: Arc<watch::Sender<u64>>,
+    /// Held across a start: one helper per app, never two loading at once.
+    starting: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl<R> Clone for LocalCleanup<R> {
@@ -60,6 +71,8 @@ impl<R> Clone for LocalCleanup<R> {
             spawn: Arc::clone(&self.spawn),
             check: Arc::clone(&self.check),
             state: Arc::clone(&self.state),
+            generations: Arc::clone(&self.generations),
+            starting: Arc::clone(&self.starting),
         }
     }
 }
@@ -70,6 +83,8 @@ struct State<R> {
     generation: u64,
     /// The model file wanted, if any.
     wanted: Option<PathBuf>,
+    /// Whether the last settings chose on-device speech.
+    local: bool,
     /// The helper, once it has started.
     running: Option<Arc<R>>,
 }
@@ -95,11 +110,11 @@ impl LocalCleanup<LlamaServer> {
     /// tasks run on Tauri's async runtime.
     #[must_use]
     pub fn new(store: ModelStore, helper: Option<PathBuf>) -> Self {
-        let starter: Starter<LlamaServer> = Arc::new(move |model: PathBuf| {
+        let starter: Starter<LlamaServer> = Arc::new(move |model: PathBuf, cancel| {
             let helper = helper.clone();
             Box::pin(async move {
                 let helper = helper.ok_or(LlamaError::HelperMissing)?;
-                LlamaServer::start(&helper, &model).await
+                LlamaServer::start_until(&helper, &model, cancel).await
             })
         });
         let spawn: Spawner = Arc::new(|task| {
@@ -124,8 +139,11 @@ impl<R: ChatRunner + 'static> LocalCleanup<R> {
             state: Arc::new(Mutex::new(State {
                 generation: 0,
                 wanted: None,
+                local: false,
                 running: None,
             })),
+            generations: Arc::new(watch::channel(0).0),
+            starting: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -149,20 +167,32 @@ impl<R: ChatRunner + 'static> LocalCleanup<R> {
     /// Starts or stops the helper for `settings`: running while on-device
     /// transcription is selected and the model is downloaded.
     pub fn follow(&self, settings: &Settings) {
-        let wanted = match settings.transcription {
-            Transcription::Local => self.store.ready_path(self.model),
-            Transcription::Cloud => None,
+        self.follow_local(settings.transcription == Transcription::Local);
+    }
+
+    /// Decides again with the last settings: the cleanup model has just
+    /// finished downloading, with no settings change to say so.
+    pub fn refresh(&self) {
+        let local = lock(&self.state).local;
+        self.follow_local(local);
+    }
+
+    fn follow_local(&self, local: bool) {
+        let wanted = if local {
+            self.store.ready_path(self.model)
+        } else {
+            None
         };
         let generation = {
             let mut state = lock(&self.state);
+            state.local = local;
             if state.wanted == wanted {
                 return;
             }
-            state.generation += 1;
             state.wanted.clone_from(&wanted);
             // Dropping the handle stops the helper.
             state.running = None;
-            state.generation
+            self.bump(&mut state)
         };
         let Some(path) = wanted else {
             tracing::info!("on-device cleanup off");
@@ -176,9 +206,16 @@ impl<R: ChatRunner + 'static> LocalCleanup<R> {
     /// [`follow`](Self::follow) decides again.
     pub fn release(&self) {
         let mut state = lock(&self.state);
-        state.generation += 1;
         state.wanted = None;
         state.running = None;
+        self.bump(&mut state);
+    }
+
+    /// A new generation: a start of an older one is cancelled.
+    fn bump(&self, state: &mut State<R>) -> u64 {
+        state.generation += 1;
+        self.generations.send_replace(state.generation);
+        state.generation
     }
 
     async fn start(&self, generation: u64, path: PathBuf) {
@@ -200,11 +237,18 @@ impl<R: ChatRunner + 'static> LocalCleanup<R> {
                 return;
             }
         };
+        // One start at a time: a superseded one is cancelled below and
+        // releases this only once its helper has exited.
+        let _one = self.starting.lock().await;
         if !current() {
             return;
         }
+        let mut generations = self.generations.subscribe();
+        let superseded: BoxFuture<()> = Box::pin(async move {
+            let _ = generations.wait_for(|now| *now != generation).await;
+        });
         let started = std::time::Instant::now();
-        match (self.starter)(path).await {
+        match (self.starter)(path, superseded).await {
             Ok(server) => {
                 let mut state = lock(&self.state);
                 if state.generation == generation {
@@ -212,6 +256,9 @@ impl<R: ChatRunner + 'static> LocalCleanup<R> {
                     tracing::info!(model = model.id, elapsed = ?started.elapsed(), "on-device cleanup ready");
                 }
                 // Otherwise the settings moved on: `server` drops here and stops.
+            }
+            Err(LlamaError::Cancelled) => {
+                tracing::debug!(model = model.id, "on-device cleanup start cancelled");
             }
             Err(error) => {
                 tracing::warn!(model = model.id, %error, "on-device cleanup didn't start");
@@ -254,8 +301,7 @@ impl<R: ChatRunner + 'static> LocalCleanup<R> {
                     );
                     let path = path.clone();
                     state.running = None;
-                    state.generation += 1;
-                    Some((state.generation, path))
+                    Some((self.bump(&mut state), path))
                 }
                 _ => None,
             }

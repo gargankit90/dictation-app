@@ -326,3 +326,53 @@ async fn the_cleanup_model_follows_the_speech_model() {
     downloads.then_cleanup(&live);
     assert!(!downloads.is_running(gemma));
 }
+
+/// Review finding 1: when the chained cleanup download finishes, the
+/// helper starts with no settings save or restart.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_finished_cleanup_download_starts_the_helper() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use dictation_core::settings::{Settings, Transcription};
+    use dictation_transcribe::llama::{LlamaError, LlamaServer};
+
+    use crate::cleanup::{LocalCleanup, Spawner, Starter};
+
+    let dir = TempDir::new("chain-done");
+    std::fs::create_dir_all(&dir.0).unwrap();
+    let starts = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&starts);
+    let starter: Starter<LlamaServer> = Arc::new(move |_, _| {
+        counted.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Err(LlamaError::HelperMissing) })
+    });
+    let spawn: Spawner = Arc::new(|task| {
+        tokio::spawn(task);
+    });
+    let store = ModelStore::new(dir.0.clone(), Arc::new(|_| Ok(u64::MAX))).unwrap();
+    let live = live(&dir.0).with_cleanup(LocalCleanup::trusting(store, starter, spawn));
+    let keeper = live.cleanup().unwrap();
+    // The speech model's rebuild: on-device chosen, Gemma not here yet.
+    keeper.follow(&Settings {
+        transcription: Transcription::Local,
+        ..Settings::default()
+    });
+    // A failed download changes nothing.
+    cleanup_downloaded(&live, &Err(DownloadError::Cancelled));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(starts.load(Ordering::SeqCst), 0);
+    // Gemma lands: the helper is started.
+    let gemma = &local_models::GEMMA_4_E2B;
+    std::fs::File::create(dir.0.join(gemma.file_name))
+        .unwrap()
+        .set_len(gemma.size_bytes)
+        .unwrap();
+    cleanup_downloaded(&live, &Ok(()));
+    for _ in 0..100 {
+        if starts.load(Ordering::SeqCst) == 1 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the helper wasn't started");
+}

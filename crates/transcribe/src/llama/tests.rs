@@ -134,6 +134,45 @@ async fn a_completion_sends_the_key_and_reads_the_reply() {
     );
 }
 
+/// Criterion 2: cancelling a cleanup (dropping its future, as the
+/// pipeline's deadline does) closes the helper's connection, which is how
+/// llama-server learns to stop that generation and free its one slot.
+#[tokio::test]
+async fn a_dropped_request_closes_its_connection_so_the_helper_stops_generating() {
+    use tokio::io::AsyncReadExt as _;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    // A helper that reads the request, never answers (a long generation),
+    // and reports when the client goes away.
+    let closed = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buffer = [0u8; 4096];
+        loop {
+            match socket.read(&mut buffer).await {
+                Ok(0) | Err(_) => return true,
+                Ok(_) => {}
+            }
+        }
+    });
+    let client = crate::http::client(&base_url).unwrap();
+    let body = request_body("s", "u", 4_000);
+    let request = complete_at(&client, &base_url, "k", &body);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), request)
+            .await
+            .is_err()
+    );
+    // The client (and its pool) stays alive: the drop alone closes it.
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), closed)
+            .await
+            .expect("the connection stayed open after the request was dropped")
+            .unwrap()
+    );
+    drop(client);
+}
+
 #[tokio::test]
 async fn http_errors_and_odd_answers_are_typed() {
     let server = MockServer::start().await;
@@ -304,6 +343,42 @@ async fn a_helper_that_never_gets_ready_is_stopped_after_the_limit() {
         Err(LlamaError::StartTimeout)
     );
     assert!(gone_within(pid, Duration::from_secs(5)).await);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_start_returns_only_once_its_helper_has_exited() {
+    let dir = TempDir::new("cancel-start");
+    let pid_file = dir.0.join("pid");
+    // Never gets ready, like a model still loading; says its pid.
+    let helper = dir.helper(&format!(
+        "echo $$ > '{0}.tmp'\nmv '{0}.tmp' '{0}'\nexec sleep 300",
+        pid_file.display()
+    ));
+    let model = dir.0.join("model.gguf");
+    let (cancel, cancelled) = tokio::sync::oneshot::channel::<()>();
+    let start = tokio::spawn({
+        let helper = helper.clone();
+        async move {
+            LlamaServer::start_until(&helper, &model, async {
+                let _ = cancelled.await;
+            })
+            .await
+        }
+    });
+    let mut pid = None;
+    for _ in 0..250 {
+        if let Ok(text) = std::fs::read_to_string(&pid_file) {
+            pid = text.trim().parse::<u32>().ok();
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let pid = pid.expect("the helper started");
+    assert!(alive(pid));
+    cancel.send(()).unwrap();
+    assert!(matches!(start.await.unwrap(), Err(LlamaError::Cancelled)));
+    // Already gone when the start returns: the next start can't overlap it.
+    assert!(!alive(pid), "the cancelled helper is still running");
 }
 
 #[tokio::test]

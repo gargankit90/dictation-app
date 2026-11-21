@@ -27,6 +27,18 @@ struct Behaviour {
     dead: AtomicBool,
     /// Requests never answer.
     hang: AtomicBool,
+    /// Hung requests whose future was dropped: cancelled, which closes the
+    /// helper's connection and stops its generation.
+    dropped: AtomicUsize,
+}
+
+/// Counts a dropped request future.
+struct OnDrop(Arc<Behaviour>);
+
+impl Drop for OnDrop {
+    fn drop(&mut self) {
+        self.0.dropped.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 /// A started helper that counts how many are alive.
@@ -44,6 +56,7 @@ impl Drop for FakeServer {
 impl ChatRunner for FakeServer {
     async fn complete(&self, _: &str, _: &str, _: u32) -> Result<String, LlamaError> {
         if self.behaviour.hang.load(Ordering::SeqCst) {
+            let _cancelled = OnDrop(Arc::clone(&self.behaviour));
             std::future::pending::<()>().await;
         }
         Ok(CLEANED.to_owned())
@@ -95,7 +108,7 @@ fn rig(dir: &TempDir, delay: Duration, fail: bool) -> Rig {
         Arc::clone(&alive),
         Arc::clone(&behaviour),
     );
-    let starter: Starter<FakeServer> = Arc::new(move |path: PathBuf| {
+    let starter: Starter<FakeServer> = Arc::new(move |path: PathBuf, _cancel| {
         let (s, a, b) = (Arc::clone(&s), Arc::clone(&a), Arc::clone(&b));
         Box::pin(async move {
             assert!(path.ends_with(local_models::GEMMA_4_E2B.file_name));
@@ -334,6 +347,20 @@ async fn a_local_dictation_pastes_the_cleaned_text_and_the_raw_text_on_a_helper_
         waited >= local_cleanup::TIMEOUT && waited < local_cleanup::TIMEOUT * 3,
         "{waited:?}"
     );
+    // Criterion 2: the timed-out inference was cancelled (its request
+    // dropped), and the next dictation is cleaned at once, not queued
+    // behind it.
+    assert_eq!(rig.behaviour.dropped.load(Ordering::SeqCst), 1);
+    rig.behaviour.hang.store(false, Ordering::SeqCst);
+    let started = std::time::Instant::now();
+    let (outcomes, pasted) = dictate_with(&rig.keeper).await;
+    assert_eq!(outcomes, [CleanupOutcome::Applied]);
+    assert_eq!(pasted, [CLEANED]);
+    assert!(
+        started.elapsed() < local_cleanup::TIMEOUT,
+        "{:?}",
+        started.elapsed()
+    );
 
     // Cloud speech selected: the helper is stopped and cleanup is the
     // cloud's (off here), so the raw text is pasted with nothing counted.
@@ -341,4 +368,74 @@ async fn a_local_dictation_pastes_the_cleaned_text_and_the_raw_text_on_a_helper_
     let (outcomes, pasted) = dictate_with(&rig.keeper).await;
     assert!(outcomes.is_empty());
     assert_eq!(pasted, [RAW]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn review_1_a_cleanup_model_that_lands_later_starts_the_helper_without_a_settings_change() {
+    let dir = TempDir::new("lands");
+    let first = rig(&dir, Duration::ZERO, false);
+    // On-device chosen; the speech model's rebuild runs while Gemma is
+    // still downloading.
+    first.keeper.follow(&settings(Transcription::Local));
+    assert_eq!(first.keeper.state(), CleanupState::Off);
+    // The chained download finishes: no settings save, no restart.
+    dir.download_gemma();
+    first.keeper.refresh();
+    until(|| first.keeper.state() == CleanupState::Ready).await;
+    assert!(first.keeper.cleaner().is_some());
+
+    // With cloud speech, a download that lands starts nothing.
+    let dir = TempDir::new("lands-cloud");
+    let cloud = rig(&dir, Duration::ZERO, false);
+    cloud.keeper.follow(&settings(Transcription::Cloud));
+    dir.download_gemma();
+    cloud.keeper.refresh();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(cloud.starts.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn review_2_a_superseded_start_is_cancelled_and_exits_before_the_next_loads() {
+    let dir = TempDir::new("one-helper");
+    dir.download_gemma();
+    // Each start loads until cancelled (a model that is never ready), then
+    // takes a moment to exit, as the real helper does.
+    let loading = Arc::new(AtomicUsize::new(0));
+    let most = Arc::new(AtomicUsize::new(0));
+    let cancelled = Arc::new(AtomicUsize::new(0));
+    let (l, m, c) = (
+        Arc::clone(&loading),
+        Arc::clone(&most),
+        Arc::clone(&cancelled),
+    );
+    let starter: Starter<FakeServer> = Arc::new(move |_path: PathBuf, cancel| {
+        let (l, m, c) = (Arc::clone(&l), Arc::clone(&m), Arc::clone(&c));
+        Box::pin(async move {
+            let now = l.fetch_add(1, Ordering::SeqCst) + 1;
+            m.fetch_max(now, Ordering::SeqCst);
+            cancel.await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            l.fetch_sub(1, Ordering::SeqCst);
+            c.fetch_add(1, Ordering::SeqCst);
+            Err(LlamaError::Cancelled)
+        })
+    });
+    let spawn: Spawner = Arc::new(|task| {
+        tokio::spawn(task);
+    });
+    let store = ModelStore::new(dir.0.clone(), Arc::new(|_| Ok(u64::MAX))).unwrap();
+    let keeper = LocalCleanup::trusting(store, starter, spawn);
+
+    keeper.follow(&settings(Transcription::Local));
+    until(|| loading.load(Ordering::SeqCst) == 1).await;
+    keeper.follow(&settings(Transcription::Cloud));
+    keeper.follow(&settings(Transcription::Local));
+    // The first start is cancelled and has exited; only then does the
+    // second load.
+    until(|| cancelled.load(Ordering::SeqCst) == 1 && loading.load(Ordering::SeqCst) == 1).await;
+    assert_eq!(most.load(Ordering::SeqCst), 1, "two helpers loaded at once");
+    keeper.release();
+    until(|| cancelled.load(Ordering::SeqCst) == 2).await;
+    assert_eq!(loading.load(Ordering::SeqCst), 0);
+    assert_eq!(most.load(Ordering::SeqCst), 1);
 }

@@ -277,7 +277,9 @@ impl ModelDownloads {
         if ready {
             return;
         }
-        if let Err(error) = self.start(live, id, None, |_| {}) {
+        let after = live.clone();
+        let done = move |result: Result<(), DownloadError>| cleanup_downloaded(&after, &result);
+        if let Err(error) = self.start(live, id, None, done) {
             tracing::warn!(%error, "cleanup model download didn't start");
         }
     }
@@ -317,6 +319,16 @@ impl ModelDownloads {
             self.delete(live, local_models::DEFAULT_CLEANUP_MODEL)?;
         }
         Ok(())
+    }
+}
+
+/// The cleanup model is in (Q4): the helper starts now if on-device speech
+/// is selected, with no settings change or restart needed.
+fn cleanup_downloaded(live: &LiveEngine, result: &Result<(), DownloadError>) {
+    if result.is_ok()
+        && let Some(cleanup) = live.cleanup()
+    {
+        cleanup.refresh();
     }
 }
 
