@@ -123,11 +123,7 @@ pub fn judge(raw: &str, reply: &str, prompt: &str) -> Judgement {
         return Judgement::TooLong;
     }
     let kept = numbers(reply);
-    let corrected = corrected_numbers(raw);
-    if numbers(raw)
-        .iter()
-        .any(|n| !kept.contains(n) && !corrected.contains(n))
-    {
+    if numbers(raw).iter().any(|n| !kept.contains(n)) {
         return Judgement::DroppedNumber;
     }
     let lower = reply.to_lowercase();
@@ -200,45 +196,6 @@ fn numbers(text: &str) -> Vec<String> {
     }
     if !current.is_empty() {
         found.push(current);
-    }
-    found
-}
-
-/// Words that announce a spoken self-correction ("at 9, sorry, at 10").
-const CORRECTION_CUES: [&str; 9] = [
-    "no",
-    "sorry",
-    "actually",
-    "wait",
-    "mean",
-    "make",
-    "rather",
-    "scratch",
-    "correction",
-];
-
-/// Numbers the speaker corrects in `raw` itself: a number followed within
-/// six words by a correction cue and then, within ten words of the number,
-/// another number ("starting at 9, sorry, starting at 10": 9). A reply that
-/// resolves the correction may drop them; every other number must stay.
-fn corrected_numbers(raw: &str) -> Vec<String> {
-    let words: Vec<&str> = raw.split_whitespace().collect();
-    let mut found = Vec::new();
-    for (i, word) in words.iter().enumerate() {
-        let here = numbers(word);
-        if here.is_empty() {
-            continue;
-        }
-        let cue = (i + 1..words.len().min(i + 7)).find(|&k| {
-            let w = words[k]
-                .trim_matches(|c: char| !c.is_alphanumeric())
-                .to_lowercase();
-            CORRECTION_CUES.contains(&w.as_str())
-        });
-        let Some(cue) = cue else { continue };
-        if (cue + 1..words.len().min(i + 11)).any(|k| !numbers(words[k]).is_empty()) {
-            found.extend(here);
-        }
     }
     found
 }
@@ -428,33 +385,31 @@ mod tests {
             Judgement::DroppedNumber
         );
         assert_eq!(
-            judge("January 23rd. Sorry, January 29th.", "January 29th.", p()),
-            Judgement::Accepted
-        );
-        assert_eq!(
-            judge(
-                "It started in build 4.2, wait, no, 4.3.",
-                "It started in build 4.3.",
-                p()
-            ),
-            Judgement::Accepted
-        );
-        assert_eq!(
-            judge(
-                "Set it to 10 a minute, make that 5 per IP.",
-                "Set it to 5 per IP.",
-                p()
-            ),
-            Judgement::Accepted
-        );
-        assert_eq!(
-            judge("January 23rd. Sorry, January 29th.", "January 23rd.", p()),
-            Judgement::DroppedNumber
-        );
-        assert_eq!(
             judge("Call 555-0164. Thanks!", "Call me. Thanks!", p()),
             Judgement::DroppedNumber
         );
+    }
+
+    /// v4 keeps both values of a spoken self-correction, so a reply that
+    /// resolves the correction (drops either value) falls back to the raw
+    /// text, as the eval's guard did (review Q2 round 1).
+    #[test]
+    fn a_resolved_self_correction_falls_back() {
+        for (raw, reply) in [
+            ("Print 20 copies, make that 30.", "Print 30 copies."),
+            ("January 23rd. Sorry, January 29th.", "January 29th."),
+            ("January 23rd. Sorry, January 29th.", "January 23rd."),
+            (
+                "It started in build 4.2, wait, no, 4.3.",
+                "It started in build 4.3.",
+            ),
+            (
+                "Set it to 10 a minute, make that 5 per IP.",
+                "Set it to 5 per IP.",
+            ),
+        ] {
+            assert_eq!(judge(raw, reply, p()), Judgement::DroppedNumber, "{raw}");
+        }
     }
 
     #[test]
@@ -603,20 +558,6 @@ mod tests {
             judge("Push it to get hub.", "Push it to GitHub.", p()),
             Judgement::Echo
         );
-    }
-
-    #[test]
-    fn corrected_numbers_are_the_ones_a_cue_replaces() {
-        assert_eq!(
-            corrected_numbers("starting at 9, sorry, starting at 10 at the garden"),
-            ["9"]
-        );
-        assert_eq!(corrected_numbers("node 20, sorry, node 22"), ["20"]);
-        assert_eq!(
-            corrected_numbers("I have 2 kids. Sorry I'm late."),
-            Vec::<String>::new()
-        );
-        assert_eq!(corrected_numbers("version 3 is out"), Vec::<String>::new());
     }
 
     #[test]

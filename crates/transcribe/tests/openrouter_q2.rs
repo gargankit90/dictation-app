@@ -61,7 +61,7 @@ async fn serve(path_: &str, response: ResponseTemplate) -> MockServer {
 
 fn chat_reply(text: &str) -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_json(serde_json::json!({
-        "choices": [{"message": {"role": "assistant", "content": text}}]
+        "choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": "stop"}]
     }))
 }
 
@@ -172,6 +172,26 @@ async fn cleanup_statuses_map_to_typed_errors_without_the_key() {
     )
     .await;
     assert_eq!(cleaner(&bad).clean("t").await, Err(CleanupError::BadReply));
+}
+
+/// Review Q2 round 1: a reply cut off by the token limit is a bad reply,
+/// so the pipeline pastes the raw text instead of a clipped sentence.
+#[tokio::test]
+async fn a_truncated_cleanup_is_a_bad_reply() {
+    let server = serve(
+        "/api/v1/chat/completions",
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{"message": {"role": "assistant", "content": "Please send the report"},
+                         "finish_reason": "length"}]
+        })),
+    )
+    .await;
+    assert_eq!(
+        cleaner(&server)
+            .clean("Please send the report and cancel the meeting.")
+            .await,
+        Err(CleanupError::BadReply)
+    );
 }
 
 #[tokio::test]

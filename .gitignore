@@ -27,3 +27,7 @@ lcov.info
 
 # Seeded by scripts/vendor-tests.sh and removed again
 /third_party/*/Cargo.lock
+
+# Python (the eval harness)
+__pycache__/
+.venv/

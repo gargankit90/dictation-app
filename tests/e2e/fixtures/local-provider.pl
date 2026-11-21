@@ -174,7 +174,7 @@ sub read_request {
 # The JSON body as a hash, or undef if it isn't a JSON object.
 sub json_body {
   my ($body) = @_;
-  my $value = eval { JSON::PP->new->decode($body) };
+  my $value = eval { JSON::PP->new->utf8->decode($body) };
   return ref $value eq 'HASH' ? $value : undef;
 }
 
@@ -294,7 +294,7 @@ sub serve {
       '{"error":{"message":"Invalid API Key","code":401}}');
     if ($auth eq 'good') {
       $reply = JSON::PP->new->ascii->canonical->encode({
-        choices => [{ message => { role => 'assistant', content => cleanup_input($json) } }],
+        choices => [{ message => { role => 'assistant', content => cleanup_input($json) }, finish_reason => 'stop' }],
       });
       $status = 200;
     }
