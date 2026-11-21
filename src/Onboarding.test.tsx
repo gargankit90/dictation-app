@@ -470,10 +470,11 @@ describe("Welcome", () => {
     expect(order.indexOf("accept_terms")).toBeLessThan(order.indexOf("set_onboarding_step"));
   });
 
-  it("TOS1: if the Terms can't be stored, it stays on Welcome and says so", async () => {
+  it("TOS1: if the Terms can't be stored, it stays on Welcome and says so; Get started retries", async () => {
     const original = backend.handle;
+    let failing = true;
     mockIPC((command, payload) => {
-      if (command === "accept_terms") {
+      if (command === "accept_terms" && failing) {
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         throw "the onboarding task crashed";
       }
@@ -487,6 +488,9 @@ describe("Welcome", () => {
     fireEvent.click(primary("Get started"));
     await screen.findByText(/onboarding task crashed/);
     expect(backend.step).toBe("welcome");
+    failing = false;
+    fireEvent.click(primary("Get started"));
+    await screen.findByText("How should Vocet transcribe?");
   });
 });
 

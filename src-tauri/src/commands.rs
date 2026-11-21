@@ -578,11 +578,16 @@ pub async fn accept_terms(
 ) -> Result<(), String> {
     let (onboarding, usage) = (Arc::clone(&onboarding), usage.inner().clone());
     tauri::async_runtime::spawn_blocking(move || {
-        onboarding.accept_terms();
+        onboarding.accept_terms().map_err(|error| {
+            tracing::warn!(%error, "couldn't note that the Terms were accepted");
+            "Couldn't save that you agreed to the Terms. Check that the disk isn't full, then try again."
+                .to_owned()
+        })?;
         usage::terms_accepted(&usage, env!("CARGO_PKG_VERSION"));
+        Ok(())
     })
     .await
-    .map_err(|_| "the onboarding task crashed".to_owned())
+    .map_err(|_| "the onboarding task crashed".to_owned())?
 }
 
 /// Settings, Help, "Run setup again" (U5, U6): opens the first-run steps,

@@ -325,20 +325,20 @@ impl Onboarding {
     }
 
     /// Get started: the person agreed to the Terms and Privacy Policy. Writes
-    /// [`TERMS_DATE`] to [`TERMS_FILE`]; a failure only costs asking again at
-    /// the next launch, so it is logged. True the first time.
-    pub fn accept_terms(&self) -> bool {
-        let first = !std::mem::replace(&mut self.lock().terms_accepted, true);
+    /// [`TERMS_DATE`] to [`TERMS_FILE`] first; if that fails nothing counts as
+    /// agreed and the caller shows the error (Get started tries again).
+    /// True the first time.
+    ///
+    /// # Errors
+    /// The date couldn't be written.
+    pub fn accept_terms(&self) -> std::io::Result<bool> {
         if let Some(file) = &self.terms_file {
-            let written = file
-                .parent()
-                .map_or(Ok(()), std::fs::create_dir_all)
-                .and_then(|()| std::fs::write(file, TERMS_DATE));
-            if let Err(error) = written {
-                tracing::warn!(%error, "couldn't note that the Terms were accepted");
+            if let Some(dir) = file.parent() {
+                std::fs::create_dir_all(dir)?;
             }
+            std::fs::write(file, TERMS_DATE)?;
         }
-        first
+        Ok(!std::mem::replace(&mut self.lock().terms_accepted, true))
     }
 
     /// Whether a permission turned granted since the last time this was asked,
@@ -653,8 +653,8 @@ mod tests {
         let fresh = Onboarding::load(&dir);
         assert!(!fresh.terms_accepted(), "a fresh install hasn't agreed");
         assert!(!dir.join(TERMS_FILE).exists());
-        assert!(fresh.accept_terms(), "true the first time");
-        assert!(!fresh.accept_terms(), "and only then");
+        assert!(fresh.accept_terms().unwrap(), "true the first time");
+        assert!(!fresh.accept_terms().unwrap(), "and only then");
         assert!(fresh.terms_accepted());
         assert_eq!(
             std::fs::read_to_string(dir.join(TERMS_FILE)).unwrap(),
@@ -674,6 +674,25 @@ mod tests {
         let before_terms = Onboarding::load(&dir);
         assert!(before_terms.terms_accepted());
         assert!(!dir.join(TERMS_FILE).exists(), "nothing was agreed to");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// TOS1: a failed write counts as nothing agreed; Get started again works.
+    #[test]
+    fn tos1_a_failed_write_agrees_to_nothing_and_can_be_retried() {
+        let dir = temp("terms-fail");
+        let onboarding = Onboarding::load(&dir);
+        // A directory where the file goes makes the write fail.
+        std::fs::create_dir_all(dir.join(TERMS_FILE)).unwrap();
+        assert!(onboarding.accept_terms().is_err());
+        assert!(!onboarding.terms_accepted(), "not agreed without the date");
+        std::fs::remove_dir(dir.join(TERMS_FILE)).unwrap();
+        assert!(onboarding.accept_terms().unwrap(), "the retry is the first");
+        assert!(onboarding.terms_accepted());
+        assert_eq!(
+            std::fs::read_to_string(dir.join(TERMS_FILE)).unwrap(),
+            TERMS_DATE
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
