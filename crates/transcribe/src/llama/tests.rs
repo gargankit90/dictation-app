@@ -280,8 +280,9 @@ async fn gone_within(pid: u32, limit: Duration) -> bool {
 async fn closing_the_pipe_kills_the_server_and_the_key_is_only_in_its_environment() {
     let dir = TempDir::new("pipe");
     let seen = dir.0.join("seen");
+    // Written aside, then renamed: the file never shows up half written.
     let helper = dir.helper(&format!(
-        "printf '%s|%s' \"$LLAMA_API_KEY\" \"$*\" > '{}'\nexec sleep 300",
+        "printf '%s|%s' \"$LLAMA_API_KEY\" \"$*\" > '{0}.tmp'\nmv '{0}.tmp' '{0}'\nexec sleep 300",
         seen.display()
     ));
     let supervised = spawn_supervised(&helper, &["--port".into(), "1".into()], "s3cret")
