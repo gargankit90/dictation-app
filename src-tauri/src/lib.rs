@@ -55,7 +55,7 @@ pub mod diagnostics;
 pub mod engine;
 mod flags;
 mod history;
-mod key_writes;
+mod keychain;
 mod logging;
 pub mod models;
 pub mod onboarding;

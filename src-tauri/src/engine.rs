@@ -14,11 +14,9 @@
 //! interaction, denied, timed out" all become a clear message at dictation
 //! time ([`TranscribeError::KeychainUnavailable`]), never a hang.
 //!
-//! A read that times out can't be cancelled, so [`KeyReads`] allows one read
-//! in flight at a time for the whole app: later rebuilds wait on it (each for
-//! its own timeout) instead of starting reads of their own, and a read that
-//! was started before the last save is not trusted for the rebuild after it.
-//! A locked keychain therefore costs one parked thread, not one per save.
+//! A read that times out can't be cancelled, so [`KeyReads`]
+//! (`crate::keychain`) allows one read in flight at a time for the whole
+//! app: later rebuilds wait on it instead of starting reads of their own.
 //!
 //! On-device transcription (L1) needs no key: with `transcription: local`
 //! the engine is the saved model, loaded by [`LocalModels`] from the models
@@ -31,9 +29,8 @@
 //! `--transcriber mock` pins the mock engine: [`LiveEngine::fixed`] never
 //! rebuilds, so saving settings in a test run can't swap in a real provider.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use dictation_core::local_models;
@@ -45,7 +42,7 @@ use dictation_transcribe::local::{CppModel, LocalTranscriber, SpeechModel};
 use dictation_transcribe::models::{DownloadError, ModelStore};
 
 use crate::cleanup::LocalCleanup;
-use crate::key_writes::KeyWrites;
+use crate::keychain::{KeyReads, KeyWrites};
 
 /// How long a keychain read may take before the key counts as unreadable.
 /// Long enough for a person to answer an access prompt.
@@ -594,145 +591,8 @@ pub fn engine_for<S: SecretStore + 'static>(
     }
 }
 
-type KeyOutcome = Result<Option<Secret>, SecretError>;
-
-/// Keychain reads with at most one in flight, app-wide.
-///
-/// A keychain read that never returns (a locked keychain waiting for a
-/// person) can't be cancelled; giving up on it only stops waiting. Without a
-/// bound, every settings save would start another read that parks on the
-/// keychain too. So a request first looks for the read already in flight:
-///
-/// - one that is fresh (started after the last
-///   [`invalidate`](Self::invalidate)) is waited on and its answer shared;
-/// - one that is stale (a save happened since it began, so its answer may
-///   be the old key) is waited on to finish, within
-///   the same deadline, and then a new read starts.
-///
-/// Either way the waiter's deadline is its own timeout from the call, so a
-/// stuck read costs each rebuild one timeout and no thread.
-#[derive(Clone, Default)]
-pub struct KeyReads {
-    state: Arc<Mutex<ReadState>>,
-}
-
-#[derive(Default)]
-struct ReadState {
-    /// Bumped by every save; a read started before it is stale after it.
-    generation: u64,
-    /// The read whose thread is still running, if any.
-    in_flight: Option<Arc<Read>>,
-}
-
-/// One keychain read: what it asked for and, once it finishes, the answer.
-struct Read {
-    generation: u64,
-    outcome: Mutex<Option<KeyOutcome>>,
-    finished: Condvar,
-}
-
-impl Read {
-    /// The answer, or `None` if `deadline` passes first.
-    fn wait(&self, deadline: Instant) -> Option<KeyOutcome> {
-        let mut outcome = lock(&self.outcome);
-        loop {
-            if let Some(answer) = &*outcome {
-                return Some(answer.clone());
-            }
-            let left = deadline.checked_duration_since(Instant::now())?;
-            outcome = self
-                .finished
-                .wait_timeout(outcome, left)
-                .unwrap_or_else(PoisonError::into_inner)
-                .0;
-        }
-    }
-}
-
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-impl KeyReads {
-    /// Marks every read in flight as stale: call it after a save, before the
-    /// rebuild that should see what was saved.
-    pub fn invalidate(&self) {
-        lock(&self.state).generation += 1;
-    }
-
-    /// The key from the keychain, waiting at most `timeout` (from now) for
-    /// it.
-    fn read<S: SecretStore + 'static>(
-        &self,
-        config: &Arc<Config<S>>,
-        timeout: Duration,
-    ) -> KeyOutcome {
-        let deadline = Instant::now() + timeout;
-        let wanted = lock(&self.state).generation;
-        loop {
-            let read = self.in_flight_or_start(config)?;
-            let Some(answer) = read.wait(deadline) else {
-                return Err(SecretError::Store(format!(
-                    "no answer from the keychain after {} s (locked, or waiting for access to be allowed)",
-                    timeout.as_secs()
-                )));
-            };
-            if read.generation >= wanted {
-                return answer;
-            }
-            // A stale answer: it's finished now, so the next pass starts a
-            // read of its own (the only one in flight).
-        }
-    }
-
-    /// The read in flight, or a new one if there is none.
-    fn in_flight_or_start<S: SecretStore + 'static>(
-        &self,
-        config: &Arc<Config<S>>,
-    ) -> Result<Arc<Read>, SecretError> {
-        let mut state = lock(&self.state);
-        if let Some(read) = &state.in_flight {
-            return Ok(Arc::clone(read));
-        }
-        let read = Arc::new(Read {
-            generation: state.generation,
-            outcome: Mutex::new(None),
-            finished: Condvar::new(),
-        });
-        let (reader, shared, task) = (
-            Arc::clone(config),
-            Arc::clone(&self.state),
-            Arc::clone(&read),
-        );
-        std::thread::Builder::new()
-            .name("keychain-read".to_owned())
-            .spawn(move || {
-                let answer = catch_unwind(AssertUnwindSafe(|| reader.api_key())).map_or_else(
-                    |_| {
-                        Err(SecretError::Store(
-                            "the keychain read stopped unexpectedly".to_owned(),
-                        ))
-                    },
-                    |result| match result {
-                        Ok(key) => Ok(key),
-                        Err(ConfigError::Secret(error)) => Err(error),
-                        // `api_key` only fails in the keychain; ConfigError never holds a key.
-                        Err(other) => Err(SecretError::Store(other.to_string())),
-                    },
-                );
-                // Done and no longer in flight in one step, so nobody sees a
-                // finished read as still running.
-                let mut state = lock(&shared);
-                state.in_flight = None;
-                *lock(&task.outcome) = Some(answer);
-                task.finished.notify_all();
-            })
-            .map_err(|error| {
-                SecretError::Store(format!("could not start the keychain read: {error}"))
-            })?;
-        state.in_flight = Some(Arc::clone(&read));
-        Ok(read)
-    }
 }
 
 /// Runs `change` (saving settings or a key) and, if it worked, rebuilds the
