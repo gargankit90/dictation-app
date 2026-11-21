@@ -59,7 +59,7 @@ pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(90);
 /// How often `/health` is asked while the helper starts.
 const HEALTH_POLL: Duration = Duration::from_millis(100);
 
-/// How long [`LlamaServer::stop_and_wait`] waits for the supervisor before
+/// How long [`LlamaServer::shutdown_and_reap`] waits for the supervisor before
 /// killing the server and the supervisor itself. The supervisor escalates
 /// on its own after 2 s (SIGTERM, then SIGKILL), so this is a backstop.
 const STOP_GRACE: Duration = Duration::from_secs(4);
@@ -311,6 +311,17 @@ impl LlamaServer {
         model: &Path,
         cancel: impl Future<Output = ()> + Send,
     ) -> Result<Self, LlamaError> {
+        Self::start_within(helper, model, STARTUP_TIMEOUT, cancel).await
+    }
+
+    /// As [`start_until`](Self::start_until), giving the helper `limit` to
+    /// get ready.
+    async fn start_within(
+        helper: &Path,
+        model: &Path,
+        limit: Duration,
+        cancel: impl Future<Output = ()> + Send,
+    ) -> Result<Self, LlamaError> {
         if !helper.is_file() {
             return Err(LlamaError::HelperMissing);
         }
@@ -327,13 +338,18 @@ impl LlamaServer {
             client,
             supervisor: Mutex::new(Some(supervised)),
         };
-        tokio::select! {
-            ready = server.wait_ready(STARTUP_TIMEOUT) => ready.map(|()| server),
-            () = cancel => {
-                server.stop_and_wait().await;
-                Err(LlamaError::Cancelled)
-            }
+        // The select only decides the outcome; it never stops a process.
+        let outcome = tokio::select! {
+            ready = server.wait_ready(limit) => ready,
+            () = cancel => Err(LlamaError::Cancelled),
+        };
+        if outcome.is_ok() {
+            return Ok(server);
         }
+        // Timed out, cancelled or failed: one shutdown, outside the select,
+        // so a cancellation can't cut it short.
+        server.shutdown_and_reap().await;
+        outcome.map(|()| server)
     }
 
     /// Stops the helper and returns only once it is gone: the pipe closes
@@ -342,7 +358,7 @@ impl LlamaServer {
     /// hasn't exited within [`STOP_GRACE`], the server and then the
     /// supervisor get SIGKILL, which can't be ignored, and the supervisor
     /// is reaped.
-    async fn stop_and_wait(&self) {
+    async fn shutdown_and_reap(&self) {
         let supervised = lock(&self.supervisor).take();
         if let Some(mut supervised) = supervised {
             supervised.stdin.take();
@@ -376,15 +392,10 @@ impl LlamaServer {
                 tokio::time::sleep(HEALTH_POLL).await;
             }
         };
-        let result = match tokio::time::timeout(limit, ready).await {
+        match tokio::time::timeout(limit, ready).await {
             Ok(result) => result,
             Err(_) => Err(LlamaError::StartTimeout),
-        };
-        if result.is_err() {
-            // A failed start is gone before the caller can start another.
-            self.stop_and_wait().await;
         }
-        result
     }
 
     /// The supervisor's exit status, if it has exited (the server is then

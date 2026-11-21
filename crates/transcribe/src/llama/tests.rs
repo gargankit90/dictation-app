@@ -326,24 +326,83 @@ async fn a_helper_that_exits_while_starting_is_an_error_not_a_hang() {
     assert!(started.elapsed() < Duration::from_secs(10));
 }
 
+/// Reads the pid a helper script wrote to `file`, waiting up to 10 s.
+async fn pid_in(file: &Path) -> u32 {
+    for _ in 0..500 {
+        if let Some(pid) = std::fs::read_to_string(file)
+            .ok()
+            .and_then(|text| text.trim().parse().ok())
+        {
+            return pid;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the helper didn't start");
+}
+
+/// A helper that never gets ready and says its pid; `extra` runs first.
+fn never_ready(dir: &TempDir, extra: &str) -> (PathBuf, PathBuf) {
+    let pid_file = dir.0.join("pid");
+    let helper = dir.helper(&format!(
+        "{extra}\necho $$ > '{0}.tmp'\nmv '{0}.tmp' '{0}'\nexec sleep 300",
+        pid_file.display()
+    ));
+    (helper, pid_file)
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_helper_that_never_gets_ready_is_stopped_after_the_limit() {
     let dir = TempDir::new("never-ready");
-    let helper = dir.helper("exec sleep 300");
-    let supervised = spawn_supervised(&helper, &[], "k").await.unwrap();
-    let pid = supervised.server_pid;
-    let closed = format!("http://127.0.0.1:{}", free_port().unwrap());
-    let server = LlamaServer {
-        client: crate::http::client(&closed).unwrap(),
-        base_url: closed,
-        key: "k".to_owned(),
-        supervisor: Mutex::new(Some(supervised)),
-    };
-    assert_eq!(
-        server.wait_ready(Duration::from_millis(500)).await,
+    let (helper, pid_file) = never_ready(&dir, "");
+    let model = dir.0.join("model.gguf");
+    let start = tokio::spawn(async move {
+        LlamaServer::start_within(
+            &helper,
+            &model,
+            // Long enough for a loaded machine to run the script.
+            Duration::from_secs(2),
+            std::future::pending(),
+        )
+        .await
+    });
+    let pid = pid_in(&pid_file).await;
+    assert!(matches!(
+        start.await.unwrap(),
         Err(LlamaError::StartTimeout)
+    ));
+    assert!(!alive(pid), "a timed-out helper outlived its start");
+}
+
+/// Review round 3: a cancellation that arrives while a timed-out start is
+/// shutting down a SIGTERM-proof helper doesn't cut the shutdown short.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancellation_during_the_timeout_shutdown_waits_for_the_reap() {
+    let dir = TempDir::new("cancel-in-shutdown");
+    let (helper, pid_file) = never_ready(&dir, "trap '' TERM");
+    let model = dir.0.join("model.gguf");
+    let (cancel, cancelled) = tokio::sync::oneshot::channel::<()>();
+    let limit = Duration::from_secs(2);
+    let begun = Instant::now();
+    let start = tokio::spawn(async move {
+        LlamaServer::start_within(&helper, &model, limit, async {
+            let _ = cancelled.await;
+        })
+        .await
+    });
+    let pid = pid_in(&pid_file).await;
+    // 1 s past the limit: the shutdown is in its 2 s SIGTERM grace (the
+    // helper ignores it) when the cancellation arrives.
+    tokio::time::sleep((limit + Duration::from_secs(1)).saturating_sub(begun.elapsed())).await;
+    assert!(
+        alive(pid),
+        "the shutdown should still be in its grace period"
     );
-    assert!(gone_within(pid, Duration::from_secs(5)).await);
+    let _ = cancel.send(());
+    assert!(matches!(
+        start.await.unwrap(),
+        Err(LlamaError::StartTimeout)
+    ));
+    assert!(!alive(pid), "the start returned with the helper alive");
 }
 
 #[tokio::test(flavor = "multi_thread")]
