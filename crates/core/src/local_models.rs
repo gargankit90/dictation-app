@@ -55,8 +55,9 @@ pub struct LocalModel {
 /// checkpoint at revision `a526248c`, then transcribe.cpp `db678a03`'s
 /// `convert-qwen3_asr.py` and `transcribe-quantize --quant Q4_K_M`. It was
 /// reproduced byte for byte on 2026-11-20 (same SHA-256) and is hosted by
-/// the owner, with oruk's licence and a notice. The URL is pinned to a
-/// commit once the upload lands.
+/// the owner, with oruk's licence and a notice, pinned to the upload's
+/// commit (Hugging Face's `x-linked-size` and `x-linked-etag` match this
+/// size and SHA-256, checked 2026-11-21).
 pub const ORUKQWEN_1_7B: LocalModel = LocalModel {
     id: "orukqwen-asr-1.7b-q4_k_m",
     role: Role::Speech,
@@ -64,7 +65,7 @@ pub const ORUKQWEN_1_7B: LocalModel = LocalModel {
     languages: &["en"],
     languages_label: "English only",
     size_bytes: 1_319_830_656,
-    url: "https://huggingface.co/vocetlabs/orukqwen-asr-1.7b-gguf/resolve/main/orukqwen-asr-1.7b-Q4_K_M.gguf",
+    url: "https://huggingface.co/vocetlabs/orukqwen-asr-1.7b-gguf/resolve/c947468edd421a9922afbbb7887056f793e5fd20/orukqwen-asr-1.7b-Q4_K_M.gguf",
     sha256: "057471662f060800a6374708ad679d4abe51775e52ca591a88ea4ade78b273bb",
     file_name: "orukqwen-asr-1.7b-Q4_K_M.gguf",
     licence: "Apache-2.0 (oruk; based on Qwen3-ASR by Qwen)",
@@ -216,12 +217,9 @@ mod tests {
             assert_eq!(repo.matches('/').count(), 1, "{}", model.id);
             let (revision, file) = after.split_once('/').unwrap();
             assert_eq!(file, model.file_name);
-            // Pinned to a commit, except OrukQwen until the owner's upload
-            // has one (the Lead pins it before release).
-            if model.id != ORUKQWEN_1_7B.id {
-                assert_eq!(revision.len(), 40, "{}", model.id);
-                assert!(revision.chars().all(|c| c.is_ascii_hexdigit()));
-            }
+            // Pinned to a commit.
+            assert_eq!(revision.len(), 40, "{}", model.id);
+            assert!(revision.chars().all(|c| c.is_ascii_hexdigit()));
             assert_eq!(
                 std::path::Path::new(model.file_name).extension(),
                 Some("gguf".as_ref())
