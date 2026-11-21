@@ -26,8 +26,6 @@ describe("App", () => {
       if (command === "get_settings") {
         return {
           version: 2,
-          provider: "openrouter",
-          model: "openai/gpt-4o-mini-transcribe",
           hotkey: "RightAlt",
           launch_at_login: false,
           share_usage_events: true,
@@ -67,12 +65,9 @@ describe("App", () => {
       if (command === "get_settings") {
         return {
           version: 2,
-          provider: "openrouter",
-          model: "openai/gpt-4o-mini-transcribe",
           hotkey: "RightAlt",
           launch_at_login: false,
           transcription: "cloud",
-          local_model: "orukqwen-asr-1.7b-q4_k_m",
           share_usage_events: true,
         };
       }
@@ -122,12 +117,9 @@ describe("App", () => {
         case "get_settings":
           return {
             version: 2,
-            provider: "openrouter",
-            model: "openai/gpt-4o-mini-transcribe",
             hotkey: "RightAlt",
             launch_at_login: false,
             transcription: "cloud",
-            local_model: "orukqwen-asr-1.7b-q4_k_m",
             share_usage_events: true,
             history_limit: 25,
           };
@@ -303,12 +295,9 @@ describe("App", () => {
         case "get_settings":
           return {
             version: 2,
-            provider: "openrouter",
-            model: "openai/gpt-4o-mini-transcribe",
             hotkey: "RightAlt",
             launch_at_login: false,
             transcription: "cloud",
-            local_model: "orukqwen-asr-1.7b-q4_k_m",
             share_usage_events: true,
           };
         default:

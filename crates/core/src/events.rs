@@ -8,6 +8,7 @@ use std::fmt;
 use std::time::Duration;
 
 use crate::coordinator::Phase;
+use crate::diagnostics::ErrorCode;
 use crate::error::{DictationError, Permission};
 use crate::redact;
 
@@ -40,8 +41,8 @@ pub enum Event {
     AudioCaptured,
     /// The transcriber returned text (possibly empty).
     TranscriptReady(String),
-    /// The transcriber failed; `reason` is a short, user-safe summary.
-    TranscriptionFailed(String),
+    /// The transcriber failed, for the reason the code says.
+    TranscriptionFailed(ErrorCode),
     /// The transcript had nothing to paste once cleaned up
     /// ([`crate::text::clean`] dropped it): back to Idle, no error.
     TranscriptDropped,
@@ -102,10 +103,9 @@ impl fmt::Debug for Event {
                 .debug_struct("TranscriptReady")
                 .field("len", &text.len())
                 .finish(),
-            Event::TranscriptionFailed(reason) => f
-                .debug_tuple("TranscriptionFailed")
-                .field(&redact::summary(reason))
-                .finish(),
+            Event::TranscriptionFailed(code) => {
+                f.debug_tuple("TranscriptionFailed").field(code).finish()
+            }
             Event::TranscriptDropped => f.write_str("TranscriptDropped"),
             Event::TranscriptSilent => f.write_str("TranscriptSilent"),
             Event::InsertDone => f.write_str("InsertDone"),
@@ -154,11 +154,10 @@ mod tests {
         let key = "gsk_dummy_NOT_A_REAL_KEY_0123456789";
         let reason = format!("401 for {key}\n{}", "body ".repeat(100));
         for debug in [
-            format!("{:?}", Event::TranscriptionFailed(reason.clone())),
             format!("{:?}", Event::InsertFailed(reason.clone())),
             format!(
                 "{:?}",
-                Command::ShowError(DictationError::TranscriptionFailed { reason })
+                Command::ShowError(DictationError::InsertFailed { reason })
             ),
         ] {
             assert!(!debug.contains(key), "{debug}");
@@ -180,8 +179,8 @@ mod tests {
             (Event::Tick(ms), "Tick(5ms)"),
             (Event::AudioCaptured, "AudioCaptured"),
             (
-                Event::TranscriptionFailed("x".into()),
-                "TranscriptionFailed(\"x\")",
+                Event::TranscriptionFailed(ErrorCode::KeyMissing),
+                "TranscriptionFailed(KeyMissing)",
             ),
             (Event::TranscriptDropped, "TranscriptDropped"),
             (Event::TranscriptSilent, "TranscriptSilent"),

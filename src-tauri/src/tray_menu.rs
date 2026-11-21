@@ -17,11 +17,11 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use crate::preferences::Link;
-use dictation_core::diagnostics::ErrorCode;
+use dictation_core::diagnostics::{ErrorCode, FixAction};
 use dictation_core::settings::Transcription;
 use dictation_pipeline::history::History;
 use dictation_pipeline::tray::{
-    Ambient, Download, Entry, Fix, MenuModel, TrayIcon, TrayStatus, id,
+    Ambient, Download, Entry, MenuModel, TrayIcon, TrayStatus, fix_from_id, id,
 };
 use dictation_ports::{Permission, PermissionStatus};
 use tauri::image::Image;
@@ -99,7 +99,7 @@ pub enum Action {
     ResumeSetup,
     CopyLast,
     History,
-    Fix(Fix),
+    Fix(FixAction),
 }
 
 /// The action for a menu item's id.
@@ -112,7 +112,7 @@ pub fn action_for(item: &str) -> Option<Action> {
         id::RESUME_SETUP => Action::ResumeSetup,
         id::COPY_LAST => Action::CopyLast,
         id::HISTORY => Action::History,
-        other => Action::Fix(Fix::from_id(other)?),
+        other => Action::Fix(fix_from_id(other)?),
     })
 }
 
@@ -131,15 +131,19 @@ pub enum Effect {
 
 /// The effect of `fix`.
 #[must_use]
-pub const fn effect_of(fix: Fix) -> Effect {
+pub const fn effect_of(fix: FixAction) -> Effect {
     match fix {
-        Fix::OpenSpeechSettings | Fix::DownloadModel => Effect::Window(WindowRequest::Speech),
-        Fix::ChooseAnotherKey => Effect::Window(WindowRequest::Shortcut),
-        Fix::Troubleshoot => Effect::Window(WindowRequest::Troubleshoot),
-        Fix::OpenMicrophoneSettings => Effect::SystemSettings(Permission::Microphone),
-        Fix::OpenAccessibilitySettings => Effect::SystemSettings(Permission::Accessibility),
-        Fix::Relaunch => Effect::Relaunch,
-        Fix::AddCredits => Effect::OpenLink(Link::OpenrouterCredits),
+        FixAction::OpenSpeechSettings | FixAction::DownloadModel => {
+            Effect::Window(WindowRequest::Speech)
+        }
+        FixAction::ChooseAnotherKey => Effect::Window(WindowRequest::Shortcut),
+        FixAction::Troubleshoot | FixAction::TryAgain => {
+            Effect::Window(WindowRequest::Troubleshoot)
+        }
+        FixAction::OpenMicrophoneSettings => Effect::SystemSettings(Permission::Microphone),
+        FixAction::OpenAccessibilitySettings => Effect::SystemSettings(Permission::Accessibility),
+        FixAction::Relaunch => Effect::Relaunch,
+        FixAction::AddCredits => Effect::OpenLink(Link::OpenrouterCredits),
     }
 }
 
@@ -234,7 +238,7 @@ fn read_ambient(app: &AppHandle) -> Ambient {
                 .unwrap_or_default();
             Download {
                 chosen: settings.transcription == Transcription::Local
-                    && settings.local_model == model.id,
+                    && model.id == dictation_core::local_models::DEFAULT_MODEL,
             }
         });
     let (mic, accessibility) = app.try_state::<onboarding::OsPermissions>().map_or(
@@ -253,9 +257,7 @@ fn read_ambient(app: &AppHandle) -> Ambient {
             dictation_transcribe::engine::Engine::Unavailable(
                 dictation_ports::TranscribeError::KeyPending,
             ) => None,
-            dictation_transcribe::engine::Engine::Unavailable(error) => {
-                Some(ErrorCode::from_reason(&error.user_message()))
-            }
+            dictation_transcribe::engine::Engine::Unavailable(error) => Some(error.code()),
             _ => None,
         });
     let problem = if mic == PermissionStatus::Denied {
@@ -414,7 +416,7 @@ fn ask_window(app: &AppHandle, request: WindowRequest) {
     crate::show_settings(app);
 }
 
-fn run_fix(app: &AppHandle, fix: Fix) {
+fn run_fix(app: &AppHandle, fix: FixAction) {
     match effect_of(fix) {
         Effect::Window(request) => ask_window(app, request),
         Effect::SystemSettings(permission) => {
@@ -506,32 +508,42 @@ mod tests {
     fn criterion_3_each_fix_has_the_effect_from_the_table() {
         let table = [
             (
-                Fix::OpenSpeechSettings,
+                FixAction::OpenSpeechSettings,
                 Effect::Window(WindowRequest::Speech),
             ),
-            (Fix::DownloadModel, Effect::Window(WindowRequest::Speech)),
             (
-                Fix::ChooseAnotherKey,
+                FixAction::DownloadModel,
+                Effect::Window(WindowRequest::Speech),
+            ),
+            (
+                FixAction::ChooseAnotherKey,
                 Effect::Window(WindowRequest::Shortcut),
             ),
             (
-                Fix::Troubleshoot,
+                FixAction::Troubleshoot,
                 Effect::Window(WindowRequest::Troubleshoot),
             ),
             (
-                Fix::OpenMicrophoneSettings,
+                FixAction::OpenMicrophoneSettings,
                 Effect::SystemSettings(Permission::Microphone),
             ),
             (
-                Fix::OpenAccessibilitySettings,
+                FixAction::OpenAccessibilitySettings,
                 Effect::SystemSettings(Permission::Accessibility),
             ),
-            (Fix::Relaunch, Effect::Relaunch),
-            (Fix::AddCredits, Effect::OpenLink(Link::OpenrouterCredits)),
+            (FixAction::Relaunch, Effect::Relaunch),
+            (
+                FixAction::AddCredits,
+                Effect::OpenLink(Link::OpenrouterCredits),
+            ),
         ];
         for (fix, effect) in table {
             assert_eq!(effect_of(fix), effect, "{fix:?}");
-            assert_eq!(action_for(fix.id()), Some(Action::Fix(fix)), "{fix:?}");
+            assert_eq!(
+                action_for(dictation_pipeline::tray::fix_id(fix)),
+                Some(Action::Fix(fix)),
+                "{fix:?}"
+            );
         }
     }
 
@@ -573,7 +585,7 @@ mod tests {
         assert_eq!(action_for(id::SETTINGS), Some(Action::Settings));
         assert_eq!(WindowRequest::Settings.as_str(), "settings");
         assert_eq!(
-            effect_of(Fix::Troubleshoot),
+            effect_of(FixAction::Troubleshoot),
             Effect::Window(WindowRequest::Troubleshoot)
         );
     }

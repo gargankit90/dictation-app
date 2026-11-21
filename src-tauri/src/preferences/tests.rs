@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use dictation_core::hotkey_spec::HotkeySpec;
+use dictation_core::settings::Settings;
 use dictation_pipeline::hotkey_setting::ConfigurableHotkey;
 use dictation_platform::fakes::{FakeHotkey, MemSecretStore};
 use dictation_ports::HotkeySource;
@@ -16,8 +17,6 @@ use dictation_transcribe::models::ModelStore;
 
 use super::*;
 use crate::engine::{Loader, LocalModels};
-
-const ENGLISH: &str = local_models::DEFAULT_MODEL;
 
 struct TempDir(PathBuf);
 
@@ -39,7 +38,7 @@ impl Drop for TempDir {
 struct Silent;
 
 impl SpeechModel for Silent {
-    fn run(&mut self, _: &[f32], _: Option<&str>) -> Result<String, String> {
+    fn run(&mut self, _: &[f32]) -> Result<String, String> {
         Ok(String::new())
     }
 }
@@ -98,8 +97,8 @@ fn rig(tag: &str, loader: Loader) -> Rig {
 }
 
 /// Puts a stand-in of the catalogue size where model `id` goes.
-fn downloaded(rig: &Rig, id: &str) {
-    let model = local_models::find(id).unwrap();
+fn downloaded(rig: &Rig) {
+    let model = local_models::DEFAULT;
     let dir = rig.dir.0.join("models");
     std::fs::create_dir_all(&dir).unwrap();
     let file = std::fs::File::create(dir.join(model.file_name)).unwrap();
@@ -111,21 +110,18 @@ fn is_mock(transcribers: &Transcribers) -> bool {
 }
 
 #[test]
-fn criterion_4_choosing_a_provider_switches_to_its_default_model() {
-    let mut settings = Settings {
-        transcription: Transcription::Local,
-        ..Settings::default()
-    };
-    choose_cloud(&mut settings, Provider::OpenRouter);
-    assert_eq!(settings.transcription, Transcription::Cloud);
-    assert_eq!(settings.provider, Provider::OpenRouter);
-    assert_eq!(settings.model, Provider::OpenRouter.default_model());
-
-    settings.model = "custom".into();
-    choose_cloud(&mut settings, Provider::OpenRouter);
+fn criterion_4_the_cloud_is_chosen_at_once() {
+    let rig = rig("cloud", loads());
+    rig.config
+        .save_settings(&Settings {
+            transcription: Transcription::Local,
+            ..Settings::default()
+        })
+        .unwrap();
+    switch(&rig.config, &rig.live, &rig.control, Transcription::Cloud).unwrap();
     assert_eq!(
-        settings.model, "custom",
-        "the same provider keeps its model"
+        rig.config.settings().unwrap().transcription,
+        Transcription::Cloud
     );
 }
 
@@ -143,14 +139,15 @@ fn criterion_4_use_this_switches_only_once_the_model_is_ready() {
         Ok(Box::new(Silent) as Box<dyn SpeechModel>)
     });
     let rig = rig("use-this", slow);
-    downloaded(&rig, ENGLISH);
+    downloaded(&rig);
 
     let (config, live, control) = (
         Arc::clone(&rig.config),
         rig.live.clone(),
         rig.control.clone(),
     );
-    let switching = std::thread::spawn(move || switch_to_local(&config, &live, &control, ENGLISH));
+    let switching =
+        std::thread::spawn(move || switch(&config, &live, &control, Transcription::Local));
     entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
     // Loading: the previous engine is still the one in use, and the
     // settings still choose it.
@@ -164,7 +161,6 @@ fn criterion_4_use_this_switches_only_once_the_model_is_ready() {
     switching.join().unwrap().unwrap();
     let after = rig.config.settings().unwrap();
     assert_eq!(after.transcription, Transcription::Local);
-    assert_eq!(after.local_model, ENGLISH);
     assert!(matches!(*rig.transcribers.current(), Engine::Local(_)));
     assert_eq!(get_status(&rig).state, EngineState::Ready);
 }
@@ -176,8 +172,8 @@ fn get_status(rig: &Rig) -> EngineStatus {
 #[test]
 fn criterion_4_a_model_that_fails_to_load_leaves_the_previous_engine_chosen() {
     let rig = rig("load-fails", fails());
-    downloaded(&rig, ENGLISH);
-    let error = switch_to_local(&rig.config, &rig.live, &rig.control, ENGLISH).unwrap_err();
+    downloaded(&rig);
+    let error = switch(&rig.config, &rig.live, &rig.control, Transcription::Local).unwrap_err();
     assert!(error.starts_with("Couldn't load "), "{error}");
     assert_eq!(
         rig.config.settings().unwrap().transcription,
@@ -195,7 +191,7 @@ fn criterion_4_a_failed_write_after_loading_puts_the_old_engine_back() {
     use std::os::unix::fs::PermissionsExt as _;
 
     let rig = rig("write-fails", loads());
-    downloaded(&rig, ENGLISH);
+    downloaded(&rig);
     rig.config.save_settings(&Settings::default()).unwrap();
     assert_eq!(
         rig.config.settings().unwrap().transcription,
@@ -206,7 +202,7 @@ fn criterion_4_a_failed_write_after_loading_puts_the_old_engine_back() {
     let folder = rig.dir.0.join("config");
     let mode = |bits| std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(bits));
     mode(0o500).unwrap();
-    let error = switch_to_local(&rig.config, &rig.live, &rig.control, ENGLISH);
+    let error = switch(&rig.config, &rig.live, &rig.control, Transcription::Local);
     mode(0o700).unwrap();
 
     assert!(error.is_err(), "the write was refused, so the switch fails");
@@ -220,17 +216,20 @@ fn criterion_4_a_failed_write_after_loading_puts_the_old_engine_back() {
     );
 }
 
+/// U8's "Download and continue": a model not downloaded yet is chosen at
+/// once, and the engine says it isn't ready until the download finishes.
 #[test]
-fn criterion_4_a_model_that_is_not_downloaded_is_refused() {
+fn criterion_4_a_model_not_downloaded_yet_is_chosen_for_after_its_download() {
     let rig = rig("missing", loads());
-    let error = switch_to_local(&rig.config, &rig.live, &rig.control, ENGLISH).unwrap_err();
-    assert!(error.contains("download"), "{error}");
+    switch(&rig.config, &rig.live, &rig.control, Transcription::Local).unwrap();
     assert_eq!(
         rig.config.settings().unwrap().transcription,
-        Transcription::Cloud
+        Transcription::Local
     );
-    let error = switch_to_local(&rig.config, &rig.live, &rig.control, "no-such-model").unwrap_err();
-    assert!(error.contains("no-such-model"), "{error}");
+    assert!(matches!(
+        *rig.transcribers.current(),
+        Engine::Unavailable(TranscribeError::ModelMissing)
+    ));
 }
 
 #[test]
@@ -255,13 +254,11 @@ fn criterion_4_status_says_loading_ready_or_why_it_failed() {
 fn criterion_5_remove_key_deletes_it_from_the_keychain() {
     let rig = rig("remove-key", loads());
     rig.config
-        .set_api_key(Provider::OpenRouter, "sk-or-remove-me-NOT-REAL-1234")
+        .set_api_key("sk-or-remove-me-NOT-REAL-1234")
         .unwrap();
-    assert!(rig.config.has_api_key(Provider::OpenRouter).unwrap());
-    rig.live
-        .delete_key(&rig.config, Provider::OpenRouter)
-        .unwrap();
-    assert!(!rig.config.has_api_key(Provider::OpenRouter).unwrap());
+    assert!(rig.config.has_api_key().unwrap());
+    rig.live.delete_key(&rig.config).unwrap();
+    assert!(!rig.config.has_api_key().unwrap());
 }
 
 #[test]
@@ -347,21 +344,14 @@ async fn a_hotkey_waiting_for_accessibility_fails_no_write() {
 
     let (live, keys) = (rig.live.clone(), control.clone());
     write(Arc::clone(&rig.config), &usage, move |config| {
-        commands::write_change(config, &live, &keys, |settings| {
-            choose_cloud(settings, Provider::OpenRouter);
-        })
-        .map_err(|error| error.to_string())
+        switch(config, &live, &keys, Transcription::Cloud)
     })
     .await
     .expect("the own-key route's engine is saved");
-    assert_eq!(
-        rig.config.settings().unwrap().provider,
-        Provider::OpenRouter
-    );
 
     let (live, keys) = (rig.live.clone(), control.clone());
     write(Arc::clone(&rig.config), &usage, move |config| {
-        choose_local(config, &live, &keys, ENGLISH)
+        switch(config, &live, &keys, Transcription::Local)
     })
     .await
     .expect("Download and continue's choice is saved");

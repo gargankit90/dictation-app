@@ -15,7 +15,6 @@ dictation-core.workspace = true
 dictation-ports.workspace = true
 # Random API keys: OpenRouter PKCE (Q3) and the cleanup helper (Q4).
 getrandom = "0.3.4"
-httpdate.workspace = true
 reqwest = { workspace = true, features = ["rustls-no-provider"] }
 rustls.workspace = true
 rustls-platform-verifier.workspace = true

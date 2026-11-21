@@ -18,7 +18,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dictation_core::diagnostics::{ErrorCode, ErrorLog, FixAction, LoggedError};
 use dictation_core::error::DictationError;
-use dictation_core::report::{self, Access, EngineInfo, ReportInput};
+use dictation_core::local_models;
+use dictation_core::report::{self, EngineInfo, ReportInput};
 use dictation_core::settings::{Settings, Transcription};
 use dictation_pipeline::config::Config;
 use dictation_platform::secrets::KeychainSecretStore;
@@ -28,7 +29,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt as _;
 
-use crate::commands::{self, AppConfig, KeyTestKind};
+use crate::commands::{self, AppConfig};
 use crate::engine::LiveEngine;
 use crate::models::{ModelDownloads, ModelState};
 use crate::onboarding::OsPermissions;
@@ -245,7 +246,9 @@ impl EngineView {
         match engine {
             Engine::Local(_) => Self::Loaded,
             Engine::Unavailable(TranscribeError::ModelLoading) => Self::Loading,
-            Engine::Unavailable(TranscribeError::Engine(_)) => Self::Failed,
+            Engine::Unavailable(
+                TranscribeError::ModelLoadFailed(_) | TranscribeError::Engine(_),
+            ) => Self::Failed,
             Engine::Unavailable(TranscribeError::ModelMissing) => Self::Missing,
             _ => Self::Other,
         }
@@ -323,11 +326,11 @@ fn failing(id: CheckId, label: &str, code: ErrorCode) -> Check {
         id,
         label: label.to_owned(),
         ok: false,
-        detail: format!("{} {}", info.message, info.next_step),
+        detail: code.user_text(),
         code: Some(code),
         details: Some(code.to_string()),
         fix: Some(info.action),
-        fix_label: Some(info.action_label.to_owned()),
+        fix_label: Some(info.action.label().to_owned()),
         local_model: None,
     }
 }
@@ -384,11 +387,11 @@ pub fn checks(input: &CheckInput) -> Vec<Check> {
                 id: CheckId::LastError,
                 label: "Last error".to_owned(),
                 ok: false,
-                detail: format!("{} {}", info.message, info.next_step),
+                detail: error.code.user_text(),
                 code: Some(error.code),
                 details: Some(format!("{} at {}", error.code, report::utc(error.at))),
                 fix: Some(info.action),
-                fix_label: Some(info.action_label.to_owned()),
+                fix_label: Some(info.action.label().to_owned()),
                 local_model: None,
             }
         }
@@ -428,31 +431,29 @@ impl Environment {
     /// event loop).
     #[must_use]
     pub fn read(app_version: &str) -> Self {
-        let macos_version = std::process::Command::new("sw_vers")
-            .arg("-productVersion")
-            .output()
-            .ok()
-            .and_then(|out| String::from_utf8(out.stdout).ok())
-            .map_or_else(|| "unknown".to_owned(), |text| text.trim().to_owned());
         Self {
             app_version: app_version.to_owned(),
-            macos_version,
+            macos_version: macos_version().unwrap_or_else(|| "unknown".to_owned()),
             arch: std::env::consts::ARCH.to_owned(),
         }
     }
 }
 
-fn access(status: PermissionStatus) -> Access {
-    match status {
-        PermissionStatus::Granted => Access::Granted,
-        PermissionStatus::Denied => Access::Denied,
-        PermissionStatus::NotDetermined => Access::NotDetermined,
-    }
+/// The macOS version (`15.1`), from `sw_vers`; `None` if it can't be read.
+/// A short child process: call it off the event loop.
+#[must_use]
+pub fn macos_version() -> Option<String> {
+    std::process::Command::new("sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|text| text.trim().to_owned())
 }
 
 /// The report for the user to read. The inputs are all typed: the settings
-/// (of which only the hotkey, provider, transcription kind, on-device model
-/// id and the analytics switch are read), permission states, the engine's
+/// (of which only the hotkey, transcription kind and the analytics switch
+/// are read), permission states, the engine's
 /// readiness, and error codes with times.
 #[must_use]
 pub fn report_text(
@@ -463,15 +464,15 @@ pub fn report_text(
     errors: &[LoggedError],
 ) -> String {
     let engine = match settings.transcription {
-        Transcription::Cloud => EngineInfo::Cloud(settings.provider),
-        Transcription::Local => EngineInfo::Local(&settings.local_model),
+        Transcription::Cloud => EngineInfo::Cloud,
+        Transcription::Local => EngineInfo::Local(local_models::DEFAULT_MODEL),
     };
     report::render(&ReportInput {
         app_version: &env.app_version,
         macos_version: &env.macos_version,
         arch: &env.arch,
-        microphone: access(permissions.0),
-        accessibility: access(permissions.1),
+        microphone: permissions.0,
+        accessibility: permissions.1,
         hotkey: &settings.hotkey,
         engine,
         engine_ready,
@@ -492,7 +493,7 @@ async fn engine_state(
             let download = downloads
                 .list(live)
                 .into_iter()
-                .find(|model| model.id == settings.local_model)
+                .find(|model| model.id == local_models::DEFAULT_MODEL)
                 .map_or(ModelState::Missing, |model| model.state);
             let view = live
                 .current_engine()
@@ -500,10 +501,8 @@ async fn engine_state(
             EngineState::Local(local_state(view, download))
         }
         Transcription::Cloud => {
-            let (config, live, provider) = (Arc::clone(config), live.clone(), settings.provider);
-            let read =
-                tauri::async_runtime::spawn_blocking(move || live.read_key(&config, provider))
-                    .await;
+            let (config, live) = (Arc::clone(config), live.clone());
+            let read = tauri::async_runtime::spawn_blocking(move || live.read_key(&config)).await;
             EngineState::Cloud(match read {
                 Ok(Ok(Some(_))) => KeyState::Saved,
                 Ok(Ok(None)) => KeyState::Missing,
@@ -556,19 +555,6 @@ pub struct ConnectionResult {
     pub message: String,
 }
 
-/// The code for a failed key test.
-#[must_use]
-pub fn connection_code(kind: KeyTestKind) -> ErrorCode {
-    match kind {
-        KeyTestKind::NoKey => ErrorCode::KeyMissing,
-        KeyTestKind::InvalidKey => ErrorCode::KeyRejected,
-        KeyTestKind::RateLimited => ErrorCode::ProviderQuota,
-        KeyTestKind::Network => ErrorCode::NetworkUnreachable,
-        KeyTestKind::Server => ErrorCode::EngineFailed,
-        KeyTestKind::Keychain => ErrorCode::KeyUnreadable,
-    }
-}
-
 /// Asks the selected provider whether it answers and accepts the saved key,
 /// with a short silent clip (the key test). Only when the user presses the
 /// button; never for the on-device engine.
@@ -587,22 +573,20 @@ pub async fn test_connection(
             message: "The on-device engine needs no connection.".to_owned(),
         });
     }
-    let base_url = live.provider_base_url(settings.provider);
-    let result =
-        commands::test_saved_key(&config.0, live.inner(), settings.provider, &base_url).await;
+    let base_url = live.provider_base_url();
+    let result = commands::test_saved_key(&config.0, live.inner(), &base_url).await;
     Ok(match result {
         Ok(()) => ConnectionResult {
             ok: true,
             code: None,
             message: "The provider answered and accepted your key.".to_owned(),
         },
-        Err(error) => {
-            let code = connection_code(error.kind);
+        Err(code) => {
             lock(&diagnostics.0.log).record_code(code, now());
             ConnectionResult {
                 ok: false,
                 code: Some(code),
-                message: format!("{} {}", code.info().message, code.info().next_step),
+                message: code.user_text(),
             }
         }
     })
@@ -771,7 +755,7 @@ mod tests {
         assert!(!mic.ok);
         assert_eq!(mic.code, Some(ErrorCode::MicDenied));
         assert_eq!(mic.fix, Some(FixAction::OpenMicrophoneSettings));
-        assert_eq!(mic.fix_label.as_deref(), Some("Open Microphone Settings"));
+        assert_eq!(mic.fix_label.as_deref(), Some("Open Microphone settings"));
         assert!(mic.detail.contains("use the microphone"), "{}", mic.detail);
         assert!(by_id(&rows, CheckId::Accessibility).ok);
     }
@@ -864,9 +848,7 @@ mod tests {
     /// "Ready", in the check or in the report.
     #[test]
     fn a_present_model_that_fails_to_load_is_not_ready() {
-        let failed = Engine::Unavailable(TranscribeError::Engine(
-            "couldn't load the on-device model: out of memory".into(),
-        ));
+        let failed = Engine::Unavailable(TranscribeError::ModelLoadFailed("out of memory".into()));
         let state = local_state(EngineView::of(&failed), ModelState::Ready);
         assert_eq!(state, LocalState::LoadFailed);
         let mut data = input();
@@ -875,8 +857,8 @@ mod tests {
         let row = by_id(&rows, CheckId::Engine);
         assert!(!row.ok);
         assert_eq!(row.code, Some(ErrorCode::ModelLoadingFailed));
-        assert_eq!(row.fix, Some(FixAction::OpenSettings));
-        assert!(row.detail.contains("download another"), "{}", row.detail);
+        assert_eq!(row.fix, Some(FixAction::DownloadModel));
+        assert!(row.detail.contains("Download it again"), "{}", row.detail);
         assert!(data.engine.problem().is_some());
     }
 
@@ -952,27 +934,7 @@ mod tests {
         );
         // U12 criterion 2: the sentence holds no code; it goes in Details.
         assert!(!last.detail.contains("key_rejected"), "{}", last.detail);
-        assert_eq!(last.fix, Some(FixAction::OpenSettings));
-    }
-
-    #[test]
-    fn a_failed_key_test_has_a_code_for_every_kind() {
-        use KeyTestKind::{InvalidKey, Keychain, Network, NoKey, RateLimited, Server};
-        let codes: Vec<ErrorCode> = [NoKey, InvalidKey, RateLimited, Network, Server, Keychain]
-            .into_iter()
-            .map(connection_code)
-            .collect();
-        assert_eq!(
-            codes,
-            [
-                ErrorCode::KeyMissing,
-                ErrorCode::KeyRejected,
-                ErrorCode::ProviderQuota,
-                ErrorCode::NetworkUnreachable,
-                ErrorCode::EngineFailed,
-                ErrorCode::KeyUnreadable,
-            ]
-        );
+        assert_eq!(last.fix, Some(FixAction::OpenSpeechSettings));
     }
 
     #[test]
@@ -1009,9 +971,7 @@ mod tests {
 
         // Settings: every text field the user or a hand edit controls.
         let settings = Settings {
-            hotkey: format!("{home}/.ssh/{key}"),
-            model: format!("{transcript} {key}"),
-            local_model: format!("{home}/Library/{registered}"),
+            hotkey: format!("{home}/.ssh/{key} {transcript} {registered}"),
             ..Settings::default()
         };
         let local = Settings {
@@ -1023,11 +983,9 @@ mod tests {
         // and a provider's body; only the code is kept.
         let diagnostics = Diagnostics::default();
         for error in [
-            DictationError::TranscriptionFailed {
-                reason: format!("{transcript} {key} {registered} {home}/x.wav {log_line}"),
-            },
+            DictationError::TranscriptionFailed(ErrorCode::EngineFailed),
             DictationError::InsertFailed {
-                reason: format!("{app_name} refused {clipboard}"),
+                reason: format!("{app_name} refused {clipboard} {transcript} {key} {log_line}"),
             },
             DictationError::HotkeyFailed,
             DictationError::EmptyTranscript,

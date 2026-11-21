@@ -695,14 +695,10 @@ mod tests {
     #[test]
     fn an_error_shows_the_tables_message_and_next_step() {
         use dictation_core::error::Permission;
-        let load_failure = DictationError::TranscriptionFailed {
-            reason: "Something went wrong: couldn't load the on-device model: out of memory."
-                .into(),
-        };
         let cases = [
             (
-                load_failure,
-                "Pick or download another in Settings → Speech.",
+                DictationError::TranscriptionFailed(ErrorCode::ModelLoadingFailed),
+                "Download it again in Settings → Speech.",
             ),
             (
                 DictationError::InsertFailed {
@@ -735,25 +731,8 @@ mod tests {
                 !message.contains(ErrorCode::of(&error).as_str()),
                 "{message}"
             );
-            assert!(!message.contains("Something went wrong"), "{message}");
             assert!(!message.contains("no focused app"), "{message}");
         }
-    }
-
-    #[test]
-    fn an_error_message_never_carries_a_key() {
-        let mut model = OverlayModel::default();
-        let key = "sk-or-abcdefghijklmnop1234567890";
-        let change = model
-            .on_event(&UiEvent::Error(DictationError::TranscriptionFailed {
-                reason: format!("401 Unauthorized for key {key}"),
-            }))
-            .expect("an error is a change");
-        let OverlayView::Error { message } = change.view else {
-            panic!("expected an error view");
-        };
-        assert!(!message.contains(key), "{message}");
-        assert!(!message.contains("401"), "{message}");
     }
 
     #[test]

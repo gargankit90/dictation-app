@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use dictation_core::retry::RetryPolicy;
-use dictation_ports::{Audio, Secret, TranscribeError};
+use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
 use dictation_transcribe::check_key::check_key_within;
 use dictation_transcribe::openrouter::{Config, OpenRouter, TokioWait, Wait};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -222,7 +222,7 @@ async fn shutdown_aborts_http_request_without_retry() {
         Arc::new(OpenRouter::with_wait(config, Secret::new(KEY), wait.clone(), 1).unwrap());
     let running = {
         let engine = Arc::clone(&engine);
-        tokio::spawn(async move { engine.transcribe_verbose(&audio()).await })
+        tokio::spawn(async move { engine.transcribe(&audio()).await })
     };
     fenced(&server.request_read, "the request").await;
     // Shutdown drops the request.
@@ -248,7 +248,7 @@ async fn abort_during_backoff_sends_no_next_request() {
         Arc::new(OpenRouter::with_wait(config, Secret::new(KEY), wait.clone(), 1).unwrap());
     let running = {
         let engine = Arc::clone(&engine);
-        tokio::spawn(async move { engine.transcribe_verbose(&audio()).await })
+        tokio::spawn(async move { engine.transcribe(&audio()).await })
     };
     // The 503 came back and the engine is now backing off.
     fenced(&wait.asked, "the backoff").await;
@@ -269,7 +269,7 @@ async fn without_an_abort_the_engine_retries_after_the_backoff() {
         ..server.config()
     };
     let engine = OpenRouter::new(config, Secret::new(KEY)).unwrap();
-    let result = tokio::time::timeout(FENCE, engine.transcribe_verbose(&audio())).await;
+    let result = tokio::time::timeout(FENCE, engine.transcribe(&audio())).await;
     assert!(
         matches!(result, Ok(Err(TranscribeError::Engine(_)))),
         "{result:?}"
@@ -287,7 +287,7 @@ async fn no_headers_times_out() {
     };
     let engine = OpenRouter::new(config, Secret::new(KEY)).unwrap();
     let start = Instant::now();
-    let result = tokio::time::timeout(FENCE, engine.transcribe_verbose(&audio())).await;
+    let result = tokio::time::timeout(FENCE, engine.transcribe(&audio())).await;
     assert_eq!(result.unwrap().unwrap_err(), TranscribeError::Timeout);
     assert!(start.elapsed() >= SHORT, "not before the deadline");
     fenced(&server.request_read, "the request").await;
@@ -304,7 +304,7 @@ async fn partial_body_times_out() {
     };
     let engine = OpenRouter::new(config, Secret::new(KEY)).unwrap();
     let start = Instant::now();
-    let result = tokio::time::timeout(FENCE, engine.transcribe_verbose(&audio())).await;
+    let result = tokio::time::timeout(FENCE, engine.transcribe(&audio())).await;
     // The deadline covers the body, not just the headers.
     assert_eq!(result.unwrap().unwrap_err(), TranscribeError::Timeout);
     assert!(start.elapsed() >= SHORT);
@@ -320,7 +320,7 @@ async fn truncated_body_has_safe_error() {
         ..server.config()
     };
     let engine = OpenRouter::new(config, Secret::new(KEY)).unwrap();
-    let result = tokio::time::timeout(FENCE, engine.transcribe_verbose(&audio())).await;
+    let result = tokio::time::timeout(FENCE, engine.transcribe(&audio())).await;
     // Fixed text: no key, no half-read transcript, no URL.
     assert_eq!(result.unwrap().unwrap_err(), cut_off);
     assert_eq!(server.requests(), 1);
@@ -332,7 +332,7 @@ async fn truncated_body_has_safe_error() {
         ..server.config()
     };
     let engine = OpenRouter::new(config, Secret::new(KEY)).unwrap();
-    let result = tokio::time::timeout(FENCE, engine.transcribe_verbose(&audio())).await;
+    let result = tokio::time::timeout(FENCE, engine.transcribe(&audio())).await;
     assert_eq!(result.unwrap().unwrap_err(), cut_off);
     assert_eq!(server.requests(), 3, "retried up to the limit, no more");
 }

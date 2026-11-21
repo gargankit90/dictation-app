@@ -51,11 +51,12 @@ async fn ok_server() -> MockServer {
 
 fn leaky_errors() -> Vec<DictationError> {
     vec![
-        DictationError::TranscriptionFailed {
-            reason: format!("{} {} at {}", SECRETS[0], SECRETS[1], SECRETS[2]),
-        },
+        DictationError::TranscriptionFailed(ErrorCode::KeyRejected),
         DictationError::InsertFailed {
-            reason: format!("{} on {} ({})", SECRETS[5], SECRETS[4], SECRETS[3]),
+            reason: format!(
+                "{} {} at {} on {} ({}) {}",
+                SECRETS[0], SECRETS[1], SECRETS[2], SECRETS[5], SECRETS[4], SECRETS[3]
+            ),
         },
     ]
 }

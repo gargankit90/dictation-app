@@ -564,7 +564,10 @@ async fn a_failed_undo_names_the_hotkey_that_still_works() {
     assert_eq!(saved.hotkey, old.to_string());
     let shown = hotkey_setting::with_active(app.control.spec(), saved.clone());
     assert_eq!(shown.hotkey, "F6");
-    assert_eq!(shown.model, saved.model, "only the hotkey differs");
+    assert_eq!(
+        shown.history_limit, saved.history_limit,
+        "only the hotkey differs"
+    );
     app.pipeline.shutdown().await;
 }
 

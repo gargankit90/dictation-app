@@ -11,9 +11,8 @@
 use std::future::Future;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use dictation_core::settings::Provider;
 use dictation_pipeline::config::Config;
-use dictation_ports::{Opener, SecretStore};
+use dictation_ports::{EngineKind, Opener, SecretStore};
 use dictation_transcribe::connect::{self, ConnectError};
 use tauri::State;
 use tokio::sync::oneshot;
@@ -95,7 +94,7 @@ pub async fn connect_openrouter(
         || attempt.claim(id),
     )
     .await?;
-    usage.record(usage::engine_selected(Provider::OpenRouter));
+    usage.record(usage::engine_selected(EngineKind::Cloud));
     Ok(())
 }
 
@@ -115,7 +114,7 @@ pub fn cancel_connect(attempt: State<'_, AppConnect>) -> Result<bool, String> {
 /// browser" by requesting the sign-in address itself, so the fake (which
 /// reads `callback_url` and `state` from it) can call the callback back.
 fn plan(live: &LiveEngine, opener: &Arc<dyn Opener>) -> (connect::Config, Arc<dyn Opener>) {
-    let base = live.provider_base_url(Provider::OpenRouter);
+    let base = live.provider_base_url();
     if base == dictation_transcribe::openrouter::BASE_URL {
         return (connect::Config::openrouter(), Arc::clone(opener));
     }
@@ -177,7 +176,7 @@ async fn connect_and_save<S: SecretStore + 'static>(
     if !claim() {
         return Err(ConnectError::Cancelled.to_string());
     }
-    save_key(config, live, Provider::OpenRouter, key.expose().to_owned()).await
+    save_key(config, live, key.expose().to_owned()).await
 }
 
 /// The saved key as Settings shows it: `sk-or-…` and its last four
@@ -187,10 +186,9 @@ async fn connect_and_save<S: SecretStore + 'static>(
 pub async fn saved_key_hint(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
-    provider: Provider,
 ) -> Result<Option<String>, String> {
     let (config, live) = (Arc::clone(&state.0), engine.inner().clone());
-    tauri::async_runtime::spawn_blocking(move || live.read_key(&config, provider))
+    tauri::async_runtime::spawn_blocking(move || live.read_key(&config))
         .await
         .map_err(|_| "the settings task crashed".to_owned())?
         .map(|key| key.map(|key| mask(key.expose())))
@@ -221,6 +219,7 @@ fn mask(key: &str) -> String {
 mod tests {
     use std::time::Duration;
 
+    use dictation_core::settings::API_KEY_NAME;
     use dictation_platform::fakes::{FakeOpener, MemSecretStore};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -328,7 +327,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let saved = store.get(Provider::OpenRouter.key_name()).unwrap().unwrap();
+        let saved = store.get(API_KEY_NAME).unwrap().unwrap();
         assert_eq!(saved.expose(), KEY);
     }
 
@@ -353,12 +352,7 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(error, "OpenRouter didn't accept the sign-in. Try again.");
-        assert!(
-            store
-                .get(Provider::OpenRouter.key_name())
-                .unwrap()
-                .is_none()
-        );
+        assert!(store.get(API_KEY_NAME).unwrap().is_none());
     }
 
     /// A test build's fake provider: `<base>/auth` gets the sign-in request
@@ -443,7 +437,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let saved = store.get(Provider::OpenRouter.key_name()).unwrap().unwrap();
+        let saved = store.get(API_KEY_NAME).unwrap().unwrap();
         assert_eq!(saved.expose(), KEY);
         assert!(opener.urls().is_empty(), "the system browser was used");
     }
@@ -627,11 +621,7 @@ mod tests {
         let could_cancel = attempts.cancel();
         gate_tx.send(works).unwrap();
         let result = task.await.unwrap();
-        let held = store
-            .inner
-            .get(Provider::OpenRouter.key_name())
-            .unwrap()
-            .is_some();
+        let held = store.inner.get(API_KEY_NAME).unwrap().is_some();
         (result, could_cancel, held)
     }
 
@@ -679,12 +669,7 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(error, "Connecting was cancelled.");
-        assert!(
-            store
-                .get(Provider::OpenRouter.key_name())
-                .unwrap()
-                .is_none()
-        );
+        assert!(store.get(API_KEY_NAME).unwrap().is_none());
     }
 
     #[tokio::test]
@@ -703,12 +688,7 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(error, "Connecting was cancelled.");
-        assert!(
-            store
-                .get(Provider::OpenRouter.key_name())
-                .unwrap()
-                .is_none()
-        );
+        assert!(store.get(API_KEY_NAME).unwrap().is_none());
     }
 
     #[tokio::test]

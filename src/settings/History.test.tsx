@@ -61,12 +61,9 @@ class Backend {
 function settingsWith(limit: number, hotkey = "RightAlt"): Settings_Serialize {
   return {
     version: 2,
-    provider: "openrouter",
-    model: "openai/gpt-4o-mini-transcribe",
     hotkey,
     launch_at_login: false,
     transcription: "cloud",
-    local_model: "m",
     share_usage_events: true,
     history_limit: limit,
   };

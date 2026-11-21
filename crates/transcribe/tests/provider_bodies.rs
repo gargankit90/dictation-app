@@ -45,11 +45,7 @@ async fn provider_bodies_never_reach_the_error() {
         (200, "pineapple budget meeting"),
     ] {
         let error = error_for(status, body).await;
-        for text in [
-            error.to_string(),
-            format!("{error:?}"),
-            error.user_message(),
-        ] {
+        for text in [error.to_string(), format!("{error:?}")] {
             assert!(!text.contains("pineapple"), "{status}: {text}");
             assert!(!text.contains("gsk_bodycheck"), "{status}: {text}");
             assert!(text.len() < 200, "{status}: {text}");

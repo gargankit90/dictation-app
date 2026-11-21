@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { commands } from "../bindings";
-import type { AppPermission, OnboardingStatus, PermissionState } from "../bindings";
+import type { AppPermission, OnboardingStatus, PermissionStatus } from "../bindings";
 import { BROKEN, messageOf } from "../messages";
 import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";
@@ -107,7 +107,7 @@ export function PermissionsStep({
   // the window closes, with no second setup.
   const askedAgain = status.asked_again;
 
-  function badge(state: PermissionState, which: AppPermission) {
+  function badge(state: PermissionStatus, which: AppPermission) {
     if (state === "granted") return <span className="ob-allowed">✓ Allowed</span>;
     if (state === "denied") return <span className="ob-attention">Turned off</span>;
     if (asked[which] === true) return <span className="ob-waiting">Waiting for macOS…</span>;

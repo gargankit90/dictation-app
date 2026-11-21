@@ -46,7 +46,7 @@ const MIC_DENIED: Check[] = [
       "Vocet can't use the microphone. Allow it in System Settings → Privacy & Security → Microphone.",
     code: "mic_denied",
     fix: "open_microphone_settings",
-    fix_label: "Open Microphone Settings",
+    fix_label: "Open Microphone settings",
   }),
   ...HEALTHY.slice(1),
 ];
@@ -126,7 +126,7 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
       "mic_denied",
     );
     expect(within(list).getByText("mic_denied").closest("details")).toBeTruthy();
-    fireEvent.click(within(list).getByRole("button", { name: "Open Microphone Settings" }));
+    fireEvent.click(within(list).getByRole("button", { name: "Open Microphone settings" }));
     await waitFor(() => {
       expect(calls).toContain("request_permission");
     });
@@ -147,7 +147,7 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
         detail: "Accessibility is off.",
         code: "accessibility_missing",
         fix: "open_accessibility_settings",
-        fix_label: "Open Accessibility Settings",
+        fix_label: "Open Accessibility settings",
       }),
       check({
         id: "engine",
@@ -155,8 +155,8 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
         ok: false,
         detail: "No API key is saved.",
         code: "key_missing",
-        fix: "open_settings",
-        fix_label: "Open Settings",
+        fix: "open_speech_settings",
+        fix_label: "Open Speech settings",
       }),
       check({
         id: "last_error",
@@ -170,11 +170,11 @@ describe("criterion_e1_2 Troubleshoot checks", () => {
       }),
     ];
     view({ onOpenSettings });
-    fireEvent.click(await screen.findByRole("button", { name: "Open Accessibility Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Accessibility settings" }));
     await waitFor(() => {
       expect(args[calls.indexOf("request_permission")]).toEqual({ permission: "accessibility" });
     });
-    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Speech settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
     // Details hold the last error's code and time, and "try again" has no button.
     expect(screen.getByText(/network_unreachable at 2026-11-03T10:11:12Z/)).toBeTruthy();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LocalModelInfo_Serialize } from "../bindings";
-import { languagesLabel, modelDetails, modelRow, modelTitle } from "./modelRow";
+import { modelDetails, modelRow } from "./modelRow";
 import type { RowContext } from "./modelRow";
 
 const SIZE = 477_274_496;
@@ -10,7 +10,6 @@ function model(overrides: Partial<LocalModelInfo_Serialize> = {}): LocalModelInf
     id: "english",
     name: "OrukQwen English",
     languages: "English only",
-    language_codes: ["en"],
     size_bytes: SIZE,
     downloaded_bytes: 0,
     state: "missing",
@@ -128,24 +127,11 @@ describe("criterion_u6_4 the model state machine", () => {
   });
 });
 
-describe("Design Lead round 1: model titles and captions", () => {
-  it("titles are the language choice, the catalogue name goes in the menu", () => {
-    expect(modelTitle(model())).toBe("English");
+describe("Design Lead round 1: model details", () => {
+  it("the catalogue name goes in the menu, and it never claims nothing is sent", () => {
     expect(modelDetails(model())).toBe(
       "OrukQwen English · English only · works offline · audio stays on this Mac",
     );
-    const multi = model({
-      name: "Multilingual Test 0.6B",
-      language_codes: ["en", "hi", "de", "fr"],
-    });
-    expect(modelTitle(multi)).toBe("4 languages");
-    expect(modelDetails(multi)).toBe(
-      "Multilingual Test 0.6B · 4 languages, including English and Hindi · works offline · audio stays on this Mac",
-    );
-  });
-
-  it("counts the languages from the codes, and never claims nothing is sent", () => {
-    expect(languagesLabel(["de", "fr", "es"])).toBe("3 languages");
     expect(modelDetails(model())).not.toContain("nothing is sent");
   });
 });

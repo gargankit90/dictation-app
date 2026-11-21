@@ -1,18 +1,13 @@
+import type { OverlayView_Serialize } from "../bindings";
+
 /**
- * What the overlay window shows (M5.1, U4: the recording pill). The Rust side
- * sends one of these as the payload of {@link OVERLAY_EVENT}
- * (`src-tauri/src/overlay.rs`, whose tests pin the same JSON). The page reads
- * the input level itself with {@link LEVEL_COMMAND} while it shows Listening
- * or No sound. An error carries only
- * the user-facing message, never a code, the transcript or a key.
+ * What the overlay window shows (M5.1, U4: the recording pill): the payload
+ * of {@link OVERLAY_EVENT}, generated from `src-tauri/src/overlay.rs`. The
+ * page reads the input level itself with {@link LEVEL_COMMAND} while it
+ * shows Listening or No sound. An error carries only the user-facing
+ * message, never a code, the transcript or a key.
  */
-export type OverlayView =
-  | { state: "hidden" }
-  | { state: "recording" }
-  | { state: "no_sound"; device?: string }
-  | { state: "transcribing" }
-  | { state: "paste_sent" }
-  | { state: "error"; message: string };
+export type OverlayView = OverlayView_Serialize;
 
 /** The view event (sent only to the overlay window). */
 export const OVERLAY_EVENT = "overlay-view";

@@ -83,7 +83,7 @@ e2e_settings_key_provider_recovery() {
   expect "it reached the provider with the wrong key" provider_request_has 1 auth=bad
   expect "which rejected it" provider_wait_event '^replied n=1 status=401'
   expect "the user is told the key was rejected" \
-    wait_for_log 'shown to the user error=Transcription failed: The provider rejected your API key'
+    wait_for_log 'shown to the user error=Transcription failed: Your API key was rejected'
   expect "nothing was inserted" test "$(phases_since 0)" = "Recording Transcribing Idle"
   expect "TextEdit got nothing (read back exactly)" textedit_is ""
   expect "the clipboard is untouched" test "$(clipboard)" = "$PROVIDER_SENTINEL"

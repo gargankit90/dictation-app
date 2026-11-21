@@ -1,16 +1,12 @@
-//! Error codes and what to do about them (E1, #209).
+//! Error codes and what to do about them (E1, #209; typed in SIMP1).
 //!
-//! Every error the user can see has a stable [`ErrorCode`]. One table,
-//! [`ErrorCode::info`], maps each code to a plain message, a next step and
-//! the [`FixAction`] that does it, so the overlay, the tray and the
-//! Troubleshoot window say the same thing.
-//!
-//! Analytics keeps its own coarse `ErrorType` (`dictation-ports`); a code
-//! refines it (several codes share one type) and the mapping is checked in
-//! `dictation-ports`' tests, so there is one taxonomy, not two. The code of
-//! an error is chosen from its kind, never from free text that could hold a
-//! transcript, except for a transcription failure, whose reason is one of
-//! the app's own fixed sentences ([`ErrorCode::from_reason`]).
+//! Every error the user can see has a stable [`ErrorCode`], set where the
+//! error happens (`TranscribeError::code` in `dictation-ports`, the pipeline
+//! for the microphone and a crash, the coordinator for the rest). One table,
+//! [`ErrorCode::info`], maps each code to a plain sentence, the
+//! [`FixAction`] that fixes it and its analytics [`ErrorType`], so the
+//! overlay, the tray, Troubleshoot and the usage events say the same thing.
+//! An [`ErrorType`] is coarser: several codes share one, and only it is sent.
 
 use std::collections::VecDeque;
 
@@ -45,8 +41,6 @@ pub enum ErrorCode {
     ProviderQuota,
     /// The `OpenRouter` account has no credits left (402).
     OutOfCredits,
-    /// The provider answered with a redirect.
-    ProviderRedirect,
     /// The on-device model isn't downloaded.
     ModelMissing,
     /// The on-device model is still loading.
@@ -63,23 +57,81 @@ pub enum ErrorCode {
     SecureInput,
 }
 
-/// What the user can do about an error, in one click.
+/// What the user can do about an error, in one click: the button in
+/// Troubleshoot and the fix row in the tray.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum FixAction {
-    /// Open System Settings at the Microphone page.
+    /// Settings, on Speech (the key and the engine).
+    OpenSpeechSettings,
+    /// System Settings at the Microphone page.
     OpenMicrophoneSettings,
-    /// Open System Settings at the Accessibility page.
+    /// System Settings at the Accessibility page.
     OpenAccessibilitySettings,
-    /// Open this app's settings.
-    OpenSettings,
-    /// Open the Troubleshoot window.
-    OpenTroubleshoot,
-    /// Open `OpenRouter`'s page for adding credits.
+    /// Settings, on the dictation key.
+    ChooseAnotherKey,
+    /// Settings, on Speech, where the model downloads.
+    DownloadModel,
+    /// `OpenRouter`'s page for adding credits.
     AddCredits,
-    /// Nothing to click: the next dictation is the retry.
+    /// The Troubleshoot page.
+    Troubleshoot,
+    /// Restart the app, so a permission grant takes effect.
+    Relaunch,
+    /// Nothing to click: the next dictation is the retry. The tray offers
+    /// Troubleshoot instead.
     TryAgain,
+}
+
+impl FixAction {
+    /// The button's label. The tray adds "…" to the ones that open a window.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::OpenSpeechSettings => "Open Speech settings",
+            Self::OpenMicrophoneSettings => "Open Microphone settings",
+            Self::OpenAccessibilitySettings => "Open Accessibility settings",
+            Self::ChooseAnotherKey => "Choose another key",
+            Self::DownloadModel => "Download the model",
+            Self::AddCredits => "Add credits",
+            Self::Troubleshoot => "Troubleshoot",
+            Self::Relaunch => "Relaunch Vocet",
+            Self::TryAgain => "Try again",
+        }
+    }
+
+    /// Whether this fix sends the user to System Settings for a grant that
+    /// reaches the app only after a relaunch.
+    #[must_use]
+    pub const fn is_grant(self) -> bool {
+        matches!(
+            self,
+            Self::OpenMicrophoneSettings | Self::OpenAccessibilitySettings
+        )
+    }
+}
+
+/// Why a dictation failed, as the `dictation_failed` usage event says it: a
+/// coarse category of [`ErrorCode`], never the reason's text
+/// (`docs/privacy.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorType {
+    /// The engine failed.
+    Transcription,
+    /// The engine heard no words.
+    EmptyTranscript,
+    /// The text couldn't be pasted.
+    Insert,
+    /// A password field had focus.
+    SecureInput,
+    /// The microphone permission is missing.
+    MicrophonePermission,
+    /// The Accessibility permission is missing.
+    AccessibilityPermission,
+    /// The hotkey stopped working.
+    Hotkey,
 }
 
 /// One row of the table.
@@ -93,23 +145,8 @@ pub struct CodeInfo {
     pub next_step: &'static str,
     /// The button that does it.
     pub action: FixAction,
-    /// The button's label.
-    pub action_label: &'static str,
-}
-
-impl FixAction {
-    /// The label of the button for this action.
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::OpenMicrophoneSettings => "Open Microphone Settings",
-            Self::OpenAccessibilitySettings => "Open Accessibility Settings",
-            Self::OpenSettings => "Open Settings",
-            Self::OpenTroubleshoot => "Troubleshoot",
-            Self::AddCredits => "Add credits",
-            Self::TryAgain => "Try again",
-        }
-    }
+    /// The usage events' category.
+    pub category: ErrorType,
 }
 
 const fn row(
@@ -117,13 +154,14 @@ const fn row(
     message: &'static str,
     next_step: &'static str,
     action: FixAction,
+    category: ErrorType,
 ) -> CodeInfo {
     CodeInfo {
         code,
         message,
         next_step,
         action,
-        action_label: action.label(),
+        category,
     }
 }
 
@@ -131,122 +169,133 @@ const fn row(
 /// lines of about 52 characters.
 pub const USER_TEXT_MAX_CHARS: usize = 150;
 
-/// The table: every code once. A code missing here fails
-/// `every_code_has_one_row_in_order`.
-const TABLE: [CodeInfo; 18] = [
+/// The table: every code once, in [`ErrorCode::ALL`]'s order. A code missing
+/// here fails `every_code_has_one_row_in_order`.
+const TABLE: [CodeInfo; 17] = [
     row(
         ErrorCode::MicDenied,
         "Vocet can't use the microphone.",
         "Allow it in System Settings → Privacy & Security → Microphone, then relaunch Vocet.",
         FixAction::OpenMicrophoneSettings,
+        ErrorType::MicrophonePermission,
     ),
     row(
         ErrorCode::MicFailed,
         "The microphone didn't work.",
         "Check that one is connected, then try again.",
         FixAction::TryAgain,
+        ErrorType::Transcription,
     ),
     row(
         ErrorCode::AccessibilityMissing,
         "Vocet can't paste into other apps yet.",
         "Allow it in System Settings → Privacy & Security → Accessibility.",
         FixAction::OpenAccessibilitySettings,
+        ErrorType::AccessibilityPermission,
     ),
     row(
         ErrorCode::HotkeyUnregistered,
         "The dictation key isn't working.",
         "Allow Vocet in System Settings → Privacy & Security → Accessibility; it starts working again by itself.",
         FixAction::OpenAccessibilitySettings,
+        ErrorType::Hotkey,
     ),
     row(
         ErrorCode::KeyMissing,
         "No API key saved.",
         "Add one in Settings → Speech, or use the model on this Mac.",
-        FixAction::OpenSettings,
+        FixAction::OpenSpeechSettings,
+        ErrorType::Transcription,
     ),
     row(
         ErrorCode::KeyRejected,
         "Your API key was rejected.",
-        "Open Settings → Speech to fix it.",
-        FixAction::OpenSettings,
+        "Check the key in Settings → Speech.",
+        FixAction::OpenSpeechSettings,
+        ErrorType::Transcription,
     ),
     row(
         ErrorCode::KeyUnreadable,
         "Vocet couldn't read your saved key.",
         "Unlock your Keychain, or enter the key again in Settings.",
-        FixAction::OpenSettings,
+        FixAction::OpenSpeechSettings,
+        ErrorType::Transcription,
     ),
     row(
         ErrorCode::NetworkUnreachable,
         "Vocet couldn't reach the provider.",
         "Check your internet, or use the model on this Mac.",
         FixAction::TryAgain,
+        ErrorType::Transcription,
     ),
     row(
         ErrorCode::ProviderQuota,
         "The provider is limiting requests.",
         "Wait a minute and try again.",
         FixAction::TryAgain,
+        ErrorType::Transcription,
     ),
     row(
         ErrorCode::OutOfCredits,
         "Your OpenRouter credits ran out.",
         "Add credits.",
         FixAction::AddCredits,
-    ),
-    row(
-        ErrorCode::ProviderRedirect,
-        "The provider sent a redirect.",
-        "Check the provider in Settings → Speech.",
-        FixAction::OpenSettings,
+        ErrorType::Transcription,
     ),
     row(
         ErrorCode::ModelMissing,
         "The model on this Mac isn't downloaded.",
         "Download it in Settings → Speech.",
-        FixAction::OpenSettings,
+        FixAction::DownloadModel,
+        ErrorType::Transcription,
     ),
     row(
         ErrorCode::ModelLoading,
         "The model on this Mac is still loading.",
         "Try again in a moment.",
         FixAction::TryAgain,
+        ErrorType::Transcription,
     ),
     row(
         ErrorCode::ModelLoadingFailed,
         "The model on this Mac couldn't be loaded.",
-        "Pick or download another in Settings → Speech.",
-        FixAction::OpenSettings,
+        "Download it again in Settings → Speech.",
+        FixAction::DownloadModel,
+        ErrorType::Transcription,
     ),
     row(
         ErrorCode::EngineFailed,
         "Transcription failed.",
         "Try again. If it keeps happening, report a problem.",
-        FixAction::OpenTroubleshoot,
+        FixAction::Troubleshoot,
+        ErrorType::Transcription,
     ),
     row(
         ErrorCode::NoSpeech,
         "No speech was recognised.",
         "Speak closer to the microphone and try again.",
         FixAction::TryAgain,
+        ErrorType::EmptyTranscript,
     ),
     row(
         ErrorCode::PasteFailed,
         "The text couldn't be pasted.",
         "It's on the clipboard: press ⌘V. If it keeps happening, check Accessibility.",
         FixAction::OpenAccessibilitySettings,
+        ErrorType::Insert,
     ),
     row(
         ErrorCode::SecureInput,
         "A password field is focused.",
         "Click a normal text field and dictate again.",
         FixAction::TryAgain,
+        ErrorType::SecureInput,
     ),
 ];
 
 impl ErrorCode {
     /// Every code, in the table's order.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 17] = [
         Self::MicDenied,
         Self::MicFailed,
         Self::AccessibilityMissing,
@@ -257,7 +306,6 @@ impl ErrorCode {
         Self::NetworkUnreachable,
         Self::ProviderQuota,
         Self::OutOfCredits,
-        Self::ProviderRedirect,
         Self::ModelMissing,
         Self::ModelLoading,
         Self::ModelLoadingFailed,
@@ -281,7 +329,6 @@ impl ErrorCode {
             Self::NetworkUnreachable => "network_unreachable",
             Self::ProviderQuota => "provider_quota",
             Self::OutOfCredits => "out_of_credits",
-            Self::ProviderRedirect => "provider_redirect",
             Self::ModelMissing => "model_missing",
             Self::ModelLoading => "model_loading",
             Self::ModelLoadingFailed => "model_loading_failed",
@@ -300,8 +347,8 @@ impl ErrorCode {
         &TABLE[self as usize]
     }
 
-    /// What the overlay and the tray show for this code: the table's
-    /// message and next step in one short text (at most
+    /// What the overlay, the tray and Troubleshoot show for this code: the
+    /// table's message and next step in one short text (at most
     /// [`USER_TEXT_MAX_CHARS`] characters, so it fits the overlay).
     #[must_use]
     pub fn user_text(self) -> String {
@@ -313,7 +360,7 @@ impl ErrorCode {
     #[must_use]
     pub fn of(error: &DictationError) -> Self {
         match error {
-            DictationError::TranscriptionFailed { reason } => Self::from_reason(reason),
+            DictationError::TranscriptionFailed(code) => *code,
             DictationError::EmptyTranscript => Self::NoSpeech,
             DictationError::InsertFailed { .. } => Self::PasteFailed,
             DictationError::SecureInput => Self::SecureInput,
@@ -324,37 +371,11 @@ impl ErrorCode {
             DictationError::HotkeyFailed => Self::HotkeyUnregistered,
         }
     }
+}
 
-    /// The code for a transcription failure's `reason`, which is one of the
-    /// app's own sentences (`TranscribeError::user_message` in
-    /// `dictation-ports`, whose tests check that every variant lands on the
-    /// right code). Anything else is [`ErrorCode::EngineFailed`].
-    #[must_use]
-    pub fn from_reason(reason: &str) -> Self {
-        let reason = reason.to_ascii_lowercase();
-        // Most specific first.
-        let table: [(&str, Self); 13] = [
-            ("add your api key", Self::KeyMissing),
-            ("still reading your api key", Self::KeyUnreadable),
-            ("read your api key from the keychain", Self::KeyUnreadable),
-            ("rejected your api key", Self::KeyRejected),
-            ("limiting requests", Self::ProviderQuota),
-            ("credits ran out", Self::OutOfCredits),
-            ("answered with a redirect", Self::ProviderRedirect),
-            ("didn't answer in time", Self::NetworkUnreachable),
-            ("couldn't reach the provider", Self::NetworkUnreachable),
-            ("model isn't downloaded", Self::ModelMissing),
-            ("model is still loading", Self::ModelLoading),
-            (
-                "couldn't load the on-device model",
-                Self::ModelLoadingFailed,
-            ),
-            ("the microphone failed", Self::MicFailed),
-        ];
-        table
-            .iter()
-            .find(|(needle, _)| reason.contains(needle))
-            .map_or(Self::EngineFailed, |&(_, code)| code)
+impl From<&DictationError> for ErrorType {
+    fn from(error: &DictationError) -> Self {
+        ErrorCode::of(error).info().category
     }
 }
 
@@ -454,7 +475,6 @@ mod tests {
                 | ErrorCode::NetworkUnreachable
                 | ErrorCode::ProviderQuota
                 | ErrorCode::OutOfCredits
-                | ErrorCode::ProviderRedirect
                 | ErrorCode::ModelMissing
                 | ErrorCode::ModelLoading
                 | ErrorCode::ModelLoadingFailed
@@ -494,13 +514,15 @@ mod tests {
         }
     }
 
+    /// SIMP1 criterion 3: every code has a friendly sentence and a fix.
     #[test]
     fn every_code_says_what_to_do() {
         for code in ErrorCode::ALL {
             let info = code.info();
+            assert!(info.message.len() > 10, "{code}: {}", info.message);
             assert!(info.message.ends_with('.'), "{code}: {}", info.message);
             assert!(info.next_step.ends_with('.'), "{code}: {}", info.next_step);
-            assert_eq!(info.action_label, info.action.label(), "{code}");
+            assert!(!info.action.label().is_empty(), "{code}");
             assert!(
                 code.user_text().chars().count() <= USER_TEXT_MAX_CHARS,
                 "{code} is too long for the overlay and tray"
@@ -541,7 +563,7 @@ mod tests {
         }
         assert_eq!(
             ErrorCode::KeyRejected.user_text(),
-            "Your API key was rejected. Open Settings → Speech to fix it."
+            "Your API key was rejected. Check the key in Settings → Speech."
         );
         assert_eq!(
             ErrorCode::MicDenied.user_text(),
@@ -580,7 +602,7 @@ mod tests {
         assert_eq!(info.action, FixAction::OpenMicrophoneSettings);
         assert_eq!(
             ErrorCode::KeyRejected.info().action,
-            FixAction::OpenSettings
+            FixAction::OpenSpeechSettings
         );
         assert_eq!(
             ErrorCode::HotkeyUnregistered.info().action,
@@ -592,9 +614,7 @@ mod tests {
     fn each_dictation_error_has_a_code() {
         let cases = [
             (
-                DictationError::TranscriptionFailed {
-                    reason: "The provider rejected your API key. Check it in Settings.".into(),
-                },
+                DictationError::TranscriptionFailed(ErrorCode::KeyRejected),
                 ErrorCode::KeyRejected,
             ),
             (DictationError::EmptyTranscript, ErrorCode::NoSpeech),
@@ -618,17 +638,41 @@ mod tests {
         }
     }
 
+    /// The analytics category comes from the same row: one taxonomy.
     #[test]
-    fn unknown_reasons_are_engine_failures() {
+    fn each_error_type_comes_from_its_code() {
         assert_eq!(
-            ErrorCode::from_reason("Something went wrong: boom."),
-            ErrorCode::EngineFailed
+            ErrorType::from(&DictationError::TranscriptionFailed(
+                ErrorCode::OutOfCredits
+            )),
+            ErrorType::Transcription
         );
-        assert_eq!(ErrorCode::from_reason(""), ErrorCode::EngineFailed);
         assert_eq!(
-            ErrorCode::from_reason("the microphone failed (no microphone found)"),
-            ErrorCode::MicFailed
+            ErrorType::from(&DictationError::PermissionMissing(
+                Permission::Accessibility
+            )),
+            ErrorType::AccessibilityPermission
         );
+        assert_eq!(
+            ErrorType::from(&DictationError::EmptyTranscript),
+            ErrorType::EmptyTranscript
+        );
+        assert_eq!(
+            ErrorType::from(&DictationError::InsertFailed { reason: "x".into() }),
+            ErrorType::Insert
+        );
+        assert_eq!(
+            serde_json::to_value(ErrorType::MicrophonePermission).unwrap(),
+            "microphone_permission"
+        );
+    }
+
+    #[test]
+    fn only_grants_need_a_relaunch() {
+        assert!(FixAction::OpenMicrophoneSettings.is_grant());
+        assert!(FixAction::OpenAccessibilitySettings.is_grant());
+        assert!(!FixAction::OpenSpeechSettings.is_grant());
+        assert!(!FixAction::Relaunch.is_grant());
     }
 
     #[test]

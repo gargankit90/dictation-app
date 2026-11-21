@@ -14,29 +14,25 @@ function done(model: LocalModelInfo_Serialize): number {
   return model.downloaded_bytes ?? 0;
 }
 
-function englishOnly(model: LocalModelInfo_Serialize): boolean {
-  return model.language_codes.join() === "en";
-}
-
 /** "212 of 477 MB". */
 export function progressText(model: LocalModelInfo_Serialize): string {
   return `${String(Math.round(done(model) / 1_000_000))} of ${megabytes(size(model))}`;
 }
 
-/** The model to recommend (0.2.0 is English-only): the English model, else the first. */
+/** The speech model the app runs on this Mac: the catalogue's default. */
 export function recommendedModel(
   models: readonly LocalModelInfo_Serialize[],
 ): LocalModelInfo_Serialize | null {
-  return models.find(englishOnly) ?? models[0] ?? null;
+  return models.find((model) => model.default) ?? models[0] ?? null;
 }
 
-/** The on-device model the settings choose, if they choose one. */
+/** The on-device model, if the settings choose this Mac. */
 export function chosenModel(
   settings: Settings_Serialize | null,
   models: readonly LocalModelInfo_Serialize[] | null,
 ): LocalModelInfo_Serialize | null {
   if (settings?.transcription !== "local" || models === null) return null;
-  return models.find((model) => model.id === settings.local_model) ?? null;
+  return recommendedModel(models);
 }
 
 export type StripAction = "cancel" | "resume" | "retry" | "use-key";

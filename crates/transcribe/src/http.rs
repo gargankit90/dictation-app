@@ -106,21 +106,23 @@ pub(crate) fn download_client(
 }
 
 /// Whether `url` is plain `http` to this machine (`localhost`, `127.0.0.0/8`
-/// or `[::1]`).
-fn is_loopback_http(url: &str) -> bool {
+/// or `[::1]`), with no user name or password. Test builds take only such
+/// URLs for the fake provider and model server.
+#[must_use]
+pub fn is_loopback_http(url: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(url) else {
         return false;
     };
     // An IPv6 host comes back in brackets ("[::1]").
-    url.scheme() == "http"
-        && url.host_str().is_some_and(|host| {
-            host.eq_ignore_ascii_case("localhost")
-                || host
-                    .trim_start_matches('[')
-                    .trim_end_matches(']')
-                    .parse::<std::net::IpAddr>()
-                    .is_ok_and(|ip| ip.is_loopback())
-        })
+    let loopback = url.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback())
+    });
+    url.scheme() == "http" && loopback && url.username().is_empty() && url.password().is_none()
 }
 
 fn failed(what: &str, error: &dyn std::fmt::Display) -> TranscribeError {

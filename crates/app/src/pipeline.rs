@@ -33,9 +33,10 @@ use std::time::Duration;
 use dictation_core::audio_math::{self, Verdict};
 use dictation_core::cleanup::{self as cleanup_rules, Judgement};
 use dictation_core::coordinator::{Phase, State, step};
+use dictation_core::diagnostics::ErrorCode;
 use dictation_core::error::DictationError;
 use dictation_core::events::{Command, Event};
-use dictation_core::text::{Cleaned, Transcript, clean};
+use dictation_core::text::{Cleaned, clean};
 use dictation_ports::{
     Audio, AudioError, AudioSource, Cleaner, CleanupError, CleanupOutcome, Clock, HotkeyError,
     HotkeyEvent, HotkeySource, InsertError, LevelMeter, Permission, PermissionStatus, Permissions,
@@ -477,7 +478,7 @@ fn level_interval() -> Interval {
 /// with `preceding` the character before the cursor if known (the smart
 /// leading space): the text to insert, or "nothing to paste" (no error).
 /// Never logs the text or `preceding`.
-fn cleaned_event(transcript: &Transcript, preceding: Option<char>) -> Event {
+fn cleaned_event(transcript: &str, preceding: Option<char>) -> Event {
     match clean(transcript, preceding) {
         Cleaned::Text(text) => Event::TranscriptReady(text),
         Cleaned::Dropped(why) => {
@@ -524,7 +525,7 @@ enum JobResult {
     /// cursor right after it, and what the cleanup did.
     Transcribed(
         u64,
-        Result<Transcript, TranscribeError>,
+        Result<String, TranscribeError>,
         Option<char>,
         Option<CleanupOutcome>,
     ),
@@ -1109,7 +1110,11 @@ where
                 }
                 Some(match result {
                     Ok(transcript) => cleaned_event(&transcript, preceding),
-                    Err(error) => Event::TranscriptionFailed(error.user_message()),
+                    Err(error) => {
+                        // The detail, for the log; the user sees the code's sentence.
+                        tracing::warn!(%error, "transcription failed");
+                        Event::TranscriptionFailed(error.code())
+                    }
                 })
             }
             // Nothing to paste, and no error to show: straight back to Idle.
@@ -1127,9 +1132,10 @@ where
             JobResult::AudioFailed(job, AudioError::PermissionDenied) if job == self.job => {
                 Some(Event::PermissionMissing(Permission::Microphone))
             }
-            JobResult::AudioFailed(job, error) if job == self.job => Some(
-                Event::TranscriptionFailed(format!("the microphone failed ({error})")),
-            ),
+            JobResult::AudioFailed(job, error) if job == self.job => {
+                tracing::warn!(%error, "the microphone failed");
+                Some(Event::TranscriptionFailed(ErrorCode::MicFailed))
+            }
             JobResult::Transcribed(job, ..)
             | JobResult::NotTranscribed(job)
             | JobResult::NotTranscribedSilent(job)
@@ -1149,7 +1155,7 @@ where
             Some((id, job)) if id == error.id() && error.is_panic() => {
                 tracing::error!(?job, "a background job panicked");
                 Some(match job {
-                    Job::Transcribe => Event::TranscriptionFailed("the transcriber crashed".into()),
+                    Job::Transcribe => Event::TranscriptionFailed(ErrorCode::EngineFailed),
                     Job::Insert => Event::InsertFailed("the inserter crashed".into()),
                 })
             }
@@ -1216,9 +1222,9 @@ where
     fn transcribe(&mut self) {
         self.job += 1;
         let Some(captured) = self.captured.take() else {
-            self.pending.push_back(Event::TranscriptionFailed(
-                "no audio was captured".to_owned(),
-            ));
+            tracing::warn!("no audio was captured");
+            self.pending
+                .push_back(Event::TranscriptionFailed(ErrorCode::EngineFailed));
             return;
         };
         let job = self.job;
@@ -1254,15 +1260,15 @@ where
                 };
             }
             tracing::debug!(job, duration = ?audio.duration(), "transcribing");
-            let mut result = transcriber.transcribe_detailed(&audio).await;
+            let mut result = transcriber.transcribe(&audio).await;
             let mut outcome = None;
             if let (Ok(transcript), Some(cleanup)) = (&mut result, cleanup)
                 // Only text that would be pasted: never a dropped one.
                 && matches!(clean(transcript, None), Cleaned::Text(_))
             {
-                let (cleaned, done) = cleanup.run(&transcript.text).await;
+                let (cleaned, done) = cleanup.run(transcript).await;
                 if let Some(cleaned) = cleaned {
-                    transcript.text = cleaned;
+                    *transcript = cleaned;
                 }
                 outcome = done;
             }
@@ -1750,7 +1756,7 @@ mod tests {
             let job = runner.job;
             deliver(
                 &mut runner,
-                JobResult::Transcribed(job, Ok(Transcript::from_text(text)), Some('a'), None),
+                JobResult::Transcribed(job, Ok(text.to_owned()), Some('a'), None),
             );
             assert_eq!(runner.state, State::Idle, "{text:?}");
         }
@@ -1771,13 +1777,13 @@ mod tests {
         vec![
             (
                 "transcribed",
-                |n| JobResult::Transcribed(n, Ok(Transcript::from_text("hello")), None, None),
+                |n| JobResult::Transcribed(n, Ok("hello".to_owned()), None, None),
                 Event::TranscriptReady("hello".into()),
             ),
             (
                 "transcription failed",
                 |n| JobResult::Transcribed(n, Err(TranscribeError::Timeout), None, None),
-                Event::TranscriptionFailed(TranscribeError::Timeout.user_message()),
+                Event::TranscriptionFailed(TranscribeError::Timeout.code()),
             ),
             (
                 "not transcribed",
@@ -1807,10 +1813,7 @@ mod tests {
             (
                 "audio failed: device",
                 |n| JobResult::AudioFailed(n, AudioError::NoDevice),
-                Event::TranscriptionFailed(format!(
-                    "the microphone failed ({})",
-                    AudioError::NoDevice
-                )),
+                Event::TranscriptionFailed(ErrorCode::MicFailed),
             ),
         ]
     }
@@ -1942,9 +1945,9 @@ mod tests {
             [
                 UiEvent::StateChanged(Recording),
                 UiEvent::StateChanged(Transcribing),
-                UiEvent::Error(DictationError::TranscriptionFailed {
-                    reason: TranscribeError::Timeout.user_message()
-                }),
+                UiEvent::Error(DictationError::TranscriptionFailed(
+                    TranscribeError::Timeout.code()
+                )),
                 UiEvent::StateChanged(Idle),
             ]
         );
@@ -2476,9 +2479,7 @@ mod audio_worker_tests {
             [
                 UiEvent::StateChanged(Recording),
                 UiEvent::StateChanged(Transcribing),
-                UiEvent::Error(DictationError::TranscriptionFailed {
-                    reason: "the microphone failed (no microphone found)".into()
-                }),
+                UiEvent::Error(DictationError::TranscriptionFailed(ErrorCode::MicFailed)),
                 UiEvent::StateChanged(Idle),
             ]
         );
@@ -2496,9 +2497,7 @@ mod audio_worker_tests {
         let mut audio = ScriptedAudio::new(Vec::new());
         audio.panic_on_stop = true;
         let mut harness = Harness::start(audio.clone());
-        let crashed = UiEvent::Error(DictationError::TranscriptionFailed {
-            reason: "the microphone failed (audio device error: the audio source crashed)".into(),
-        });
+        let crashed = UiEvent::Error(DictationError::TranscriptionFailed(ErrorCode::MicFailed));
         assert_eq!(harness.dictate().await[2], crashed);
         // The source is gone; the next dictation fails the same way.
         assert_eq!(harness.dictate().await[2], crashed);

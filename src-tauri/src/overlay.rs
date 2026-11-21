@@ -215,11 +215,12 @@ impl<R: Runtime> OverlaySurface for Surface<R> {
     }
 }
 
-/// [`EVENT`]'s payload: `OverlayView` in `src/overlay/view.ts`. An error
-/// carries only its user-facing message, no code (U4 criterion 6).
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-enum Payload<'a> {
+/// The overlay event's payload, generated into `src/bindings.ts` for the
+/// overlay page. An error carries only its user-facing message, no code (U4
+/// criterion 6).
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(tag = "state", rename = "OverlayView", rename_all = "snake_case")]
+pub(crate) enum Payload<'a> {
     Hidden,
     Recording,
     NoSound {

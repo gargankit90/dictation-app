@@ -15,15 +15,16 @@ export const commands = {
 	 *  hotkey listening than the file holds; T3 round 2).
 	 */
 	getSettings: () => typedError<Settings_Serialize, string>(__TAURI_INVOKE("get_settings")),
-	/**  Stores `key` as `provider`'s API key in the keychain. Write-only. */
-	setApiKey: (provider: Provider, key: string) => typedError<null, string>(__TAURI_INVOKE("set_api_key", { provider, key })),
+	/**  Stores `key` as the API key in the keychain. Write-only. */
+	setApiKey: (key: string) => typedError<null, string>(__TAURI_INVOKE("set_api_key", { key })),
 	/**
-	 *  Tests an API key with a short silent clip through `provider`'s
+	 *  Tests an API key with a short silent clip through `OpenRouter`'s
 	 *  transcription endpoint: the key typed in the form (`key`, used for this
 	 *  request only and not stored), or the saved one if `key` is `None`. The
-	 *  key never comes back; the result is success or a [`KeyTestError`].
+	 *  key never comes back; the result is success or what went wrong, in the
+	 *  error code's words.
 	 */
-	testApiKey: (provider: Provider, key: string | null) => typedError<null, KeyTestError>(__TAURI_INVOKE("test_api_key", { provider, key })),
+	testApiKey: (key: string | null) => typedError<null, string>(__TAURI_INVOKE("test_api_key", { key })),
 	/**
 	 *  Signs in at `OpenRouter` and saves the key. Returns when it is saved, or
 	 *  with the reason it isn't. A cancelled attempt is an error too; the window
@@ -40,7 +41,7 @@ export const commands = {
 	 *  The saved key as Settings shows it: `sk-or-…` and its last four
 	 *  characters. `None` if no key is saved. Never the whole key.
 	 */
-	savedKeyHint: (provider: Provider) => typedError<string | null, string>(__TAURI_INVOKE("saved_key_hint", { provider })),
+	savedKeyHint: () => typedError<string | null, string>(__TAURI_INVOKE("saved_key_hint")),
 	/**
 	 *  The view the settings window shows and, for onboarding (M5.2), the step
 	 *  the user is on and the two permissions. Never blocks: the key isn't read.
@@ -113,14 +114,12 @@ export const commands = {
 	 */
 	getHotkeyNotice: () => typedError<string | null, string>(__TAURI_INVOKE("get_hotkey_notice")),
 	/**
-	 *  Turns launch at login on or off, and nothing else. It returns at once
-	 *  with the OS's answer for the latest choice: the OS can take 40 s to
-	 *  unregister the login item (#238), so the window must not wait on it and
-	 *  Settings shows "Applying…" until this resolves. The change runs on a
-	 *  thread of its own, one at a time; if the user toggles again meanwhile,
-	 *  every call resolves with the outcome of the last choice. The result is
-	 *  whether the app starts at login now; an error says why not, and what to
-	 *  do (the user may have to approve it in System Settings).
+	 *  Turns launch at login on or off, and nothing else, on the blocking pool:
+	 *  the OS can take 40 s to unregister the login item (#238), so Settings
+	 *  shows "Applying…" with the switch disabled until this answers. The
+	 *  result is whether the app starts at login now, as stored in the settings
+	 *  file; an error says why not, and what to do (the user may have to approve
+	 *  it in System Settings).
 	 */
 	setLaunchAtLogin: (enabled: boolean) => typedError<boolean, string>(__TAURI_INVOKE("set_launch_at_login", { enabled })),
 	/**
@@ -155,39 +154,31 @@ export const commands = {
 	/**  Shows the log folder in the file manager, through the opener port. */
 	revealLogFile: () => typedError<null, string>(__TAURI_INVOKE("reveal_log_file")),
 	/**
-	 *  Dictates with `provider` and the user's own key from now on. Switching
-	 *  provider also switches to its default model.
+	 *  Dictates in the cloud (`OpenRouter` with the user's own key) or on this
+	 *  Mac from now on.
+	 * 
+	 *  On this Mac with the model downloaded, it is loaded first
+	 *  ([`LiveEngine::preload_local`]) and the settings choose it only if that
+	 *  worked, so until then the engine in use stays in use. Takes seconds;
+	 *  Settings shows "Loading…" meanwhile. Not downloaded yet (U8's "Download
+	 *  and continue"), the settings choose it at once, so the choice survives a
+	 *  quit and the model becomes the engine as soon as its download finishes;
+	 *  until then the engine says the model isn't ready.
 	 */
-	useCloudEngine: (provider: Provider) => typedError<null, string>(__TAURI_INVOKE("use_cloud_engine", { provider })),
-	/**
-	 *  Dictates with on-device model `id` from now on, once it has loaded: the
-	 *  model is loaded first ([`LiveEngine::preload_local`]) and the settings
-	 *  choose it only if that worked, so until then the engine in use stays in
-	 *  use (from another on-device model, it is reloaded if the new one fails).
-	 *  Takes seconds; Settings shows "Loading…" meanwhile.
-	 */
-	useLocalModel: (id: string) => typedError<null, string>(__TAURI_INVOKE("use_local_model", { id })),
+	setTranscription: (transcription: Transcription) => typedError<null, string>(__TAURI_INVOKE("set_transcription", { transcription })),
 	/**  The engine in use: loading, ready, or failed and why. Never blocks. */
 	getEngineStatus: () => typedError<EngineStatus_Serialize, string>(__TAURI_INVOKE("get_engine_status")),
 	/**
-	 *  Deletes `provider`'s API key from the keychain (Remove key). Bounded
+	 *  Deletes the API key from the keychain (Remove key). Bounded
 	 *  like saving one.
 	 */
-	deleteApiKey: (provider: Provider) => typedError<null, string>(__TAURI_INVOKE("delete_api_key", { provider })),
+	deleteApiKey: () => typedError<null, string>(__TAURI_INVOKE("delete_api_key")),
 	/**  Opens `link` in the browser. */
 	openLink: (link: Link) => typedError<null, string>(__TAURI_INVOKE("open_link", { link })),
 	/**  The version, and when updates were last checked. */
 	getAppInfo: () => typedError<AppInfo_Serialize, string>(__TAURI_INVOKE("get_app_info")),
 	/**  Check now, in Settings → General: a dialog says what it found. */
 	checkForUpdates: () => typedError<null, string>(__TAURI_INVOKE("check_for_updates")),
-	/**
-	 *  Chooses on-device model `id` before it is on this Mac (U8's "Download and
-	 *  continue"): the settings choose it now, so the choice survives a quit and
-	 *  the model becomes the engine as soon as its download finishes
-	 *  (`download_local_model` rebuilds the engine then). Until then the engine
-	 *  says the model isn't ready.
-	 */
-	chooseLocalModel: (id: string) => typedError<null, string>(__TAURI_INVOKE("choose_local_model", { id })),
 	/**  The recent dictations, newest first. History is in memory, so no blocking. */
 	listHistory: () => typedError<HistoryList, string>(__TAURI_INVOKE("list_history")),
 	/**
@@ -406,8 +397,6 @@ export type ErrorCode =
 "provider_quota" | 
 /**  The `OpenRouter` account has no credits left (402). */
 "out_of_credits" | 
-/**  The provider answered with a redirect. */
-"provider_redirect" | 
 /**  The on-device model isn't downloaded. */
 "model_missing" | 
 /**  The on-device model is still loading. */
@@ -423,19 +412,31 @@ export type ErrorCode =
 /**  A password field had focus. */
 "secure_input";
 
-/**  What the user can do about an error, in one click. */
+/**
+ *  What the user can do about an error, in one click: the button in
+ *  Troubleshoot and the fix row in the tray.
+ */
 export type FixAction = 
-/**  Open System Settings at the Microphone page. */
+/**  Settings, on Speech (the key and the engine). */
+"open_speech_settings" | 
+/**  System Settings at the Microphone page. */
 "open_microphone_settings" | 
-/**  Open System Settings at the Accessibility page. */
+/**  System Settings at the Accessibility page. */
 "open_accessibility_settings" | 
-/**  Open this app's settings. */
-"open_settings" | 
-/**  Open the Troubleshoot window. */
-"open_troubleshoot" | 
-/**  Open `OpenRouter`'s page for adding credits. */
+/**  Settings, on the dictation key. */
+"choose_another_key" | 
+/**  Settings, on Speech, where the model downloads. */
+"download_model" | 
+/**  `OpenRouter`'s page for adding credits. */
 "add_credits" | 
-/**  Nothing to click: the next dictation is the retry. */
+/**  The Troubleshoot page. */
+"troubleshoot" | 
+/**  Restart the app, so a permission grant takes effect. */
+"relaunch" | 
+/**
+ *  Nothing to click: the next dictation is the retry. The tray offers
+ *  Troubleshoot instead.
+ */
 "try_again";
 
 /**  What Settings → History shows. */
@@ -460,29 +461,6 @@ export type HistoryRow = {
 	/**  Whether the paste worked. */
 	pasted: boolean,
 };
-
-/**  Why a key test failed. Never contains the key. */
-export type KeyTestError = {
-	/**  The category. */
-	kind: KeyTestKind,
-	/**  What to show the user. */
-	message: string,
-};
-
-/**  What went wrong when testing a key, so the UI can pick its wording. */
-export type KeyTestKind = 
-/**  No key was typed or saved to test. */
-"no_key" | 
-/**  The key can't be a key, or the provider rejected it. */
-"invalid_key" | 
-/**  The provider is rate limiting; the key may be fine. */
-"rate_limited" | 
-/**  The provider couldn't be reached (offline, DNS, timeout). */
-"network" | 
-/**  The provider failed or gave an answer we can't use. */
-"server" | 
-/**  The saved key couldn't be read from the keychain. */
-"keychain";
 
 /**
  *  A page Settings links to. A closed list: the window can't open any
@@ -511,8 +489,6 @@ export type LocalModelInfo_Deserialize = {
 	name: string,
 	/**  Its languages in words ("English only"). */
 	languages: string,
-	/**  The ISO codes it transcribes, so the language picker offers only these. */
-	language_codes: string[],
 	/**  The download's size in bytes (a number: sizes fit a double exactly). */
 	size_bytes: number | null,
 	/**  Bytes on disk so far (the size when ready, 0 when missing). */
@@ -543,8 +519,6 @@ export type LocalModelInfo_Serialize = {
 	name: string,
 	/**  Its languages in words ("English only"). */
 	languages: string,
-	/**  The ISO codes it transcribes, so the language picker offers only these. */
-	language_codes: string[],
 	/**  The download's size in bytes (a number: sizes fit a double exactly). */
 	size_bytes: number | null,
 	/**  Bytes on disk so far (the size when ready, 0 when missing). */
@@ -585,9 +559,9 @@ export type OnboardingStatus = {
 	/**  The step the user is on. */
 	step: Step,
 	/**  The microphone permission. */
-	microphone: PermissionState,
+	microphone: PermissionStatus,
 	/**  The Accessibility permission. */
-	accessibility: PermissionState,
+	accessibility: PermissionStatus,
 	/**
 	 *  macOS says Accessibility is allowed but the hotkey can't use it: a
 	 *  relaunch makes it take.
@@ -603,28 +577,41 @@ export type OnboardingStatus = {
 	asked_again: boolean,
 };
 
-/**  A permission's state, for the onboarding steps. */
-export type PermissionState = 
-/**  Granted. */
-"granted" | 
-/**  Refused: only System Settings can grant it now. */
-"denied" | 
 /**
- *  Not granted yet (for Accessibility, macOS can't tell this from
- *  refused).
+ *  The overlay event's payload, generated into `src/bindings.ts` for the
+ *  overlay page. An error carries only its user-facing message, no code (U4
+ *  criterion 6).
  */
-"not_determined";
+export type OverlayView = OverlayView_Serialize | OverlayView_Deserialize;
 
 /**
- *  The cloud provider: `OpenRouter`, with the user's own key (Q2). A file
- *  with any other value loads as `OpenRouter` ([`from_json`]).
+ *  The overlay event's payload, generated into `src/bindings.ts` for the
+ *  overlay page. An error carries only its user-facing message, no code (U4
+ *  criterion 6).
  */
-export type Provider = 
+export type OverlayView_Deserialize = { state: "hidden" } | { state: "recording" } | { state: "no_sound"; device?: string | null } | { state: "transcribing" } | { state: "paste_sent" } | { state: "error"; message: string };
+
 /**
- *  `OpenRouter`'s API: speech and cleanup models from
- *  [`crate::cloud_models`].
+ *  The overlay event's payload, generated into `src/bindings.ts` for the
+ *  overlay page. An error carries only its user-facing message, no code (U4
+ *  criterion 6).
  */
-"openrouter";
+export type OverlayView_Serialize = { state: "hidden" } | { state: "recording" } | { state: "no_sound"; device?: string } | { state: "transcribing" } | { state: "paste_sent" } | { state: "error"; message: string };
+
+/**
+ *  Whether the OS has granted a [`Permission`]: one type for the ports,
+ *  onboarding and the report.
+ */
+export type PermissionStatus = 
+/**  Granted. */
+"granted" | 
+/**  Refused; only the user can change it, in System Settings. */
+"denied" | 
+/**
+ *  Not asked yet, or the OS can't say (for Accessibility, macOS can't
+ *  tell this from refused).
+ */
+"not_determined";
 
 /**  What the user can set. Never holds the API key. */
 export type Settings = Settings_Serialize | Settings_Deserialize;
@@ -633,14 +620,6 @@ export type Settings = Settings_Serialize | Settings_Deserialize;
 export type Settings_Deserialize = {
 	/**  The schema version; always [`CURRENT_VERSION`] once loaded. */
 	version?: number,
-	/**  Which cloud API transcribes. */
-	provider?: Provider,
-	/**
-	 *  The speech model's id in [`crate::cloud_models::CATALOG`], e.g.
-	 *  `openai/gpt-4o-mini-transcribe`. An id the catalog no longer has
-	 *  (a model shut down, or one from before Q2) loads as the default.
-	 */
-	model?: string,
 	/**  The dictation hotkey, as [`HotkeySpec`] writes it (`RightAlt`). */
 	hotkey?: string,
 	/**
@@ -651,12 +630,6 @@ export type Settings_Deserialize = {
 	launch_at_login?: boolean,
 	/**  Cloud provider or on-device model (L1). */
 	transcription?: Transcription,
-	/**
-	 *  The on-device model's id, used when `transcription` is
-	 *  [`Transcription::Local`]. An id the catalogue no longer has still
-	 *  loads; the engine then says to pick a model in Settings.
-	 */
-	local_model?: string,
 	/**
 	 *  Whether anonymous usage events are shared (A1, `docs/privacy.md`).
 	 *  On by default; a file without it loads with `true`.
@@ -673,14 +646,6 @@ export type Settings_Deserialize = {
 export type Settings_Serialize = {
 	/**  The schema version; always [`CURRENT_VERSION`] once loaded. */
 	version: number,
-	/**  Which cloud API transcribes. */
-	provider: Provider,
-	/**
-	 *  The speech model's id in [`crate::cloud_models::CATALOG`], e.g.
-	 *  `openai/gpt-4o-mini-transcribe`. An id the catalog no longer has
-	 *  (a model shut down, or one from before Q2) loads as the default.
-	 */
-	model: string,
 	/**  The dictation hotkey, as [`HotkeySpec`] writes it (`RightAlt`). */
 	hotkey: string,
 	/**
@@ -691,12 +656,6 @@ export type Settings_Serialize = {
 	launch_at_login: boolean,
 	/**  Cloud provider or on-device model (L1). */
 	transcription: Transcription,
-	/**
-	 *  The on-device model's id, used when `transcription` is
-	 *  [`Transcription::Local`]. An id the catalogue no longer has still
-	 *  loads; the engine then says to pick a model in Settings.
-	 */
-	local_model: string,
 	/**
 	 *  Whether anonymous usage events are shared (A1, `docs/privacy.md`).
 	 *  On by default; a file without it loads with `true`.
@@ -727,9 +686,9 @@ export type Step =
 
 /**  Where speech becomes text (L1). */
 export type Transcription = 
-/**  A cloud provider with the user's own API key ([`Settings::provider`]). */
+/**  `OpenRouter` with the user's own API key. */
 "cloud" | 
-/**  A downloaded model on this Mac ([`Settings::local_model`]); no key. */
+/**  The downloaded model on this Mac; no key. */
 "local";
 
 /**  What the settings window shows. */

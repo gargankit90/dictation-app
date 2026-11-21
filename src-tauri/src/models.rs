@@ -51,8 +51,6 @@ pub struct LocalModelInfo {
     pub name: String,
     /// Its languages in words ("English only").
     pub languages: String,
-    /// The ISO codes it transcribes, so the language picker offers only these.
-    pub language_codes: Vec<String>,
     /// The download's size in bytes (a number: sizes fit a double exactly).
     pub size_bytes: f64,
     /// Bytes on disk so far (the size when ready, 0 when missing).
@@ -165,7 +163,6 @@ impl ModelDownloads {
                     id: model.id.to_owned(),
                     name: model.name.to_owned(),
                     languages: model.languages_label.to_owned(),
-                    language_codes: model.languages.iter().map(|&c| c.to_owned()).collect(),
                     size_bytes: model.size_bytes as f64,
                     downloaded_bytes: downloaded as f64,
                     state,

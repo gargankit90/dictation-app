@@ -20,21 +20,21 @@
 //!
 //! `test_api_key` (M3.4) is the one command that sends a key anywhere but
 //! the keychain: to the provider, in the `Authorization` header, with a short
-//! silent clip. It returns nothing but success or a [`KeyTestError`] whose
-//! message is written here and never holds a key.
+//! silent clip. It returns nothing but success or the error code's
+//! sentence (`dictation_core::diagnostics`), which never holds a key.
 
 use std::sync::Arc;
 
+use dictation_core::diagnostics::ErrorCode;
 use dictation_core::onboarding::Step;
-use dictation_core::settings::{Provider, Settings};
+use dictation_core::settings::Settings;
 use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, UndoFailed};
-use dictation_pipeline::launch::LoginSync;
+use dictation_pipeline::launch::LoginItem;
 use dictation_platform::secrets::KeychainSecretStore;
-use dictation_ports::{LaunchAtLogin, Permission, SecretStore, SetupProblem, TranscribeError};
+use dictation_ports::{EngineKind, Permission, SecretStore, SetupProblem};
 use dictation_transcribe::check_key::check_key;
 use dictation_transcribe::openrouter;
-use serde::Serialize;
 use tauri::State;
 
 use crate::diagnostics::Diagnostics;
@@ -47,29 +47,6 @@ pub const BINDINGS_PATH: &str = "../src/bindings.ts";
 
 /// The settings file and keys the commands use.
 pub struct AppConfig(pub Arc<Config<KeychainSecretStore>>);
-
-/// The OS's login item for the launch-at-login setting (M5.3), and the
-/// thread that changes it, so no save waits for the OS (S1, #238).
-pub struct LoginItem {
-    /// For reading the OS's state.
-    pub login: Arc<dyn LaunchAtLogin>,
-    /// Changes it, off the caller's thread, the latest choice winning.
-    pub sync: LoginSync,
-}
-
-impl LoginItem {
-    /// Changes of the login item are stored in `config`'s settings file once
-    /// the OS has answered.
-    pub fn new<S: SecretStore + 'static>(
-        login: Arc<dyn LaunchAtLogin>,
-        config: Arc<Config<S>>,
-    ) -> Self {
-        let sync = LoginSync::new(Arc::clone(&login), move |outcome| {
-            store_launch_at_login(&config, outcome.enabled).map_err(|error| error.to_string())
-        });
-        Self { login, sync }
-    }
-}
 
 /// Stores what the OS ended up with as the launch-at-login setting.
 fn store_launch_at_login<S: SecretStore>(
@@ -131,11 +108,11 @@ async fn on_config<T: Send + 'static, E: std::fmt::Display + Send + 'static>(
 #[specta::specta]
 pub async fn get_settings(
     state: State<'_, AppConfig>,
-    login: State<'_, LoginItem>,
+    login: State<'_, Arc<LoginItem>>,
     hotkey: State<'_, ActiveHotkey>,
 ) -> Result<Settings, String> {
     let hotkey = hotkey.0.clone();
-    let login = login.sync.clone();
+    let login = Arc::clone(&login);
     on_config(&state, move |config| read_settings(config, &login, &hotkey)).await
 }
 
@@ -143,7 +120,7 @@ pub async fn get_settings(
 /// they really are.
 fn read_settings<S: SecretStore>(
     config: &Config<S>,
-    login: &LoginSync,
+    login: &LoginItem,
     hotkey: &HotkeyControl,
 ) -> Result<Settings, ConfigError> {
     let saved = login.shown(config.settings()?);
@@ -346,29 +323,28 @@ pub async fn set_hotkey(
     saved.problem().map_or(Ok(()), Err)
 }
 
-/// Turns launch at login on or off, and nothing else. It returns at once
-/// with the OS's answer for the latest choice: the OS can take 40 s to
-/// unregister the login item (#238), so the window must not wait on it and
-/// Settings shows "Applying…" until this resolves. The change runs on a
-/// thread of its own, one at a time; if the user toggles again meanwhile,
-/// every call resolves with the outcome of the last choice. The result is
-/// whether the app starts at login now; an error says why not, and what to
-/// do (the user may have to approve it in System Settings).
+/// Turns launch at login on or off, and nothing else, on the blocking pool:
+/// the OS can take 40 s to unregister the login item (#238), so Settings
+/// shows "Applying…" with the switch disabled until this answers. The
+/// result is whether the app starts at login now, as stored in the settings
+/// file; an error says why not, and what to do (the user may have to approve
+/// it in System Settings).
 #[tauri::command]
 #[specta::specta]
 pub async fn set_launch_at_login(
-    login: State<'_, LoginItem>,
+    state: State<'_, AppConfig>,
+    login: State<'_, Arc<LoginItem>>,
     enabled: bool,
 ) -> Result<bool, String> {
-    let outcome = login
-        .sync
-        .request(enabled)
-        .await
-        .map_err(|_| "the login item task crashed".to_owned())?;
-    match outcome.problem {
-        Some(problem) => Err(problem.to_string()),
-        None => Ok(outcome.enabled),
-    }
+    let (config, login) = (Arc::clone(&state.0), Arc::clone(&login));
+    tauri::async_runtime::spawn_blocking(move || {
+        login.set(enabled, |now| {
+            store_launch_at_login(&config, now).map_err(|error| error.to_string())
+        })
+    })
+    .await
+    .map_err(|_| "the login item task crashed".to_owned())?
+    .map_err(|problem| problem.to_string())
 }
 
 /// While the user is choosing a new dictation key, pressing the current one
@@ -461,7 +437,7 @@ fn write_sharing<S: SecretStore>(
     Ok(())
 }
 
-/// Stores `key` as `provider`'s API key in the keychain. Write-only.
+/// Stores `key` as the API key in the keychain. Write-only.
 // Bounded: a keychain that never answers gives an error after
 // `engine::KEY_READ_TIMEOUT`, and a retry doesn't start another write.
 #[tauri::command]
@@ -470,11 +446,10 @@ pub async fn set_api_key(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
     usage: State<'_, Usage>,
-    provider: Provider,
     key: String,
 ) -> Result<(), String> {
-    save_key(&state.0, engine.inner(), provider, key).await?;
-    usage.record(usage::engine_selected(provider));
+    save_key(&state.0, engine.inner(), key).await?;
+    usage.record(usage::engine_selected(EngineKind::Cloud));
     Ok(())
 }
 
@@ -484,11 +459,10 @@ pub async fn set_api_key(
 pub(crate) async fn save_key<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
-    provider: Provider,
     key: String,
 ) -> Result<(), String> {
     let (config, live) = (Arc::clone(config), live.clone());
-    tauri::async_runtime::spawn_blocking(move || live.write_key(&config, provider, key))
+    tauri::async_runtime::spawn_blocking(move || live.write_key(&config, key))
         .await
         .map_err(|_| "the settings task crashed".to_owned())?
         .map_err(|error| {
@@ -497,16 +471,15 @@ pub(crate) async fn save_key<S: SecretStore + 'static>(
         })
 }
 
-/// Whether `provider` has a key stored (for the keychain tests; the UI asks
+/// Whether a key is stored (for the keychain tests; the UI asks
 /// `saved_key_hint`).
 #[cfg(test)]
 async fn has_key<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
-    provider: Provider,
 ) -> Result<bool, String> {
     let (config, live) = (Arc::clone(config), live.clone());
-    tauri::async_runtime::spawn_blocking(move || live.read_key(&config, provider))
+    tauri::async_runtime::spawn_blocking(move || live.read_key(&config))
         .await
         .map_err(|_| "the settings task crashed".to_owned())?
         .map(|key| key.is_some())
@@ -516,160 +489,34 @@ async fn has_key<S: SecretStore + 'static>(
         })
 }
 
-/// What went wrong when testing a key, so the UI can pick its wording.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum KeyTestKind {
-    /// No key was typed or saved to test.
-    NoKey,
-    /// The key can't be a key, or the provider rejected it.
-    InvalidKey,
-    /// The provider is rate limiting; the key may be fine.
-    RateLimited,
-    /// The provider couldn't be reached (offline, DNS, timeout).
-    Network,
-    /// The provider failed or gave an answer we can't use.
-    Server,
-    /// The saved key couldn't be read from the keychain.
-    Keychain,
-}
-
-/// Why a key test failed. Never contains the key.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
-pub struct KeyTestError {
-    /// The category.
-    pub kind: KeyTestKind,
-    /// What to show the user.
-    pub message: String,
-}
-
-impl KeyTestError {
-    fn new(kind: KeyTestKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-        }
-    }
-}
-
-/// The provider's name for messages.
-fn provider_name(provider: Provider) -> &'static str {
-    match provider {
-        Provider::OpenRouter => "OpenRouter",
-    }
-}
-
-/// The user-facing error for a failed check. The messages are fixed text
-/// plus the engine's own detail, which never holds the key, the audio or a
-/// transcript (`TranscribeError`).
-fn describe(provider: Provider, error: &TranscribeError) -> KeyTestError {
-    let name = provider_name(provider);
-    match error {
-        TranscribeError::MissingKey => KeyTestError::new(
-            KeyTestKind::NoKey,
-            format!("No {name} API key is saved yet. Paste one first."),
-        ),
-        TranscribeError::InvalidKey => KeyTestError::new(
-            KeyTestKind::InvalidKey,
-            format!(
-                "{name} rejected this API key. Check that you copied the whole key from {name}."
-            ),
-        ),
-        TranscribeError::OutOfCredits => KeyTestError::new(
-            KeyTestKind::Server,
-            format!(
-                "The key works, but your {name} account has no credits. Add credits on {name}, then test again."
-            ),
-        ),
-        TranscribeError::NoRoute => KeyTestError::new(
-            KeyTestKind::Server,
-            format!(
-                "{name} has no provider for the speech model with Vocet's privacy settings right now, so the key couldn't be checked. Try again in a few minutes."
-            ),
-        ),
-        TranscribeError::RateLimited => KeyTestError::new(
-            KeyTestKind::RateLimited,
-            format!(
-                "{name} is limiting requests right now. The key may be fine; try again in a minute."
-            ),
-        ),
-        TranscribeError::Timeout => KeyTestError::new(
-            KeyTestKind::Network,
-            format!("{name} didn't answer in time. Check your internet connection and try again."),
-        ),
-        TranscribeError::Network(_) => KeyTestError::new(
-            KeyTestKind::Network,
-            format!("Couldn't reach {name}. Check your internet connection and try again."),
-        ),
-        // The key test reads the keychain itself and reports its errors
-        // (`KeyTestKind::Keychain`); these two come from the dictation engine.
-        TranscribeError::KeyPending | TranscribeError::KeychainUnavailable(_) => KeyTestError::new(
-            KeyTestKind::Keychain,
-            "Couldn't read your API key from the Keychain.".to_owned(),
-        ),
-        // Never followed, so retrying won't help (#86).
-        TranscribeError::Redirected(status) => KeyTestError::new(
-            KeyTestKind::Server,
-            format!(
-                "{name} answered with a redirect (HTTP {status}), which isn't followed, so the key couldn't be checked. Check the provider selected in Settings, then test the key again."
-            ),
-        ),
-        // Only the on-device engine reports it; a key test never runs one.
-        TranscribeError::ModelMissing | TranscribeError::ModelLoading => KeyTestError::new(
-            KeyTestKind::Server,
-            "The key couldn't be checked. Try again.".to_owned(),
-        ),
-        TranscribeError::Engine(detail) => KeyTestError::new(
-            KeyTestKind::Server,
-            format!(
-                "{name} had a problem, so the key couldn't be checked ({detail}). Try again later."
-            ),
-        ),
-    }
-}
-
 /// Tests `typed`, or the stored key if `typed` is `None`, against
-/// `provider` at `base_url`. A typed key is only used for this request;
-/// it is not stored (saving it is `set_api_key`'s job).
+/// `OpenRouter` at `base_url`. A typed key is only used for this request;
+/// it is not stored (saving it is `set_api_key`'s job). The error is the
+/// code of what went wrong; the details go to the log.
 async fn key_test<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
-    provider: Provider,
     typed: Option<String>,
     base_url: &str,
-) -> Result<(), KeyTestError> {
-    let name = provider_name(provider);
+) -> Result<(), ErrorCode> {
     let (key, source) = match typed {
-        Some(typed) => {
-            let key = config::validate_key(&typed).map_err(|error| match error {
-                ConfigError::InvalidKey(reason) => {
-                    KeyTestError::new(KeyTestKind::InvalidKey, format!("The API key {reason}."))
-                }
-                other => KeyTestError::new(KeyTestKind::Keychain, other.to_string()),
-            })?;
-            (key, "typed")
-        }
+        Some(typed) => (
+            config::validate_key(&typed).map_err(|_| ErrorCode::KeyRejected)?,
+            "typed",
+        ),
         None => {
             // Bounded and shared with the engine's reads: a keychain that
             // never answers is an error here, not a button stuck on
             // "Testing…", and a retry doesn't start another thread.
             let (stored, live) = (Arc::clone(config), live.clone());
-            let stored = tokio::task::spawn_blocking(move || live.read_key(&stored, provider))
+            let stored = tokio::task::spawn_blocking(move || live.read_key(&stored))
                 .await
-                .map_err(|_| KeyTestError::new(KeyTestKind::Keychain, "the keychain task crashed"))?
+                .map_err(|_| ErrorCode::KeyUnreadable)?
                 .map_err(|error| {
-                    KeyTestError::new(
-                        KeyTestKind::Keychain,
-                        format!("Couldn't read the saved key: {error}."),
-                    )
+                    tracing::warn!(%error, "API key test: couldn't read the saved key");
+                    ErrorCode::KeyUnreadable
                 })?;
-            let key = stored.ok_or_else(|| {
-                KeyTestError::new(
-                    KeyTestKind::NoKey,
-                    format!("No {name} API key is saved yet. Paste one first."),
-                )
-            })?;
-            (key, "stored")
+            (stored.ok_or(ErrorCode::KeyMissing)?, "stored")
         }
     };
     let engine = openrouter::Config {
@@ -678,36 +525,37 @@ async fn key_test<S: SecretStore + 'static>(
     };
     let result = check_key(engine, key).await;
     match &result {
-        Ok(()) => tracing::info!(%provider, source, "API key works"),
-        Err(error) => tracing::warn!(%provider, source, %error, "API key test failed"),
+        Ok(()) => tracing::info!(source, "API key works"),
+        Err(error) => tracing::warn!(source, %error, "API key test failed"),
     }
-    result.map_err(|error| describe(provider, &error))
+    result.map_err(|error| error.code())
 }
 
-/// Tests the saved key of `provider` (Troubleshoot's "Test connection").
+/// Tests the saved key (Troubleshoot's "Test connection").
 pub(crate) async fn test_saved_key(
     config: &Arc<Config<KeychainSecretStore>>,
     live: &LiveEngine,
-    provider: Provider,
     base_url: &str,
-) -> Result<(), KeyTestError> {
-    key_test(config, live, provider, None, base_url).await
+) -> Result<(), ErrorCode> {
+    key_test(config, live, None, base_url).await
 }
 
-/// Tests an API key with a short silent clip through `provider`'s
+/// Tests an API key with a short silent clip through `OpenRouter`'s
 /// transcription endpoint: the key typed in the form (`key`, used for this
 /// request only and not stored), or the saved one if `key` is `None`. The
-/// key never comes back; the result is success or a [`KeyTestError`].
+/// key never comes back; the result is success or what went wrong, in the
+/// error code's words.
 #[tauri::command]
 #[specta::specta]
 pub async fn test_api_key(
     state: State<'_, AppConfig>,
     engine: State<'_, LiveEngine>,
-    provider: Provider,
     key: Option<String>,
-) -> Result<(), KeyTestError> {
-    let base_url = engine.provider_base_url(provider);
-    key_test(&state.0, engine.inner(), provider, key, &base_url).await
+) -> Result<(), String> {
+    let base_url = engine.provider_base_url();
+    key_test(&state.0, engine.inner(), key, &base_url)
+        .await
+        .map_err(ErrorCode::user_text)
 }
 
 /// The view the settings window shows and, for onboarding (M5.2), the step
@@ -876,51 +724,51 @@ pub fn relaunch_from_tray(shell: &AppShell) {
 /// Every command, for the invoke handler and the bindings. Generic over the
 /// runtime so the ACL tests can run the real handler on Tauri's mock runtime.
 pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
-    tauri_specta::Builder::<R>::new().commands(tauri_specta::collect_commands![
-        get_settings,
-        set_api_key,
-        test_api_key,
-        crate::connect::connect_openrouter,
-        crate::connect::cancel_connect,
-        crate::connect::saved_key_hint,
-        get_onboarding,
-        request_permission,
-        open_setup,
-        set_onboarding_step,
-        finish_onboarding,
-        relaunch_app,
-        crate::models::list_local_models,
-        crate::models::list_cleanup_models,
-        crate::models::download_local_model,
-        crate::models::cancel_local_model_download,
-        crate::models::delete_local_model,
-        set_share_usage_events,
-        set_hotkey,
-        set_hotkey_recording,
-        get_hotkey_notice,
-        set_launch_at_login,
-        crate::diagnostics::run_checks,
-        crate::diagnostics::test_connection,
-        crate::diagnostics::build_report,
-        crate::diagnostics::save_report,
-        crate::diagnostics::open_issue,
-        crate::diagnostics::take_window_request,
-        crate::diagnostics::reveal_log_file,
-        crate::preferences::use_cloud_engine,
-        crate::preferences::use_local_model,
-        crate::preferences::get_engine_status,
-        crate::preferences::delete_api_key,
-        crate::preferences::open_link,
-        crate::preferences::get_app_info,
-        crate::preferences::check_for_updates,
-        crate::preferences::choose_local_model,
-        crate::history::list_history,
-        crate::history::copy_history_entry,
-        crate::history::delete_history_entry,
-        crate::history::clear_history,
-        crate::history::set_history_limit,
-        crate::overlay::get_overlay_level,
-    ])
+    tauri_specta::Builder::<R>::new()
+        .commands(tauri_specta::collect_commands![
+            get_settings,
+            set_api_key,
+            test_api_key,
+            crate::connect::connect_openrouter,
+            crate::connect::cancel_connect,
+            crate::connect::saved_key_hint,
+            get_onboarding,
+            request_permission,
+            open_setup,
+            set_onboarding_step,
+            finish_onboarding,
+            relaunch_app,
+            crate::models::list_local_models,
+            crate::models::list_cleanup_models,
+            crate::models::download_local_model,
+            crate::models::cancel_local_model_download,
+            crate::models::delete_local_model,
+            set_share_usage_events,
+            set_hotkey,
+            set_hotkey_recording,
+            get_hotkey_notice,
+            set_launch_at_login,
+            crate::diagnostics::run_checks,
+            crate::diagnostics::test_connection,
+            crate::diagnostics::build_report,
+            crate::diagnostics::save_report,
+            crate::diagnostics::open_issue,
+            crate::diagnostics::take_window_request,
+            crate::diagnostics::reveal_log_file,
+            crate::preferences::set_transcription,
+            crate::preferences::get_engine_status,
+            crate::preferences::delete_api_key,
+            crate::preferences::open_link,
+            crate::preferences::get_app_info,
+            crate::preferences::check_for_updates,
+            crate::history::list_history,
+            crate::history::copy_history_entry,
+            crate::history::delete_history_entry,
+            crate::history::clear_history,
+            crate::history::set_history_limit,
+            crate::overlay::get_overlay_level,
+        ])
+        .typ::<crate::overlay::Payload<'static>>()
 }
 
 /// Writes the TypeScript bindings to `path`.
@@ -1009,39 +857,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_ui_default_models_match_core() {
-        let names = std::fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/settings/modelRow.ts"),
-        )
-        .unwrap();
-        let provider = format!(
-            "PROVIDER_NAME = \"{}\"",
-            provider_name(Provider::OpenRouter)
-        );
-        assert!(
-            names.contains(&provider),
-            "src/settings/modelRow.ts lacks {provider}"
-        );
-        for (constant, id) in [
-            (
-                "SPEECH_MODEL_NAME",
-                dictation_core::cloud_models::DEFAULT_SPEECH,
-            ),
-            (
-                "CLEANUP_MODEL_NAME",
-                dictation_core::cloud_models::DEFAULT_CLEANUP,
-            ),
-        ] {
-            let name = dictation_core::cloud_models::find(id).unwrap().display_name;
-            let entry = format!("{constant} = \"{name}\"");
-            assert!(
-                names.contains(&entry),
-                "src/settings/modelRow.ts lacks {entry}"
-            );
-        }
-    }
-
     /// The field names of a generated TypeScript object type's body.
     fn field_names(body: &str) -> Vec<&str> {
         body.lines()
@@ -1071,15 +886,8 @@ mod tests {
         assert!(command("setApiKey").contains("typedError<null, string>"));
         assert!(command("savedKeyHint").contains("typedError<string | null, string>"));
         // The Test key command sends the key out and returns success or a
-        // `KeyTestError` (kind and message), never the key.
-        assert!(command("testApiKey").contains("typedError<null, KeyTestError>"));
-        let error = bindings
-            .split("export type KeyTestError = {")
-            .nth(1)
-            .and_then(|rest| rest.split("\n};").next())
-            .unwrap();
-        assert_eq!(field_names(error), ["kind", "message"]);
-        assert!(error.contains("kind: KeyTestKind") && error.contains("message: string"));
+        // sentence, never the key.
+        assert!(command("testApiKey").contains("typedError<null, string>"));
         // Settings, the only other type sent back, has no key field.
         let settings = bindings
             .split("export type Settings_Serialize = {")
@@ -1091,12 +899,9 @@ mod tests {
             fields,
             [
                 "version",
-                "provider",
-                "model",
                 "hotkey",
                 "launch_at_login",
                 "transcription",
-                "local_model",
                 "share_usage_events",
                 "history_limit"
             ]
@@ -1113,7 +918,6 @@ mod tests {
                 "id",
                 "name",
                 "languages",
-                "language_codes",
                 "size_bytes",
                 "downloaded_bytes",
                 "state",
@@ -1464,7 +1268,6 @@ mod tests {
     }
 
     mod launch_at_login {
-        use std::time::Duration;
 
         use dictation_platform::fakes::{FakeLaunchAtLogin, MemSecretStore};
         use dictation_ports::LaunchAtLoginState;
@@ -1496,75 +1299,17 @@ mod tests {
         fn the_screen_follows_the_os_after_a_change_outside_the_app() {
             let (config, dir) = config();
             let fake = FakeLaunchAtLogin::new();
-            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
-            tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
+            let item = LoginItem::new(Arc::new(fake.clone()));
+            let store = |now| store_launch_at_login(&config, now).map_err(|e| e.to_string());
+            assert_eq!(item.set(true, store), Ok(true));
+            assert!(config.settings().unwrap().launch_at_login);
             fake.set_state(LaunchAtLoginState::Disabled);
             let (hotkey, _) = listening();
-            let shown = read_settings(&config, &item.sync, &hotkey).unwrap();
+            let shown = read_settings(&config, &item, &hotkey).unwrap();
             assert!(!shown.launch_at_login);
             // Asking for it on again does reach the OS, whatever the file says.
-            let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
-            assert!(outcome.enabled);
+            assert_eq!(item.set(true, store), Ok(true));
             assert_eq!(fake.calls(), [true, true]);
-            let _ = std::fs::remove_dir_all(dir);
-        }
-
-        /// Toggled again while the first change is pending: the file and the
-        /// OS both end on the last choice.
-        #[test]
-        fn the_file_and_the_os_agree_on_the_last_choice() {
-            let (config, dir) = config();
-            let fake = FakeLaunchAtLogin::new();
-            fake.delay_changes(Duration::from_millis(300));
-            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
-            let first = item.sync.request(true);
-            std::thread::sleep(Duration::from_millis(50));
-            let second = item.sync.request(false);
-            let (first, second) =
-                tauri::async_runtime::block_on(async { (first.await, second.await) });
-            assert_eq!(first.unwrap(), second.unwrap());
-            assert_eq!(fake.state(), Ok(LaunchAtLoginState::Disabled));
-            assert!(!config.settings().unwrap().launch_at_login);
-            let _ = std::fs::remove_dir_all(dir);
-        }
-
-        /// S1 review, R2: an unwritable settings file after the OS changed is
-        /// an error the user sees, the OS result is kept, and a later change
-        /// stores again.
-        #[test]
-        fn a_settings_file_that_cannot_be_written_is_reported() {
-            let (config, dir) = config();
-            let _ = std::fs::remove_dir_all(&dir);
-            // A file where the settings directory should be.
-            std::fs::write(&dir, "not a directory").unwrap();
-            let fake = FakeLaunchAtLogin::new();
-            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
-            let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
-            assert!(outcome.enabled);
-            assert_eq!(fake.state(), Ok(LaunchAtLoginState::Enabled));
-            let text = outcome.problem.unwrap().to_string();
-            assert!(text.contains("Vocet couldn't save that setting"), "{text}");
-            assert!(text.contains("see Troubleshoot"), "{text}");
-            let _ = std::fs::remove_file(&dir);
-            let again = tauri::async_runtime::block_on(item.sync.request(false)).unwrap();
-            assert!(again.problem.is_none(), "{again:?}");
-            assert!(!config.settings().unwrap().launch_at_login);
-            let _ = std::fs::remove_dir_all(dir);
-        }
-
-        /// A refusal stores what the OS really has, and says why.
-        #[test]
-        fn a_refused_change_stores_the_real_state() {
-            let (config, dir) = config();
-            let fake = FakeLaunchAtLogin::new();
-            fake.enabling_gives(LaunchAtLoginState::RequiresApproval);
-            let item = LoginItem::new(Arc::new(fake), Arc::clone(&config));
-            let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
-            assert_eq!(
-                outcome.problem,
-                Some(dictation_pipeline::launch::LaunchProblem::NeedsApproval)
-            );
-            assert!(!config.settings().is_ok_and(|saved| saved.launch_at_login));
             let _ = std::fs::remove_dir_all(dir);
         }
 
@@ -1574,8 +1319,8 @@ mod tests {
         fn invalid_settings_never_change_the_hotkey() {
             for bad in [
                 Settings {
-                    model: String::new(),
                     hotkey: "F6".into(),
+                    history_limit: 7,
                     ..on()
                 },
                 Settings {
@@ -1620,7 +1365,7 @@ mod tests {
         fn invalid_settings_are_not_saved() {
             let (config, dir) = config();
             let bad = Settings {
-                model: String::new(),
+                history_limit: 7,
                 ..on()
             };
             let (hotkey, _) = listening();
@@ -1635,6 +1380,7 @@ mod tests {
         use std::sync::{Condvar, Mutex};
         use std::time::Duration;
 
+        use dictation_core::settings::API_KEY_NAME;
         use dictation_platform::fakes::MemSecretStore;
         use dictation_ports::{Secret, SecretError};
 
@@ -1682,7 +1428,7 @@ mod tests {
 
             fn stored(&self) -> Option<String> {
                 self.inner
-                    .get(Provider::OpenRouter.key_name())
+                    .get(API_KEY_NAME)
                     .unwrap()
                     .map(|key| key.expose().to_owned())
             }
@@ -1733,23 +1479,17 @@ mod tests {
             let quick = live.clone().with_key_timeout(SHORT);
 
             for attempt in 1..=3 {
-                let error = tokio::time::timeout(
-                    LIMIT,
-                    save_key(&config, &quick, Provider::OpenRouter, FIRST.into()),
-                )
-                .await
-                .expect("the save never returned")
-                .unwrap_err();
+                let error = tokio::time::timeout(LIMIT, save_key(&config, &quick, FIRST.into()))
+                    .await
+                    .expect("the save never returned")
+                    .unwrap_err();
                 assert!(
                     error.contains("no answer from the keychain"),
                     "{attempt}: {error}"
                 );
                 assert!(error.contains("may not be saved"), "{error}");
                 assert!(!error.contains(FIRST));
-                assert_eq!(
-                    has_key(&config, &live, Provider::OpenRouter).await,
-                    Ok(false)
-                );
+                assert_eq!(has_key(&config, &live).await, Ok(false));
             }
             assert_eq!(
                 store.asked(),
@@ -1762,14 +1502,8 @@ mod tests {
             landed
                 .recv_timeout(LIMIT)
                 .expect("the late write never landed");
-            assert_eq!(
-                has_key(&config, &live, Provider::OpenRouter).await,
-                Ok(true)
-            );
-            assert_eq!(
-                save_key(&config, &live, Provider::OpenRouter, NEWER.into()).await,
-                Ok(())
-            );
+            assert_eq!(has_key(&config, &live).await, Ok(true));
+            assert_eq!(save_key(&config, &live, NEWER.into()).await, Ok(()));
             assert_eq!(store.stored().as_deref(), Some(NEWER));
         }
 
@@ -1781,15 +1515,11 @@ mod tests {
             let (config, store, landed) = rig();
             let live = LiveEngine::fixed();
             let quick = live.clone().with_key_timeout(SHORT);
-            assert!(
-                save_key(&config, &quick, Provider::OpenRouter, FIRST.into())
-                    .await
-                    .is_err()
-            );
+            assert!(save_key(&config, &quick, FIRST.into()).await.is_err());
 
             let newer = tokio::spawn({
                 let (config, live) = (Arc::clone(&config), live.clone());
-                async move { save_key(&config, &live, Provider::OpenRouter, NEWER.into()).await }
+                async move { save_key(&config, &live, NEWER.into()).await }
             });
             let writes = live.writes().clone();
             let queued = tokio::task::spawn_blocking(move || writes.wait_queued(1, LIMIT))
@@ -1819,12 +1549,8 @@ mod tests {
         async fn a_key_that_cant_be_a_key_never_waits_behind_a_stuck_write() {
             let (config, store, _landed) = rig();
             let live = LiveEngine::fixed().with_key_timeout(SHORT);
-            assert!(
-                save_key(&config, &live, Provider::OpenRouter, FIRST.into())
-                    .await
-                    .is_err()
-            );
-            let error = save_key(&config, &live, Provider::OpenRouter, "two words".into())
+            assert!(save_key(&config, &live, FIRST.into()).await.is_err());
+            let error = save_key(&config, &live, "two words".into())
                 .await
                 .unwrap_err();
             assert!(error.contains("contains spaces"), "{error}");
@@ -2038,12 +1764,8 @@ mod tests {
             // The file still has RightAlt and the old limit; what
             // Settings shows is the hotkey that works, with the rest as saved.
             assert_eq!(config.settings().unwrap().hotkey, "RightAlt");
-            let shown = read_settings(
-                &config,
-                &LoginSync::new(Arc::new(login.clone()), |_| Ok(())),
-                &hotkey,
-            )
-            .unwrap();
+            let shown =
+                read_settings(&config, &LoginItem::new(Arc::new(login.clone())), &hotkey).unwrap();
             assert_eq!(shown.hotkey, "F6");
             assert_eq!(shown.history_limit, 10);
             let _ = std::fs::remove_dir_all(dir);
@@ -2068,13 +1790,9 @@ mod tests {
             assert_eq!(error.to_string(), "settings file prefs: disk full");
             assert!(keys.listening("RightAlt") && !keys.listening("F6"));
             assert_eq!(
-                read_settings(
-                    &config,
-                    &LoginSync::new(Arc::new(login.clone()), |_| Ok(())),
-                    &hotkey
-                )
-                .unwrap()
-                .hotkey,
+                read_settings(&config, &LoginItem::new(Arc::new(login.clone())), &hotkey)
+                    .unwrap()
+                    .hotkey,
                 "RightAlt"
             );
             let _ = std::fs::remove_dir_all(dir);
@@ -2119,15 +1837,14 @@ mod tests {
             typed: Option<&str>,
             secrets: Option<&str>,
             server: &MockServer,
-        ) -> (Result<(), KeyTestError>, MemSecretStore) {
+        ) -> (Result<(), ErrorCode>, MemSecretStore) {
             let (config, store) = config(&temp());
             if let Some(key) = secrets {
-                config.set_api_key(Provider::OpenRouter, key).unwrap();
+                config.set_api_key(key).unwrap();
             }
             let result = key_test(
                 &config,
                 &LiveEngine::fixed(),
-                Provider::OpenRouter,
                 typed.map(str::to_owned),
                 &server.uri(),
             )
@@ -2160,45 +1877,19 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn each_failure_has_a_kind_and_a_readable_message_without_the_key() {
-            for (status, kind, words) in [
-                (401, KeyTestKind::InvalidKey, "rejected this API key"),
-                (403, KeyTestKind::InvalidKey, "rejected this API key"),
-                (402, KeyTestKind::Server, "Add credits on OpenRouter"),
-                (404, KeyTestKind::Server, "privacy settings"),
-                (429, KeyTestKind::RateLimited, "limiting requests"),
-                (503, KeyTestKind::Server, "HTTP 503"),
-                (400, KeyTestKind::Server, "HTTP 400"),
+        async fn each_failure_has_its_code() {
+            for (status, code) in [
+                (401, ErrorCode::KeyRejected),
+                (403, ErrorCode::KeyRejected),
+                (402, ErrorCode::OutOfCredits),
+                (404, ErrorCode::EngineFailed),
+                (429, ErrorCode::ProviderQuota),
+                (503, ErrorCode::EngineFailed),
+                (400, ErrorCode::EngineFailed),
             ] {
                 let server = provider(status, TYPED).await;
                 let (result, _) = run(Some(TYPED), None, &server).await;
-                let error = result.unwrap_err();
-                assert_eq!(error.kind, kind, "HTTP {status}");
-                assert!(error.message.contains(words), "{}", error.message);
-                assert!(error.message.contains("OpenRouter"), "{}", error.message);
-                assert!(!error.message.contains(TYPED));
-            }
-        }
-
-        /// #86: a 3xx says redirects aren't followed, not "try again later".
-        #[tokio::test]
-        async fn a_redirect_has_its_own_message() {
-            for status in [301, 302, 307, 308] {
-                let server = provider(status, TYPED).await;
-                let (result, _) = run(Some(TYPED), None, &server).await;
-                let error = result.unwrap_err();
-                assert_eq!(error.kind, KeyTestKind::Server, "HTTP {status}");
-                assert!(
-                    error.message
-                        == format!(
-                            "OpenRouter answered with a redirect (HTTP {status}), which isn't followed, so the key couldn't be checked. Check the provider selected in Settings, then test the key again."
-                        ),
-                    "{}",
-                    error.message
-                );
-                assert!(!error.message.contains("address"), "{}", error.message);
-                assert!(!error.message.contains("later"), "{}", error.message);
-                assert!(!error.message.contains(TYPED), "{}", error.message);
+                assert_eq!(result, Err(code), "HTTP {status}");
             }
         }
 
@@ -2213,32 +1904,19 @@ mod tests {
             let error = key_test(
                 &config,
                 &LiveEngine::fixed(),
-                Provider::OpenRouter,
                 Some(TYPED.to_owned()),
                 &format!("http://127.0.0.1:{port}"),
             )
             .await
             .unwrap_err();
-            assert_eq!(error.kind, KeyTestKind::Network);
-            assert!(
-                error.message.contains("Couldn't reach OpenRouter"),
-                "{}",
-                error.message
-            );
-            assert!(!error.message.contains(TYPED));
+            assert_eq!(error, ErrorCode::NetworkUnreachable);
         }
 
         #[tokio::test]
         async fn without_a_stored_or_typed_key_there_is_nothing_to_test() {
             let server = provider(200, STORED).await;
             let (result, _) = run(None, None, &server).await;
-            let error = result.unwrap_err();
-            assert_eq!(error.kind, KeyTestKind::NoKey);
-            assert!(
-                error.message.contains("No OpenRouter API key"),
-                "{}",
-                error.message
-            );
+            assert_eq!(result, Err(ErrorCode::KeyMissing));
             assert!(
                 server.received_requests().await.unwrap().is_empty(),
                 "no request without a key"
@@ -2248,15 +1926,9 @@ mod tests {
         #[tokio::test]
         async fn a_typed_key_that_cant_be_a_key_is_refused_before_any_request() {
             let server = provider(200, STORED).await;
-            for (typed, why) in [
-                ("", "is empty"),
-                ("   ", "is empty"),
-                ("two words", "contains spaces"),
-            ] {
+            for typed in ["", "   ", "two words"] {
                 let (result, _) = run(Some(typed), Some(STORED), &server).await;
-                let error = result.unwrap_err();
-                assert_eq!(error.kind, KeyTestKind::InvalidKey);
-                assert_eq!(error.message, format!("The API key {why}."));
+                assert_eq!(result, Err(ErrorCode::KeyRejected), "{typed:?}");
             }
             assert!(server.received_requests().await.unwrap().is_empty());
         }
@@ -2266,17 +1938,10 @@ mod tests {
             let server = provider(200, STORED).await;
             let (config, secrets) = config(&temp());
             secrets.set_access_denied(true);
-            let error = key_test(
-                &config,
-                &LiveEngine::fixed(),
-                Provider::OpenRouter,
-                None,
-                &server.uri(),
-            )
-            .await
-            .unwrap_err();
-            assert_eq!(error.kind, KeyTestKind::Keychain);
-            assert!(error.message.contains("keychain access was denied"));
+            let error = key_test(&config, &LiveEngine::fixed(), None, &server.uri())
+                .await
+                .unwrap_err();
+            assert_eq!(error, ErrorCode::KeyUnreadable);
         }
 
         /// A keychain that doesn't answer until it is opened, and counts
@@ -2335,32 +2000,23 @@ mod tests {
                 gets: Arc::default(),
             };
             let config = Arc::new(Config::new(temp(), store.clone()));
-            config.set_api_key(Provider::OpenRouter, STORED).unwrap();
+            config.set_api_key(STORED).unwrap();
             let live = LiveEngine::fixed().with_key_timeout(Duration::from_millis(150));
 
             for attempt in 1..=3 {
                 let error = tokio::time::timeout(
                     Duration::from_secs(20),
-                    key_test(&config, &live, Provider::OpenRouter, None, &server.uri()),
+                    key_test(&config, &live, None, &server.uri()),
                 )
                 .await
                 .expect("the test never returned")
                 .unwrap_err();
-                assert_eq!(error.kind, KeyTestKind::Keychain, "test {attempt}");
-                assert!(
-                    error.message.contains("no answer from the keychain"),
-                    "{}",
-                    error.message
-                );
-                assert!(!error.message.contains(STORED));
+                assert_eq!(error, ErrorCode::KeyUnreadable, "test {attempt}");
 
-                let status = tokio::time::timeout(
-                    Duration::from_secs(20),
-                    has_key(&config, &live, Provider::OpenRouter),
-                )
-                .await
-                .expect("the status never returned")
-                .unwrap_err();
+                let status = tokio::time::timeout(Duration::from_secs(20), has_key(&config, &live))
+                    .await
+                    .expect("the status never returned")
+                    .unwrap_err();
                 assert!(status.contains("no answer from the keychain"), "{status}");
             }
             assert_eq!(
@@ -2372,14 +2028,8 @@ mod tests {
 
             // The keychain answers: the same calls now work.
             store.open();
-            assert_eq!(
-                has_key(&config, &live, Provider::OpenRouter).await,
-                Ok(true)
-            );
-            assert_eq!(
-                key_test(&config, &live, Provider::OpenRouter, None, &server.uri()).await,
-                Ok(())
-            );
+            assert_eq!(has_key(&config, &live).await, Ok(true));
+            assert_eq!(key_test(&config, &live, None, &server.uri()).await, Ok(()));
         }
 
         #[test]
@@ -2390,10 +2040,7 @@ mod tests {
                     crate::engine::starting(),
                 )),
             ] {
-                assert_eq!(
-                    live.provider_base_url(Provider::OpenRouter),
-                    "https://openrouter.ai/api/v1"
-                );
+                assert_eq!(live.provider_base_url(), "https://openrouter.ai/api/v1");
             }
         }
 
@@ -2403,14 +2050,13 @@ mod tests {
         async fn a_test_build_tests_the_key_where_it_dictates() {
             let server = provider(200, TYPED).await;
             let live = LiveEngine::fixed().at(&server.uri());
-            assert_eq!(live.provider_base_url(Provider::OpenRouter), server.uri());
+            assert_eq!(live.provider_base_url(), server.uri());
             let (config, _) = config(&temp());
             key_test(
                 &config,
                 &live,
-                Provider::OpenRouter,
                 Some(TYPED.to_owned()),
-                &live.provider_base_url(Provider::OpenRouter),
+                &live.provider_base_url(),
             )
             .await
             .unwrap();
@@ -2628,51 +2274,6 @@ mod capability_tests {
         }
     }
 
-    fn capability_file(name: &str) -> serde_json::Value {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("capabilities")
-            .join(name);
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-    }
-
-    #[test]
-    fn criterion_m1_7_2_the_capability_files_list_exactly_the_commands() {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("capabilities");
-        let mut files: Vec<_> = std::fs::read_dir(&dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect();
-        files.sort();
-        assert_eq!(
-            files,
-            ["default.json", "overlay.json"],
-            "two capability files"
-        );
-
-        let main = capability_file("default.json");
-        let expected: Vec<String> = COMMAND_NAMES
-            .iter()
-            .map(|name| format!("allow-{}", name.replace('_', "-")))
-            .collect();
-        assert_eq!(main["permissions"], serde_json::json!(expected));
-        assert_eq!(main["windows"], serde_json::json!([MAIN]));
-        assert!(main.get("webviews").is_none());
-        assert!(main.get("remote").is_none());
-
-        let overlay = capability_file("overlay.json");
-        assert_eq!(
-            overlay["permissions"],
-            serde_json::json!([
-                "core:event:allow-listen",
-                "core:event:allow-unlisten",
-                "allow-get-overlay-level"
-            ])
-        );
-        assert_eq!(overlay["windows"], serde_json::json!([OVERLAY]));
-        assert!(overlay.get("webviews").is_none());
-        assert!(overlay.get("remote").is_none());
-    }
-
     /// A directory of its own under the temporary one, removed when this is
     /// dropped, on a normal return and on unwind (#143). The name has the
     /// pid, a counter and the time, so two fixtures in one process, even with
@@ -2753,9 +2354,10 @@ mod capability_tests {
         app.manage(crate::diagnostics::AppOpener(std::sync::Arc::new(
             opener.clone(),
         )));
-        app.manage(crate::commands::LoginItem::new(
-            std::sync::Arc::new(dictation_platform::fakes::FakeLaunchAtLogin::new()),
-            std::sync::Arc::clone(&config),
+        app.manage(std::sync::Arc::new(
+            dictation_pipeline::launch::LoginItem::new(std::sync::Arc::new(
+                dictation_platform::fakes::FakeLaunchAtLogin::new(),
+            )),
         ));
         app.manage(LiveEngine::fixed());
         app.manage(crate::connect::AppConnect::default());
@@ -2964,12 +2566,7 @@ mod capability_tests {
     /// Valid arguments for each command, so a refusal can only be the ACL's.
     fn args(command: &str) -> serde_json::Value {
         match command {
-            "set_api_key" => {
-                serde_json::json!({ "provider": "openrouter", "key": "sk-or-not-a-real-key" })
-            }
-            "test_api_key" | "saved_key_hint" => {
-                serde_json::json!({ "provider": "openrouter" })
-            }
+            "set_api_key" => serde_json::json!({ "key": "sk-or-not-a-real-key" }),
             "request_permission" => serde_json::json!({ "permission": "microphone" }),
             "set_onboarding_step" => serde_json::json!({ "step": "welcome" }),
             "set_share_usage_events" => serde_json::json!({ "share": true }),
@@ -3012,7 +2609,7 @@ mod capability_tests {
     /// so no keychain or network is touched.
     fn unusable_args() -> serde_json::Value {
         serde_json::json!({
-            "provider": "not-a-provider",
+            "transcription": "nowhere",
             "settings": 0,
             "key": 0,
             "permission": "camera",
@@ -3072,6 +2669,12 @@ mod capability_tests {
                         }
                     })
                 }
+                // No arguments to refuse: the disabled keychain refuses
+                // instead, after the ACL let the call through.
+                "saved_key_hint" | "delete_api_key" => match invoke(main, command, args(command)) {
+                    Err(error) if error.to_string().contains("keychain is disabled") => Ok(()),
+                    other => other.map(|_| ()),
+                },
                 // F1: it must succeed, through the fake opener.
                 "open_issue" => invoke(main, command, args(command)).map(|_| ()),
                 "run_checks"

@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use dictation_core::settings::{self, Provider, Settings, SettingsError};
+use dictation_core::settings::{self, API_KEY_NAME, Settings, SettingsError};
 use dictation_ports::{Secret, SecretError, SecretStore};
 use thiserror::Error;
 
@@ -126,47 +126,47 @@ impl<S: SecretStore> Config<S> {
         Ok(())
     }
 
-    /// Stores `key` as `provider`'s API key, replacing any earlier one.
+    /// Stores `key` as the API key, replacing any earlier one.
     /// Surrounding whitespace (from a paste) is trimmed.
     ///
     /// # Errors
     ///
     /// [`ConfigError::InvalidKey`] if it's empty, too long or holds spaces,
     /// and [`ConfigError::Secret`] if the keychain refuses.
-    pub fn set_api_key(&self, provider: Provider, key: &str) -> Result<(), ConfigError> {
+    pub fn set_api_key(&self, key: &str) -> Result<(), ConfigError> {
         let key = validate_key(key)?;
-        self.secrets.set(provider.key_name(), &key)?;
-        tracing::info!(%provider, "API key saved");
+        self.secrets.set(API_KEY_NAME, &key)?;
+        tracing::info!("API key saved");
         Ok(())
     }
 
-    /// `provider`'s stored API key, for Rust code that calls the provider
+    /// The stored API key, for Rust code that calls the provider
     /// (the Test key command, later the transcriber). No command hands it
     /// to the UI.
     ///
     /// # Errors
     ///
     /// [`ConfigError::Secret`] if the keychain refuses.
-    pub fn api_key(&self, provider: Provider) -> Result<Option<Secret>, ConfigError> {
-        Ok(self.secrets.get(provider.key_name())?)
+    pub fn api_key(&self) -> Result<Option<Secret>, ConfigError> {
+        Ok(self.secrets.get(API_KEY_NAME)?)
     }
 
-    /// Whether `provider` has an API key stored.
+    /// Whether an API key is stored.
     ///
     /// # Errors
     ///
     /// [`ConfigError::Secret`] if the keychain refuses.
-    pub fn has_api_key(&self, provider: Provider) -> Result<bool, ConfigError> {
-        Ok(self.secrets.get(provider.key_name())?.is_some())
+    pub fn has_api_key(&self) -> Result<bool, ConfigError> {
+        Ok(self.secrets.get(API_KEY_NAME)?.is_some())
     }
 
-    /// Removes `provider`'s API key, if any.
+    /// Removes the API key, if any.
     ///
     /// # Errors
     ///
     /// [`ConfigError::Secret`] if the keychain refuses.
-    pub fn delete_api_key(&self, provider: Provider) -> Result<(), ConfigError> {
-        self.secrets.delete(provider.key_name())?;
+    pub fn delete_api_key(&self) -> Result<(), ConfigError> {
+        self.secrets.delete(API_KEY_NAME)?;
         Ok(())
     }
 
@@ -254,7 +254,6 @@ mod tests {
         let dir = TempDir::new();
         let (config, _) = config(&dir);
         let settings = Settings {
-            provider: Provider::OpenRouter,
             hotkey: "F6".into(),
             ..Settings::default()
         };
@@ -283,10 +282,11 @@ mod tests {
         let dir = TempDir::new();
         let (config, _) = config(&dir);
         let config = std::sync::Arc::new(config);
-        // Alternate short and long model ids so an overlapping write would
+        // Alternate short and long hotkeys so an overlapping write would
         // leave the tail of the longer document behind.
         let variant = |thread: usize| Settings {
-            local_model: "x".repeat(if thread.is_multiple_of(2) { 1 } else { 90 } + thread),
+            hotkey: ["F6", "LeftCtrl+LeftAlt+LeftShift+LeftCmd+Space"][thread % 2].into(),
+            history_limit: settings::HISTORY_LIMITS[thread % settings::HISTORY_LIMITS.len()],
             ..Settings::default()
         };
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(THREADS));
@@ -336,13 +336,13 @@ mod tests {
         let dir = TempDir::new();
         let (config, _) = config(&dir);
         let invalid = Settings {
-            model: String::new(),
+            hotkey: "NotAKey".into(),
             ..Settings::default()
         };
         assert!(matches!(
             config.save_settings(&invalid),
             Err(ConfigError::Settings(SettingsError::Invalid {
-                field: "model",
+                field: "hotkey",
                 ..
             }))
         ));
@@ -367,14 +367,12 @@ mod tests {
     fn criterion_3_the_key_goes_to_the_secret_store_only() {
         let dir = TempDir::new();
         let (config, secrets) = config(&dir);
-        assert!(!config.has_api_key(Provider::OpenRouter).unwrap());
+        assert!(!config.has_api_key().unwrap());
 
-        config
-            .set_api_key(Provider::OpenRouter, &format!("  {DUMMY_KEY}\n"))
-            .unwrap();
+        config.set_api_key(&format!("  {DUMMY_KEY}\n")).unwrap();
         config.save_settings(&Settings::default()).unwrap();
 
-        assert!(config.has_api_key(Provider::OpenRouter).unwrap());
+        assert!(config.has_api_key().unwrap());
         assert_eq!(
             secrets.get("openrouter-api-key").unwrap().unwrap().expose(),
             DUMMY_KEY,
@@ -385,8 +383,8 @@ mod tests {
         assert!(!file.contains(DUMMY_KEY), "{file}");
         assert!(!file.contains("sk-or-"), "{file}");
 
-        config.delete_api_key(Provider::OpenRouter).unwrap();
-        assert!(!config.has_api_key(Provider::OpenRouter).unwrap());
+        config.delete_api_key().unwrap();
+        assert!(!config.has_api_key().unwrap());
     }
 
     #[test]
@@ -400,7 +398,7 @@ mod tests {
             (long.as_str(), "is too long"),
             ("sk-or-dummy with_space", "contains spaces"),
         ] {
-            let error = config.set_api_key(Provider::OpenRouter, key).unwrap_err();
+            let error = config.set_api_key(key).unwrap_err();
             assert_eq!(error, ConfigError::InvalidKey(why));
             if !key.trim().is_empty() {
                 assert!(!error.to_string().contains(key.trim()));
@@ -413,9 +411,9 @@ mod tests {
     fn the_stored_key_is_available_to_rust_and_validate_key_trims() {
         let dir = TempDir::new();
         let (config, _) = config(&dir);
-        assert_eq!(config.api_key(Provider::OpenRouter).unwrap(), None);
-        config.set_api_key(Provider::OpenRouter, DUMMY_KEY).unwrap();
-        let stored = config.api_key(Provider::OpenRouter).unwrap().unwrap();
+        assert_eq!(config.api_key().unwrap(), None);
+        config.set_api_key(DUMMY_KEY).unwrap();
+        let stored = config.api_key().unwrap().unwrap();
         assert_eq!(stored.expose(), DUMMY_KEY);
         assert_eq!(validate_key(" k1\n").unwrap().expose(), "k1");
         assert_eq!(
@@ -430,14 +428,14 @@ mod tests {
         let (config, secrets) = config(&dir);
         secrets.set_access_denied(true);
         assert_eq!(
-            config.has_api_key(Provider::OpenRouter),
+            config.has_api_key(),
             Err(ConfigError::Secret(SecretError::AccessDenied))
         );
         assert_eq!(
-            config.set_api_key(Provider::OpenRouter, DUMMY_KEY),
+            config.set_api_key(DUMMY_KEY),
             Err(ConfigError::Secret(SecretError::AccessDenied))
         );
-        assert!(config.delete_api_key(Provider::OpenRouter).is_err());
+        assert!(config.delete_api_key().is_err());
         assert_eq!(
             ConfigError::Secret(SecretError::AccessDenied).to_string(),
             "keychain access was denied"
