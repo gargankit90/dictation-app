@@ -172,6 +172,10 @@ struct ChatReply {
 #[derive(Deserialize)]
 struct Choice {
     message: Message,
+    /// OpenRouter's normalised reason: `stop` for a finished reply;
+    /// `length`, `content_filter` or `error` for a cut-off one.
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -181,10 +185,16 @@ struct Message {
 }
 
 /// The first choice's text without the transcript tags; `None` if the body
-/// isn't a chat reply with text.
+/// isn't a finished chat reply with text. A reply cut off by the token limit
+/// or a filter (any `finish_reason` but `stop`, or none) could be a clean
+/// prefix the guard accepts, so it counts as no reply: the raw text is pasted.
 fn parse_reply(body: &[u8]) -> Option<String> {
     let reply: ChatReply = serde_json::from_slice(body).ok()?;
-    let content = reply.choices.into_iter().next()?.message.content?;
+    let choice = reply.choices.into_iter().next()?;
+    if choice.finish_reason.as_deref() != Some("stop") {
+        return None;
+    }
+    let content = choice.message.content?;
     Some(cleanup::strip_tags(&content).to_owned())
 }
 
@@ -233,14 +243,27 @@ mod tests {
 
     #[test]
     fn replies_are_read_without_the_tags() {
-        let body = br#"{"choices":[{"message":{"role":"assistant","content":" <transcript>\nHi there.\n</transcript> "}}]}"#;
+        let body = br#"{"choices":[{"message":{"role":"assistant","content":" <transcript>\nHi there.\n</transcript> "},"finish_reason":"stop"}]}"#;
         assert_eq!(parse_reply(body).as_deref(), Some("Hi there."));
         assert_eq!(parse_reply(br#"{"choices":[]}"#), None);
         assert_eq!(parse_reply(b"nope"), None);
         assert_eq!(
-            parse_reply(br#"{"choices":[{"message":{"content":null}}]}"#),
+            parse_reply(br#"{"choices":[{"message":{"content":null},"finish_reason":"stop"}]}"#),
             None
         );
+    }
+
+    /// Review Q2 round 1: a cut-off reply is never pasted.
+    #[test]
+    fn unfinished_replies_are_bad_replies() {
+        for reason in [r#""length""#, r#""content_filter""#, r#""error""#, "null"] {
+            let body = format!(
+                r#"{{"choices":[{{"message":{{"content":"Please send the report"}},"finish_reason":{reason}}}]}}"#
+            );
+            assert_eq!(parse_reply(body.as_bytes()), None, "{reason}");
+        }
+        let missing = br#"{"choices":[{"message":{"content":"Please send the report"}}]}"#;
+        assert_eq!(parse_reply(missing), None);
     }
 
     #[test]

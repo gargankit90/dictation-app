@@ -294,7 +294,7 @@ sub serve {
       '{"error":{"message":"Invalid API Key","code":401}}');
     if ($auth eq 'good') {
       $reply = JSON::PP->new->ascii->canonical->encode({
-        choices => [{ message => { role => 'assistant', content => cleanup_input($json) } }],
+        choices => [{ message => { role => 'assistant', content => cleanup_input($json) }, finish_reason => 'stop' }],
       });
       $status = 200;
     }
