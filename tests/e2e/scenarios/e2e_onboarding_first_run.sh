@@ -1,11 +1,12 @@
-# U8 criterion 8 (M5.2 criterion 3 before it): a first run with no saved key,
-# down the own-key path. Onboarding shows at launch at Welcome, without the
-# events switch, which Ready has, on (U10). Selecting the own key on Speech opens
-# no form; Continue opens Connect your key (U11), where Test & Save refuses a key
-# the provider rejects, leaving Continue locked, and accepts a made-up key the local provider (T4a,
-# _provider_helpers.sh) takes. Permissions shows both allowed, Try it's
-# dictation pastes into the practice box, Ready shows the real states, and
-# Start dictating hides the window and takes "Resume setup…" off the tray.
+# U8 criterion 8 (M5.2 criterion 3 before it), TOS1: a first run with no saved
+# key, down the own-key path. Onboarding shows at launch at Welcome, with the
+# Terms line under Get started and no events switch. Selecting the own key on
+# Speech opens no form; Continue opens Connect OpenRouter (U11), where Test &
+# Save refuses a key the provider rejects, leaving Continue locked, and accepts
+# a made-up key the local provider (T4a, _provider_helpers.sh) takes.
+# Permissions shows both allowed, Try it's dictation pastes into the practice
+# box, and Done (login item cleared) hides the window and takes "Resume
+# setup…" off the tray. E2E_APPEARANCE=dark takes the screenshots in dark.
 # "Run setup again" in Settings, Help goes through the steps from Welcome. Neither
 # key nor the transcript is ever in the app's log.
 #
@@ -17,12 +18,14 @@
 # (ax.js secret-set).
 
 ONBOARDING_WINDOW="Set up"
+SHOT_LOOK="${E2E_APPEARANCE:-light}"
 
 e2e_onboarding_first_run() {
   arm_key_cleanup e2e_onboarding_first_run
   KEY_CLEANUP_HOOK=provider_cleanup
   fresh_app_state
   settings_reset
+  obs_appearance "$SHOT_LOOK"
   expect "the local provider starts" provider_start "$PROVIDER_GOOD_KEY"
 
   expect "the app starts on the local provider" launch_on_provider --debug-onboarding
@@ -34,11 +37,17 @@ e2e_onboarding_first_run() {
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Talk instead of type" 10
   expect "with no choice to make, only Get started" \
     ax_ok wait-no-text "$APP_NAME" "$ONBOARDING_WINDOW" "Share usage" 2
+  expect "under it, the Terms line" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "you agree to the" 5
+  obs_shot "1-welcome-$SHOT_LOOK"
   expect "press Get started" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" "Get started"
   expect "Speech asks for the engine" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "How should Vocet transcribe" 10
-  expect "the local model is recommended" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "English · 1320 MB" 10
+  expect "the local model shows the whole download" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "English · 4.4 GB download (speech + cleanup)" 10
+  expect "OpenRouter is explained for people who don't know it" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "OpenRouter is one account for many AI models" 5
+  obs_shot "2-speech-$SHOT_LOOK"
   expect "choose my own key" \
     ax_ok radio-press "$APP_NAME" "$ONBOARDING_WINDOW" "Use OpenRouter"
   expect "selecting it opens no form" \
@@ -50,6 +59,9 @@ e2e_onboarding_first_run() {
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Paste a key instead" 10
   expect "Continue waits for a connection, and says so" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Continue unlocks once OpenRouter" 10
+  expect "nothing to disconnect, re-add or credit before connecting" \
+    ax_ok wait-no-text "$APP_NAME" "$ONBOARDING_WINDOW" "Add credits" 2
+  obs_shot "3-connect-not-connected-$SHOT_LOOK"
   expect "open Paste a key instead" \
     ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" "Paste a key instead"
 
@@ -79,6 +91,11 @@ e2e_onboarding_first_run() {
   expect "the key was saved and the engine rebuilt from it" \
     wait_for_log_count 'engine rebuilt' $((rebuilt + 1)) 10
   expect "with the key" wait_for_log 'engine settings provider=openrouter .*has_key=true'
+  expect "Add credits is the one link once connected" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Add credits" 5
+  expect "and Paste a key instead is gone" \
+    ax_ok wait-no-text "$APP_NAME" "$ONBOARDING_WINDOW" "Paste a key instead" 5
+  obs_shot "3-connect-connected-$SHOT_LOOK"
   expect "press Continue" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" Continue
 
   # The golden image has both permissions.
@@ -97,20 +114,18 @@ e2e_onboarding_first_run() {
   expect "the provider answered it" provider_wait_event '^replied n=3 status=200'
   expect "the transcript is in the practice box" \
     job_says "$PROVIDER_TEXT" ax field-get "$APP_NAME" "$ONBOARDING_WINDOW" try-field
-  expect "press Done" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" Done
-
-  expect "Ready shows the key" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "(hold)" 10
-  expect "and that OpenRouter is connected" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "OpenRouter · ✓ Connected" 10
-  expect "and the history limit" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Keeps your last 25 dictations on this Mac" 10
-  expect "the events switch is there, on" \
-    job_says checked ax check-get "$APP_NAME" "$ONBOARDING_WINDOW" ob-share-ready
-  expect "launch at login is off" \
-    job_says unchecked ax check-get "$APP_NAME" "$ONBOARDING_WINDOW" ob-login
+  expect "Try it points to the menu bar" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Find Vocet in the menu bar" 10
+  expect "Open Vocet when I log in is on by default" \
+    job_says checked ax check-get "$APP_NAME" "$ONBOARDING_WINDOW" ob-login
+  expect "there is no events switch in setup" \
+    ax_ok wait-no-text "$APP_NAME" "$ONBOARDING_WINDOW" "Share usage" 2
+  obs_shot "4-try-$SHOT_LOOK"
   expect "the tray offers Resume setup until it is finished" tray_has_resume_setup
-  expect "press Start dictating" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" "Start dictating"
+  # Cleared, so the run leaves no login item behind (e2e_launch_at_login covers it).
+  expect "clear Open Vocet when I log in" \
+    ax_ok check-set "$APP_NAME" "$ONBOARDING_WINDOW" ob-login off
+  expect "press Done" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" Done
   expect "the window hides" ax_ok wait-no-window "$APP_NAME" "$ONBOARDING_WINDOW" 10
   expect "the app logs that onboarding finished" wait_for_log 'onboarding finished'
 

@@ -53,10 +53,12 @@ e2e_setup_no_permissions() {
   expect "its window is on screen" ax_ok wait-window "$APP_NAME" "$NOPERM_WINDOW" 10
   expect "the hotkey is off, as for a person who hasn't allowed it yet" \
     wait_for_log 'PermissionMissing' 15
+  expect "Welcome is on screen" \
+    ax_ok wait-text "$APP_NAME" "$NOPERM_WINDOW" "Talk instead of type" 10
   expect "press Get started" ax_ok press "$APP_NAME" "$NOPERM_WINDOW" "Get started"
 
   expect "Speech offers the English model" \
-    ax_ok wait-text "$APP_NAME" "$NOPERM_WINDOW" "English · 1320 MB" 15
+    ax_ok wait-text "$APP_NAME" "$NOPERM_WINDOW" "English · 4.4 GB download (speech + cleanup)" 15
   expect "step 2 doesn't mention the hotkey" noperm_listen_message_absent
   expect "choose this Mac" ax_ok radio-press "$APP_NAME" "$NOPERM_WINDOW" "Use this Mac"
   expect "press Download and continue" \

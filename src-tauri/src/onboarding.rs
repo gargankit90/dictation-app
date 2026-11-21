@@ -39,6 +39,14 @@ const RESUME_MARKER: &str = "onboarding-resume";
 /// The empty file whose presence says setup was finished.
 pub const COMPLETED_MARKER: &str = "onboarding-completed";
 
+/// The file `Get started` writes: the date of the Terms the person agreed to
+/// (TOS1). Nothing is sent to analytics before it exists.
+pub const TERMS_FILE: &str = "accepted_terms";
+
+/// The date of the Terms on the website (`site/terms.html`), which `Get started`
+/// records. Change both together.
+pub const TERMS_DATE: &str = "2026-11-21";
+
 /// What the settings window shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -82,8 +90,6 @@ pub struct OnboardingStatus {
     /// macOS says Accessibility is allowed but the hotkey can't use it: a
     /// relaunch makes it take.
     pub needs_relaunch: bool,
-    /// Sharing has been on for the whole of this walk through setup.
-    pub sharing_on_throughout: bool,
     /// Setup was finished, then a permission went missing: by a person's hand,
     /// or through an update signed differently (N1, #206). Until setup is
     /// finished again the window says so, and Done closes it.
@@ -100,6 +106,8 @@ pub struct Onboarding {
     state: Mutex<State>,
     /// `None`: nothing is kept (tests).
     marker: Option<PathBuf>,
+    /// Where [`TERMS_FILE`] goes; `None`: nothing is kept (tests).
+    terms_file: Option<PathBuf>,
 }
 
 #[allow(
@@ -113,17 +121,20 @@ struct State {
     step: Step,
     /// The user has continued past Welcome.
     welcome_passed: bool,
-    /// "Start dictating" was pressed, here or in an earlier launch.
+    /// Done was pressed on Try it, here or in an earlier launch.
     completed: bool,
-    /// Sharing was off at some point of this walk through setup, so Ready
-    /// can't say it has been on since setup began (U10).
-    sharing_was_off: bool,
+    /// The person pressed Get started (the Terms), or finished setup in a
+    /// version from before the Terms.
+    terms_accepted: bool,
+    /// Which permissions the last read found granted (microphone,
+    /// Accessibility); `None` before the first read.
+    seen_granted: Option<(bool, bool)>,
+    /// A permission has just turned granted: the window should come to the
+    /// front (taken once by [`Onboarding::take_grant`]).
+    granted_now: bool,
     /// Setup was finished, then a permission went missing (N1, #206): the
     /// window says so and closes when both are back.
     asked_again: bool,
-    /// Onboarding was opened in this launch. A scripted test launch that never
-    /// opens it isn't setting anything up.
-    opened: bool,
     /// Problems already recorded this launch, for those read over and over.
     told: Vec<SetupProblem>,
     /// Accessibility was asked for this launch.
@@ -151,7 +162,7 @@ impl std::fmt::Display for NotYet {
             Step::Welcome => "Continue past the first screen first.",
             Step::Speech => "Choose how speech becomes text first.",
             Step::Permissions => "Allow the microphone and Accessibility first.",
-            Step::Try | Step::Ready => "Finish the steps before this one first.",
+            Step::Try => "Finish the steps before this one first.",
         };
         f.write_str(what)
     }
@@ -165,28 +176,30 @@ impl Onboarding {
     }
 
     /// A new setup starts at Welcome. Past it (`welcome_passed`), setup opens
-    /// at the first step that isn't done: the summary once it was finished.
+    /// at the first step that isn't done: Try it once everything is.
     fn with(completed: bool, welcome_passed: bool, marker: Option<PathBuf>) -> Self {
         let welcome_passed = completed || welcome_passed;
         Self {
             state: Mutex::new(State {
                 view: View::Settings,
                 step: if welcome_passed {
-                    Step::Ready
+                    Step::Try
                 } else {
                     Step::Welcome
                 },
                 welcome_passed,
                 completed,
-                sharing_was_off: false,
+                terms_accepted: false,
+                seen_granted: None,
+                granted_now: false,
                 asked_again: false,
-                opened: false,
                 told: Vec::new(),
                 accessibility_asked: false,
                 left_told: false,
                 lost_reads: 0,
             }),
             marker,
+            terms_file: None,
         }
     }
 
@@ -198,7 +211,14 @@ impl Onboarding {
         let marker = config_dir.join(COMPLETED_MARKER);
         let welcome_passed =
             config_dir.join(SETTINGS_FILE).exists() || resume_marker(config_dir).exists();
-        Self::with(marker.exists(), welcome_passed, Some(marker))
+        let terms_file = config_dir.join(TERMS_FILE);
+        let mut onboarding = Self::with(marker.exists(), welcome_passed, Some(marker));
+        // Setup finished before there were Terms: that person agreed to the
+        // reports in the old setup, and keeps them.
+        let accepted = terms_file.exists() || onboarding.completed();
+        onboarding.lock().terms_accepted = accepted;
+        onboarding.terms_file = Some(terms_file);
+        onboarding
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -216,7 +236,6 @@ impl Onboarding {
             state.lost_reads = state.lost_reads.max(1);
         }
         state.view = View::Onboarding;
-        state.opened = true;
         state.left_told = false;
         state.step
     }
@@ -231,8 +250,6 @@ impl Onboarding {
         }
         state.step = Step::Welcome;
         state.asked_again = false;
-        // A new walk: whether sharing is off now is noted when it opens.
-        state.sharing_was_off = false;
     }
 
     /// Switches the window back to the settings view; the step is kept for
@@ -241,7 +258,7 @@ impl Onboarding {
         self.lock().view = View::Settings;
     }
 
-    /// "Start dictating": setup is done, and the window goes back to the
+    /// Done on Try it: setup is done, and the window goes back to the
     /// settings view. The marker is written; a failure only costs showing
     /// setup again at the next launch, so it is logged and the app goes on.
     pub fn finish(&self) {
@@ -300,14 +317,35 @@ impl Onboarding {
         true
     }
 
-    /// Sharing is off, or was just turned off: Ready can't say it has been on
-    /// since setup began. Nothing to note for someone who has never opened
-    /// setup: opening it notes the choice then.
-    pub fn note_sharing_off(&self) {
-        let mut state = self.lock();
-        if state.opened {
-            state.sharing_was_off = true;
+    /// Whether the person agreed to the Terms (or finished setup before there
+    /// were any): until then nothing goes to analytics.
+    #[must_use]
+    pub fn terms_accepted(&self) -> bool {
+        self.lock().terms_accepted
+    }
+
+    /// Get started: the person agreed to the Terms and Privacy Policy. Writes
+    /// [`TERMS_DATE`] to [`TERMS_FILE`] first; if that fails nothing counts as
+    /// agreed and the caller shows the error (Get started tries again).
+    /// True the first time.
+    ///
+    /// # Errors
+    /// The date couldn't be written.
+    pub fn accept_terms(&self) -> std::io::Result<bool> {
+        if let Some(file) = &self.terms_file {
+            if let Some(dir) = file.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(file, TERMS_DATE)?;
         }
+        Ok(!std::mem::replace(&mut self.lock().terms_accepted, true))
+    }
+
+    /// Whether a permission turned granted since the last time this was asked,
+    /// while setup was on the window: the window then comes to the front.
+    pub fn take_grant(&self) -> bool {
+        let mut state = self.lock();
+        state.view == View::Onboarding && std::mem::take(&mut state.granted_now)
     }
 
     /// The user asked for Accessibility.
@@ -340,6 +378,15 @@ impl Onboarding {
             accessibility: accessibility == PermissionStatus::Granted,
         };
         let step = readiness.resume_at(state.step);
+        let granted = (readiness.microphone, readiness.accessibility);
+        // A flip from missing to granted since the last read; the first read
+        // only sets the baseline.
+        if let Some((was_microphone, was_accessibility)) = state.seen_granted
+            && ((granted.0 && !was_microphone) || (granted.1 && !was_accessibility))
+        {
+            state.granted_now = true;
+        }
+        state.seen_granted = Some(granted);
         let missing = state.completed
             && (microphone != PermissionStatus::Granted
                 || accessibility != PermissionStatus::Granted);
@@ -356,7 +403,6 @@ impl Onboarding {
             microphone,
             accessibility,
             needs_relaunch: accessibility == PermissionStatus::Granted && hotkey_down,
-            sharing_on_throughout: !state.sharing_was_off,
             asked_again: state.asked_again,
         }
     }
@@ -598,28 +644,103 @@ mod tests {
         );
     }
 
+    /// TOS1: Get started stores the date of the Terms, and only that makes
+    /// the app count as having agreed (a version from before the Terms
+    /// counts finished setups).
     #[test]
-    fn u10_a_note_that_sharing_was_off_lasts_until_the_walk_ends() {
-        let onboarding = Onboarding::new();
-        onboarding.note_sharing_off();
-        let permissions = granted(true, true);
-        onboarding.open(Readiness::READY);
-        assert!(
-            onboarding.status(&permissions, false).sharing_on_throughout,
-            "setup never opened: nothing to note"
+    fn tos1_get_started_stores_the_terms_date() {
+        let dir = temp("terms");
+        let fresh = Onboarding::load(&dir);
+        assert!(!fresh.terms_accepted(), "a fresh install hasn't agreed");
+        assert!(!dir.join(TERMS_FILE).exists());
+        assert!(fresh.accept_terms().unwrap(), "true the first time");
+        assert!(!fresh.accept_terms().unwrap(), "and only then");
+        assert!(fresh.terms_accepted());
+        assert_eq!(
+            std::fs::read_to_string(dir.join(TERMS_FILE)).unwrap(),
+            TERMS_DATE
         );
-        onboarding.note_sharing_off();
-        assert!(!onboarding.status(&permissions, false).sharing_on_throughout);
-        onboarding.finish();
-        onboarding.start_over_if_finished();
+        drop(fresh);
+
         assert!(
-            onboarding.status(&permissions, false).sharing_on_throughout,
-            "Run setup again is a new walk"
+            Onboarding::load(&dir).terms_accepted(),
+            "kept across launches"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Setup finished before there were Terms: reports stay as they were.
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(COMPLETED_MARKER), b"").unwrap();
+        let before_terms = Onboarding::load(&dir);
+        assert!(before_terms.terms_accepted());
+        assert!(!dir.join(TERMS_FILE).exists(), "nothing was agreed to");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// TOS1: a failed write counts as nothing agreed; Get started again works.
+    #[test]
+    fn tos1_a_failed_write_agrees_to_nothing_and_can_be_retried() {
+        let dir = temp("terms-fail");
+        let onboarding = Onboarding::load(&dir);
+        // A directory where the file goes makes the write fail.
+        std::fs::create_dir_all(dir.join(TERMS_FILE)).unwrap();
+        assert!(onboarding.accept_terms().is_err());
+        assert!(!onboarding.terms_accepted(), "not agreed without the date");
+        std::fs::remove_dir(dir.join(TERMS_FILE)).unwrap();
+        assert!(onboarding.accept_terms().unwrap(), "the retry is the first");
+        assert!(onboarding.terms_accepted());
+        assert_eq!(
+            std::fs::read_to_string(dir.join(TERMS_FILE)).unwrap(),
+            TERMS_DATE
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The date in the app is the date on the Terms page.
+    #[test]
+    fn tos1_the_terms_date_is_the_one_on_the_page() {
+        let page = include_str!("../../site/terms.html");
+        assert!(
+            page.contains(TERMS_DATE),
+            "site/terms.html lacks {TERMS_DATE}"
+        );
+    }
+
+    /// TOS1: a permission turning granted while setup is open brings the
+    /// window forward, once; the first read and an already granted one don't.
+    #[test]
+    fn tos1_a_permission_turning_granted_activates_the_window_once() {
+        let onboarding = Onboarding::new();
+        onboarding.open(Readiness::default());
+        let permissions = granted(false, false);
+        onboarding.status(&permissions, false);
+        assert!(!onboarding.take_grant(), "the first read is the baseline");
+        permissions.set(Permission::Microphone, Granted);
+        onboarding.status(&permissions, false);
+        assert!(onboarding.take_grant(), "microphone turned granted");
+        assert!(!onboarding.take_grant(), "once");
+        onboarding.status(&permissions, false);
+        assert!(!onboarding.take_grant(), "still granted is no change");
+        permissions.set(Permission::Accessibility, Granted);
+        onboarding.status(&permissions, false);
+        assert!(onboarding.take_grant(), "so did Accessibility");
+        permissions.set(Permission::Microphone, Denied);
+        onboarding.status(&permissions, false);
+        assert!(!onboarding.take_grant(), "going away doesn't");
+
+        let settings_view = Onboarding::new();
+        let missing = granted(false, false);
+        settings_view.status(&missing, false);
+        missing.set(Permission::Microphone, Granted);
+        settings_view.status(&missing, false);
+        assert!(
+            !settings_view.take_grant(),
+            "only while setup is on the window"
         );
     }
 
     /// An unfinished setup starts again at the first step that isn't done;
-    /// one that was finished is reopened at the summary, past Welcome.
+    /// one that was finished is reopened at Try it, past Welcome.
     #[test]
     fn only_finishing_is_kept_across_launches() {
         let dir = temp("marker");
@@ -653,7 +774,7 @@ mod tests {
         let finished = Onboarding::load(&dir);
         assert!(finished.completed() && finished.welcome_passed());
         assert!(!finished.in_progress());
-        assert_eq!(finished.open(Readiness::READY), Step::Ready);
+        assert_eq!(finished.open(Readiness::READY), Step::Try);
         assert_eq!(
             finished.open(Readiness {
                 accessibility: false,
@@ -741,10 +862,6 @@ mod tests {
             Err(NotYet(Step::Permissions))
         );
         assert_eq!(onboarding.go_to(Step::Try, Readiness::READY), Ok(Step::Try));
-        assert_eq!(
-            onboarding.go_to(Step::Ready, Readiness::READY),
-            Ok(Step::Ready)
-        );
         // Back is always allowed.
         assert_eq!(onboarding.go_to(Step::Welcome, none), Ok(Step::Welcome));
     }

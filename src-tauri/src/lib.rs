@@ -445,7 +445,13 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     // Anonymous usage events (A1): on by default, a no-op without a build
     // key, silent in scripted test launches. They follow the stored choice
     // from here on, first setup included (U10).
-    let usage = usage::start(&data_dir, usage::stored_choice(&config), scripted, &version);
+    let usage = usage::start(
+        &data_dir,
+        usage::stored_choice(&config),
+        setup.terms_accepted(),
+        scripted,
+        &version,
+    );
     usage::launched(usage.clone(), &version);
     app.manage(usage.clone());
     let recordings = data_dir.join("debug-recordings");

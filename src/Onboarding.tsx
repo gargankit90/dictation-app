@@ -6,13 +6,10 @@ import { BROKEN, messageOf } from "./messages";
 import { chosenModel, modelWait, stripView } from "./onboarding/logic";
 import type { StripAction } from "./onboarding/logic";
 import { PermissionsStep } from "./onboarding/PermissionsStep";
-import { ReadyStep } from "./onboarding/ReadyStep";
 import { SpeechStep } from "./onboarding/SpeechStep";
 import { TryStep } from "./onboarding/TryStep";
 import { WelcomeStep } from "./onboarding/WelcomeStep";
 import type { FrameParts } from "./onboarding/StepFrame";
-import { FINISH_REASON } from "./onboarding/ReadyStep";
-import { sharingBlock, useSharingSwitch } from "./settings/Privacy";
 import { useEngineStatus, useModels } from "./Settings";
 import { useCleanupModels, withCleanup } from "./settings/CleanupModel";
 import "./settings.css";
@@ -22,7 +19,6 @@ export const STEPS: readonly { id: Step; name: string }[] = [
   { id: "speech", name: "Speech" },
   { id: "permissions", name: "Permissions" },
   { id: "try", name: "Try it" },
-  { id: "ready", name: "Ready" },
 ];
 
 /** How often the shell asks the app about permissions, the model and the engine. */
@@ -43,10 +39,10 @@ interface Props {
 }
 
 /**
- * The first-run steps (U8): Welcome, Speech, Permissions, Try it, Ready. The
- * app keeps the step and refuses to skip one that isn't done. This shell shows the rail, the persistent download
- * strip and whichever step the app says, and each step decides its own
- * primary action.
+ * The first-run steps (U8, TOS1): Welcome, Speech, Permissions, Try it. The
+ * app keeps the step and refuses to skip one that isn't done. This shell shows
+ * the rail, the persistent download strip and whichever step the app says, and
+ * each step decides its own primary action; Done on Try it ends setup.
  */
 export function Onboarding({ onFinished }: Props) {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
@@ -62,24 +58,6 @@ export function Onboarding({ onFinished }: Props) {
   const [downPolls, setDownPolls] = useState(0);
   // The engine picked on Speech, kept while the window is open.
   const [speechChoice, setSpeechChoice] = useState<SpeechChoice | null>(null);
-
-  // Here, not in a step: the writes outlive any one step, and every way out
-  // of a step waits for them, since leaving can send an event. Only Ready has
-  // the switch, so only Ready can hold on a failed write: on any other step
-  // (one made in Settings, say) there would be no way to try again. An off that
-  // failed to save has already stopped sending.
-  const sharing = useSharingSwitch(settings?.share_usage_events ?? true, setSettings);
-  const exitBlock = sharingBlock(sharing.save, status?.step === "ready" ? FINISH_REASON : null);
-  /**
-   * The one way out of a step: moving, finishing, or leaving for Settings all
-   * go through here, so a new exit can't overtake the user's sharing choice.
-   */
-  const leave = useCallback(
-    async (exit: () => Promise<void>) => {
-      if (exitBlock === null) await exit();
-    },
-    [exitBlock],
-  );
 
   const moveTo = useCallback(async (step: Step) => {
     setBusy(true);
@@ -97,8 +75,6 @@ export function Onboarding({ onFinished }: Props) {
       setBusy(false);
     }
   }, []);
-
-  const goTo = useCallback((step: Step) => leave(() => moveTo(step)), [leave, moveTo]);
 
   const refresh = useCallback(async () => {
     try {
@@ -179,16 +155,27 @@ export function Onboarding({ onFinished }: Props) {
       await refreshModels();
       await refresh();
     } else if (action === "use-key") {
-      await goTo("speech");
+      await moveTo("speech");
     } else {
       await download(id);
       await refresh();
     }
   }
 
-  async function finishNow() {
+  /**
+   * Done: applies "Open Vocet when I log in" (Try it's checkbox; `null` when
+   * setup ends from Permissions and has none), then ends setup.
+   */
+  async function finishNow(openAtLogin: boolean | null = null) {
     setBusy(true);
     try {
+      if (openAtLogin !== null) {
+        const login = await commands.setLaunchAtLogin(openAtLogin);
+        if (login.status === "error") {
+          setError(messageOf(login.error));
+          return;
+        }
+      }
       const result = await commands.finishOnboarding();
       if (result.status === "error") {
         setError(messageOf(result.error));
@@ -235,10 +222,9 @@ export function Onboarding({ onFinished }: Props) {
       previous === undefined
         ? null
         : () => {
-            void goTo(previous.id);
+            void moveTo(previous.id);
           },
     busy,
-    exitBlock,
     error,
     strip: stripShown ? (
       <div className="ob-strip" role="status" aria-label="Model download">
@@ -252,7 +238,6 @@ export function Onboarding({ onFinished }: Props) {
               key={action}
               type="button"
               className="link"
-              disabled={action === "use-key" && exitBlock !== null}
               onClick={() => void stripAction(action, strip.model.id)}
             >
               {ACTION_LABELS[action]}
@@ -264,7 +249,7 @@ export function Onboarding({ onFinished }: Props) {
     ) : null,
   };
   const forward = () => {
-    if (next !== undefined) void goTo(next.id);
+    if (next !== undefined) void moveTo(next.id);
   };
 
   return (
@@ -319,7 +304,7 @@ export function Onboarding({ onFinished }: Props) {
           onStatus={setStatus}
           needsRelaunch={downPolls >= RELAUNCH_AFTER_POLLS}
           onContinue={forward}
-          onDone={() => void leave(finishNow)}
+          onDone={() => void finishNow()}
         />
       )}
       {status.step === "try" && (
@@ -328,19 +313,7 @@ export function Onboarding({ onFinished }: Props) {
           settings={settings}
           onStored={setSettings}
           wait={modelWait(settings, models, engine)}
-          onDone={forward}
-        />
-      )}
-      {status.step === "ready" && (
-        <ReadyStep
-          parts={parts}
-          status={status}
-          settings={settings}
-          onStored={setSettings}
-          models={models}
-          engine={engine}
-          sharing={sharing}
-          onFinish={() => void leave(finishNow)}
+          onDone={(openAtLogin) => void finishNow(openAtLogin)}
         />
       )}
     </main>

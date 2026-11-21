@@ -1,13 +1,13 @@
-//! The first-run steps (U8): which step a new user is on, when they may move
-//! on.
+//! The first-run steps (U8, TOS1): which step a new user is on, when they may
+//! move on.
 //!
 //! The steps come in a fixed order: [`Welcome`](Step::Welcome) (what the app
-//! does), [`Speech`](Step::Speech) (the
-//! engine), [`Permissions`](Step::Permissions) (microphone and
-//! Accessibility), [`Try`](Step::Try) (a practice dictation) and
-//! [`Ready`](Step::Ready) (a summary, and the events switch). A step is done when its condition
-//! holds ([`Readiness::is_met`]); the user may go to a step only when every
-//! step before it is done ([`Readiness::allows`]), and may always go back.
+//! does, and the Terms), [`Speech`](Step::Speech) (the engine),
+//! [`Permissions`](Step::Permissions) (microphone and Accessibility) and
+//! [`Try`](Step::Try) (a practice dictation; Done ends setup). A step is done
+//! when its condition holds ([`Readiness::is_met`]); the user may go to a step
+//! only when every step before it is done ([`Readiness::allows`]), and may
+//! always go back.
 //!
 //! The permissions and the key are read by the caller each time.
 
@@ -27,22 +27,14 @@ pub enum Step {
     Speech,
     /// Allow the microphone and Accessibility.
     Permissions,
-    /// The dictation key, and a practice dictation in the onboarding window.
+    /// The dictation key, a practice dictation in the onboarding window, and
+    /// Done, which closes onboarding.
     Try,
-    /// A summary of the real states, and the usage and error events switch;
-    /// closes onboarding.
-    Ready,
 }
 
 impl Step {
     /// Every step, in order.
-    pub const ALL: [Self; 5] = [
-        Self::Welcome,
-        Self::Speech,
-        Self::Permissions,
-        Self::Try,
-        Self::Ready,
-    ];
+    pub const ALL: [Self; 4] = [Self::Welcome, Self::Speech, Self::Permissions, Self::Try];
 
     /// The step after this one, if any.
     #[must_use]
@@ -51,8 +43,7 @@ impl Step {
             Self::Welcome => Some(Self::Speech),
             Self::Speech => Some(Self::Permissions),
             Self::Permissions => Some(Self::Try),
-            Self::Try => Some(Self::Ready),
-            Self::Ready => None,
+            Self::Try => None,
         }
     }
 
@@ -64,7 +55,6 @@ impl Step {
             Self::Speech => Some(Self::Welcome),
             Self::Permissions => Some(Self::Speech),
             Self::Try => Some(Self::Permissions),
-            Self::Ready => Some(Self::Try),
         }
     }
 }
@@ -96,25 +86,25 @@ impl Readiness {
         accessibility: true,
     };
 
-    /// Whether `step` is done. [`Step::Try`] and [`Step::Ready`] are always
-    /// done: trying is optional, and neither has anything to wait for.
+    /// Whether `step` is done. [`Step::Try`] is always done: trying is
+    /// optional, and it has nothing to wait for.
     #[must_use]
     pub fn is_met(&self, step: Step) -> bool {
         match step {
             Step::Welcome => self.welcome_passed,
             Step::Speech => self.speech_chosen,
             Step::Permissions => self.microphone && self.accessibility,
-            Step::Try | Step::Ready => true,
+            Step::Try => true,
         }
     }
 
-    /// The first step that isn't done, or [`Step::Ready`] once all are.
+    /// The first step that isn't done, or [`Step::Try`] once all are.
     #[must_use]
     pub fn first_unmet(&self) -> Step {
         Step::ALL
             .into_iter()
             .find(|step| !self.is_met(*step))
-            .unwrap_or(Step::Ready)
+            .unwrap_or(Step::Try)
     }
 
     /// Whether the user may be on `step`: every step before it is done.
@@ -161,16 +151,10 @@ mod tests {
     }
 
     #[test]
-    fn there_are_exactly_five_steps_in_the_owners_order() {
+    fn there_are_exactly_four_steps_in_the_owners_order() {
         assert_eq!(
             Step::ALL,
-            [
-                Step::Welcome,
-                Step::Speech,
-                Step::Permissions,
-                Step::Try,
-                Step::Ready
-            ]
+            [Step::Welcome, Step::Speech, Step::Permissions, Step::Try]
         );
     }
 
@@ -181,7 +165,7 @@ mod tests {
             assert_eq!(pair[1].previous(), Some(pair[0]));
         }
         assert_eq!(Step::Welcome.previous(), None);
-        assert_eq!(Step::Ready.next(), None);
+        assert_eq!(Step::Try.next(), None);
     }
 
     #[test]
@@ -202,7 +186,7 @@ mod tests {
             readiness(true, true, true, false).first_unmet(),
             Step::Permissions
         );
-        assert_eq!(Readiness::READY.first_unmet(), Step::Ready);
+        assert_eq!(Readiness::READY.first_unmet(), Step::Try);
     }
 
     #[test]
@@ -217,7 +201,6 @@ mod tests {
         assert!(chosen.allows(Step::Permissions));
         assert!(!chosen.allows(Step::Try));
         assert!(Readiness::READY.allows(Step::Try));
-        assert!(Readiness::READY.allows(Step::Ready));
     }
 
     #[test]
@@ -230,7 +213,7 @@ mod tests {
     #[test]
     fn resuming_keeps_the_step_unless_an_earlier_one_came_undone() {
         assert_eq!(Readiness::READY.resume_at(Step::Speech), Step::Speech);
-        assert_eq!(Readiness::READY.resume_at(Step::Ready), Step::Ready);
+        assert_eq!(Readiness::READY.resume_at(Step::Try), Step::Try);
         assert_eq!(
             readiness(true, true, false, true).resume_at(Step::Try),
             Step::Permissions

@@ -11,6 +11,7 @@
     "allow-cancel-connect",
     "allow-saved-key-hint",
     "allow-get-onboarding",
+    "allow-accept-terms",
     "allow-request-permission",
     "allow-open-setup",
     "allow-set-onboarding-step",

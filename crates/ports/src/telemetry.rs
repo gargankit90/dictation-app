@@ -121,10 +121,8 @@ pub enum OnboardingStep {
     Speech,
     /// Allow the microphone and Accessibility.
     Permissions,
-    /// Try a dictation.
+    /// Try a dictation; Done ends setup.
     Try,
-    /// The summary, and the sharing switch.
-    Ready,
 }
 
 impl From<Step> for OnboardingStep {
@@ -134,7 +132,6 @@ impl From<Step> for OnboardingStep {
             Step::Speech => Self::Speech,
             Step::Permissions => Self::Permissions,
             Step::Try => Self::Try,
-            Step::Ready => Self::Ready,
         }
     }
 }
@@ -392,9 +389,9 @@ mod tests {
             ),
             (
                 Event::OnboardingCompleted {
-                    step: OnboardingStep::Ready,
+                    step: OnboardingStep::Try,
                 },
-                json!({"event":"onboarding_completed","properties":{"step":"ready"}}),
+                json!({"event":"onboarding_completed","properties":{"step":"try"}}),
             ),
             (
                 Event::OnboardingLeft {

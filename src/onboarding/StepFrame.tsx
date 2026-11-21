@@ -30,11 +30,6 @@ export interface FrameParts {
   error: string | null;
   /** A step change is running. */
   busy: boolean;
-  /**
-   * Why nothing may leave this step yet (the sharing switch isn't saved), or
-   * `null`. Disables what leaves; the shell also refuses the exits themselves.
-   */
-  exitBlock: string | null;
 }
 
 interface Props {
@@ -44,17 +39,27 @@ interface Props {
   large?: boolean;
   primary: Primary;
   secondary?: Secondary;
+  /** A line under the footer, below the primary (Welcome's Terms line). */
+  below?: ReactNode;
   children: ReactNode;
 }
 
-export function StepFrame({ parts, title, large = false, primary, secondary, children }: Props) {
+export function StepFrame({
+  parts,
+  title,
+  large = false,
+  primary,
+  secondary,
+  below,
+  children,
+}: Props) {
   const content = useRef<HTMLDivElement>(null);
   // A new step starts at its top.
   useEffect(() => {
     if (content.current !== null) content.current.scrollTop = 0;
   }, [title]);
-  const blocked = parts.busy ? "One moment…" : (parts.exitBlock ?? primary.blockedBecause);
-  const stuck = parts.busy || parts.exitBlock !== null;
+  const blocked = parts.busy ? "One moment…" : primary.blockedBecause;
+  const stuck = parts.busy;
   return (
     <div className="ob-main">
       <div className="ob-content" ref={content}>
@@ -98,6 +103,7 @@ export function StepFrame({ parts, title, large = false, primary, secondary, chi
           {primary.label}
         </button>
       </footer>
+      {below !== undefined && <div className="ob-below">{below}</div>}
     </div>
   );
 }
