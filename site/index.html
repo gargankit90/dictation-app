@@ -490,6 +490,14 @@
         grid-template-columns: 1fr 1fr;
         gap: 16px;
       }
+      .ticks {
+        margin: 12px 0 0;
+        padding-left: 20px;
+        color: var(--vc-ink-2);
+      }
+      .ticks li + li {
+        margin-top: 8px;
+      }
       details {
         border-top: 1px solid var(--vc-line);
         padding: 14px 0;
@@ -1998,49 +2006,73 @@
           <div class="cols">
             <div class="card">
               <h3>Engineers</h3>
-              <p>
-                Long prompts for Claude Code, Cursor or Codex. Code-review comments. Slack replies.
-                Docs.
-              </p>
+              <ul class="ticks">
+                <li>
+                  Speak long, detailed prompts for Claude Code, Cursor or Codex faster than you can
+                  type them.
+                </li>
+                <li>Cleanup removes the ums and false starts, so the prompt reads clean.</li>
+                <li>
+                  Fixes clearly misheard tech words: “get hub” → GitHub, “jason” → JSON, “pie test”
+                  → pytest. Function and file names come out the way they’re written in code.
+                </li>
+                <li>Spoken paths and URLs become symbols: “docs slash setup” → docs/setup.</li>
+                <li>Works in the terminal, your editor, GitHub review comments, Slack and docs.</li>
+                <li>
+                  Working on private code? “On this Mac” keeps your audio and text on your Mac.
+                </li>
+              </ul>
             </div>
             <div class="card">
               <h3>Students</h3>
-              <p>
-                Lecture notes. Essay and lab drafts. Prompts to AI tutors and coding assistants.
-                Emails to professors.
-              </p>
+              <ul class="ticks">
+                <li>Draft essays, lab reports and notes by talking, then edit.</li>
+                <li>Prompts to AI tutors and coding assistants, without typing paragraphs.</li>
+                <li>Emails to professors keep your greeting and sign-off.</li>
+                <li>
+                  “On this Mac” is free: no account, no credits, and it works offline after a
+                  one-time download, so library Wi-Fi isn’t needed.
+                </li>
+              </ul>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="band">
+      <section class="band" id="data">
         <div class="wrap">
           <h2>Two ways to run</h2>
-          <p>
-            No Vocet account and no Vocet server: your audio goes through your own OpenRouter
-            account, or never leaves your Mac. Read the <a href="privacy.html">privacy policy</a>.
-          </p>
-        </div>
-      </section>
-
-      <section id="data">
-        <div class="wrap">
-          <h2>Where your data goes</h2>
           <div class="cols">
             <div class="card">
-              <h3>Connect OpenRouter</h3>
-              <p>
-                OpenRouter sends your audio to OpenAI to turn it into text and sends the text to a
-                cleanup model on a zero-data-retention host. Vocet doesn’t run a server that
-                receives your dictations.
-              </p>
+              <h3>On this Mac</h3>
+              <ul class="ticks">
+                <li>Runs on your Mac’s own chip: free, no account, no credits.</li>
+                <li>Fast, with no network round trip.</li>
+                <li>Works offline after a one-time 4.4 GB download.</li>
+                <li>Good English accuracy.</li>
+                <li>Your audio and text never leave your Mac.</li>
+              </ul>
             </div>
             <div class="card">
-              <h3>On this Mac</h3>
-              <p>Your audio and dictation text stay on your Mac.</p>
+              <h3>Connect OpenRouter <span class="brand-tag">Default</span></h3>
+              <ul class="ticks">
+                <li>The most accurate option: a speech model plus a cleanup model.</li>
+                <li>Fast, but needs internet: each dictation goes to the service and back.</li>
+                <li>
+                  Pay as you go with your own OpenRouter account: you pay only for what you dictate.
+                </li>
+                <li>
+                  OpenRouter sends your audio to OpenAI and the text to a cleanup model. Vocet asks
+                  for zero-data-retention hosts; your OpenRouter privacy settings decide the rest.
+                </li>
+                <li>Vocet doesn’t run a server that receives your dictations.</li>
+              </ul>
             </div>
           </div>
+          <p class="note">
+            No Vocet account and no Vocet server. Read the
+            <a href="privacy.html">privacy policy</a>.
+          </p>
         </div>
       </section>
 
@@ -2051,8 +2083,8 @@
             <summary>What does it cost?</summary>
             <p>
               Vocet is free during the beta. On this Mac there is nothing else to pay. With Connect
-              OpenRouter you pay OpenRouter for what you use: about $0.70 per 1,000 dictations, with
-              a $5 minimum top-up.
+              OpenRouter you add credit to your own OpenRouter account and pay only for what you
+              dictate.
             </p>
           </details>
           <details>
