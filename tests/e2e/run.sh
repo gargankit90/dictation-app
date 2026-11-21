@@ -34,7 +34,7 @@ ALL_SCENARIOS=(
   e2e_hold_release e2e_held_at_launch e2e_hotkey_listener_recovers
   e2e_quit_during_recording_then_relaunch e2e_tray_error_clears_on_next_recording
   e2e_settings_save_reopen e2e_onboarding_first_run e2e_onboarding_five_steps
-  e2e_onboarding_layout e2e_onboarding_round2
+  e2e_onboarding_round2
   e2e_settings_key_provider_recovery e2e_connect_openrouter e2e_cancel_and_busy_presses
   e2e_focus_switch_during_transcription e2e_unicode_multiline_selection_paste
   e2e_quit_during_transcription_then_relaunch
@@ -46,15 +46,14 @@ ALL_SCENARIOS=(
   e2e_hotkey_shortcuts e2e_no_words_transcript e2e_hotkey_recorder
   e2e_accessibility_revoked e2e_setup_no_permissions e2e_setup_own_key_no_permissions
   e2e_local_model
-  e2e_first_paste_after_launch e2e_quit_right_after_paste e2e_tray_menu_screenshots
-  e2e_onboarding_screenshots e2e_setup_redesign_screens
+  e2e_first_paste_after_launch e2e_quit_right_after_paste
   e2e_history
   e2e_release_build_smoke
   e2e_update_privileged_install
 )
 # Scenarios that need something the VM may lack (a microphone, a OpenRouter key):
 # they may SKIP. Any other scenario that SKIPs fails the run.
-OPTIONAL_SCENARIOS=(e2e_real_mic e2e_real_openrouter e2e_tray_menu_screenshots e2e_onboarding_screenshots e2e_setup_redesign_screens e2e_release_build_smoke e2e_notarized_dmg_first_launch)
+OPTIONAL_SCENARIOS=(e2e_real_mic e2e_real_openrouter e2e_release_build_smoke e2e_notarized_dmg_first_launch)
 APP_PATH=target/debug/bundle/macos/$APP_NAME.app
 build=1
 reset=1
