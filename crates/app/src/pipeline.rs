@@ -1970,7 +1970,16 @@ mod audio_worker_tests {
     use tokio::sync::mpsc::error::TryRecvError;
 
     use super::*;
-    use crate::stand_ins::FixedTranscriber;
+
+    /// Answers every transcription with the same text.
+    #[derive(Debug, Default, Clone, Copy)]
+    struct FixedTranscriber;
+
+    impl dictation_ports::Transcriber for FixedTranscriber {
+        async fn transcribe(&self, _audio: &Audio) -> Result<String, TranscribeError> {
+            Ok("This is a test dictation.".to_owned())
+        }
+    }
 
     const WAIT: Duration = Duration::from_secs(5);
 

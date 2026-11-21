@@ -75,7 +75,6 @@ use dictation_pipeline::hotkey_setting::{self, ConfigurableHotkey, HotkeyControl
 use dictation_pipeline::pipeline::{
     CleanupStep, Config, CursorReader, Extras, Pipeline, Ports, UiEvent,
 };
-use dictation_pipeline::stand_ins::{GrantedPermissions, MicrophoneOnly};
 use dictation_pipeline::test_hooks::Injector;
 #[cfg(debug_assertions)]
 use dictation_pipeline::test_hooks::{Breakable, HotkeyOutage, SyntheticHotkey};
@@ -132,26 +131,23 @@ type ShellHotkey = SyntheticHotkey<SavedHotkey>;
 type ShellHotkey = SavedHotkey;
 
 /// The permissions the pipeline checks on each press: the real microphone
-/// permission (Accessibility isn't checked on press: the paste reports it
-/// as `InsertError::PermissionDenied`, so the test flags work without it), or
-/// none when a debug audio file stands in for the microphone.
-enum ShellPermissions {
-    Microphone(MicrophoneOnly<SystemPermissions>),
-    None(GrantedPermissions),
-}
+/// permission, or none when a debug audio file stands in for the microphone
+/// (`None`). Accessibility isn't checked on press: the paste reports it as
+/// `InsertError::PermissionDenied`, so the test flags work without it.
+struct ShellPermissions(Option<SystemPermissions>);
 
 impl Permissions for ShellPermissions {
     fn check(&self, permission: Permission) -> PermissionStatus {
-        match self {
-            Self::Microphone(permissions) => permissions.check(permission),
-            Self::None(permissions) => permissions.check(permission),
+        match (&self.0, permission) {
+            (Some(os), Permission::Microphone) => os.check(permission),
+            _ => PermissionStatus::Granted,
         }
     }
 
     fn request(&self, permission: Permission) -> Result<(), PermissionError> {
-        match self {
-            Self::Microphone(permissions) => permissions.request(permission),
-            Self::None(permissions) => permissions.request(permission),
+        match (&self.0, permission) {
+            (Some(os), Permission::Microphone) => os.request(permission),
+            _ => Ok(()),
         }
     }
 }
@@ -176,14 +172,11 @@ fn shell_audio(
     let (audio, permissions): (Box<dyn AudioSource>, _) = match &launch.audio_file {
         Some(path) => {
             tracing::info!(path = %path.display(), "test hook: recording a file, not the microphone");
-            (
-                Box::new(FileAudioSource::new(path)),
-                ShellPermissions::None(GrantedPermissions),
-            )
+            (Box::new(FileAudioSource::new(path)), ShellPermissions(None))
         }
         None => (
             Box::new(SystemMicrophone::new()),
-            ShellPermissions::Microphone(MicrophoneOnly(SystemPermissions::new())),
+            ShellPermissions(Some(SystemPermissions::new())),
         ),
     };
     if launch.save_audio {
