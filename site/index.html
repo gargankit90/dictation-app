@@ -12,7 +12,7 @@
     <meta property="og:title" content="Vocet: Mac dictation that cleans up what you say" />
     <meta
       property="og:description"
-      content="Speak rough. Paste clean, in any Mac app. Free beta for students and engineers."
+      content="Talk instead of type in every app you use. Free beta for students and engineers."
     />
     <meta property="og:url" content="https://vocetlabs.com/" />
     <meta property="og:type" content="website" />
@@ -453,6 +453,15 @@
         font-size: 20px;
         color: var(--vc-ink);
         text-decoration: none;
+      }
+      .brand-tag {
+        font-family: var(--vc-font-ui, system-ui, sans-serif);
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--vc-ink-2);
+        background: var(--vc-bg-grouped);
+        border-radius: 999px;
+        padding: 4px 10px;
       }
       .actions {
         display: flex;
@@ -1624,7 +1633,7 @@
   </head>
   <body>
     <header class="wrap">
-      <a class="brand" href="/" aria-label="Vocet home">
+      <a class="brand" href="/" aria-label="Vocet Dictation home">
         <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true">
           <rect x="1" y="1" width="26" height="26" rx="8" fill="#1F4FC9" />
           <path
@@ -1634,7 +1643,8 @@
             stroke-linecap="round"
           />
         </svg>
-        Vocet
+        <span>Vocet</span>
+        <span class="brand-tag">Dictation</span>
       </a>
     </header>
 
@@ -1643,8 +1653,9 @@
         <div class="hero-copy">
           <h1>Speak rough. Paste clean, in any Mac app.</h1>
           <p class="lede">
-            Hold one key and talk. Vocet cuts fillers and false starts, then pastes where you type:
-            Google Docs, Notion, Claude Code, Cursor, Slack or Mail.
+            Hold one key, say what you mean, let go. Vocet cuts the ums and false starts, then
+            pastes clean text wherever your cursor is: Google Docs, Notion, Claude Code, Cursor,
+            Slack or Mail.
           </p>
           <div class="ctas">
             <a
@@ -1654,12 +1665,7 @@
               >Download for Mac</a
             >
           </div>
-          <p class="fine">
-            Apple silicon Mac (M1 or later) · macOS 13 or later · signed and notarized
-          </p>
-          <p class="fine" data-coming-soon>
-            Version 0.2.0, with cleanup and Connect OpenRouter, is coming soon.
-          </p>
+          <p class="fine">Free · macOS 13 or later · Apple silicon</p>
           <p class="fine phone-only">
             On your phone? Vocet runs on a Mac.
             <button type="button" class="linkbtn" id="copy-link">Copy the link for later</button>
@@ -1706,9 +1712,6 @@
               </div>
             </div>
           </div>
-          <button type="button" class="linkbtn anim-toggle" aria-pressed="false" hidden>
-            Pause animation
-          </button>
         </div>
       </section>
 
@@ -1716,9 +1719,6 @@
         <div class="wrap">
           <h2>Wherever you type</h2>
           <div class="tabset">
-            <button type="button" class="linkbtn anim-toggle" aria-pressed="false" hidden>
-              Pause animation
-            </button>
             <input class="sr" type="radio" name="app" id="t-ai" aria-label="Claude Code" checked />
             <input class="sr" type="radio" name="app" id="t-chat" aria-label="Slack" />
             <input class="sr" type="radio" name="app" id="t-doc" aria-label="Docs / Notion" />
@@ -2017,26 +2017,9 @@
       <section class="band">
         <div class="wrap">
           <h2>Two ways to run</h2>
-          <div class="cols">
-            <div class="card">
-              <h3>Connect OpenRouter (default)</h3>
-              <p>
-                Click Connect OpenRouter and authorize your account (or paste a key). You pay
-                OpenRouter directly: about $0.70 per 1,000 dictations, $5 minimum top-up. Uses
-                gpt-4o-mini-transcribe for speech and GLM 5.3 Flash for cleanup.
-              </p>
-            </div>
-            <div class="card">
-              <h3>On this Mac: $0, no account or card</h3>
-              <p>
-                Choose On this Mac and download about 4.4 GB once (OrukQwen 1.7B + Gemma 4 E2B).
-                English, works offline. Your audio and text stay on your Mac.
-              </p>
-            </div>
-          </div>
-          <p class="note">
-            See the cleanup prompts, models and accuracy tests we use on
-            <a href="https://github.com/gargankit90/dictation-app/tree/main/eval">GitHub</a>.
+          <p>
+            No Vocet account and no Vocet server: your audio goes through your own OpenRouter
+            account, or never leaves your Mac. Read the <a href="privacy.html">privacy policy</a>.
           </p>
         </div>
       </section>
@@ -2128,12 +2111,7 @@
               >Download for Mac</a
             >
           </div>
-          <p class="fine">
-            Apple silicon Mac (M1 or later) · macOS 13 or later · signed and notarized
-          </p>
-          <p class="fine" data-coming-soon>
-            Version 0.2.0, with cleanup and Connect OpenRouter, is coming soon.
-          </p>
+          <p class="fine">Free · macOS 13 or later · Apple silicon</p>
         </div>
       </section>
     </main>
@@ -2151,16 +2129,11 @@
     <script>
       // Download link. Release day: set DOWNLOAD_URL to the DMG,
       // https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/Vocet_0.2.0_aarch64.dmg
-      // and the "coming soon" lines hide themselves.
       var DOWNLOAD_URL = "https://github.com/gargankit90/dictation-app/releases";
       (function () {
         document.querySelectorAll("[data-download]").forEach(function (a) {
           a.href = DOWNLOAD_URL;
         });
-        if (/\.dmg$/.test(DOWNLOAD_URL))
-          document.querySelectorAll("[data-coming-soon]").forEach(function (e) {
-            e.hidden = true;
-          });
 
         // Hero: one composer that changes app on every loop (original order), and the app tabs.
         // idle -> listening (the rough words) -> transcribing -> pasted (the clean text).
@@ -2260,8 +2233,7 @@
           d._timers = [];
         }
         var radios = [].slice.call(document.querySelectorAll('.tabset input[type="radio"]'));
-        var paused = false,
-          userChose = false;
+        var userChose = false;
         // Keep the example steady while the visitor hovers or has keyboard focus in it.
         function held(d) {
           var box = d.classList.contains("use-row")
@@ -2318,7 +2290,7 @@
         }
         function refreshDemos() {
           demos.forEach(function (d) {
-            if (shown(d) && d._inView && !paused) {
+            if (shown(d) && d._inView) {
               if (!d._timers || !d._timers.length) play(d);
             } else {
               stop(d);
@@ -2334,20 +2306,6 @@
           });
         });
         if (reduce) return;
-        // Pause / play for everything that moves (WCAG 2.2.2)
-        var toggles = [].slice.call(document.querySelectorAll(".anim-toggle"));
-        toggles.forEach(function (b) {
-          b.hidden = false;
-          b.addEventListener("click", function () {
-            paused = !paused;
-            toggles.forEach(function (t) {
-              t.textContent = paused ? "Play animation" : "Pause animation";
-              t.setAttribute("aria-pressed", paused ? "true" : "false");
-            });
-            demos.forEach(stop);
-            refreshDemos();
-          });
-        });
         if ("IntersectionObserver" in window) {
           var io = new IntersectionObserver(
             function (entries) {

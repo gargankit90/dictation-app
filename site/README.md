@@ -6,7 +6,7 @@ The public website for Vocet (issue #211): one static page, no build step.
 - `fonts/`: Inter and Inter Tight (WOFF2, SIL OFL, `fonts/LICENSE.txt`), served from here so the page makes no request to Google.
 - `og.png`: the 1200×630 link-preview image.
 
-The page is the WEB1 rewrite for 0.2.0 (students and engineers). Until v0.2.0 is released, both Download buttons link to the releases page and a "coming soon" line shows under them. On release day, set `DOWNLOAD_URL` in the script at the bottom of `index.html` to the DMG (`https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/Vocet_0.2.0_aarch64.dmg`, not `releases/latest`, which skips pre-releases); that one line also hides the "coming soon" lines.
+The page is the WEB1 rewrite for 0.2.0 (students and engineers). Until v0.2.0 is released, both Download buttons link to the releases page. On release day, set `DOWNLOAD_URL` in the script at the bottom of `index.html` to the DMG (`https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/Vocet_0.2.0_aarch64.dmg`, not `releases/latest`, which skips pre-releases).
 
 To preview it, open `index.html` in a browser. Hosting is on Cloudflare (the `vocetlabs` Worker, static assets only).
 
