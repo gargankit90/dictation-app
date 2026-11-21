@@ -47,8 +47,12 @@ export const commands = {
 	 *  that cancelled it knows.
 	 */
 	connectOpenrouter: () => typedError<null, string>(__TAURI_INVOKE("connect_openrouter")),
-	/**  Ends the attempt in progress, if there is one. */
-	cancelConnect: () => typedError<null, string>(__TAURI_INVOKE("cancel_connect")),
+	/**
+	 *  Ends the attempt if it still waits for the browser: `true`. `false` means
+	 *  there is none, or the key has arrived and is being saved, which always
+	 *  finishes (the window says so and waits).
+	 */
+	cancelConnect: () => typedError<boolean, string>(__TAURI_INVOKE("cancel_connect")),
 	/**
 	 *  The saved key as Settings shows it: `sk-or-…` and its last four
 	 *  characters. `None` if no key is saved. Never the whole key.

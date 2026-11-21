@@ -144,6 +144,8 @@ class Backend {
   failing = new Map<string, string>();
   /** Holds the command named until the promise settles. */
   holds = new Map<string, Promise<void>>();
+  /** What `cancel_connect` answers: `false` once the key is being saved. */
+  cancelResult = true;
   calls: Call[] = [];
 
   status(): OnboardingStatus {
@@ -254,7 +256,7 @@ class Backend {
         return null;
       }
       case "cancel_connect":
-        return null;
+        return this.cancelResult;
       case "set_api_key":
         this.keys[args.provider as Provider] = true;
         return null;
@@ -1080,6 +1082,10 @@ describe("Speech", () => {
     await selectCloud();
     fireEvent.click(primary("Continue"));
     await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
+    // The saved-key lookup (a zero-delay timer, then the app) has settled.
+    await waitFor(() => {
+      expect(screen.queryByText("Checking for a saved key…")).toBeNull();
+    });
   }
 
   it("Q3: selecting OpenRouter shows no form, only Continue", async () => {
@@ -1119,6 +1125,8 @@ describe("Speech", () => {
 
   it("Q3: the explainer says what OpenRouter costs, and Continue waits for the connection", async () => {
     await openConnectScreen();
+    // The saved-key lookup has settled once the footer gives its reason.
+    await screen.findByText(KEY_REASON);
     expect(EXPLAINER).toContain("about $0.70 per 1,000 dictations");
     expect(EXPLAINER).toContain("a few dollars of credit");
     expect(primary("Continue").disabled).toBe(true);

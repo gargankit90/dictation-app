@@ -106,7 +106,13 @@ export function useConnection({ onConnected, refreshEngine }: Options) {
   async function cancel() {
     cancelled.current = true;
     try {
-      await commands.cancelConnect();
+      const result = await commands.cancelConnect();
+      if (result.status === "ok" && !result.data) {
+        // The key has already arrived and is being saved, which always
+        // finishes: say so, keep the exits shut, and report how it ends.
+        cancelled.current = false;
+        setBusy((now) => (now === "connecting" ? "saving" : now));
+      }
     } catch {
       // The attempt ends by itself at its own deadline.
     }
@@ -221,6 +227,8 @@ export function ConnectPanel({
               Cancel
             </button>
           </>
+        ) : busy === "saving" ? (
+          <span role="status">Saving your key…</span>
         ) : (
           <button
             type="button"

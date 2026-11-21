@@ -23,9 +23,52 @@ use crate::diagnostics::AppOpener;
 use crate::engine::LiveEngine;
 use crate::usage::{self, Usage};
 
-/// The attempt in progress, if any: the way to cancel it.
+/// The attempt in progress, if any: the way to cancel it, until its key
+/// starts to be saved.
 #[derive(Default)]
-pub struct AppConnect(Mutex<Option<oneshot::Sender<()>>>);
+pub struct AppConnect(Mutex<Attempts>);
+
+#[derive(Default)]
+struct Attempts {
+    /// The newest attempt's number.
+    latest: u64,
+    /// Cancels the newest attempt while it still waits for the browser.
+    cancel: Option<oneshot::Sender<()>>,
+}
+
+impl AppConnect {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Attempts> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Starts an attempt. A newer one replaces the older, which ends as
+    /// cancelled (its sender is dropped).
+    fn begin(&self) -> (u64, oneshot::Receiver<()>) {
+        let (cancel, cancelled) = oneshot::channel();
+        let mut attempts = self.lock();
+        attempts.latest += 1;
+        attempts.cancel = Some(cancel);
+        (attempts.latest, cancelled)
+    }
+
+    /// The key arrived: commits attempt `id` to saving it. `false` if it was
+    /// cancelled or replaced first, and then nothing is saved. After `true`
+    /// [`cancel`](Self::cancel) has nothing to cancel: the save always
+    /// finishes, so there is never a half-saved state.
+    fn claim(&self, id: u64) -> bool {
+        let mut attempts = self.lock();
+        attempts.latest == id && attempts.cancel.take().is_some()
+    }
+
+    /// Cancels the attempt if it still waits for the browser. `false` if
+    /// there is none, or its key is already being saved.
+    fn cancel(&self) -> bool {
+        self.lock()
+            .cancel
+            .take()
+            .is_some_and(|cancel| cancel.send(()).is_ok())
+    }
+}
 
 /// Signs in at `OpenRouter` and saves the key. Returns when it is saved, or
 /// with the reason it isn't. A cancelled attempt is an error too; the window
@@ -39,9 +82,7 @@ pub async fn connect_openrouter(
     usage: State<'_, Usage>,
     attempt: State<'_, AppConnect>,
 ) -> Result<(), String> {
-    let (cancel, cancelled) = oneshot::channel::<()>();
-    // A newer attempt replaces the older one, which ends as cancelled.
-    *attempt.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(cancel);
+    let (id, cancelled) = attempt.begin();
     let (connect_config, browser) = plan(engine.inner(), &opener.0);
     connect_and_save(
         &state.0,
@@ -51,25 +92,20 @@ pub async fn connect_openrouter(
         async {
             let _ = cancelled.await;
         },
+        || attempt.claim(id),
     )
     .await?;
     usage.record(usage::engine_selected(Provider::OpenRouter));
     Ok(())
 }
 
-/// Ends the attempt in progress, if there is one.
+/// Ends the attempt if it still waits for the browser: `true`. `false` means
+/// there is none, or the key has arrived and is being saved, which always
+/// finishes (the window says so and waits).
 #[tauri::command]
 #[specta::specta]
-pub fn cancel_connect(attempt: State<'_, AppConnect>) -> Result<(), String> {
-    let cancel = attempt
-        .0
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .take();
-    if let Some(cancel) = cancel {
-        let _ = cancel.send(());
-    }
-    Ok(())
+pub fn cancel_connect(attempt: State<'_, AppConnect>) -> Result<bool, String> {
+    Ok(attempt.cancel())
 }
 
 /// Where to sign in and what plays the browser. Normally `OpenRouter` and
@@ -128,6 +164,7 @@ async fn connect_and_save<S: SecretStore + 'static>(
     connect_config: &connect::Config,
     opener: &dyn Opener,
     cancel: impl Future<Output = ()>,
+    claim: impl FnOnce() -> bool,
 ) -> Result<(), String> {
     let key = connect::connect(connect_config, |url| opener.open_url(url), cancel)
         .await
@@ -135,6 +172,11 @@ async fn connect_and_save<S: SecretStore + 'static>(
             tracing::warn!(%error, "connecting OpenRouter failed");
             error.to_string()
         })?;
+    // From here the save is committed: a cancel that came first wins and
+    // nothing is saved; one that comes later has nothing to cancel.
+    if !claim() {
+        return Err(ConnectError::Cancelled.to_string());
+    }
     save_key(config, live, Provider::OpenRouter, key.expose().to_owned()).await
 }
 
@@ -282,6 +324,7 @@ mod tests {
             &connect_config,
             &browser,
             std::future::pending(),
+            || true,
         )
         .await
         .unwrap();
@@ -305,6 +348,7 @@ mod tests {
             &connect_config,
             &browser,
             std::future::pending(),
+            || true,
         )
         .await
         .unwrap_err();
@@ -395,6 +439,7 @@ mod tests {
             &connect_config,
             browser.as_ref(),
             std::future::pending(),
+            || true,
         )
         .await
         .unwrap();
@@ -451,6 +496,7 @@ mod tests {
             &connect_config,
             browser.as_ref(),
             std::future::pending(),
+            || true,
         )
         .await
         .unwrap();
@@ -466,6 +512,7 @@ mod tests {
             &refused_config,
             &browser,
             std::future::pending(),
+            || true,
         )
         .await
         .unwrap_err();
@@ -479,6 +526,167 @@ mod tests {
         assert!(!logged.contains("code_challenge"), "{logged}");
     }
 
+    #[test]
+    fn a_cancel_before_the_key_arrives_wins_and_one_after_has_nothing_to_cancel() {
+        let attempts = AppConnect::default();
+        let (id, _cancelled) = attempts.begin();
+        assert!(attempts.cancel());
+        assert!(!attempts.claim(id), "a cancelled attempt must not save");
+
+        let (id, _cancelled) = attempts.begin();
+        assert!(attempts.claim(id));
+        assert!(!attempts.cancel(), "the save is committed");
+
+        // A newer attempt replaces an older one: the old one can't save.
+        let (old, _a) = attempts.begin();
+        let (new, _b) = attempts.begin();
+        assert!(!attempts.claim(old));
+        assert!(attempts.claim(new));
+    }
+
+    /// A keychain whose write waits until the test lets it through, then
+    /// succeeds or fails.
+    #[derive(Clone)]
+    struct GatedStore {
+        inner: MemSecretStore,
+        started: std::sync::mpsc::Sender<()>,
+        gate: Arc<Mutex<std::sync::mpsc::Receiver<bool>>>,
+    }
+
+    impl SecretStore for GatedStore {
+        fn get(
+            &self,
+            name: &str,
+        ) -> Result<Option<dictation_ports::Secret>, dictation_ports::SecretError> {
+            self.inner.get(name)
+        }
+
+        fn set(
+            &self,
+            name: &str,
+            secret: &dictation_ports::Secret,
+        ) -> Result<(), dictation_ports::SecretError> {
+            let _ = self.started.send(());
+            let works = self.gate.lock().unwrap().recv().unwrap();
+            if !works {
+                return Err(dictation_ports::SecretError::Store("locked".into()));
+            }
+            self.inner.set(name, secret)
+        }
+
+        fn delete(&self, name: &str) -> Result<(), dictation_ports::SecretError> {
+            self.inner.delete(name)
+        }
+    }
+
+    /// Runs a sign-in whose Keychain write is held; presses Cancel while it
+    /// is held; then lets the write finish as `works`. Returns the result,
+    /// whether Cancel could cancel, and what the store ended up holding.
+    async fn cancel_during_the_save(works: bool) -> (Result<(), String>, bool, bool) {
+        let (connect_config, _server) = {
+            let (server, config) = exchange(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "key": KEY })),
+            )
+            .await;
+            (config, server)
+        };
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (gate_tx, gate_rx) = std::sync::mpsc::channel();
+        let store = GatedStore {
+            inner: MemSecretStore::new(),
+            started: started_tx,
+            gate: Arc::new(Mutex::new(gate_rx)),
+        };
+        let config = Arc::new(Config::new(temp(), store.clone()));
+        let attempts = Arc::new(AppConnect::default());
+        let (id, cancelled) = attempts.begin();
+        let browser = Browser {
+            inner: FakeOpener::new(),
+            state_ok: true,
+        };
+        let task = {
+            let (config, attempts) = (Arc::clone(&config), Arc::clone(&attempts));
+            tokio::spawn(async move {
+                connect_and_save(
+                    &config,
+                    &LiveEngine::fixed(),
+                    &connect_config,
+                    &browser,
+                    async {
+                        let _ = cancelled.await;
+                    },
+                    || attempts.claim(id),
+                )
+                .await
+            })
+        };
+        // The key has arrived and the write is in the keychain.
+        tokio::task::spawn_blocking(move || started_rx.recv().unwrap())
+            .await
+            .unwrap();
+        let could_cancel = attempts.cancel();
+        gate_tx.send(works).unwrap();
+        let result = task.await.unwrap();
+        let held = store
+            .inner
+            .get(Provider::OpenRouter.key_name())
+            .unwrap()
+            .is_some();
+        (result, could_cancel, held)
+    }
+
+    /// Review finding 1: Cancel during the save finds nothing to cancel, and
+    /// the save finishes: the key is saved, never half-saved.
+    #[tokio::test]
+    async fn cancel_during_a_slow_save_cannot_cancel_it_and_the_key_is_saved() {
+        let (result, could_cancel, held) = cancel_during_the_save(true).await;
+        assert!(!could_cancel);
+        assert_eq!(result, Ok(()));
+        assert!(held);
+    }
+
+    /// And a save that fails reports its own error, not "cancelled".
+    #[tokio::test]
+    async fn a_failing_save_after_a_cancel_press_reports_the_keychain_error() {
+        let (result, could_cancel, held) = cancel_during_the_save(false).await;
+        assert!(!could_cancel);
+        let error = result.unwrap_err();
+        assert!(error.contains("locked"), "{error}");
+        assert!(!error.contains("cancelled"));
+        assert!(!held);
+    }
+
+    /// A cancel that wins the race with the arriving key saves nothing.
+    #[tokio::test]
+    async fn a_cancel_that_won_the_claim_saves_nothing() {
+        let (_server, connect_config) =
+            exchange(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "key": KEY })))
+                .await;
+        let store = MemSecretStore::new();
+        let config = Arc::new(Config::new(temp(), store.clone()));
+        let browser = Browser {
+            inner: FakeOpener::new(),
+            state_ok: true,
+        };
+        let error = connect_and_save(
+            &config,
+            &LiveEngine::fixed(),
+            &connect_config,
+            &browser,
+            std::future::pending(),
+            || false,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error, "Connecting was cancelled.");
+        assert!(
+            store
+                .get(Provider::OpenRouter.key_name())
+                .unwrap()
+                .is_none()
+        );
+    }
+
     #[tokio::test]
     async fn cancelling_saves_nothing() {
         let (_server, connect_config) = exchange(ResponseTemplate::new(500)).await;
@@ -490,6 +698,7 @@ mod tests {
             &connect_config,
             &FakeOpener::new(),
             std::future::ready(()),
+            || true,
         )
         .await
         .unwrap_err();
@@ -517,6 +726,7 @@ mod tests {
             &connect_config,
             &browser,
             std::future::pending(),
+            || true,
         )
         .await
         .unwrap_err();

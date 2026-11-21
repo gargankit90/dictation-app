@@ -73,6 +73,8 @@ class Backend {
   failing = new Map<string, string>();
   /** Holds the command named until the promise settles. */
   holds = new Map<string, Promise<void>>();
+  /** What `cancel_connect` answers: `false` once the key is being saved. */
+  cancelResult = true;
   calls: Call[] = [];
 
   hotkeyNotice: string | null = null;
@@ -147,7 +149,7 @@ class Backend {
         this.keys.openrouter = true;
         return null;
       case "cancel_connect":
-        return null;
+        return this.cancelResult;
       case "test_api_key":
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         if (this.testResult !== null) throw this.testResult;
@@ -775,6 +777,55 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
     await screen.findByRole("button", { name: "Connect OpenRouter" });
     expect(screen.queryByText("Connecting was cancelled.")).toBeNull();
     expect(backend.keys.openrouter).toBe(false);
+  });
+
+  it("Cancel while the key is being saved can't cancel it: it says so, shuts the exits, and the save finishes", async () => {
+    onDevice();
+    const hold = gate();
+    backend.holds.set("connect_openrouter", hold.closed);
+    backend.cancelResult = false;
+    await open("speech");
+    fireEvent.click(radio(/^OpenRouter/));
+    await screen.findByRole("dialog");
+    click("Connect OpenRouter");
+    await screen.findByText("Waiting for OpenRouter in your browser…");
+    click("Cancel");
+    expect(await screen.findByText("Saving your key…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Done" }).disabled).toBe(true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    await act(async () => {
+      hold.open();
+      await Promise.resolve();
+    });
+    // The save finished, so the result counts: connected, and switched.
+    expect(await screen.findByText(CONNECTED)).toBeTruthy();
+    expect(backend.keys.openrouter).toBe(true);
+    await waitFor(() => {
+      expect(backend.named("use_cloud_engine")).toHaveLength(1);
+    });
+  });
+
+  it("a save that fails after Cancel was pressed shows the Keychain error, not a silent cancel", async () => {
+    onDevice();
+    const hold = gate();
+    backend.holds.set("connect_openrouter", hold.closed);
+    backend.cancelResult = false;
+    await open("speech");
+    fireEvent.click(radio(/^OpenRouter/));
+    await screen.findByRole("dialog");
+    click("Connect OpenRouter");
+    await screen.findByText("Waiting for OpenRouter in your browser…");
+    click("Cancel");
+    await screen.findByText("Saving your key…");
+    backend.failing.set("connect_openrouter", "the Keychain is locked");
+    await act(async () => {
+      hold.open();
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("the Keychain is locked")).toBeTruthy();
+    expect(backend.named("use_cloud_engine")).toHaveLength(0);
   });
 
   it("Done during the wait cancels it", async () => {
