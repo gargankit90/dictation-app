@@ -111,55 +111,6 @@ fn is_mock(transcribers: &Transcribers) -> bool {
 }
 
 #[test]
-fn criterion_2_language_saves_on_its_own_and_keeps_every_other_field() {
-    let rig = rig("language", loads());
-    // Another control's newer values are already stored.
-    let stored = Settings {
-        hotkey: "F6".into(),
-        share_usage_events: false,
-        launch_at_login: true,
-        ..Settings::default()
-    };
-    rig.config.save_settings(&stored).unwrap();
-
-    language_change(&rig.config, &rig.live, &rig.control, Some(" hi ".into())).unwrap();
-    let after = rig.config.settings().unwrap();
-    assert_eq!(after.language.as_deref(), Some("hi"));
-    assert_eq!(
-        (
-            after.hotkey.as_str(),
-            after.share_usage_events,
-            after.launch_at_login
-        ),
-        ("F6", false, true)
-    );
-
-    language_change(&rig.config, &rig.live, &rig.control, Some(String::new())).unwrap();
-    assert_eq!(
-        rig.config.settings().unwrap().language,
-        None,
-        "empty: detect it"
-    );
-}
-
-#[test]
-fn criterion_2_an_invalid_language_changes_nothing() {
-    let rig = rig("bad-language", loads());
-    let error = language_change(
-        &rig.config,
-        &rig.live,
-        &rig.control,
-        Some("not a code!".into()),
-    )
-    .unwrap_err();
-    assert!(!error.is_empty());
-    assert_eq!(
-        rig.config.settings().unwrap().language,
-        Settings::default().language
-    );
-}
-
-#[test]
 fn criterion_4_choosing_a_provider_switches_to_its_default_model() {
     let mut settings = Settings {
         transcription: Transcription::Local,
@@ -234,33 +185,39 @@ fn criterion_4_a_model_that_fails_to_load_leaves_the_previous_engine_chosen() {
     );
 }
 
-/// U6 review round 1, finding 2: from on-device model A, choosing B loads B
-/// first (and frees A); if the settings then can't be written, A must be
-/// the engine again, as the file and the window still say.
+/// U6 review round 1, finding 2: choosing the on-device model loads it
+/// first; if the settings then can't be written, what they still choose
+/// (the cloud) must be the engine again, as the file and the window say.
+/// (Q4 left one speech model, so this goes cloud → local, not A → B.)
 #[test]
 #[cfg(unix)]
-fn criterion_4_a_failed_write_after_loading_puts_the_old_model_back() {
+fn criterion_4_a_failed_write_after_loading_puts_the_old_engine_back() {
     use std::os::unix::fs::PermissionsExt as _;
 
-    const MULTI: &str = "qwen3-asr-0.6b-q4_k_m";
     let rig = rig("write-fails", loads());
     downloaded(&rig, ENGLISH);
-    downloaded(&rig, MULTI);
-    switch_to_local(&rig.config, &rig.live, &rig.control, ENGLISH).unwrap();
-    let local = rig.live.local().unwrap();
-    assert_eq!(local.loaded(), Some(ENGLISH));
+    rig.config.save_settings(&Settings::default()).unwrap();
+    assert_eq!(
+        rig.config.settings().unwrap().transcription,
+        Transcription::Cloud
+    );
 
     // A full disk: nothing can be written in the settings folder.
     let folder = rig.dir.0.join("config");
     let mode = |bits| std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(bits));
     mode(0o500).unwrap();
-    let error = switch_to_local(&rig.config, &rig.live, &rig.control, MULTI);
+    let error = switch_to_local(&rig.config, &rig.live, &rig.control, ENGLISH);
     mode(0o700).unwrap();
 
     assert!(error.is_err(), "the write was refused, so the switch fails");
-    assert_eq!(rig.config.settings().unwrap().local_model, ENGLISH);
-    assert_eq!(local.loaded(), Some(ENGLISH), "the live model is A again");
-    assert!(matches!(*rig.transcribers.current(), Engine::Local(_)));
+    assert_eq!(
+        rig.config.settings().unwrap().transcription,
+        Transcription::Cloud
+    );
+    assert!(
+        !matches!(*rig.transcribers.current(), Engine::Local(_)),
+        "the cloud engine is current again"
+    );
 }
 
 #[test]
@@ -310,7 +267,6 @@ fn criterion_5_remove_key_deletes_it_from_the_keychain() {
 #[test]
 fn links_are_a_closed_list_of_https_pages() {
     for link in [
-        Link::OpenrouterKeys,
         Link::OpenrouterCredits,
         Link::Privacy,
         Link::Repository,
@@ -320,13 +276,6 @@ fn links_are_a_closed_list_of_https_pages() {
         assert!(link.url().starts_with("https://"), "{link:?}");
     }
     assert_eq!(Link::Privacy.url(), "https://vocetlabs.com/privacy");
-}
-
-#[test]
-fn criterion_6_microphone_problems_say_what_to_do() {
-    assert!(microphone_problem(&AudioError::PermissionDenied).contains("System Settings"));
-    assert!(microphone_problem(&AudioError::NoDevice).contains("No microphone"));
-    assert!(!microphone_problem(&AudioError::Device("raw detail".into())).contains("raw detail"));
 }
 
 #[test]
@@ -394,17 +343,6 @@ async fn a_hotkey_waiting_for_accessibility_fails_no_write() {
         control
             .notice()
             .is_some_and(|said| said.contains("Accessibility"))
-    );
-
-    let (live, keys) = (rig.live.clone(), control.clone());
-    write(Arc::clone(&rig.config), &usage, move |config| {
-        language_change(config, &live, &keys, Some("hi".into()))
-    })
-    .await
-    .expect("the language is saved");
-    assert_eq!(
-        rig.config.settings().unwrap().language.as_deref(),
-        Some("hi")
     );
 
     let (live, keys) = (rig.live.clone(), control.clone());

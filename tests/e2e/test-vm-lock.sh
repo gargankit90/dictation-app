@@ -7,21 +7,16 @@
 #   the golden image and its backup included, is refused before lume runs.
 # - A reset clones the golden image, then sets memory and CPUs on the clone
 #   (never on the golden image), then starts it.
-# - A VM's lock is taken with one atomic create, released however the run
-#   ends, and refused with a "VM busy" error while a live run holds it. A
-#   lock whose run is gone is never taken over: the run fails naming
-#   `run.sh --clear-stale-lock <vm>`, which removes it only if its pid is not
-#   running and only for the VMs' and the host-wide locks. Two runs never both
-#   get one lock (also while one is slow), a signal at any point of taking it
-#   releases it, and a scenario's own traps don't leave it behind.
+# - A VM's lock is released however the run ends, and refused with a "VM
+#   busy" error while a live run holds it. A lock whose run is gone is never
+#   taken over: the run fails naming `run.sh --clear-stale-lock <vm>`, which
+#   removes it only if its pid is not running. A scenario's own traps don't
+#   leave it behind.
 # - Clones of the golden image are serialised; a third running macOS VM is
-#   refused, also when two runs reset their VMs at the same time and while
-#   a start is not yet visible in `lume ls` (the start lock is held until it
-#   is; at the deadline the VM is stopped and the run fails). If that stop
-#   fails, or the run gets a signal after `lume run`, the start lock stays
-#   (stale once the run exits) so no third start begins; clearing it
-#   (`--clear-stale-lock vm-start`) is refused while `lume ls` shows two macOS
-#   VMs running or the VM the lock was taken for.
+#   refused, and a stale start lock stops a reset.
+#
+# The races and signal timings of taking the locks were trimmed in SIMP1:
+# two VMs and one operator don't need them.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd -P)
@@ -65,30 +60,20 @@ export E2E_LOCK_DIR="$STUB/locks"
 . tests/e2e/lib.sh
 
 # `lume ls` lists $STUB/ls.json plus every VM `lume run` has started (their
-# names, one per line, in $STUB/started). With STUB_HIDE_STARTED=1 it leaves
-# them out until the file $STUB/visible exists (a start that takes a while to
-# show). STUB_RUN_FAIL_LS=1: `lume ls` fails once a VM has been started.
-# STUB_STOP_FAIL=1: `lume stop` fails. STUB_RUN_TERM=1: the run gets TERM right
-# after `lume run` (the VM is started but not yet listed).
+# names, one per line, in $STUB/started).
 lume() {
   echo "$*" >>"$STUB/lume.log"
   case $1 in
     ls)
       if [ -e "$STUB/ls.fail" ]; then return 1; fi
-      if [ -s "$STUB/started" ] && { [ "${STUB_HIDE_STARTED:-}" != 1 ] || [ -e "$STUB/visible" ]; }; then
+      if [ -s "$STUB/started" ]; then
         jq -c --rawfile s "$STUB/started" '. + ([$s | split("\n")[] | select(length > 0)] | map({name: ., os: "macOS", status: "running"}))' "$STUB/ls.json"
       else
         cat "$STUB/ls.json"
       fi
       ;;
     clone) [ -z "${STUB_CLONE_SLEEP:-}" ] || sleep "$STUB_CLONE_SLEEP" ;;
-    stop) [ -z "${STUB_STOP_FAIL:-}" ] || return 1 ;;
-    run)
-      [ -z "${STUB_RUN_SLEEP:-}" ] || sleep "$STUB_RUN_SLEEP"
-      echo "$2" >>"$STUB/started"
-      [ -z "${STUB_RUN_FAIL_LS:-}" ] || : >"$STUB/ls.fail"
-      [ -z "${STUB_RUN_TERM:-}" ] || kill -TERM $$
-      ;;
+    run) echo "$2" >>"$STUB/started" ;;
   esac
 }
 wait_for_vm() { :; }
@@ -175,49 +160,6 @@ start_dead_pid() {
   true &
   DEAD_PID=$!
   wait "$DEAD_PID"
-}
-
-# run_bg <case> <label> <script> [env...]: like run_case, but in the background
-# and in a case directory several runs share (their locks, their lume). Output
-# in <case>/<label>.out, .err and .status; collect with wait_bg.
-bg_runs=()
-run_bg() {
-  local name=$1 label=$2 script=$3
-  shift 3
-  local dir=$tmp/$name
-  mkdir -p "$dir"
-  [ -e "$dir/ls.json" ] || echo '[]' >"$dir/ls.json"
-  (
-    set +e
-    env ROOT="$root" STUB="$dir" "$@" \
-      bash -c '. "$STUB/../harness.sh"; '"$script" >"$dir/$label.out" 2>"$dir/$label.err" </dev/null
-    echo $? >"$dir/$label.status"
-  ) &
-  bg_runs+=("$!")
-  bg_pids+=("$!")
-}
-wait_bg() {
-  local pid
-  for pid in ${bg_runs[@]+"${bg_runs[@]}"}; do wait "$pid" || true; done
-  bg_runs=()
-}
-# wait_for_file <path>: up to 10 seconds.
-wait_for_file() {
-  local i
-  for i in $(seq 1 100); do
-    [ -e "$1" ] && return 0
-    sleep 0.1
-  done
-  return 1
-}
-# acquired_count <case> <label>...: how many of those runs got the lock.
-acquired_count() {
-  local name=$1 label n=0
-  shift
-  for label in "$@"; do
-    grep -q '^acquired$' "$tmp/$name/$label.out" && n=$((n + 1))
-  done
-  echo "$n"
 }
 
 # --- Which VM -----------------------------------------------------------------
@@ -359,57 +301,6 @@ run_case not_mine 'lock_release dictation-vm'
 check "lock_release leaves another run's lock alone" is_locked not_mine dictation-vm
 
 
-# --- Taking a lock is atomic: two runs never both get it ------------------------
-# (R1) The first run is slow between starting to take the lock and having it
-# (the `date` it calls for the lock's time stalls). The second run must not
-# mistake that for a dead owner.
-run_bg slow_owner a '
-  date() { if [ "${1:-}" = "+%F %T" ]; then touch "$STUB/a_stalled"; sleep 3; fi; command date "$@"; }
-  arm_run_traps; vm_lock_take; echo acquired; sleep 3'
-wait_for_file "$tmp/slow_owner/a_stalled" || true
-run_bg slow_owner b 'arm_run_traps; vm_lock_take; echo acquired; sleep 4'
-wait_bg
-check "a slow first owner and a second run: exactly one gets the lock" \
-  test "$(acquired_count slow_owner a b)" = 1
-check "the one that lost was told the VM is busy" \
-  test "$(cat "$tmp/slow_owner/a.status")$(cat "$tmp/slow_owner/b.status")" = 10 -o "$(cat "$tmp/slow_owner/a.status")$(cat "$tmp/slow_owner/b.status")" = 01
-check "and the winner's lock is gone only once the winner is" not_locked slow_owner dictation-vm
-
-# Four runs find the same stale lock at once: none takes it, all say so, and
-# the lock stays for --clear-stale-lock.
-start_dead_pid
-fake_lock stale_race dictation-vm "$DEAD_PID"
-for label in a b c d; do
-  run_bg stale_race $label 'arm_run_traps; vm_lock_take; echo acquired; sleep 2'
-done
-wait_bg
-check "four runs, one stale lock: none takes it" test "$(acquired_count stale_race a b c d)" = 0
-check "all four say it is stale" test "$(grep -l 'stale lock for dictation-vm from pid' "$tmp"/stale_race/?.err | wc -l | tr -d ' ')" = 4
-check "the stale lock is untouched" test "$(lock_pid stale_race dictation-vm)" = "$DEAD_PID"
-
-# What used to be the takeover race (an abandoned reclaim lock beside a stale
-# lock, two contenders): nothing is taken over, so there is nothing to race
-# for. Both fail, both locks stay as they were (the reclaim file is just
-# ignored).
-start_dead_pid
-fake_lock reclaim_race dictation-vm "$DEAD_PID"
-fake_lock reclaim_race dictation-vm.reclaim "$DEAD_PID"
-for label in a b; do
-  run_bg reclaim_race $label 'arm_run_traps; vm_lock_take; echo acquired; sleep 2'
-done
-wait_bg
-check "a stale lock and a stale reclaim lock, two runs: neither gets the VM" test "$(acquired_count reclaim_race a b)" = 0
-check "both fail" test "$(cat "$tmp/reclaim_race/a.status")$(cat "$tmp/reclaim_race/b.status")" = 11
-check "the stale lock is untouched" test "$(lock_pid reclaim_race dictation-vm)" = "$DEAD_PID"
-check "and so is the reclaim lock" test "$(lock_pid reclaim_race dictation-vm.reclaim)" = "$DEAD_PID"
-
-# A stale lock does not make a live contender race anyone: while a run holds
-# the lock for real, others get "busy", never "stale".
-fake_lock reclaim_live_pid dictation-vm "$pid"
-run_case reclaim_live_pid 'arm_run_traps; vm_lock_take'
-check "a young lock whose run is alive is never taken over" test "$(status_of reclaim_live_pid)" != 0
-check "and is reported busy, not stale" lacks "stale lock" "$tmp/reclaim_live_pid/err"
-
 # --- run.sh --clear-stale-lock <vm> ----------------------------------------------
 start_dead_pid
 dead=$DEAD_PID
@@ -461,26 +352,6 @@ run_sh clear_olddir_live --clear-stale-lock dictation-vm
 check "and a live one's is refused" is_locked clear_olddir_live dictation-vm
 run_sh clear_help --help
 check "--help lists --clear-stale-lock" has "--clear-stale-lock" "$tmp/clear_help/out"
-
-# --- A signal while taking a lock releases it ---------------------------------
-# (R3) TERM right after the lock is created, before the run has done anything
-# with it; right before; and inside a takeover.
-run_case sig_after 'ln() { command ln "$@"; kill -TERM $$; }; mv() { command mv "$@"; kill -TERM $$; }; arm_run_traps; vm_lock_take; echo survived'
-check "TERM just after the VM lock is created: the run ends" test "$(status_of sig_after)" = 143
-check "and the lock is gone" not_locked sig_after dictation-vm
-check "and the run did not carry on" lacks survived "$tmp/sig_after/out"
-run_case sig_before 'ln() { kill -TERM $$; command ln "$@"; }; arm_run_traps; vm_lock_take; echo survived'
-check "TERM just before it is created: no lock" not_locked sig_before dictation-vm
-run_case sig_clone 'ln() { command ln "$@"; kill -TERM $$; }; mv() { command mv "$@"; kill -TERM $$; }; arm_run_traps; clone_golden; echo survived'
-check "TERM just after the clone lock is created: the lock is gone" not_locked sig_clone golden-clone
-check "and nothing was cloned" no_lume_call sig_clone
-for signal in INT HUP; do
-  run_case "sig_$signal" 'ln() { command ln "$@"; kill -'"$signal"' $$; }; mv() { command mv "$@"; kill -'"$signal"' $$; }; arm_run_traps; vm_lock_take'
-  check "$signal while taking the lock: it is released" not_locked "sig_$signal" dictation-vm
-done
-# lock_release twice, and for a lock this run never took
-run_case release_twice 'vm_lock_take; lock_release dictation-vm; lock_release dictation-vm; lock_release golden-clone; release_run_locks; release_run_locks'
-check "releasing twice, or what was never held, is harmless" test "$(status_of release_twice)" = 0
 
 # --- A scenario's own traps don't leave the lock behind -----------------------
 # (R2) Scenarios arm their own EXIT trap (arm_key_cleanup, apikey_guard_start...),
@@ -573,177 +444,6 @@ check "nothing running: fine" test "$(status_of stopped_ok)" = 0
 ls_json three_vm2 dictation-vm:running "$GOLDEN:running"
 run_case three_vm2 'reset_vm' E2E_VM=dictation-vm-2
 check "dictation-vm-2: dictation-vm and golden running: refused" test "$(status_of three_vm2)" != 0
-
-# (R4) Two runs reset their two VMs together while one other macOS VM runs:
-# only one more may start. lume run takes a second, so without one lock around
-# the count and the start both count one other VM and both start.
-ls_json two_resets unrelated:running "$GOLDEN:stopped"
-run_bg two_resets a 'arm_run_traps; vm_lock_take; reset_vm' E2E_VM=dictation-vm STUB_RUN_SLEEP=1
-run_bg two_resets b 'arm_run_traps; vm_lock_take; reset_vm' E2E_VM=dictation-vm-2 STUB_RUN_SLEEP=1
-wait_bg
-check "two resets at once with one other VM running: one of them is refused" \
-  test "$(cat "$tmp/two_resets/a.status")$(cat "$tmp/two_resets/b.status")" = 10 -o "$(cat "$tmp/two_resets/a.status")$(cat "$tmp/two_resets/b.status")" = 01
-check "so only one VM was started" test "$(wc -l <"$tmp/two_resets/started" | tr -d ' ')" = 1
-check "the refused one says Apple allows 2" test "$(cat "$tmp/two_resets/a.err" "$tmp/two_resets/b.err" | grep -c 'Apple allows 2 at once')" = 1
-check "the start lock is gone" not_locked two_resets vm-start
-check "so are both VM locks" test "$(ls "$tmp/two_resets/locks" | wc -l | tr -d ' ')" = 0
-
-# Two resets, nothing else running: both start (the lock only serialises).
-ls_json two_ok "$GOLDEN:stopped"
-run_bg two_ok a 'arm_run_traps; vm_lock_take; reset_vm' E2E_VM=dictation-vm STUB_RUN_SLEEP=1
-run_bg two_ok b 'arm_run_traps; vm_lock_take; reset_vm' E2E_VM=dictation-vm-2 STUB_RUN_SLEEP=1
-wait_bg
-check "two resets with nothing else running: both succeed" \
-  test "$(cat "$tmp/two_ok/a.status")$(cat "$tmp/two_ok/b.status")" = 00
-check "and both VMs were started" test "$(sort "$tmp/two_ok/started" | tr '\n' ' ')" = "dictation-vm dictation-vm-2 "
-
-# The start lock held by another run for too long: this one waits, then gives
-# up without starting anything.
-fake_lock start_busy vm-start "$pid"
-run_case start_busy 'reset_vm' E2E_START_LOCK_WAIT=1
-check "a start in progress elsewhere: this one gives up after the wait" test "$(status_of start_busy)" != 0
-check "the error names the lock" has "'vm-start' is busy" "$tmp/start_busy/err"
-check "lume run was not called" lacks "run " "$tmp/start_busy/lume.log"
-
-# The start lock is held until lume ls lists the new VM as running (R4). Here
-# the start takes a while to show: until then the lock stays held, a third
-# start is refused, and the VM only counts once it is listed.
-ls_json visible unrelated:running
-run_bg visible a 'arm_run_traps; vm_lock_take; reset_vm; echo done' E2E_VM=dictation-vm STUB_HIDE_STARTED=1 E2E_START_VISIBLE_WAIT=30
-wait_for_file "$tmp/visible/started" || true
-sleep 1
-check "while the new VM is not listed: the start lock is held" is_locked visible vm-start
-check "by the run that started it" test "$(lock_pid visible vm-start)" = "$(lock_pid visible dictation-vm)"
-run_bg visible b 'arm_run_traps; vm_lock_take; reset_vm; echo done' E2E_VM=dictation-vm-2 STUB_HIDE_STARTED=1 E2E_START_LOCK_WAIT=0
-sleep 2
-check "a third start while it is unconfirmed is refused" test "$(cat "$tmp/visible/b.status" 2>/dev/null)" = 1
-check "with the start lock's busy error" has "'vm-start' is busy" "$tmp/visible/b.err"
-check "it never ran lume run" test "$(calls visible | grep -c '^run dictation-vm-2')" = 0
-check "and the first run is still waiting, holding the lock" is_locked visible vm-start
-: >"$tmp/visible/visible"
-wait_bg
-check "once the VM is listed, the first run goes on" test "$(cat "$tmp/visible/a.status")" = 0
-check "only one VM was started" test "$(wc -l <"$tmp/visible/started" | tr -d ' ')" = 1
-check "the start lock is released after that" not_locked visible vm-start
-check "lume ls was asked again after the run" test "$(calls visible | grep -c '^ls ')" -ge 3
-
-# The deadline passes with the VM still not listed: it is stopped, the lock is
-# released and the run fails (R4). A second reset waiting for the lock goes
-# only after that: starts never overlap.
-ls_json deadline unrelated:running
-run_bg deadline a 'arm_run_traps; vm_lock_take; reset_vm; echo done' E2E_VM=dictation-vm STUB_HIDE_STARTED=1 E2E_START_VISIBLE_WAIT=2
-wait_for_file "$tmp/deadline/started" || true
-run_bg deadline b 'arm_run_traps; vm_lock_take; reset_vm; echo done' E2E_VM=dictation-vm-2 STUB_HIDE_STARTED=1 E2E_START_VISIBLE_WAIT=2 E2E_START_LOCK_WAIT=30
-wait_bg
-check "a VM never listed as running: the reset fails" test "$(cat "$tmp/deadline/a.status")" != 0
-check "and says why" has "lume ls didn't list dictation-vm as running within 2 s; stopped dictation-vm" "$tmp/deadline/a.err"
-check "it did not report success" lacks done "$tmp/deadline/a.out"
-check "its VM lock and the start lock are released" not_locked deadline dictation-vm
-# (Each reset also stops its VM first, before any start lock: only the stop
-# after the run counts.)
-line_of() { calls "$1" | grep -n "$2" | "${3:-head}" -1 | cut -d: -f1; }
-check "the second reset waited for the first to finish: run A, stop A, only then run B" \
-  test "$(line_of deadline '^run dictation-vm ')" -lt "$(line_of deadline '^stop dictation-vm$' tail)" \
-  -a "$(line_of deadline '^stop dictation-vm$' tail)" -lt "$(line_of deadline '^run dictation-vm-2 ')"
-check "the second one also fails at its own deadline" test "$(cat "$tmp/deadline/b.status")" != 0
-check "no lock is left" test "$(ls "$tmp/deadline/locks" | wc -l | tr -d ' ')" = 0
-
-# `lume ls` failing after the start is the same: unconfirmed, stopped, released.
-ls_json ls_after_run unrelated:running
-run_case ls_after_run 'arm_run_traps; vm_lock_take; reset_vm; echo done' STUB_RUN_FAIL_LS=1 E2E_START_VISIBLE_WAIT=2
-check "lume ls failing after the start: the reset fails at the deadline" test "$(status_of ls_after_run)" != 0
-check "the VM is stopped" test "$(calls ls_after_run | grep -c '^stop dictation-vm')" = 2
-check "the last call is the stop" test "$(calls ls_after_run | tail -1)" = "stop dictation-vm"
-check "the start lock is released" not_locked ls_after_run vm-start
-
-# If lume stop fails too, the run says the VM may still be starting, and the
-# start lock stays (R4): a third start can't begin while the VM's state is
-# unconfirmed. The lock is stale once the run has exited.
-ls_json stop_fails unrelated:running
-run_case stop_fails 'arm_run_traps; vm_lock_take; reset_vm' STUB_HIDE_STARTED=1 STUB_STOP_FAIL=1 E2E_START_VISIBLE_WAIT=1
-check "unconfirmed start and a failing lume stop: the reset fails" test "$(status_of stop_fails)" != 0
-check "and says the VM may still be starting" has "lume stop dictation-vm failed; it may still be starting" "$tmp/stop_fails/err"
-check "and how to clear the start lock" has "tests/e2e/run.sh --clear-stale-lock vm-start" "$tmp/stop_fails/err"
-check "the start lock is NOT released" is_locked stop_fails vm-start
-check "the VM lock is" not_locked stop_fails dictation-vm
-check "the start lock names the VM it was taken for" test "$(readlink "$(lock_dir stop_fails vm-start)" | awk '{print $NF}')" = dictation-vm
-# A second run (the other VM, which `lume ls` still shows only one other VM
-# for) is refused and never calls lume run.
-run_case stop_fails 'arm_run_traps; vm_lock_take; reset_vm; echo done' STUB_HIDE_STARTED=1 E2E_VM=dictation-vm-2 E2E_START_VISIBLE_WAIT=1
-check "a second start after a failed stop is refused" test "$(status_of stop_fails)" != 0
-check "as a stale start lock, with the command to clear it" \
-  has "stale lock for vm-start from pid $(lock_pid stop_fails vm-start) (no longer running); remove it with: tests/e2e/run.sh --clear-stale-lock vm-start" "$tmp/stop_fails/err"
-check "lume run was not called for it" test "$(calls stop_fails | grep -c '^run dictation-vm-2')" = 0
-
-# TERM after lume run, before the VM is listed (R4): the run exits 143 and the
-# start lock stays; nothing else starts until it is cleared.
-ls_json term_start unrelated:running
-run_case term_start 'arm_run_traps; vm_lock_take; reset_vm; echo done' STUB_HIDE_STARTED=1 STUB_RUN_TERM=1 E2E_START_VISIBLE_WAIT=30
-check "TERM after lume run: the run ends with 143" test "$(status_of term_start)" = 143
-check "the start lock is NOT released" is_locked term_start vm-start
-check "the VM lock is" not_locked term_start dictation-vm
-check "it says the start is unconfirmed and how to clear the lock" \
-  has "interrupted while dictation-vm was starting; leaving the vm-start lock" "$tmp/term_start/err"
-check "and gives the clear command" has "tests/e2e/run.sh --clear-stale-lock vm-start" "$tmp/term_start/err"
-run_case term_start 'arm_run_traps; vm_lock_take; reset_vm; echo done' STUB_HIDE_STARTED=1 E2E_VM=dictation-vm-2 E2E_START_VISIBLE_WAIT=1
-check "a second start after the interruption is refused" test "$(status_of term_start)" != 0
-check "as a stale start lock" has "stale lock for vm-start from pid" "$tmp/term_start/err"
-check "lume run was not called for it" test "$(calls term_start | grep -c '^run dictation-vm-2')" = 0
-# A TERM after the VM is confirmed has nothing to keep.
-ls_json term_ok unrelated:running
-run_case term_ok 'arm_run_traps; vm_lock_take; reset_vm; kill -TERM $$; sleep 1' E2E_START_VISIBLE_WAIT=5
-check "a start that was confirmed: TERM afterwards releases the start lock" not_locked term_ok vm-start
-
-# --clear-stale-lock vm-start (R4): a dead run's start lock is cleared only when
-# lume ls shows no VM left from it.
-start_dead_pid
-dead=$DEAD_PID
-fake_lock cl_two vm-start "$dead" dictation-vm
-ls_json cl_two dictation-vm:running dictation-vm-2:running
-run_sh cl_two --clear-stale-lock vm-start
-check "clearing vm-start while two VMs run: refused" test "$(status_of cl_two)" != 0
-check "the lock stays" is_locked cl_two vm-start
-check "and it says which VM to stop first" has "dictation-vm, the VM it was taken for, is still running" "$tmp/cl_two/err"
-check "with the command" has "lume stop dictation-vm" "$tmp/cl_two/err"
-
-fake_lock cl_two_other vm-start "$dead" dictation-vm
-ls_json cl_two_other unrelated:running dictation-vm-2:running
-run_sh cl_two_other --clear-stale-lock vm-start
-check "two VMs running, neither the reserved one: refused too" test "$(status_of cl_two_other)" != 0
-check "the lock stays (two)" is_locked cl_two_other vm-start
-check "and it lists the running VMs" has "2 macOS VMs are running (unrelated dictation-vm-2)" "$tmp/cl_two_other/err"
-
-fake_lock cl_one vm-start "$dead" dictation-vm-2
-ls_json cl_one unrelated:running dictation-vm-2:running
-run_sh cl_one --clear-stale-lock vm-start
-check "the reserved VM still running (with another): refused" test "$(status_of cl_one)" != 0
-check "and named" has "dictation-vm-2, the VM it was taken for, is still running" "$tmp/cl_one/err"
-
-fake_lock cl_ok vm-start "$dead" dictation-vm
-ls_json cl_ok unrelated:running dictation-vm:stopped
-run_sh cl_ok --clear-stale-lock vm-start
-check "the reserved VM is not running and one other is: the lock is cleared" test "$(status_of cl_ok)" = 0
-check "and gone" not_locked cl_ok vm-start
-
-fake_lock cl_fail vm-start "$dead" dictation-vm
-: >"$tmp/cl_fail/ls.fail"
-run_sh cl_fail --clear-stale-lock vm-start
-check "lume ls failing: refused (fails closed)" test "$(status_of cl_fail)" != 0
-check "and the lock stays" is_locked cl_fail vm-start
-
-# An older vm-start lock with no VM in it is judged on the count alone.
-fake_lock cl_plain vm-start "$dead"
-ls_json cl_plain unrelated:running dictation-vm-2:running
-run_sh cl_plain --clear-stale-lock vm-start
-check "a vm-start lock with no VM noted, two VMs running: refused" test "$(status_of cl_plain)" != 0
-check "and the lock stays" is_locked cl_plain vm-start
-
-# Other locks don't look at lume at all.
-fake_lock cl_vmlock dictation-vm "$dead"
-ls_json cl_vmlock unrelated:running dictation-vm-2:running
-run_sh cl_vmlock --clear-stale-lock dictation-vm
-check "a VM lock is cleared without asking lume" test "$(status_of cl_vmlock)" = 0
-check "lume was not called" no_lume_call cl_vmlock
 
 # The start lock left by a run that died: the next reset says so and starts nothing.
 fake_lock start_stale vm-start "$dead"

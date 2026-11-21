@@ -7,8 +7,8 @@ const SIZE = 477_274_496;
 
 function model(overrides: Partial<LocalModelInfo_Serialize> = {}): LocalModelInfo_Serialize {
   return {
-    id: "parakeet",
-    name: "Parakeet English",
+    id: "english",
+    name: "OrukQwen English",
     languages: "English only",
     language_codes: ["en"],
     size_bytes: SIZE,
@@ -132,12 +132,15 @@ describe("Design Lead round 1: model titles and captions", () => {
   it("titles are the language choice, the catalogue name goes in the menu", () => {
     expect(modelTitle(model())).toBe("English");
     expect(modelDetails(model())).toBe(
-      "Parakeet English · English only · works offline · audio stays on this Mac",
+      "OrukQwen English · English only · works offline · audio stays on this Mac",
     );
-    const multi = model({ name: "Qwen3-ASR 0.6B", language_codes: ["en", "hi", "de", "fr"] });
+    const multi = model({
+      name: "Multilingual Test 0.6B",
+      language_codes: ["en", "hi", "de", "fr"],
+    });
     expect(modelTitle(multi)).toBe("4 languages");
     expect(modelDetails(multi)).toBe(
-      "Qwen3-ASR 0.6B · 4 languages, including English and Hindi · works offline · audio stays on this Mac",
+      "Multilingual Test 0.6B · 4 languages, including English and Hindi · works offline · audio stays on this Mac",
     );
   });
 

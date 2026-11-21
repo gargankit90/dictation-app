@@ -44,6 +44,7 @@ fn hex_sha(bytes: &[u8]) -> String {
 fn model_for(bytes: &[u8]) -> LocalModel {
     LocalModel {
         id: "test-model",
+        role: dictation_core::local_models::Role::Speech,
         name: "Test",
         languages: &["en"],
         languages_label: "English only",

@@ -3,3 +3,6 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-dbg-in-tests = true
+# Product and model names that doc comments use as words (`..` keeps
+# clippy's own defaults).
+doc-valid-idents = ["OrukQwen", ".."]

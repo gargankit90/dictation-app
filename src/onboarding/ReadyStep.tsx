@@ -26,7 +26,6 @@ export const EVENTS_CAPTION = `On since setup began: usage events (with a random
 /** On, after being off at some point of setup: "since setup began" would be false. */
 export const EVENTS_FROM_NOW_CAPTION = `On from now: usage events (with a random install ID) and error reports, so we can see where things go wrong. ${NEVER} ${OFF_STOPS} ${CHANGE}`;
 export const EVENTS_OFF_CAPTION = `Off: nothing more is sent, and there's no install ID. ${CHANGE}`;
-export const NOT_TESTED = "Not tested yet: try it from the menu bar any time";
 
 interface Props {
   parts: FrameParts;
@@ -36,7 +35,6 @@ interface Props {
   sharing: SharingSwitch;
   models: LocalModelInfo_Serialize[] | null;
   engine: EngineStatus | null;
-  onChangeHistory: () => void;
   onFinish: () => void;
 }
 
@@ -61,8 +59,8 @@ function useEngineLine(
     void (async () => {
       let saved = false;
       try {
-        const result = await commands.hasApiKey(provider);
-        saved = result.status === "ok" && result.data;
+        const result = await commands.savedKeyHint(provider);
+        saved = result.status === "ok" && result.data !== null;
       } catch {
         // Not connected, as far as this line can tell.
       }
@@ -100,7 +98,6 @@ export function ReadyStep({
   sharing,
   models,
   engine,
-  onChangeHistory,
   onFinish,
 }: Props) {
   const login = useSave();
@@ -156,17 +153,7 @@ export function ReadyStep({
         {settings !== null && (
           <div>
             <dt>History</dt>
-            <dd>
-              {historyLine(settings.history_limit)} ·{" "}
-              <button
-                type="button"
-                className="link"
-                disabled={parts.exitBlock !== null}
-                onClick={onChangeHistory}
-              >
-                Change
-              </button>
-            </dd>
+            <dd>{historyLine(settings.history_limit)} · change it in Settings → History</dd>
           </div>
         )}
         <div className="ob-summary-switch">
@@ -205,7 +192,6 @@ export function ReadyStep({
         </div>
       </dl>
       <div className="ob-notes">
-        {status.try_outcome !== "passed" && <p className="ob-attention">{NOT_TESTED}</p>}
         <p className="ob-menubar">
           Find Vocet in the menu bar <span aria-hidden="true">↗</span>
         </p>

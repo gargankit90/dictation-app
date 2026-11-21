@@ -13,6 +13,7 @@ pub mod events;
 pub mod history;
 pub mod hotkey_spec;
 pub mod level;
+pub mod local_cleanup;
 pub mod local_models;
 pub mod onboarding;
 pub mod redact;

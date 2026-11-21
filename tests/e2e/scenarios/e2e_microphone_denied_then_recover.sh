@@ -20,16 +20,15 @@
 #    the tray's tooltip, and Relaunch offered in the tray menu; no second
 #    prompt; the app never left Idle; nothing pasted, the clipboard
 #    untouched. Settings opens and closes.
-#    U8: setup left at Permissions (seeded before the launch) shows the same
+#    U8: setup (with an engine chosen before the launch) shows the same
 #    refusal on its Microphone card, with the exact path, and "Relaunch and
-#    resume" comes back at Permissions with the choices kept.
+#    resume" comes back at Permissions.
 # 3. The microphone is allowed in System Settings › Privacy & Security ›
 #    Microphone (its switch for the app, pressed through AX). A press in the
 #    running app is only logged: macOS doesn't tell a running app about this
 #    grant (T4b, docs/ENGINEERING.md), which is why the error says to
 #    relaunch it. Relaunch from the tray menu, and a dictation records the
-#    real microphone with no permission error. U8: "Resume setup…" then
-#    shows the card allowed, with the live meter.
+#    real microphone with no permission error.
 #
 # However it ends, the grant is restored (mic_restore, the cleanup hook): if
 # the scenario didn't see the grant work, the permission is reset again and
@@ -213,7 +212,7 @@ e2e_microphone_denied_then_recover() {
   mic_evidence "$(vm "codesign -dv --verbose=2 $(q "$VM_APP") 2>&1" | grep -E '^(Identifier|Authority|TeamIdentifier|CDHash)=')"
 
   expect "the app's microphone permission is reset in this clone" mic_reset
-  expect "setup was left at Permissions by an earlier launch" seed_setup_at_permissions
+  expect "an earlier launch chose an engine" seed_engine_chosen
   textedit_fresh
   set_clipboard "$MIC_SENTINEL"
   launch --mock-text "$MOCK_TEXT"
@@ -338,13 +337,6 @@ e2e_microphone_denied_then_recover() {
   fi
   expect "after the relaunch a dictation records the microphone" test "$MIC_GRANTED" = 1
   expect "the clipboard is the user's again" test "$(clipboard)" = "$MIC_SENTINEL"
-  # U8: setup picks up, now allowed.
-  expect "Resume setup… opens setup again" ax_ok tray-click "$APP_NAME" "Resume setup"
-  expect "the Microphone card is allowed" ax_ok wait-text "$APP_NAME" "Set up" "Allowed" 10
-  expect "with the live meter's line" \
-    ax_ok wait-text "$APP_NAME" "Set up" "the bars should move" 10
-  screenshot e2e_microphone_denied_then_recover.setup_recovered
-  expect "closing it hides it" ax_ok close "$APP_NAME" "Set up"
   log "  evidence: $(paste -sd '|' "$MIC_EVIDENCE")"
 
   [ "$SCENARIO_FAILED" = 0 ] || dump_ui e2e_microphone_denied_then_recover

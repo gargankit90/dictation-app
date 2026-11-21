@@ -4,29 +4,20 @@ import { commands } from "../bindings";
 import type { EngineStatus, LocalModelInfo_Serialize, Settings_Serialize } from "../bindings";
 import { BROKEN, messageOf } from "../messages";
 import {
-  MODEL_CAPTION,
+  downloadingText,
   megabytes,
+  localCaption,
+  localTitle,
   modelDetails,
   modelRow,
-  modelTitle,
   cloudCaption,
 } from "./modelRow";
 import type { ModelAction } from "./modelRow";
+import { useCleanupModels, withCleanup } from "./CleanupModel";
 import { ConnectSheet, useConnection } from "./connection";
 import { Chip, Group, Row, SaveStatus, useSave } from "./ui";
 
 export { CONNECTED, KEY_NOT_SAVED } from "./connection";
-
-/** Where "Got it" on the Keychain notice is remembered (this window's storage). */
-export const NOTICE_DISMISSED_KEY = "vocet.settings.keychainNoticeDismissed";
-
-function noticeDismissed(): boolean {
-  try {
-    return window.localStorage.getItem(NOTICE_DISMISSED_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
 
 interface Props {
   settings: Settings_Serialize;
@@ -38,8 +29,6 @@ interface Props {
   engine: EngineStatus | null;
   /** Reads the engine's status again. */
   refreshEngine: () => Promise<void>;
-  /** The first launch after the rename says something about the Keychain (U1). */
-  launchNotice?: string | null;
   /** The sheet already opened by itself since Settings opened. */
   sheetOffered?: boolean;
   onSheetOffered?: () => void;
@@ -138,18 +127,18 @@ export function Speech({
   refreshModels,
   engine,
   refreshEngine,
-  launchNotice = null,
   sheetOffered = false,
   onSheetOffered,
 }: Props) {
   const onDevice = settings.transcription === "local";
+  // Gemma: part of the "On this Mac" row's one download (Q4).
+  const cleanup = useCleanupModels(true)?.[0];
   const [switching, setSwitching] = useState<string | null>(null);
   const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const cloud = useSave();
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [dismissed, setDismissed] = useState(noticeDismissed);
   // Selecting OpenRouter with no key waits here for a connection that works.
   const switchOnceConnected = useRef(false);
   // Whatever gets the sheet's focus back when it closes.
@@ -265,8 +254,8 @@ export function Speech({
     setActionError(null);
     let saved = false;
     try {
-      const result = await commands.hasApiKey("openrouter");
-      saved = result.status === "ok" && result.data;
+      const result = await commands.savedKeyHint("openrouter");
+      saved = result.status === "ok" && result.data !== null;
     } catch {
       // Treated as no key: the sheet says what is wrong.
     }
@@ -281,31 +270,31 @@ export function Speech({
   const busy = switching !== null || cloud.save.state === "saving";
   const switchingName = models?.find((model) => model.id === switching);
   const waitReason =
-    switchingName === undefined ? null : `Wait until ${modelTitle(switchingName)} has loaded.`;
-  const showNotice = launchNotice !== null && !dismissed && status.state === "connected";
+    switchingName === undefined ? null : `Wait until ${localTitle(switchingName)} has loaded.`;
 
   return (
     <>
-      {showNotice && (
-        <div role="status" className="notice-info" data-testid="launch-notice">
-          <p>{launchNotice}</p>
-          <button
-            type="button"
-            onClick={() => {
-              try {
-                window.localStorage.setItem(NOTICE_DISMISSED_KEY, "1");
-              } catch {
-                // Hidden for now; it only ever shows on one launch anyway.
-              }
-              setDismissed(true);
-            }}
-          >
-            Got it
-          </button>
-        </div>
-      )}
       <Group title="Speech engine">
         <div role="radiogroup" aria-label="Speech engine">
+          <EngineRow
+            id="engine-openrouter"
+            name="OpenRouter"
+            caption={cloudCaption(status.state === "connected")}
+            checked={cloudActive && switching === null}
+            blockedBecause={busy && !cloudActive ? waitReason : null}
+            disabled={busy}
+            onPick={() => void chooseCloud()}
+            below={<SaveStatus save={cloud.save} />}
+          >
+            {!cloudActive ? null : stored === "checking" ? (
+              <Chip tone="plain">Checking…</Chip>
+            ) : stored === "connected" ? null : (
+              <Chip tone="attention">! Not connected</Chip>
+            )}
+            <button type="button" aria-description="OpenRouter" onClick={openSheet}>
+              {status.state === "connected" ? "Manage…" : "Connect…"}
+            </button>
+          </EngineRow>
           {models === null ? (
             modelsError === null ? (
               <Row label="On this Mac" caption="Loading the models…" />
@@ -322,13 +311,15 @@ export function Speech({
           ) : (
             models.map((model) => {
               const chosen = onDevice && settings.local_model === model.id;
-              const row = modelRow(model, {
+              // One row, one download: speech then cleanup (Q4).
+              const shown = withCleanup(model, cleanup);
+              const row = modelRow(shown, {
                 chosen,
                 engine,
                 switching: switching === model.id,
                 loadError: loadErrors[model.id] ?? null,
               });
-              const title = modelTitle(model);
+              const title = localTitle(model);
               const error =
                 loadErrors[model.id] ??
                 (row.chip?.text === "! Couldn't load" && engine?.message ? engine.message : null);
@@ -340,7 +331,9 @@ export function Speech({
                   key={model.id}
                   id={`engine-${model.id}`}
                   name={title}
-                  caption={MODEL_CAPTION}
+                  caption={
+                    shown.state === "downloading" ? downloadingText(shown) : localCaption(model)
+                  }
                   checked={checked}
                   blockedBecause={reason}
                   disabled={row.blockedBecause !== null || busy}
@@ -367,39 +360,7 @@ export function Speech({
                           {reason}
                         </p>
                       )}
-                    </>
-                  }
-                >
-                  {row.chip === null ? null : (
-                    <span aria-live="polite">
-                      <Chip tone={row.chip.tone}>{row.chip.text}</Chip>
-                    </span>
-                  )}
-                  {row.actions.map((action) => (
-                    <button
-                      key={action}
-                      type="button"
-                      aria-description={title}
-                      disabled={switching !== null && action === "retry-load"}
-                      onClick={() => void modelAction(action, model)}
-                    >
-                      {actionLabel(action, model)}
-                    </button>
-                  ))}
-                  {row.hasMenu && (
-                    <span className="row-menu">
-                      <button
-                        type="button"
-                        className="menu-button"
-                        aria-label={`More actions for ${title}`}
-                        aria-haspopup="menu"
-                        aria-expanded={menuOpen === model.id}
-                        onClick={() => {
-                          setMenuOpen((open) => (open === model.id ? null : model.id));
-                        }}
-                      >
-                        …
-                      </button>
+                      {/* In the row's flow, under its text: it never covers it. */}
                       {menuOpen === model.id && (
                         <span role="menu" className="row-popover">
                           <span role="presentation" className="row-popover-info">
@@ -421,31 +382,45 @@ export function Speech({
                           )}
                         </span>
                       )}
+                    </>
+                  }
+                >
+                  {row.chip === null ? null : (
+                    <span aria-live="polite">
+                      <Chip tone={row.chip.tone}>{row.chip.text}</Chip>
+                    </span>
+                  )}
+                  {row.actions.map((action) => (
+                    <button
+                      key={action}
+                      type="button"
+                      aria-description={title}
+                      disabled={switching !== null && action === "retry-load"}
+                      onClick={() => void modelAction(action, model)}
+                    >
+                      {actionLabel(action, shown)}
+                    </button>
+                  ))}
+                  {row.hasMenu && (
+                    <span className="row-menu">
+                      <button
+                        type="button"
+                        className="menu-button"
+                        aria-label={`More actions for ${title}`}
+                        aria-haspopup="menu"
+                        aria-expanded={menuOpen === model.id}
+                        onClick={() => {
+                          setMenuOpen((open) => (open === model.id ? null : model.id));
+                        }}
+                      >
+                        …
+                      </button>
                     </span>
                   )}
                 </EngineRow>
               );
             })
           )}
-          <EngineRow
-            id="engine-openrouter"
-            name="OpenRouter"
-            caption={cloudCaption(status.state === "connected")}
-            checked={cloudActive && switching === null}
-            blockedBecause={busy && !cloudActive ? waitReason : null}
-            disabled={busy}
-            onPick={() => void chooseCloud()}
-            below={<SaveStatus save={cloud.save} />}
-          >
-            {!cloudActive ? null : stored === "checking" ? (
-              <Chip tone="plain">Checking…</Chip>
-            ) : stored === "connected" ? null : (
-              <Chip tone="attention">! Not connected</Chip>
-            )}
-            <button type="button" aria-description="OpenRouter" onClick={openSheet}>
-              {status.state === "connected" ? "Manage…" : "Connect…"}
-            </button>
-          </EngineRow>
         </div>
       </Group>
       {actionError !== null && (

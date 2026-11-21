@@ -220,19 +220,16 @@ pub enum TrayIcon {
 /// back the names Settings leaves to the "…" menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Download {
-    /// Percent done, 0 to 100.
-    pub percent: u8,
     /// Whether the settings already choose this model as the engine.
     pub chosen: bool,
 }
 
-/// What the shell reads each second, apart from the pipeline's events.
+/// What the shell reads each second, apart from the pipeline's events. Read
+/// from memory and the OS, not from the settings file.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Ambient {
-    /// The saved hotkey, as the settings write it (`RightAlt`).
+    /// The hotkey that listens, as the settings write it (`RightAlt`).
     pub hotkey: String,
-    /// The engine's display name (`"OpenRouter"`, `"On this Mac (Parakeet English)"`).
-    pub engine: String,
     /// A model downloading now.
     pub download: Option<Download>,
     /// Why dictation can't work now: no key, no model, or a permission the
@@ -402,7 +399,6 @@ impl TrayStatus {
             self.lacked_accessibility = true;
         }
         let reconfigured = ambient.engine_generation != self.ambient.engine_generation
-            || ambient.engine != self.ambient.engine
             || (ambient.download.is_some() && self.ambient.download.is_none());
         if reconfigured && self.error.is_some_and(is_engine_error) {
             self.error = None;
@@ -513,9 +509,8 @@ impl TrayStatus {
             ));
             entries.push(Entry::item(Fix::Relaunch.id(), Fix::Relaunch.label()));
             format!("{APP_NAME}: {RELAUNCH_SENTENCE}")
-        } else if let Some(download) = download {
-            let text = format!("↓ Downloading speech model, {}%", download.percent);
-            entries.push(Entry::disabled(id::STATUS, text));
+        } else if download.is_some() {
+            entries.push(Entry::disabled(id::STATUS, "↓ Downloading speech model…"));
             format!("{APP_NAME}: downloading speech model")
         } else {
             let key = keycap_label(&self.ambient.hotkey);
@@ -571,17 +566,16 @@ mod tests {
 
     use super::*;
 
-    fn ambient(hotkey: &str, engine: &str) -> Ambient {
+    fn ambient(hotkey: &str) -> Ambient {
         Ambient {
             hotkey: hotkey.to_owned(),
-            engine: engine.to_owned(),
             ..Ambient::default()
         }
     }
 
-    fn ready(hotkey: &str, engine: &str) -> TrayStatus {
+    fn ready(hotkey: &str) -> TrayStatus {
         let mut tray = TrayStatus::default();
-        tray.set_ambient(ambient(hotkey, engine));
+        tray.set_ambient(ambient(hotkey));
         tray
     }
 
@@ -617,7 +611,7 @@ mod tests {
     /// U12 criterion 7: the menu, exactly, whichever engine is in use.
     #[test]
     fn u12_criterion_7_ready_menu_in_order() {
-        let tray = ready("RightAlt", "On this Mac (Parakeet English)");
+        let tray = ready("RightAlt");
         let menu = tray.menu();
         assert_eq!(
             menu.outline(),
@@ -656,9 +650,9 @@ mod tests {
     /// Check for updates, in any state but a fix row of its own.
     #[test]
     fn u12_criterion_7_the_old_items_are_gone() {
-        let mut problem = ready("RightAlt", "OpenRouter");
+        let mut problem = ready("RightAlt");
         problem.on_event(&transcription_failed("The provider rejected your API key."));
-        for tray in [ready("RightAlt", "OpenRouter"), problem] {
+        for tray in [ready("RightAlt"), problem] {
             for (item, label) in tray.menu().outline() {
                 assert_ne!(item, "engine");
                 assert_ne!(label, "OpenRouter");
@@ -673,17 +667,13 @@ mod tests {
     /// the menu says so, whatever a press with no engine said meanwhile.
     #[test]
     fn u12_criterion_7_a_download_of_the_chosen_model_outranks_no_key() {
-        let local = "On this Mac (Parakeet English)";
         let downloading = |chosen| Ambient {
-            download: Some(Download {
-                percent: 42,
-                chosen,
-            }),
-            ..ambient("RightAlt", local)
+            download: Some(Download { chosen }),
+            ..ambient("RightAlt")
         };
         for chosen in [true, false] {
             // The ambient problem: no key saved, a download running.
-            let mut tray = ready("RightAlt", local);
+            let mut tray = ready("RightAlt");
             tray.set_ambient(Ambient {
                 problem: Some(ErrorCode::KeyMissing),
                 ..downloading(chosen)
@@ -694,7 +684,7 @@ mod tests {
             let menu = tray.menu();
             assert_eq!(
                 label_of(&menu, id::STATUS).as_deref(),
-                Some("↓ Downloading speech model, 42%"),
+                Some("↓ Downloading speech model…"),
                 "chosen: {chosen}"
             );
             assert!(label_of(&menu, id::FIX_SPEECH).is_none());
@@ -707,13 +697,10 @@ mod tests {
     #[test]
     fn u12_criterion_7_a_download_doesnt_hide_other_problems() {
         let downloading = |chosen| Ambient {
-            download: Some(Download {
-                percent: 42,
-                chosen,
-            }),
-            ..ambient("RightAlt", "OpenRouter")
+            download: Some(Download { chosen }),
+            ..ambient("RightAlt")
         };
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         tray.set_ambient(downloading(false));
         tray.on_event(&transcription_failed("The provider rejected your API key."));
         assert!(label_of(&tray.menu(), id::STATUS).unwrap().starts_with('!'));
@@ -724,7 +711,7 @@ mod tests {
             label_of(&tray.menu(), id::FIX_MICROPHONE).as_deref(),
             Some("Open Microphone settings…")
         );
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         tray.set_ambient(downloading(true));
         tray.on_event(&error(DictationError::HotkeyFailed));
         assert!(label_of(&tray.menu(), id::STATUS).unwrap().starts_with('!'));
@@ -732,7 +719,7 @@ mod tests {
 
     #[test]
     fn criterion_1_ready_with_openrouter() {
-        let menu = ready("Ctrl+Shift+Space", "OpenRouter").menu();
+        let menu = ready("Ctrl+Shift+Space").menu();
         assert_eq!(
             label_of(&menu, id::STATUS).as_deref(),
             Some("✓ Ready · Hold ⌃⇧Space")
@@ -741,21 +728,18 @@ mod tests {
 
     #[test]
     fn criterion_1_downloading_shows_progress_and_no_fix() {
-        let mut tray = ready("RightAlt", "On this Mac (Parakeet English)");
+        let mut tray = ready("RightAlt");
         tray.set_ambient(Ambient {
-            download: Some(Download {
-                percent: 42,
-                chosen: true,
-            }),
+            download: Some(Download { chosen: true }),
             problem: Some(ErrorCode::ModelMissing),
-            ..ambient("RightAlt", "On this Mac (Parakeet English)")
+            ..ambient("RightAlt")
         });
         let menu = tray.menu();
         assert_eq!(
             menu.outline().first().cloned(),
             Some((
                 "status".to_owned(),
-                "↓ Downloading speech model, 42%".to_owned()
+                "↓ Downloading speech model…".to_owned()
             ))
         );
         assert_eq!(&ids(&menu)[1], "-");
@@ -764,16 +748,16 @@ mod tests {
 
     #[test]
     fn criterion_1_setup_incomplete_adds_resume_setup_after_help() {
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         tray.set_ambient(Ambient {
             setup_incomplete: true,
-            ..ambient("RightAlt", "OpenRouter")
+            ..ambient("RightAlt")
         });
         let listed = ids(&tray.menu());
         let help = listed.iter().position(|id| id == "help").unwrap();
         assert_eq!(listed[help + 1], "onboarding");
         assert_eq!(listed[help + 2], "-");
-        let complete = ids(&ready("RightAlt", "OpenRouter").menu());
+        let complete = ids(&ready("RightAlt").menu());
         assert!(!complete.contains(&"onboarding".to_owned()));
     }
 
@@ -853,10 +837,10 @@ mod tests {
         let codes: Vec<_> = expected.iter().map(|(code, _, _)| *code).collect();
         assert_eq!(codes, ErrorCode::ALL);
         for (code, fix_id, label) in expected {
-            let mut tray = ready("RightAlt", "OpenRouter");
+            let mut tray = ready("RightAlt");
             tray.set_ambient(Ambient {
                 problem: Some(code),
-                ..ambient("RightAlt", "OpenRouter")
+                ..ambient("RightAlt")
             });
             let menu = tray.menu();
             let outline = menu.outline();
@@ -891,7 +875,7 @@ mod tests {
     /// The two real-world sources of a problem, from the pipeline.
     #[test]
     fn criterion_2_events_raise_and_clear_the_problem() {
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         assert_eq!(tray.problem(), None);
         assert!(tray.on_event(&transcription_failed("The provider rejected your API key.")));
         let menu = tray.menu();
@@ -914,9 +898,9 @@ mod tests {
 
     #[test]
     fn the_status_follows_a_changed_key_and_engine() {
-        let mut tray = ready("RightAlt", "OpenRouter");
-        assert!(!tray.set_ambient(ambient("RightAlt", "OpenRouter")));
-        assert!(tray.set_ambient(ambient("LeftCmd", "On this Mac")));
+        let mut tray = ready("RightAlt");
+        assert!(!tray.set_ambient(ambient("RightAlt")));
+        assert!(tray.set_ambient(ambient("LeftCmd")));
         let menu = tray.menu();
         assert_eq!(
             label_of(&menu, id::STATUS).as_deref(),
@@ -926,7 +910,7 @@ mod tests {
 
     #[test]
     fn the_hotkey_outage_is_a_problem_until_restored() {
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         assert!(tray.on_event(&error(DictationError::HotkeyFailed)));
         assert_eq!(tray.fix(), Some(Fix::ChooseAnotherKey));
         // A newer dictation error shows over it, and the outage returns
@@ -943,7 +927,7 @@ mod tests {
     /// Design Lead: the dead-hotkey fix depends on Accessibility.
     #[test]
     fn the_hotkey_fix_is_the_grant_when_accessibility_is_missing() {
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         tray.on_event(&error(DictationError::HotkeyFailed));
         let menu = tray.menu();
         assert_eq!(
@@ -956,7 +940,7 @@ mod tests {
         );
         tray.set_ambient(Ambient {
             problem: Some(ErrorCode::AccessibilityMissing),
-            ..ambient("RightAlt", "OpenRouter")
+            ..ambient("RightAlt")
         });
         let menu = tray.menu();
         assert_eq!(tray.fix(), Some(Fix::OpenAccessibilitySettings));
@@ -982,10 +966,10 @@ mod tests {
     /// Design Lead: recording beats the dot, and the dot returns after.
     #[test]
     fn the_recording_icon_wins_over_the_attention_dot() {
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         tray.set_ambient(Ambient {
             problem: Some(ErrorCode::KeyMissing),
-            ..ambient("RightAlt", "OpenRouter")
+            ..ambient("RightAlt")
         });
         assert_eq!(tray.menu().icon, TrayIcon::Attention);
         tray.on_event(&UiEvent::StateChanged(Phase::Recording));
@@ -1003,12 +987,12 @@ mod tests {
     fn a_rejected_key_clears_when_the_engine_is_switched_or_the_key_replaced() {
         let rejected = || transcription_failed("The provider rejected your API key.");
         // Switched to the local engine.
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         tray.on_event(&rejected());
         assert_eq!(tray.problem(), Some(ErrorCode::KeyRejected));
         tray.set_ambient(Ambient {
             engine_generation: 2,
-            ..ambient("RightAlt", "On this Mac (Parakeet English)")
+            ..ambient("RightAlt")
         });
         assert_eq!(tray.problem(), None);
         assert_eq!(tray.menu().icon, TrayIcon::Normal);
@@ -1016,7 +1000,7 @@ mod tests {
         let mut tray = TrayStatus::default();
         tray.set_ambient(Ambient {
             engine_generation: 1,
-            ..ambient("RightAlt", "OpenRouter")
+            ..ambient("RightAlt")
         });
         tray.on_event(&rejected());
         assert!(tray.problem().is_some());
@@ -1024,12 +1008,12 @@ mod tests {
         tray.set_ambient(Ambient {
             engine_generation: 1,
             hotkey: "LeftAlt".to_owned(),
-            ..ambient("RightAlt", "OpenRouter")
+            ..ambient("RightAlt")
         });
         assert!(tray.problem().is_some());
         tray.set_ambient(Ambient {
             engine_generation: 2,
-            ..ambient("RightAlt", "OpenRouter")
+            ..ambient("RightAlt")
         });
         assert_eq!(tray.problem(), None);
     }
@@ -1044,14 +1028,14 @@ mod tests {
             let mut tray = TrayStatus::default();
             tray.set_ambient(Ambient {
                 engine_generation: 1,
-                ..ambient("RightAlt", "OpenRouter")
+                ..ambient("RightAlt")
             });
             tray.on_event(&event);
             let before = tray.problem();
             assert!(before.is_some());
             tray.set_ambient(Ambient {
                 engine_generation: 2,
-                ..ambient("RightAlt", "OpenRouter")
+                ..ambient("RightAlt")
             });
             assert_eq!(tray.problem(), before, "{event:?}");
         }
@@ -1061,11 +1045,10 @@ mod tests {
     #[test]
     fn a_missing_model_error_clears_when_its_download_starts_and_finishes() {
         let mut tray = TrayStatus::default();
-        let local = "On this Mac (Parakeet English)";
         tray.set_ambient(Ambient {
             engine_generation: 1,
             problem: Some(ErrorCode::ModelMissing),
-            ..ambient("RightAlt", local)
+            ..ambient("RightAlt")
         });
         tray.on_event(&transcription_failed(
             "The on-device model isn't downloaded. Download it in Settings.",
@@ -1073,12 +1056,9 @@ mod tests {
         assert_eq!(tray.problem(), Some(ErrorCode::ModelMissing));
         tray.set_ambient(Ambient {
             engine_generation: 1,
-            download: Some(Download {
-                percent: 10,
-                chosen: true,
-            }),
+            download: Some(Download { chosen: true }),
             problem: Some(ErrorCode::ModelMissing),
-            ..ambient("RightAlt", local)
+            ..ambient("RightAlt")
         });
         let menu = tray.menu();
         assert!(
@@ -1088,7 +1068,7 @@ mod tests {
         );
         tray.set_ambient(Ambient {
             engine_generation: 2,
-            ..ambient("RightAlt", local)
+            ..ambient("RightAlt")
         });
         assert!(
             label_of(&tray.menu(), id::STATUS)
@@ -1102,8 +1082,8 @@ mod tests {
     /// own row, and the restore returns to Ready at once, no dot.
     #[test]
     fn a_hotkey_failure_without_an_accessibility_cause_is_restored_to_ready() {
-        let mut tray = ready("RightAlt", "OpenRouter");
-        tray.set_ambient(ambient("RightAlt", "OpenRouter"));
+        let mut tray = ready("RightAlt");
+        tray.set_ambient(ambient("RightAlt"));
         tray.on_event(&error(DictationError::HotkeyFailed));
         let menu = tray.menu();
         assert_eq!(
@@ -1123,15 +1103,15 @@ mod tests {
     /// menu asks for a relaunch.
     #[test]
     fn a_regrant_with_the_tap_not_live_asks_for_a_relaunch() {
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         tray.on_event(&error(DictationError::HotkeyFailed));
         tray.set_ambient(Ambient {
             problem: Some(ErrorCode::AccessibilityMissing),
-            ..ambient("RightAlt", "OpenRouter")
+            ..ambient("RightAlt")
         });
         assert_eq!(tray.fix(), Some(Fix::OpenAccessibilitySettings));
         // Granted again; the hotkey is still down.
-        tray.set_ambient(ambient("RightAlt", "OpenRouter"));
+        tray.set_ambient(ambient("RightAlt"));
         let menu = tray.menu();
         assert_eq!(
             label_of(&menu, id::STATUS).as_deref(),
@@ -1152,13 +1132,13 @@ mod tests {
     /// Re-granted and the tap restarted: Ready at once.
     #[test]
     fn a_regrant_with_the_tap_restarted_is_ready() {
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         tray.on_event(&error(DictationError::HotkeyFailed));
         tray.set_ambient(Ambient {
             problem: Some(ErrorCode::AccessibilityMissing),
-            ..ambient("RightAlt", "OpenRouter")
+            ..ambient("RightAlt")
         });
-        tray.set_ambient(ambient("RightAlt", "OpenRouter"));
+        tray.set_ambient(ambient("RightAlt"));
         tray.on_event(&UiEvent::HotkeyRestored);
         let menu = tray.menu();
         assert!(label_of(&menu, id::STATUS).unwrap().starts_with("✓ Ready"));
@@ -1168,7 +1148,7 @@ mod tests {
 
     #[test]
     fn a_grant_that_was_never_missing_needs_no_relaunch() {
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         tray.on_event(&UiEvent::StateChanged(Phase::Recording));
         tray.on_event(&UiEvent::StateChanged(Phase::Idle));
         assert!(!tray.relaunch_needed());
@@ -1214,7 +1194,7 @@ mod tests {
         assert_eq!(tray.fix(), None);
         assert!(!ids(&tray.menu()).contains(&"fix-relaunch".to_owned()));
         // A fix that isn't a grant stays itself.
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         tray.on_event(&transcription_failed("Add your API key in Settings."));
         tray.grant_opened();
         assert_eq!(tray.fix(), Some(Fix::OpenSpeechSettings));
@@ -1222,7 +1202,7 @@ mod tests {
 
     #[test]
     fn criterion_5_copy_last_is_disabled_until_a_dictation_succeeded() {
-        let mut tray = ready("RightAlt", "OpenRouter");
+        let mut tray = ready("RightAlt");
         assert_eq!(enabled(&tray.menu(), id::COPY_LAST), Some(false));
         assert!(tray.set_has_last(true));
         assert!(!tray.set_has_last(true));
@@ -1233,13 +1213,9 @@ mod tests {
     /// every state, and no item shows dictation text: their labels are fixed.
     #[test]
     fn u7_criterion_6_history_is_below_copy_last_in_every_state() {
-        let mut problem = ready("RightAlt", "OpenRouter");
+        let mut problem = ready("RightAlt");
         problem.on_event(&transcription_failed("Add your API key in Settings."));
-        for tray in [
-            ready("RightAlt", "OpenRouter"),
-            problem,
-            TrayStatus::new(true),
-        ] {
+        for tray in [ready("RightAlt"), problem, TrayStatus::new(true)] {
             let listed = ids(&tray.menu());
             let copy = listed.iter().position(|id| id == id::COPY_LAST).unwrap();
             assert_eq!(listed[copy + 1], id::HISTORY);
@@ -1253,7 +1229,7 @@ mod tests {
 
     #[test]
     fn criterion_6_the_menu_has_no_reveal_log() {
-        let tray = ready("RightAlt", "OpenRouter");
+        let tray = ready("RightAlt");
         let all = tray.menu().outline();
         assert!(!all.iter().any(|(id, label)| {
             id.contains("reveal") || label.to_lowercase().contains("reveal")

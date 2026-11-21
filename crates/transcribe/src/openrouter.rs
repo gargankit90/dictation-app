@@ -4,7 +4,7 @@
 //!
 //! The audio goes up as a 16-bit mono WAV (`dictation_core::wav`),
 //! base64-encoded in a JSON body (`input_audio: {data, format: "wav"}`, the
-//! route the hosted-ASR eval used), with the model, the language (if set),
+//! route the hosted-ASR eval used), with the model,
 //! a `prompt` only for a model whose providers get it from `OpenRouter`
 //! ([`dictation_core::cloud_models::CloudModel::prompt`]), and the model's
 //! privacy filter as `provider: {data_collection: "deny"}` (plus
@@ -176,9 +176,6 @@ pub struct Config {
     /// set. The engine builder sets it only for a model whose providers get
     /// it ([`cloud_models::CloudModel::prompt`]); nothing sets one yet.
     pub prompt: Option<String>,
-    /// An ISO-639-1 language code (`"en"`), or `None` to let the model
-    /// detect it.
-    pub language: Option<String>,
     /// The `provider` filter on every request.
     pub privacy: PrivacyFilter,
     /// Per-request timeout, for a clip of no length.
@@ -197,7 +194,7 @@ pub struct Config {
 
 impl Config {
     /// The catalog's default speech model, at
-    /// [`BASE_URL`], no language, the default timeout and retry policy.
+    /// [`BASE_URL`], the default timeout and retry policy.
     #[must_use]
     pub fn openrouter() -> Self {
         Self::for_model(cloud_models::DEFAULT_SPEECH)
@@ -213,7 +210,6 @@ impl Config {
             base_url: BASE_URL.to_owned(),
             model: model.to_owned(),
             prompt: None,
-            language: None,
             privacy: entry.map_or(PrivacyFilter::ZeroDataRetention, |m| m.privacy),
             timeout: DEFAULT_TIMEOUT,
             timeout_grows_with_audio: true,
@@ -363,16 +359,13 @@ impl<W: Wait> OpenRouter<W> {
     }
 
     /// The JSON body: the audio, the model, the privacy filter (always),
-    /// the language and the prompt if set.
+    /// and the prompt if set. No language: the model detects it.
     fn request_body(&self, audio_b64: &str) -> serde_json::Value {
         let mut body = serde_json::json!({
             "model": self.config.model,
             "input_audio": { "data": audio_b64, "format": "wav" },
             "provider": provider_filter(self.config.privacy),
         });
-        if let Some(language) = &self.config.language {
-            body["language"] = serde_json::json!(language);
-        }
         if let Some(prompt) = &self.config.prompt {
             body["prompt"] = serde_json::json!(prompt);
         }
@@ -554,7 +547,6 @@ mod tests {
         assert_eq!(config.model, "openai/gpt-4o-mini-transcribe");
         assert_eq!(config.privacy, PrivacyFilter::DenyDataCollection);
         assert_eq!(config.timeout, DEFAULT_TIMEOUT);
-        assert_eq!(config.language, None);
         assert_eq!(config.prompt, None);
         // An id the catalog doesn't know gets the strictest filter.
         assert_eq!(
@@ -592,7 +584,6 @@ mod tests {
             })
         );
         let config = Config {
-            language: Some("de".into()),
             prompt: Some("Vocet".into()),
             privacy: PrivacyFilter::ZeroDataRetention,
             ..Config::openrouter()
@@ -600,7 +591,7 @@ mod tests {
         let body = OpenRouter::new(config, Secret::new("k-1"))
             .unwrap()
             .request_body("QUJD");
-        assert_eq!(body["language"], "de");
+        assert!(body.get("language").is_none());
         assert_eq!(body["prompt"], "Vocet");
         assert_eq!(
             body["provider"],

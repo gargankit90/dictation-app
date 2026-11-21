@@ -154,8 +154,29 @@ export function languagesLabel(codes: readonly string[]): string {
     : count;
 }
 
-/** The smaller line under a model's title (owner-approved wording, U12). */
-export const MODEL_CAPTION = "On this Mac · works offline";
+/**
+ * The on-device row's title (owner, Q4): "On this Mac"; with more than one
+ * speech model, each also says its languages.
+ */
+export function localTitle(model: LocalModelInfo_Serialize): string {
+  return model.language_codes.join() === "en"
+    ? "On this Mac"
+    : `On this Mac · ${modelTitle(model)}`;
+}
+
+/** The smaller line under it (owner, Q4): "English · works offline · nothing leaves your Mac". */
+export function localCaption(model: LocalModelInfo_Serialize): string {
+  return `${modelTitle(model)} · works offline · nothing leaves your Mac`;
+}
+
+/** What one on-device download is (owner, Q4). */
+export const DOWNLOADING = "Downloading on-device models (speech + cleanup)";
+
+/** "Downloading on-device models (speech + cleanup) · 4.4 GB". */
+export function downloadingText(model: LocalModelInfo_Serialize): string {
+  const gigabytes = (model.size_bytes ?? 0) / 1_000_000_000;
+  return `${DOWNLOADING} · ${gigabytes.toFixed(1)} GB`;
+}
 
 /** The cloud provider's name (Q2: `OpenRouter` only). */
 export const PROVIDER_NAME = "OpenRouter";
@@ -171,9 +192,9 @@ export const CLEANUP_MODEL_NAME = "GLM 5.3 Flash (Z.ai)";
 /** The smaller line under the OpenRouter row. */
 export function cloudCaption(connected: boolean): string {
   return connected
-    ? `${PROVIDER_NAME} · about 100 languages · speech is sent to ${PROVIDER_NAME} · ` +
+    ? `${PROVIDER_NAME} · speech is sent to ${PROVIDER_NAME} · ` +
         `speech: ${SPEECH_MODEL_NAME} · cleanup: ${CLEANUP_MODEL_NAME}`
-    : "About 100 languages · uses internet · needs an OpenRouter account";
+    : "Uses internet · needs an OpenRouter account";
 }
 
 /**

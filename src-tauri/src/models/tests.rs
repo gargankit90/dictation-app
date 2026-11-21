@@ -57,18 +57,23 @@ fn criterion_4_lists_the_catalogue_with_statuses() {
     let live = live(&dir.0);
     let downloads = ModelDownloads::default();
     let list = downloads.list(&live);
-    assert_eq!(list.len(), 2);
+    assert_eq!(list.len(), 1);
     assert_eq!(list[0].id, DEFAULT);
-    assert!(list[0].default && !list[1].default);
+    assert!(list[0].default);
     assert_eq!(list[0].languages, "English only");
     // The language picker (U2) filters by these codes.
     assert_eq!(list[0].language_codes, ["en"]);
-    assert!(list[1].language_codes.iter().any(|c| c == "hi"));
     for (info, model) in list.iter().zip(local_models::CATALOGUE) {
         assert_eq!(info.language_codes, model.languages);
     }
     assert!(list.iter().all(|m| m.state == ModelState::Missing));
-    assert_eq!(list[0].size_bytes, 477_274_496.0);
+    assert_eq!(list[0].size_bytes, 1_319_830_656.0);
+    // Cleanup models are listed on their own (Q4), never as speech.
+    let cleanup = downloads.list_cleanup(&live);
+    assert_eq!(cleanup.len(), 1);
+    assert_eq!(cleanup[0].id, local_models::DEFAULT_CLEANUP_MODEL);
+    assert!(cleanup[0].default);
+    assert_eq!(cleanup[0].size_bytes, 3_106_738_272.0);
 
     // A part, then a full file of the right size.
     let model = local_models::find(DEFAULT).unwrap();
@@ -94,7 +99,11 @@ fn criterion_4_lists_the_catalogue_with_statuses() {
         dictation_transcribe::engine::Engine::Local(_)
     ));
     assert_eq!(local.loaded(), Some(DEFAULT));
+    // The cleanup model is part of "On this Mac" (Q4): it goes with it.
+    let gemma = local_models::find_any(local_models::DEFAULT_CLEANUP_MODEL).unwrap();
+    std::fs::write(dir.0.join(gemma.file_name), [0u8; 10]).unwrap();
     downloads.delete(&live, DEFAULT).unwrap();
+    assert!(!dir.0.join(gemma.file_name).exists());
     assert_eq!(local.loaded(), None);
     assert_eq!(
         info(&downloads.list(&live), DEFAULT).state,
@@ -191,7 +200,11 @@ async fn criterion_3_a_running_download_shows_progress_starts_once_and_cancels_q
     let list = downloads.list(&live);
     assert_eq!(info(&list, DEFAULT).state, ModelState::Downloading);
     assert_eq!(
-        info(&list, "qwen3-asr-0.6b-q4_k_m").state,
+        info(
+            &downloads.list_cleanup(&live),
+            local_models::DEFAULT_CLEANUP_MODEL
+        )
+        .state,
         ModelState::Missing
     );
 
@@ -212,7 +225,7 @@ async fn criterion_3_a_running_download_shows_progress_starts_once_and_cancels_q
 /// second download is refused before it sends a request or writes a byte.
 #[tokio::test(flavor = "multi_thread")]
 async fn only_one_model_downloads_at_a_time() {
-    const QWEN: &str = "qwen3-asr-0.6b-q4_k_m";
+    const GEMMA: &str = local_models::DEFAULT_CLEANUP_MODEL;
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(
@@ -223,8 +236,9 @@ async fn only_one_model_downloads_at_a_time() {
         .mount(&server)
         .await;
     let dir = TempDir::new("one-at-a-time");
-    // Enough for Qwen (the larger) plus headroom, not for both.
-    let free = 589_560_480 + dictation_transcribe::models::SPACE_HEADROOM + 1;
+    // Enough for Gemma (the larger) plus headroom, not for both.
+    let free =
+        local_models::GEMMA_4_E2B.size_bytes + dictation_transcribe::models::SPACE_HEADROOM + 1;
     let store = ModelStore::new(dir.0.clone(), Arc::new(move |_| Ok(free))).unwrap();
     let live = LiveEngine::fixed().with_local(LocalModels::trusting(
         store,
@@ -244,14 +258,14 @@ async fn only_one_model_downloads_at_a_time() {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let refused = downloads.start(&live, QWEN, Some(server.uri()), |_| {
+    let refused = downloads.start(&live, GEMMA, Some(server.uri()), |_| {
         panic!("a second download started")
     });
     assert_eq!(refused, Err(ONE_AT_A_TIME.to_owned()));
-    assert!(!downloads.is_running(QWEN));
+    assert!(!downloads.is_running(GEMMA));
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
-    assert!(!dir.0.join("Qwen3-ASR-0.6B-Q4_K_M.gguf.part").exists());
+    assert!(!dir.0.join("gemma-4-E2B-it-Q4_K_M.gguf.part").exists());
 
     // Once the first is cancelled, the other may start.
     downloads.cancel(DEFAULT);
@@ -259,8 +273,109 @@ async fn only_one_model_downloads_at_a_time() {
         .await
         .unwrap();
     downloads
-        .start(&live, QWEN, Some(server.uri()), |_| {})
+        .start(&live, GEMMA, Some(server.uri()), |_| {})
         .unwrap();
-    assert!(downloads.is_running(QWEN));
-    downloads.cancel(QWEN);
+    assert!(downloads.is_running(GEMMA));
+    downloads.cancel(GEMMA);
+}
+
+/// Q4: after the speech model, the cleanup model downloads too, unless it
+/// is already on this Mac.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_cleanup_model_follows_the_speech_model() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(vec![1u8; 1000])
+                .set_delay(Duration::from_secs(30)),
+        )
+        .mount(&server)
+        .await;
+    let dir = TempDir::new("chain");
+    let live = live(&dir.0);
+    let downloads = ModelDownloads::default().from_stand_in(&server.uri());
+    let gemma = local_models::DEFAULT_CLEANUP_MODEL;
+    downloads.then_cleanup(&live);
+    assert!(downloads.is_running(gemma));
+    for _ in 0..100 {
+        if !server.received_requests().await.unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(
+        requests[0].url.path(),
+        format!("/{}", local_models::GEMMA_4_E2B.file_name)
+    );
+    // "On this Mac" is one download: cancelling the speech model cancels
+    // the cleanup model that follows it.
+    downloads.cancel(DEFAULT);
+    for _ in 0..250 {
+        if !downloads.is_running(gemma) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!downloads.is_running(gemma));
+
+    // Already downloaded: nothing starts.
+    let model = &local_models::GEMMA_4_E2B;
+    std::fs::File::create(dir.0.join(model.file_name))
+        .unwrap()
+        .set_len(model.size_bytes)
+        .unwrap();
+    downloads.then_cleanup(&live);
+    assert!(!downloads.is_running(gemma));
+}
+
+/// Review finding 1: when the chained cleanup download finishes, the
+/// helper starts with no settings save or restart.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_finished_cleanup_download_starts_the_helper() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use dictation_core::settings::{Settings, Transcription};
+    use dictation_transcribe::llama::{LlamaError, LlamaServer};
+
+    use crate::cleanup::{LocalCleanup, Spawner, Starter};
+
+    let dir = TempDir::new("chain-done");
+    std::fs::create_dir_all(&dir.0).unwrap();
+    let starts = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&starts);
+    let starter: Starter<LlamaServer> = Arc::new(move |_, _| {
+        counted.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Err(LlamaError::HelperMissing) })
+    });
+    let spawn: Spawner = Arc::new(|task| {
+        tokio::spawn(task);
+    });
+    let store = ModelStore::new(dir.0.clone(), Arc::new(|_| Ok(u64::MAX))).unwrap();
+    let live = live(&dir.0).with_cleanup(LocalCleanup::trusting(store, starter, spawn));
+    let keeper = live.cleanup().unwrap();
+    // The speech model's rebuild: on-device chosen, Gemma not here yet.
+    keeper.follow(&Settings {
+        transcription: Transcription::Local,
+        ..Settings::default()
+    });
+    // A failed download changes nothing.
+    cleanup_downloaded(&live, &Err(DownloadError::Cancelled));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(starts.load(Ordering::SeqCst), 0);
+    // Gemma lands: the helper is started.
+    let gemma = &local_models::GEMMA_4_E2B;
+    std::fs::File::create(dir.0.join(gemma.file_name))
+        .unwrap()
+        .set_len(gemma.size_bytes)
+        .unwrap();
+    cleanup_downloaded(&live, &Ok(()));
+    for _ in 0..100 {
+        if starts.load(Ordering::SeqCst) == 1 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the helper wasn't started");
 }

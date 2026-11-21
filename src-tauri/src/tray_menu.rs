@@ -3,9 +3,10 @@
 //! runs what each item does.
 //!
 //! The menu is rebuilt whenever its model changes: after a pipeline event, a
-//! click, and once a second from what the app reads (settings, engine,
-//! downloads, permissions), so a changed key, engine or error shows within a
-//! second. The tray never has a text title.
+//! click, and once a second from what the app holds in memory (the hotkey, the
+//! engine, downloads) and the permissions, so a changed key, engine or error
+//! shows within a second. The settings file is read only while a model
+//! downloads. The tray never has a text title.
 //!
 //! The last dictation's text is in [`History`]. Nothing here logs it or shows
 //! it in the menu; the log line for a refresh holds the status text, which is
@@ -17,8 +18,7 @@ use std::time::Duration;
 
 use crate::preferences::Link;
 use dictation_core::diagnostics::ErrorCode;
-use dictation_core::local_models;
-use dictation_core::settings::{Provider, Settings, Transcription};
+use dictation_core::settings::Transcription;
 use dictation_pipeline::history::History;
 use dictation_pipeline::tray::{
     Ambient, Download, Entry, Fix, MenuModel, TrayIcon, TrayStatus, id,
@@ -210,27 +210,13 @@ fn native_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Menu<Wry>> {
     Ok(menu)
 }
 
-/// The engine's display name, for the menu and the history.
-#[must_use]
-pub fn engine_name(settings: &Settings) -> String {
-    match settings.transcription {
-        Transcription::Cloud => match settings.provider {
-            Provider::OpenRouter => "OpenRouter".to_owned(),
-        },
-        Transcription::Local => local_models::find(&settings.local_model).map_or_else(
-            || "On this Mac".to_owned(),
-            |model| format!("On this Mac ({})", model.name),
-        ),
-    }
-}
-
-/// Reads what the menu depends on besides the pipeline's events.
+/// Reads what the menu depends on besides the pipeline's events: memory and
+/// the OS, and the settings file only while a model downloads.
 fn read_ambient(app: &AppHandle) -> Ambient {
-    let settings = app
-        .try_state::<commands::AppConfig>()
-        .and_then(|config| config.0.settings().ok())
+    let hotkey = app
+        .try_state::<commands::ActiveHotkey>()
+        .map(|active| active.0.spec().to_string())
         .unwrap_or_default();
-    let engine_name = engine_name(&settings);
     let live = app.try_state::<engine::LiveEngine>();
     let download = app
         .try_state::<ModelDownloads>()
@@ -240,11 +226,16 @@ fn read_ambient(app: &AppHandle) -> Ambient {
                 .list(live)
                 .into_iter()
                 .find(|model| model.state == ModelState::Downloading)
-                .map(|model| Download {
-                    percent: percent(model.downloaded_bytes, model.size_bytes),
-                    chosen: settings.transcription == Transcription::Local
-                        && settings.local_model == model.id,
-                })
+        })
+        .map(|model| {
+            let settings = app
+                .try_state::<commands::AppConfig>()
+                .and_then(|config| config.0.settings().ok())
+                .unwrap_or_default();
+            Download {
+                chosen: settings.transcription == Transcription::Local
+                    && settings.local_model == model.id,
+            }
         });
     let (mic, accessibility) = app.try_state::<onboarding::OsPermissions>().map_or(
         (PermissionStatus::Granted, PermissionStatus::Granted),
@@ -284,8 +275,7 @@ fn read_ambient(app: &AppHandle) -> Ambient {
         });
     Ambient {
         engine_generation,
-        hotkey: settings.hotkey,
-        engine: engine_name,
+        hotkey,
         download,
         problem,
         setup_incomplete: mic != PermissionStatus::Granted
@@ -294,20 +284,6 @@ fn read_ambient(app: &AppHandle) -> Ambient {
             || app
                 .try_state::<std::sync::Arc<onboarding::Onboarding>>()
                 .is_some_and(|onboarding| onboarding.in_progress()),
-    }
-}
-
-fn percent(done: f64, total: f64) -> u8 {
-    if total <= 0.0 {
-        return 0;
-    }
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "clamped to 0..=100"
-    )]
-    {
-        (done / total * 100.0).clamp(0.0, 100.0) as u8
     }
 }
 
@@ -759,12 +735,5 @@ mod tests {
         // And the model has nothing to show as one: icon and tooltip only.
         let menu = TrayStatus::new(true).menu();
         assert!(menu.tooltip.starts_with("Vocet"));
-    }
-
-    #[test]
-    fn the_download_percent_is_clamped() {
-        assert_eq!(percent(0.0, 0.0), 0);
-        assert_eq!(percent(42.0, 100.0), 42);
-        assert_eq!(percent(500.0, 100.0), 100);
     }
 }

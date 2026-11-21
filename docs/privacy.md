@@ -124,8 +124,7 @@ links one install's events together. Turning sharing off deletes it.
 | `engine_selected` | You save your key, or switch between On this Mac and Your own key | `kind` (`cloud`, `local`), `provider` (`openrouter`; cloud only; which local model is never sent) |
 | `dictation_finished` | A dictation was pasted | `engine_kind` (`cloud`, `local`), `duration_bucket` (`under2s`, `from2_to5s`, `from5_to15s`, `from15_to60s`, `over60s`), `latency_bucket` (`under500ms`, `from500_to1000ms`, `from1_to2s`, `from2_to5s`, `over5s`), `cleanup` (cloud only: `applied`, or the raw transcript was pasted after `fallback_timeout`, `fallback_guard` or `fallback_error`; never the text) |
 | `dictation_failed` | A dictation failed | `error_type` (`transcription`, `empty_transcript`, `insert`, `secure_input`, `microphone_permission`, `accessibility_permission`, `hotkey`) |
-| `setting_changed` | You save a changed setting | `setting` (`provider`, `model`, `language`, `hotkey`, `launch_at_login`, `share_usage_events`, `history_limit`). Turning sharing off sends nothing, not even this. |
-| `update_installed` | The first launch after an update | `from_version`, `to_version` |
+| `setting_changed` | You save a changed setting | `setting` (`hotkey`, `launch_at_login`, `share_usage_events`, `history_limit`). Turning sharing off sends nothing, not even this. |
 
 Versions hold only digits, letters, dots, dashes and plus signs, at most 32
 characters.
@@ -142,21 +141,12 @@ while setup is on the window, not when the same thing happens in Settings.
 | `download_failed_network` | The model download stopped: the network or the server failed |
 | `download_failed_checksum` | The model download stopped: the file failed its checksum |
 | `download_failed_disk` | The model download stopped: the file couldn't be written |
-| `download_cancelled` | You cancelled the model download |
 | `model_load_failed` | The downloaded model couldn't be loaded |
-| `key_test_failed_no_key` | The key test found no key to test |
-| `key_test_failed_rejected` | The key test failed: the provider rejected the key, or it can't be one |
-| `key_test_failed_rate_limited` | The key test failed: the provider is rate limiting |
-| `key_test_failed_network` | The key test failed: the provider couldn't be reached |
-| `key_test_failed_server` | The key test failed: the provider failed or gave an unusable answer |
-| `key_test_failed_keychain` | The key test failed: the saved key couldn't be read from the keychain |
 | `microphone_denied` | macOS reports the microphone as refused |
 | `accessibility_denied` | You asked for Accessibility and it still wasn't on when you closed setup or quit (macOS doesn't report a refusal of this one) |
 | `microphone_request_failed` | macOS's microphone prompt or its settings page couldn't be opened |
 | `accessibility_request_failed` | macOS's Accessibility prompt or its settings page couldn't be opened |
 | `relaunch_needed` | You relaunched the app because a permission hadn't taken effect |
-| `paste_missed` | The practice dictation's words didn't reach the practice box |
-| `practice_skipped` | You skipped the practice dictation |
 
 A failed practice dictation is `dictation_failed`, above, with its kind.
 

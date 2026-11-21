@@ -1,13 +1,11 @@
 //! The commands U6's Settings needs besides the ones it shares with
 //! onboarding: every control saves on change through a command that writes
-//! only its own field ([`set_language`], [`use_cloud_engine`],
-//! [`use_local_model`]), like K1's `set_hotkey`, A1's
+//! only its own field ([`use_cloud_engine`], [`use_local_model`]), like K1's `set_hotkey`, A1's
 //! `set_share_usage_events` and S1's `set_launch_at_login`; so there is no
 //! form whose older values could overwrite another control's newer one.
 //!
 //! Also: which engine is in use and whether it loaded ([`get_engine_status`]),
-//! Remove key ([`delete_api_key`]), Test microphone
-//! ([`start_microphone_test`]), the links Settings opens ([`open_link`], a
+//! Remove key ([`delete_api_key`]), the links Settings opens ([`open_link`], a
 //! closed list, so the page can't open any URL), the version for About, and
 //! "Check for updates" with when it last ran.
 
@@ -18,8 +16,7 @@ use dictation_core::local_models;
 use dictation_core::settings::{Provider, Settings, Transcription};
 use dictation_pipeline::config::Config;
 use dictation_pipeline::hotkey_setting::HotkeyControl;
-use dictation_pipeline::mic_test::{self, MicTest};
-use dictation_ports::{AudioError, SecretStore, TranscribeError};
+use dictation_ports::{SecretStore, TranscribeError};
 use dictation_transcribe::engine::Engine;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -55,44 +52,6 @@ async fn write<S: SecretStore + 'static>(
         usage::settings_saved(usage, change);
     }
     Ok(())
-}
-
-/// `language` as stored: trimmed, and `None` (detect it) when empty.
-fn normalized(language: Option<String>) -> Option<String> {
-    language
-        .map(|code| code.trim().to_owned())
-        .filter(|code| !code.is_empty())
-}
-
-/// Sets the language and nothing else (`None` or empty: detect it). The
-/// engine follows at once.
-#[tauri::command]
-#[specta::specta]
-pub async fn set_language(
-    state: State<'_, AppConfig>,
-    engine: State<'_, LiveEngine>,
-    hotkey: State<'_, ActiveHotkey>,
-    usage: State<'_, Usage>,
-    language: Option<String>,
-) -> Result<(), String> {
-    let (live, control) = (engine.inner().clone(), hotkey.0.clone());
-    write(Arc::clone(&state.0), &usage, move |config| {
-        language_change(config, &live, &control, language)
-    })
-    .await
-}
-
-fn language_change<S: SecretStore + 'static>(
-    config: &Arc<Config<S>>,
-    live: &LiveEngine,
-    control: &HotkeyControl,
-    language: Option<String>,
-) -> Result<Changed, String> {
-    let language = normalized(language);
-    commands::write_change(config, live, control, |settings| {
-        settings.language = language;
-    })
-    .map_err(|error| error.to_string())
 }
 
 /// Dictates with `provider` and the user's own key from now on. Switching
@@ -189,11 +148,7 @@ fn switch_to_local<S: SecretStore + 'static>(
 ) -> Result<Changed, String> {
     let model =
         local_models::find(id).ok_or_else(|| format!("There is no on-device model {id:?}."))?;
-    let language = config
-        .settings()
-        .map_err(|error| error.to_string())?
-        .language;
-    if let Err(error) = live.preload_local(model.id, language.as_deref()) {
+    if let Err(error) = live.preload_local(model.id, None) {
         // Whatever the settings still choose becomes current again.
         live.rebuild(config);
         return Err(format!(
@@ -295,79 +250,11 @@ pub async fn delete_api_key(
         })
 }
 
-/// The microphone test, managed state.
-pub struct AppMicTest(pub MicTest);
-
-/// What the user is told when the test can't start.
-fn microphone_problem(error: &AudioError) -> String {
-    match error {
-        AudioError::PermissionDenied => "Vocet isn't allowed to use the microphone. Allow it in \
-             System Settings → Privacy & Security → Microphone."
-            .to_owned(),
-        AudioError::NoDevice => {
-            "No microphone found. Connect one, or choose one in System Settings → Sound.".to_owned()
-        }
-        AudioError::AlreadyRecording | AudioError::NotRecording | AudioError::Device(_) => {
-            "The microphone didn't start. Try again.".to_owned()
-        }
-    }
-}
-
-/// Starts recording from the microphone for a few seconds, only to show
-/// its level ([`read_microphone_test`]). Ends by itself after
-/// [`mic_test::MAX_TEST`].
-#[tauri::command]
-#[specta::specta]
-pub async fn start_microphone_test(test: State<'_, AppMicTest>) -> Result<(), String> {
-    let test = test.0.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let generation = test.start().map_err(|error| {
-            tracing::warn!(%error, "the microphone test didn't start");
-            microphone_problem(&error)
-        })?;
-        test.stop_after(generation, mic_test::MAX_TEST);
-        Ok(())
-    })
-    .await
-    .map_err(|_| "the microphone task crashed".to_owned())?
-}
-
-/// The microphone test's level and device, as Settings polls them.
-#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
-pub struct MicReading {
-    /// The level since the last reading, in dBFS; `None` once the test
-    /// has ended.
-    pub level: Option<f32>,
-    /// The input device's name, if known.
-    pub device: Option<String>,
-}
-
-/// The test's level since the last call, and the device. Never blocks.
-#[tauri::command]
-#[specta::specta]
-pub fn read_microphone_test(test: State<'_, AppMicTest>) -> Result<MicReading, String> {
-    let reading = test.0.read();
-    Ok(MicReading {
-        level: reading.level,
-        device: reading.device,
-    })
-}
-
-/// Ends the microphone test.
-#[tauri::command]
-#[specta::specta]
-pub fn stop_microphone_test(test: State<'_, AppMicTest>) -> Result<(), String> {
-    test.0.stop();
-    Ok(())
-}
-
 /// A page Settings links to. A closed list: the window can't open any
 /// other URL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum Link {
-    /// `OpenRouter`'s page for creating an API key.
-    OpenrouterKeys,
     /// `OpenRouter`'s page for adding credits.
     OpenrouterCredits,
     /// The privacy policy on the website.
@@ -387,7 +274,6 @@ impl Link {
     #[must_use]
     pub fn url(self) -> String {
         match self {
-            Self::OpenrouterKeys => "https://openrouter.ai/settings/keys".to_owned(),
             Self::OpenrouterCredits => "https://openrouter.ai/settings/credits".to_owned(),
             Self::Privacy => "https://vocetlabs.com/privacy".to_owned(),
             Self::Repository => REPOSITORY.to_owned(),
@@ -441,22 +327,6 @@ pub fn get_app_info() -> Result<AppInfo, String> {
 /// Starts the update check that says what it found in a dialog (Settings →
 /// General). Managed state, so the command needn't name the runtime.
 pub struct UpdateCheck(pub Arc<dyn Fn() + Send + Sync>);
-
-/// Retitles the window for the screen it shows. Managed state, so the command
-/// needn't name the runtime.
-pub struct WindowPages(
-    pub Arc<dyn Fn(crate::window::WindowPage) -> Result<(), String> + Send + Sync>,
-);
-
-/// The page says which screen it shows, for the window's title (U12).
-#[tauri::command]
-#[specta::specta]
-pub fn set_window_page(
-    pages: State<'_, WindowPages>,
-    page: crate::window::WindowPage,
-) -> Result<(), String> {
-    (pages.0)(page)
-}
 
 /// Check now, in Settings → General: a dialog says what it found.
 #[tauri::command]

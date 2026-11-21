@@ -85,7 +85,7 @@ e2e_pill_states() {
   expect "the pill went recording, transcribing, paste_sent, hidden" \
     test "$(pill_log_since "$mark")" = "recording transcribing paste_sent hidden"
   # The pill says the paste was sent, not that it landed (U4 review): the
-  # inserter can't tell. Whether the text landed is e2e_mock_paste's check;
+  # inserter can't tell. Whether the text landed is e2e_clipboard_restore's check;
   # here a Terminal job reads the overlay mid-recording, and the first paste
   # after that has sometimes missed TextEdit (#239). Logged for the record.
   if pill_textedit_has_text; then log "  the text landed in TextEdit"; else log "  note: TextEdit is empty after the paste (see #239)"; fi
@@ -96,6 +96,7 @@ e2e_pill_states() {
   launch_full "$VM_SILENCE"
   expect "the app starts again and logs ready" wait_for_log 'INFO .*ready'
   textedit_fresh
+  set_clipboard "e2e-silence-sentinel-$$"
   mark=$(pill_log_mark)
   launch --press
   # Listening by the log: reading the overlay starts a Terminal job, which
@@ -109,7 +110,6 @@ e2e_pill_states() {
     pill_near "$gap" "$PILL_NO_SOUND_MS"
   launch --release
   expect "the silent dictation gets back to Idle" wait_for_idle_count 1
-  expect "the silent dictation gets back to Idle" wait_for_idle_count 1
   expect "the pill says there was no sound after the release" \
     overlay_shows "$OVERLAY_NO_SOUND_RELEASED"
   screenshot e2e_pill_states.no_sound_after_release
@@ -117,6 +117,9 @@ e2e_pill_states() {
   expect "the pill went recording, no_sound, transcribing, error, hidden (no paste_sent)" \
     test "$(pill_log_since "$mark")" = "recording no_sound transcribing error hidden"
   expect "nothing was pasted" textedit_is_empty
+  expect "the pipeline never inserted" test "$(logged_phases | paste -sd ' ' -)" = "Recording Transcribing Idle"
+  expect "the log says why nothing was transcribed" wait_for_log 'not transcribing.*Silent'
+  expect "the clipboard is untouched" test "$(clipboard)" = "e2e-silence-sentinel-$$"
 
   # 3. A silent clip under 1 s (a tap): nothing to say.
   fresh_app_state

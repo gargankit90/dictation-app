@@ -16,12 +16,12 @@ import type {
 import { SECTION_KEY, Settings } from "./Settings";
 import type { SectionId } from "./Settings";
 import { HOTKEY_NOTICE_POLL_MS } from "./settings/Dictation";
-import { CONNECTED, KEY_NOT_SAVED, NOTICE_DISMISSED_KEY } from "./settings/Speech";
+import { CONNECTED, KEY_NOT_SAVED } from "./settings/Speech";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
 const KEY = "sk-or-dummy-NOT-A-REAL-KEY-0123456789";
-const ENGLISH = "parakeet-unified-en-0.6b-q4_k_m";
-const MULTI = "qwen3-asr-0.6b-q4_k_m";
+const ENGLISH = "orukqwen-asr-1.7b-q4_k_m";
+const MULTI = "multilingual-test-q4_k_m";
 
 interface Call {
   command: string;
@@ -31,7 +31,7 @@ interface Call {
 function model(id: string, overrides: Partial<LocalModelInfo_Serialize> = {}) {
   return {
     id,
-    name: id === ENGLISH ? "Parakeet English" : "Qwen3-ASR multilingual",
+    name: id === ENGLISH ? "OrukQwen English" : "Test multilingual",
     languages: id === ENGLISH ? "English only" : "30 languages",
     language_codes: id === ENGLISH ? ["en"] : ["en", "hi", "de"],
     size_bytes: id === ENGLISH ? 477_274_496 : 600_000_000,
@@ -51,7 +51,6 @@ class Backend {
     version: 2,
     provider: "openrouter",
     model: "openai/gpt-4o-mini-transcribe",
-    language: null,
     hotkey: "RightAlt",
     launch_at_login: false,
     transcription: "cloud",
@@ -61,14 +60,10 @@ class Backend {
   };
   keys: Record<Provider, boolean> = { openrouter: false };
   models: LocalModelInfo_Serialize[] = [model(ENGLISH), model(MULTI)];
+  cleanup: LocalModelInfo_Serialize[] = [];
   engine: EngineStatus = { state: "ready", message: null };
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
   testResult: KeyTestError | null = null;
-  /** What `launch_notice` says: the first launch after the rename (U1). */
-  launchNotice: string | null = null;
-  /** The levels the microphone test reads, in order (then the last again). */
-  micLevels: number[] = [-90];
-  micRunning = false;
   /** Fails the command named, with the message (a string, as the app sends). */
   failing = new Map<string, string>();
   /** Holds the command named until the promise settles. */
@@ -91,17 +86,12 @@ class Backend {
     switch (command) {
       case "get_settings":
         return this.settings;
-      case "launch_notice":
-        return this.launchNotice;
       case "list_history":
         return { rows: [], unreadable: false };
       case "set_hotkey":
         this.settings = { ...this.settings, hotkey: args.spec as string };
         return null;
       case "set_hotkey_recording":
-        return null;
-      case "set_language":
-        this.settings = { ...this.settings, language: args.language as string | null };
         return null;
       case "set_launch_at_login":
         this.settings = { ...this.settings, launch_at_login: args.enabled as boolean };
@@ -127,6 +117,8 @@ class Backend {
         return this.engine;
       case "list_local_models":
         return this.models;
+      case "list_cleanup_models":
+        return this.cleanup;
       case "download_local_model":
         this.models = this.models.map((m) =>
           m.id === args.id ? { ...m, state: "downloading", downloaded_bytes: 212_000_000 } : m,
@@ -141,8 +133,6 @@ class Backend {
       case "delete_api_key":
         this.keys[args.provider as Provider] = false;
         return null;
-      case "has_api_key":
-        return this.keys[args.provider as Provider];
       case "saved_key_hint":
         return this.keys[args.provider as Provider] ? "sk-or-…cdef" : null;
       case "connect_openrouter":
@@ -154,16 +144,6 @@ class Backend {
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         if (this.testResult !== null) throw this.testResult;
         return null;
-      case "start_microphone_test":
-        this.micRunning = true;
-        return null;
-      case "read_microphone_test": {
-        const level = this.micLevels.length > 1 ? this.micLevels.shift() : this.micLevels[0];
-        return { level: this.micRunning ? level : null, device: "MacBook Pro Microphone" };
-      }
-      case "stop_microphone_test":
-        this.micRunning = false;
-        return null;
       case "get_app_info":
         return { version: "0.1.0", last_update_check_ms: null };
       case "get_hotkey_notice":
@@ -171,8 +151,6 @@ class Backend {
       case "check_for_updates":
       case "open_link":
         return null;
-      case "save_settings":
-        throw new Error("U6 has no global Save: save_settings must not be called");
       default:
         throw new Error(`unexpected command ${command}`);
     }
@@ -229,14 +207,6 @@ async function open(section: SectionId = "general", props: Parameters<typeof Set
 
 const click = (name: string | RegExp) => {
   fireEvent.click(screen.getByRole("button", { name }));
-};
-
-/** Chooses a language the way a person does: search by name, press Enter. */
-const pick = (name: string) => {
-  const box = screen.getByLabelText("Language");
-  fireEvent.focus(box);
-  fireEvent.change(box, { target: { value: name } });
-  fireEvent.keyDown(box, { key: "Enter" });
 };
 
 /** What assistive tech would call `element`: enough of the accessible-name rules for these controls. */
@@ -354,24 +324,6 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌥");
   });
 
-  it("language: choosing one saves only the language", async () => {
-    await open("dictation");
-    pick("German");
-    expect((await screen.findByRole("status")).textContent).toBe("Saved");
-    expect(backend.named("set_language")[0]?.args).toEqual({ language: "de" });
-    pick("Detect");
-    await waitFor(() => {
-      expect(backend.named("set_language").at(-1)?.args).toEqual({ language: null });
-    });
-  });
-
-  it("language: a refused language shows the app's error next to it", async () => {
-    await open("dictation");
-    backend.failing.set("set_language", "That isn't a language code.");
-    pick("German");
-    expect((await screen.findByRole("alert")).textContent).toContain("isn't a language code");
-  });
-
   it("launch at login: the switch writes through its own command", async () => {
     await open("general");
     fireEvent.click(screen.getByRole("switch", { name: "Open Vocet at login" }));
@@ -405,9 +357,8 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     });
   });
 
-  it("closing and reopening shows the saved values, and nothing ever calls save_settings", async () => {
+  it("closing and reopening shows the saved values", async () => {
     await open("dictation");
-    pick("German");
     click("Change…");
     keyDown("F6");
     await waitFor(() => {
@@ -421,25 +372,11 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     cleanup();
     await open("dictation");
     expect(screen.getByLabelText("Dictation key").textContent).toBe("F6");
-    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toContain("German");
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
     expect(
       screen.getByRole<HTMLInputElement>("switch", { name: "Share usage and error events" })
         .checked,
     ).toBe(false);
-    expect(backend.named("save_settings")).toHaveLength(0);
-  });
-
-  it("a change made elsewhere is never put back by another control", async () => {
-    await open("dictation");
-    // The hotkey changes behind the window's back (another window, the tray).
-    backend.settings = { ...backend.settings, hotkey: "F7" };
-    pick("German");
-    await waitFor(() => {
-      expect(backend.settings.language).toBe("de");
-    });
-    expect(backend.settings.hotkey).toBe("F7");
-    expect(screen.getByLabelText("Dictation key").textContent).toBe("F7");
   });
 });
 
@@ -495,9 +432,10 @@ describe("criterion_u6_3 launch at login never blocks", () => {
     expect((await screen.findByRole("status")).textContent).toContain("Applying…");
     // Another section works meanwhile.
     fireEvent.click(screen.getByRole("tab", { name: "Dictation" }));
-    pick("German");
+    click("Change…");
+    keyDown("F6");
     await waitFor(() => {
-      expect(backend.settings.language).toBe("de");
+      expect(backend.settings.hotkey).toBe("F6");
     });
     fireEvent.click(screen.getByRole("tab", { name: "General" }));
     slow.open();
@@ -561,21 +499,28 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     backend.keys.openrouter = true;
   });
 
-  it("names lead, with no Downloaded, Use this, Active or Hide", async () => {
+  it("names lead, OpenRouter first, with no Downloaded, Use this, Active or Hide", async () => {
     backend.models = [ready(ENGLISH), model(MULTI)];
     await open("speech");
-    expect(radio(/^English/)).toBeTruthy();
-    expect(radio(/^3 languages/)).toBeTruthy();
+    // Q4 (owner): OpenRouter is listed first.
+    const radios = within(screen.getByRole("radiogroup", { name: "Speech engine" })).getAllByRole(
+      "radio",
+    );
+    expect(radios[0]?.getAttribute("aria-label")).toBe("OpenRouter");
+    expect(radio(/^On this Mac$/)).toBeTruthy();
+    expect(radio(/^On this Mac · 3 languages/)).toBeTruthy();
     expect(radio(/^OpenRouter/)).toBeTruthy();
     expect(
       within(screen.getByRole("radiogroup", { name: "Speech engine" })).getAllByRole("radio"),
     ).toHaveLength(3);
-    expect(screen.getAllByText("On this Mac · works offline")).toHaveLength(2);
+    // Q4 (owner): "On this Mac", then its language, offline and private.
+    expect(screen.getByText("English · works offline · nothing leaves your Mac")).toBeTruthy();
     expect(
       await screen.findByText(
-        "OpenRouter · about 100 languages · speech is sent to OpenRouter · speech: GPT-4o mini Transcribe (OpenAI) · cleanup: GLM 5.3 Flash (Z.ai)",
+        "OpenRouter · speech is sent to OpenRouter · speech: GPT-4o mini Transcribe (OpenAI) · cleanup: GLM 5.3 Flash (Z.ai)",
       ),
     ).toBeTruthy();
+    expect(screen.queryByText(/about 100 languages/i)).toBeNull();
     for (const gone of ["Downloaded", "✓ Active", "Use this", "Hide", "Set up…", "Multilingual"]) {
       expect(screen.queryByText(gone), gone).toBeNull();
     }
@@ -592,7 +537,9 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     expect(backend.models.length).toBeGreaterThan(1);
     for (const model of backend.models) {
       const [name, size] = modelLabel(model).split(" · ");
-      expect(radio(new RegExp(`^${name ?? "?"}`))).toBeTruthy();
+      expect(
+        radio(name === "English" ? /^On this Mac$/ : new RegExp(`^On this Mac · ${name ?? "?"}`)),
+      ).toBeTruthy();
       expect(screen.getByRole("button", { name: `Download · ${size ?? "?"}` })).toBeTruthy();
       // Setup's card shows this label, and the catalogue's name appears in neither.
       expect(modelLabel(model)).not.toContain(model.name);
@@ -601,11 +548,11 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
 
   it("a row not downloaded shows Download and its size, and can't be selected", async () => {
     await open("speech");
-    expect(radio(/^English/).disabled).toBe(true);
+    expect(radio(/^On this Mac$/).disabled).toBe(true);
 
     expect(screen.getByRole("button", { name: "Download · 477 MB" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Download · 600 MB" })).toBeTruthy();
-    fireEvent.click(radio(/^English/));
+    fireEvent.click(radio(/^On this Mac$/));
     expect(backend.named("use_local_model")).toHaveLength(0);
   });
 
@@ -613,8 +560,8 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     await open("speech");
     click("Download · 477 MB");
     expect(await screen.findByText("↓ 212 of 477 MB")).toBeTruthy();
-    expect(screen.getByRole("progressbar", { name: "English download" })).toBeTruthy();
-    expect(radio(/^English/).disabled).toBe(true);
+    expect(screen.getByRole("progressbar", { name: "On this Mac download" })).toBeTruthy();
+    expect(radio(/^On this Mac$/).disabled).toBe(true);
     expect(screen.getByTestId("blocked-reason").textContent).toBe(
       "You can choose it when the download finishes.",
     );
@@ -629,7 +576,7 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     backend.models = [model(ENGLISH, { state: "partial", downloaded_bytes: 212_000_000 })];
     await open("speech");
     expect(await screen.findByText("Paused · 212 of 477 MB")).toBeTruthy();
-    expect(radio(/^English/).disabled).toBe(true);
+    expect(radio(/^On this Mac$/).disabled).toBe(true);
     expect(screen.getByTestId("blocked-reason").textContent).toBe(
       "Finish the download to choose it.",
     );
@@ -643,7 +590,32 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     backend.models = [model(ENGLISH, { state: "downloading", downloaded_bytes: 212_000_000 })];
     await open("speech");
     expect(checked().map((row) => row.id)).toEqual([`engine-${ENGLISH}`]);
-    expect(radio(/^English/).disabled).toBe(true);
+    expect(radio(/^On this Mac$/).disabled).toBe(true);
+  });
+
+  it("Q4: On this Mac is one download: one row, one progress bar, one Pause", async () => {
+    backend.models = [ready(ENGLISH)];
+    backend.cleanup = [
+      model("gemma", {
+        size_bytes: 3_106_738_272,
+        state: "downloading",
+        downloaded_bytes: 1_000_000_000,
+      }),
+    ];
+    await open("speech");
+    expect(
+      await screen.findByText("Downloading on-device models (speech + cleanup) · 3.6 GB"),
+    ).toBeTruthy();
+    // The speech model's 477 MB plus the cleanup model's progress so far.
+    expect(screen.getByText("↓ 1477 of 3584 MB")).toBeTruthy();
+    expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Pause" })).toHaveLength(1);
+    expect(screen.queryByText(/Cleanup/)).toBeNull();
+    // Pause cancels by the speech model's id: the app cancels both.
+    click("Pause");
+    await waitFor(() => {
+      expect(backend.named("cancel_local_model_download")[0]?.args).toEqual({ id: ENGLISH });
+    });
   });
 
   it("selecting a model loads it, blocks the others with a reason, then selects it", async () => {
@@ -651,12 +623,14 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     const loading = gate();
     backend.holds.set("use_local_model", loading.closed);
     await open("speech");
-    fireEvent.click(radio(/^English/));
+    fireEvent.click(radio(/^On this Mac$/));
     expect(await screen.findByText("Loading…")).toBeTruthy();
     expect(checked().map((row) => row.id)).toEqual([`engine-${ENGLISH}`]);
-    expect(radio(/^3 languages/).disabled).toBe(true);
+    expect(radio(/^On this Mac · 3 languages/).disabled).toBe(true);
     expect(radio(/^OpenRouter/).disabled).toBe(true);
-    expect(screen.getByTestId("blocked-reason").textContent).toBe("Wait until English has loaded.");
+    expect(screen.getByTestId("blocked-reason").textContent).toBe(
+      "Wait until On this Mac has loaded.",
+    );
     loading.open();
     await waitFor(() => {
       expect(screen.queryByText("Loading…")).toBeNull();
@@ -667,14 +641,14 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
 
   it("a model that fails to load says so, with Retry and Delete in its menu", async () => {
     backend.models = [ready(ENGLISH)];
-    backend.failing.set("use_local_model", "Couldn't load Parakeet English: the file is damaged.");
+    backend.failing.set("use_local_model", "Couldn't load OrukQwen English: the file is damaged.");
     await open("speech");
-    fireEvent.click(radio(/^English/));
+    fireEvent.click(radio(/^On this Mac$/));
     expect(await screen.findByText("! Couldn't load")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("file is damaged");
     expect(checked().map((row) => row.id)).toEqual(["engine-openrouter"]);
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
-    click("More actions for English");
+    click("More actions for On this Mac");
     expect(screen.getByRole("menuitem", { name: "Delete model" })).toBeTruthy();
   });
 
@@ -682,12 +656,12 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
     backend.models = [ready(ENGLISH), ready(MULTI)];
     await open("speech");
-    click("More actions for English");
+    click("More actions for On this Mac");
     expect(screen.queryByRole("menuitem")).toBeNull();
     expect(screen.getByText(/Choose another engine to delete it/)).toBeTruthy();
-    expect(screen.getByText(/Parakeet English · English only · works offline/)).toBeTruthy();
-    click("More actions for English");
-    click("More actions for 3 languages");
+    expect(screen.getByText(/OrukQwen English · English only · works offline/)).toBeTruthy();
+    click("More actions for On this Mac");
+    click("More actions for On this Mac · 3 languages");
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete model" }));
     await waitFor(() => {
       expect(backend.named("delete_local_model")[0]?.args).toEqual({ id: MULTI });
@@ -1015,39 +989,6 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
   });
 });
 
-describe("criterion_u6_6 Test microphone", () => {
-  it("shows the live meter and says it works when it hears sound", async () => {
-    backend.micLevels = [-80, -20, -25];
-    await open("dictation");
-    click("Test microphone");
-    await waitFor(() => {
-      expect(screen.getAllByTestId("mic-bar").length).toBeGreaterThan(0);
-    });
-    expect(await screen.findByText("Hearing you.")).toBeTruthy();
-    expect(screen.getByText("MacBook Pro Microphone")).toBeTruthy();
-  });
-
-  it("says No sound after 5 s of silence, and stops the microphone", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    backend.micLevels = [-90];
-    await open("dictation");
-    click("Test microphone");
-    await screen.findByText("Listening… say something.");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_200);
-    });
-    expect((await screen.findByRole("alert")).textContent).toContain("No sound");
-    expect(backend.named("stop_microphone_test").length).toBeGreaterThan(0);
-  });
-
-  it("says why when the microphone can't start", async () => {
-    backend.failing.set("start_microphone_test", "Vocet isn't allowed to use the microphone.");
-    await open("dictation");
-    click("Test microphone");
-    expect((await screen.findByRole("alert")).textContent).toContain("isn't allowed");
-  });
-});
-
 describe("criterion_u6_7 Help", () => {
   it("each button calls the app's action", async () => {
     const onTroubleshoot = vi.fn();
@@ -1143,59 +1084,6 @@ describe("Privacy", () => {
 });
 
 describe("loading", () => {
-  const KEYCHAIN_NOTICE =
-    "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to OpenRouter.";
-
-  it("U1: says what to expect from the Keychain on the first launch after the rename", async () => {
-    backend.launchNotice = KEYCHAIN_NOTICE;
-    backend.keys.openrouter = true;
-    await open("speech");
-    const notice = await screen.findByTestId("launch-notice");
-    expect(notice.textContent).toContain("Choose Always Allow");
-    expect(notice.textContent).toContain("sent only to OpenRouter");
-  });
-
-  // U12 criterion 11.
-  it("the Keychain notice shows only in Speech, and isn't styled as a success", async () => {
-    backend.launchNotice = KEYCHAIN_NOTICE;
-    backend.keys.openrouter = true;
-    await open("speech");
-    const notice = await screen.findByTestId("launch-notice");
-    expect(notice.className).not.toMatch(/\bok\b/);
-    for (const name of ["General", "Dictation", "Privacy", "History", "Help", "About"]) {
-      fireEvent.click(screen.getByRole("tab", { name }));
-      await screen.findByRole("heading", { level: 1, name });
-      expect(screen.queryByTestId("launch-notice"), name).toBeNull();
-    }
-  });
-
-  it("the Keychain notice doesn't show with no key saved", async () => {
-    backend.launchNotice = KEYCHAIN_NOTICE;
-    await open("speech");
-    await screen.findByText("! Not connected");
-    expect(screen.queryByTestId("launch-notice")).toBeNull();
-  });
-
-  it("Got it hides the Keychain notice for good", async () => {
-    backend.launchNotice = KEYCHAIN_NOTICE;
-    backend.keys.openrouter = true;
-    await open("speech");
-    await screen.findByTestId("launch-notice");
-    click("Got it");
-    expect(screen.queryByTestId("launch-notice")).toBeNull();
-    expect(window.localStorage.getItem(NOTICE_DISMISSED_KEY)).toBe("1");
-    cleanup();
-    await open("speech");
-    await screen.findByRole("button", { name: "Manage…" });
-    expect(screen.queryByTestId("launch-notice")).toBeNull();
-    window.localStorage.removeItem(NOTICE_DISMISSED_KEY);
-  });
-
-  it("U1: says nothing about the Keychain on any other launch", async () => {
-    await open();
-    expect(screen.queryByTestId("launch-notice")).toBeNull();
-  });
-
   it("shows why the settings couldn't load", async () => {
     backend.failing.set("get_settings", "The settings file is damaged.");
     render(<Settings />);

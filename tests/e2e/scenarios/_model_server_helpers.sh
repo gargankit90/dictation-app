@@ -6,8 +6,8 @@
 # E2E_MODEL_FILE names the file. By default it's the one a run of the app on this
 # Mac downloaded. Without one these scenarios fail and say so: they never fetch it.
 
-MODEL_FILE_NAME=parakeet-unified-en-0.6b-Q4_K_M.gguf
-MODEL_FILE_BYTES=477274496
+MODEL_FILE_NAME=orukqwen-asr-1.7b-Q4_K_M.gguf
+MODEL_FILE_BYTES=1319830656
 MODEL_FILE_HOST=${E2E_MODEL_FILE:-$HOME/Library/Application Support/com.dictationapp.desktop/models/$MODEL_FILE_NAME}
 VM_MODEL_SERVER="$VM_FIXTURES/model-server.pl"
 VM_MODEL_SERVER_DIR="/Users/$VM_USER/e2e-model-server"

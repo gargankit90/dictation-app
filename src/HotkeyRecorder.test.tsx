@@ -15,7 +15,7 @@ afterEach(() => {
 const down = keyDown;
 const up = keyUp;
 const record = () => {
-  fireEvent.click(screen.getByRole("button", { name: "Record a different key" }));
+  fireEvent.click(screen.getByRole("button", { name: "Change…" }));
 };
 
 function setup(value = "RightAlt", result: string | null = null) {
@@ -105,19 +105,6 @@ describe("HotkeyRecorder", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
-  it("resets to Right Option, and only when it isn't the key already", async () => {
-    const onChange = setup("RightCmd");
-    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }));
-    await waitFor(() => {
-      expect(onChange).toHaveBeenCalledWith("RightAlt");
-    });
-    cleanup();
-    setup("RightAlt");
-    expect(
-      screen.getByRole<HTMLButtonElement>("button", { name: "Reset to default" }).disabled,
-    ).toBe(true);
-  });
-
   it("stops recording when the window loses focus", () => {
     const onChange = setup();
     record();
@@ -204,7 +191,7 @@ describe("HotkeyRecorder pausing the real hotkey", () => {
 describe("u12_criterion_5 Settings' compact row", () => {
   function compact(value = "RightCmd") {
     const onChange = vi.fn<(spec: string) => Promise<string | null>>(() => Promise.resolve(null));
-    render(<HotkeyRecorder value={value} onChange={onChange} compact />);
+    render(<HotkeyRecorder value={value} onChange={onChange} />);
     return onChange;
   }
 
@@ -254,15 +241,6 @@ describe("u12_criterion_5 Settings' compact row", () => {
     await waitFor(() => {
       expect(onChange).toHaveBeenCalledWith("F6");
     });
-  });
-});
-
-describe("setup keeps its recorder (U11 changes it)", () => {
-  it("has Record a different key and Reset to default without the option", () => {
-    render(<HotkeyRecorder value="RightCmd" onChange={() => Promise.resolve(null)} />);
-    expect(screen.getByRole("button", { name: "Record a different key" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Reset to default" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Change…" })).toBeNull();
   });
 });
 
