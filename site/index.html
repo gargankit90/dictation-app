@@ -454,39 +454,12 @@
         color: var(--vc-ink);
         text-decoration: none;
       }
-
-      .lede {
-        margin-top: 20px;
-        max-width: 640px;
-        font-size: 19px;
-        color: var(--vc-ink-2);
-      }
       .actions {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         gap: 12px 24px;
         margin-top: 28px;
-      }
-      .btn {
-        display: inline-flex;
-        align-items: center;
-        min-height: var(--vc-target-min);
-        padding: 0 24px;
-        border-radius: var(--vc-radius-pill);
-        background: var(--vc-primary-bg);
-        color: var(--vc-primary-fg);
-        font-weight: 600;
-        text-decoration: none;
-      }
-      .btn:hover {
-        background: var(--vc-primary-hover);
-        color: var(--vc-primary-fg);
-      }
-      .fine {
-        margin-top: 12px;
-        font-size: 14px;
-        color: var(--vc-muted);
       }
       .card {
         background: var(--vc-bg);
@@ -586,39 +559,6 @@
       }
       .say {
         padding: 16px 20px;
-      }
-      .ph {
-        display: none;
-      }
-      .dict-pill {
-        position: absolute;
-        right: 12px;
-        top: -18px;
-        display: inline-flex;
-        background: var(--ink);
-        color: #fff;
-        font-size: 12px;
-        font-weight: 600;
-        border-radius: 999px;
-        padding: 6px 12px;
-        box-shadow: 0 6px 16px rgba(28, 27, 25, 0.22);
-      }
-      .dict-pill .wave {
-        display: none;
-      }
-      .dict-pill .d-label::before {
-        content: "✓ ";
-      }
-      .caret {
-        display: inline-block;
-        width: 2px;
-        height: 18px;
-        background: var(--accent);
-        vertical-align: -3px;
-        margin-left: 1px;
-      }
-      .d-text {
-        white-space: normal;
       }
       .composer2,
       .cw-body,
@@ -1267,172 +1207,6 @@
           min-height: 340px;
         }
       }
-
-      /* hero: copy left, animated app window right */
-      .ph {
-        color: #8a877f;
-      }
-      .hero {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 48px;
-        align-items: center;
-        padding-top: 40px;
-        padding-bottom: 64px;
-      }
-      .hero-copy {
-        flex: 1 1 380px;
-        min-width: 0;
-      }
-      .hero-demo {
-        flex: 1 1 460px;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-      }
-      .demo-body {
-        padding: 20px 22px;
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-        font-size: 15px;
-      }
-      .msg {
-        display: flex;
-        gap: 10px;
-      }
-      .msg p {
-        margin-top: 2px;
-        color: var(--ink-2);
-      }
-      .avatar-sq {
-        width: 32px;
-        height: 32px;
-        border-radius: 8px;
-        background: #e7e2d7;
-        flex-shrink: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 13px;
-        font-weight: 700;
-        color: #5c5a55;
-      }
-      .composer {
-        position: relative;
-        border: 2px solid var(--accent);
-        border-radius: 12px;
-        padding: 12px 14px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-      .composer-text {
-        font-size: 16px;
-        line-height: 1.5;
-        min-height: 72px;
-      }
-      .composer-foot {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 10px;
-        flex-wrap: wrap;
-      }
-      .composer-hint {
-        font-size: 12px;
-        color: var(--faint);
-      }
-      .keyhint {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 12px;
-        color: var(--faint);
-      }
-      .keyhint kbd {
-        font-family: var(--vc-font-mono);
-        font-size: 12px;
-        background: #f1eee7;
-        border: 1px solid var(--line-3);
-        border-bottom-width: 3px;
-        border-radius: 6px;
-        padding: 2px 8px;
-        color: var(--ink);
-        transition:
-          background 0.15s,
-          transform 0.15s;
-      }
-      .keyhint-label::after {
-        content: "Released";
-      }
-      .say-text {
-        min-height: 3.1em;
-      }
-      /* animation states; with no script (or reduced motion) the page shows the final state */
-      .stage[data-state="idle"] .keyhint-label::after {
-        content: "Hold to talk";
-      }
-      .stage[data-state="listening"] .keyhint-label::after {
-        content: "Held, speaking";
-      }
-      .stage[data-state="listening"] .keyhint kbd {
-        background: var(--ink);
-        color: #fff;
-        border-color: var(--ink);
-        transform: translateY(1px);
-      }
-      .stage[data-state="idle"] .ph,
-      .stage[data-state="listening"] .ph,
-      .stage[data-state="transcribing"] .ph {
-        display: inline;
-      }
-      .stage[data-state="idle"] .dict-pill {
-        opacity: 0;
-      }
-      .stage:not([data-state="pasted"]) .d-label::before {
-        content: none;
-      }
-      .stage:not([data-state="listening"]) .wave {
-        display: none;
-      }
-      .stage[data-state="listening"] .wave {
-        display: inline-flex;
-        align-items: center;
-        gap: 2px;
-        height: 14px;
-        margin-right: 8px;
-      }
-      .wave i {
-        display: block;
-        width: 3px;
-        height: 4px;
-        border-radius: 2px;
-        background: #e5484d;
-        animation: wave 0.9s ease-in-out infinite;
-      }
-      .wave i:nth-child(2) {
-        animation-delay: 0.12s;
-      }
-      .wave i:nth-child(3) {
-        animation-delay: 0.24s;
-      }
-      .wave i:nth-child(4) {
-        animation-delay: 0.36s;
-      }
-      .wave i:nth-child(5) {
-        animation-delay: 0.48s;
-      }
-      @keyframes wave {
-        0%,
-        100% {
-          height: 4px;
-        }
-        50% {
-          height: 14px;
-        }
-      }
       /* Claude Code is a terminal */
       .termapp {
         display: flex;
@@ -1468,13 +1242,382 @@
         background: #f2f1ee;
         color: #1c1b19;
       }
+
+      /* buttons */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 52px;
+        padding: 0 22px;
+        border-radius: 12px;
+        font-weight: 600;
+        font-size: 17px;
+        text-decoration: none;
+        border: 1px solid transparent;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+        color: #fff;
+      }
+      .btn-secondary {
+        background: var(--white);
+        color: var(--ink);
+        border-color: var(--line-3);
+        padding: 0 18px;
+      }
+      .btn-secondary:hover {
+        color: var(--ink);
+        border-color: var(--ink);
+      }
+
+      /* hero */
+      .hero {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 48px;
+        align-items: center;
+        padding-top: 40px;
+        padding-bottom: 64px;
+      }
+      .hero-copy {
+        flex: 1 1 400px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .hero h1 {
+        font-family: var(--display);
+        font-size: clamp(38px, 5.2vw, 62px);
+        line-height: 1.02;
+        letter-spacing: -0.03em;
+      }
+      .lede {
+        font-size: 19px;
+        line-height: 1.55;
+        color: var(--muted);
+      }
+      .ctas {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      .fine {
+        font-size: 14px;
+        color: var(--soft);
+      }
+      .hero-demo {
+        flex: 1 1 520px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .demo-window {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 24px 60px rgba(28, 27, 25, 0.1);
+        overflow: hidden;
+      }
+      .demo-bar {
+        padding: 12px 16px;
+        border-bottom: 1px solid #eeebe4;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--ink-2);
+      }
+      .demo-body {
+        padding: 20px 22px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        font-size: 15px;
+      }
+      .msg {
+        display: flex;
+        gap: 10px;
+      }
+      .avatar-sq {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        background: #e7e2d7;
+        flex-shrink: 0;
+      }
+      .msg p {
+        margin-top: 2px;
+        color: var(--ink-2);
+      }
+      .composer {
+        border: 2px solid var(--accent);
+        border-radius: 12px;
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .composer-text {
+        font-size: 16px;
+        line-height: 1.5;
+        min-height: 24px;
+      }
+      .caret {
+        display: inline-block;
+        width: 2px;
+        height: 18px;
+        background: var(--accent);
+        vertical-align: -3px;
+        margin-left: 1px;
+        animation: blink 1.1s steps(1) infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+      .composer-foot {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+        background: var(--ink);
+        border-radius: 999px;
+        padding: 6px 12px;
+      }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #3dbe6b;
+      }
+      .composer-hint {
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .avatar-sq {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 700;
+        color: #5c5a55;
+      }
+      .composer.demo {
+        position: relative;
+      }
+      .composer .composer-text {
+        min-height: 48px;
+      }
+      .keyhint {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .keyhint kbd {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        background: #f1eee7;
+        border: 1px solid var(--line-3);
+        border-bottom-width: 3px;
+        border-radius: 6px;
+        padding: 2px 8px;
+        color: var(--ink);
+        transition:
+          background 0.15s,
+          transform 0.15s;
+      }
+      .demo[data-state="listening"] .keyhint kbd,
+      .demo[data-state="transcribing"] .keyhint kbd {
+        background: var(--ink);
+        color: #fff;
+        border-color: var(--ink);
+        transform: translateY(1px);
+      }
+      .demo[data-state="idle"] .keyhint-label::after {
+        content: "Hold to talk";
+      }
+      .demo[data-state="listening"] .keyhint-label::after {
+        content: "Held — speaking";
+      }
+      .demo[data-state="transcribing"] .keyhint-label::after {
+        content: "Released";
+      }
+      .demo[data-state="pasted"] .keyhint-label::after {
+        content: "Released";
+      }
+      .phone-only {
+        display: none;
+      }
+      .linkbtn {
+        background: none;
+        border: 0;
+        padding: 0;
+        font: inherit;
+        color: var(--accent);
+        text-decoration: underline;
+        cursor: pointer;
+        min-height: 44px;
+      }
+
+      /* animated demo states (shared) */
+      .demo {
+        position: relative;
+      }
+      .demo .ph {
+        color: #8a877f;
+      }
+      .demo .d-text {
+        white-space: pre-line;
+      }
+      .demo[data-state="pasted"] .ph {
+        display: none;
+      }
+      .demo:not([data-state="pasted"]) .d-text {
+        display: none;
+      }
+      .demo[data-state="pasted"] .d-text {
+        animation: land 0.9s ease-out;
+      }
+      @keyframes land {
+        0% {
+          background: #dce6fb;
+        }
+        100% {
+          background: transparent;
+        }
+      }
+      .dict-pill {
+        position: absolute;
+        right: 12px;
+        top: -18px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--ink);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        border-radius: 999px;
+        padding: 6px 12px 6px 10px;
+        box-shadow: 0 6px 16px rgba(28, 27, 25, 0.22);
+        transition:
+          opacity 0.2s,
+          transform 0.2s;
+      }
+      .demo[data-state="idle"] .dict-pill {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+      .wave {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        height: 14px;
+      }
+      .wave i {
+        display: block;
+        width: 3px;
+        height: 4px;
+        border-radius: 2px;
+        background: #e5484d;
+      }
+      .demo[data-state="listening"] .wave i {
+        animation: wave 0.9s ease-in-out infinite;
+      }
+      .demo[data-state="listening"] .wave i:nth-child(2) {
+        animation-delay: 0.12s;
+      }
+      .demo[data-state="listening"] .wave i:nth-child(3) {
+        animation-delay: 0.24s;
+      }
+      .demo[data-state="listening"] .wave i:nth-child(4) {
+        animation-delay: 0.36s;
+      }
+      .demo[data-state="listening"] .wave i:nth-child(5) {
+        animation-delay: 0.48s;
+      }
+      @keyframes wave {
+        0%,
+        100% {
+          height: 4px;
+        }
+        50% {
+          height: 14px;
+        }
+      }
+      .demo[data-state="transcribing"] .wave i {
+        background: #f2b544;
+        height: 6px;
+      }
+      .demo[data-state="pasted"] .wave {
+        display: none;
+      }
+      .demo[data-state="pasted"] .d-label::before {
+        content: "✓ ";
+      }
+      .demo[data-state="listening"] .c-input,
+      .demo[data-state="transcribing"] .c-input {
+        opacity: 0.85;
+      }
+
+      /* original hero + demo states (restored from the previous site), plus a rough line */
+      :root {
+        --accent-hover: var(--vc-accent-hover);
+        --muted: var(--vc-ink-2);
+        --soft: var(--vc-muted);
+        --display: var(--vc-font-display);
+        --white: #fff;
+        --line-2: #ece9e2;
+      }
+      .d-rough {
+        display: none;
+        color: var(--faint);
+      }
+      .demo.has-rough[data-state="listening"] .d-rough,
+      .demo.has-rough[data-state="transcribing"] .d-rough {
+        display: inline;
+      }
+      .demo.has-rough[data-state="listening"] .ph,
+      .demo.has-rough[data-state="transcribing"] .ph {
+        display: none;
+      }
+      .demo .d-text {
+        white-space: normal;
+      }
       @media (max-width: 640px) {
         .hero {
-          gap: 32px;
           padding-top: 16px;
+          gap: 36px;
         }
-        .composer-text {
-          min-height: 96px;
+        .phone-only {
+          display: block;
+        }
+        .btn {
+          font-size: 16px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .caret,
+        .demo .d-text {
+          animation: none;
         }
       }
     </style>
@@ -1503,58 +1646,62 @@
             Hold one key and talk. Vocet cuts fillers and false starts, then pastes where you type:
             Google Docs, Notion, Claude Code, Cursor, Slack or Mail.
           </p>
-          <div class="actions">
+          <div class="ctas">
             <a
-              class="btn"
-              href="https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/Vocet_0.2.0_aarch64.dmg"
+              class="btn btn-primary"
+              data-download
+              href="https://github.com/gargankit90/dictation-app/releases"
               >Download for Mac</a
             >
           </div>
           <p class="fine">
             Apple silicon Mac (M1 or later) · macOS 13 or later · signed and notarized
           </p>
+          <p class="fine" data-coming-soon>
+            Version 0.2.0, with cleanup and Connect OpenRouter, is coming soon.
+          </p>
+          <p class="fine phone-only">
+            On your phone? Vocet runs on a Mac.
+            <button type="button" class="linkbtn" id="copy-link">Copy the link for later</button>
+          </p>
         </div>
-        <div class="hero-demo stage" id="hero-demo">
-          <div class="card say">
-            <p class="label">You say</p>
-            <p class="say-text" id="h-say">
-              “Um, hi Sam, uh, attached are today’s notes. The the two open questions are at the
-              top, can we settle them on Thursday?”
-            </p>
-          </div>
+
+        <div class="hero-demo">
           <div
-            class="illo"
+            class="demo-window"
             role="img"
-            aria-label="Illustration: holding the Right Option key, speaking, and the cleaned text pasted into an email reply"
+            aria-label="Animated illustration: holding one key, speaking, and the cleaned-up words pasted into Slack, Mail and an AI chat in turn"
           >
             <div class="illo-bar">
               <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
-              ><strong id="h-app">Mail</strong
-              ><span class="illo-where" id="h-where">Reply to Sam</span>
+              ><strong id="h-app">Slack</strong
+              ><span class="illo-where" id="h-where">#design-review</span>
             </div>
             <div class="demo-body">
               <div class="msg">
-                <span class="avatar-sq" id="h-av" aria-hidden="true">S</span>
+                <span class="avatar-sq" id="h-av" aria-hidden="true">P</span>
                 <div>
-                  <strong id="h-from">Sam Rivera</strong>
-                  <p id="h-msg">Could you send the notes from today’s review?</p>
+                  <strong id="h-from">Priya</strong>
+                  <p id="h-msg">Can you look at the onboarding copy before Friday?</p>
                 </div>
               </div>
-              <div class="composer">
+              <div class="composer demo has-rough" id="hero-demo" data-state="pasted">
                 <div class="dict-pill">
                   <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
                   ><span class="d-label">Done</span>
                 </div>
                 <p class="composer-text c-input">
-                  <span class="ph" id="h-ph">Write your reply</span
+                  <span class="ph" id="h-ph">Message #design-review</span
+                  ><span class="d-rough" id="h-rough"
+                    >Yeah, I’ll, I’ll review the onboarding copy, um, tomorrow morning and send
+                    notes by noon.</span
                   ><span class="d-text" id="h-text"
-                    >Hi Sam, attached are today’s notes. The two open questions are at the top, can
-                    we settle them on Thursday?</span
-                  ><span class="caret"></span>
+                    >I’ll review the onboarding copy tomorrow morning and send notes by noon.</span
+                  ><span class="caret" aria-hidden="true"></span>
                 </p>
                 <div class="composer-foot">
                   <span class="keyhint"><kbd>Right ⌥</kbd><span class="keyhint-label"></span></span>
-                  <span class="composer-hint" id="h-hint">⌘ Enter to send</span>
+                  <span class="composer-hint" id="h-hint">Enter to send</span>
                 </div>
               </div>
             </div>
@@ -1576,7 +1723,7 @@
               <label for="t-doc">Docs / Notion</label>
               <label for="t-mail">Mail</label>
             </div>
-            <div class="use-row stage" id="p-ai">
+            <div class="use-row demo" data-state="pasted" id="p-ai">
               <div class="card say">
                 <p class="label">You say</p>
                 <p class="say-text">
@@ -1615,7 +1762,7 @@
               </div>
             </div>
 
-            <div class="use-row stage" id="p-chat">
+            <div class="use-row demo" data-state="pasted" id="p-chat">
               <div class="card say">
                 <p class="label">You say</p>
                 <p class="say-text">
@@ -1701,7 +1848,7 @@
 
             <!-- Gmail (animated) -->
 
-            <div class="use-row stage" id="p-doc">
+            <div class="use-row demo" data-state="pasted" id="p-doc">
               <div class="card say">
                 <p class="label">You say</p>
                 <p class="say-text">
@@ -1760,7 +1907,7 @@
               </div>
             </div>
 
-            <div class="use-row stage" id="p-mail">
+            <div class="use-row demo" data-state="pasted" id="p-mail">
               <div class="card say">
                 <p class="label">You say</p>
                 <p class="say-text">
@@ -1967,13 +2114,16 @@
           </p>
           <div class="actions">
             <a
-              class="btn"
+              class="btn btn-primary"
               href="https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/Vocet_0.2.0_aarch64.dmg"
               >Download for Mac</a
             >
           </div>
           <p class="fine">
             Apple silicon Mac (M1 or later) · macOS 13 or later · signed and notarized
+          </p>
+          <p class="fine" data-coming-soon>
+            Version 0.2.0, with cleanup and Connect OpenRouter, is coming soon.
           </p>
         </div>
       </section>
@@ -1989,26 +2139,22 @@
     </footer>
 
     <script>
-      // The hero and the app tabs replay one story: hold the key, the rough words appear,
-      // let go, the clean text is typed into the app. Without this script, or with reduced
-      // motion, the page shows the finished state.
+      // Download link. Release day: set DOWNLOAD_URL to the DMG,
+      // https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/Vocet_0.2.0_aarch64.dmg
+      // and the "coming soon" lines hide themselves.
+      var DOWNLOAD_URL = "https://github.com/gargankit90/dictation-app/releases";
       (function () {
-        var reduce =
-          window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        document.querySelectorAll("[data-download]").forEach(function (a) {
+          a.href = DOWNLOAD_URL;
+        });
+        if (/\.dmg$/.test(DOWNLOAD_URL))
+          document.querySelectorAll("[data-coming-soon]").forEach(function (e) {
+            e.hidden = true;
+          });
+
+        // Hero: one composer that changes app on every loop (original order), and the app tabs.
+        // idle -> listening (the rough words) -> transcribing -> pasted (the clean text).
         var scenes = [
-          {
-            app: "Mail",
-            where: "Reply to Sam",
-            av: "S",
-            from: "Sam Rivera",
-            msg: "Could you send the notes from today’s review?",
-            ph: "Write your reply",
-            hint: "⌘ Enter to send",
-            rough:
-              "Um, hi Sam, uh, attached are today’s notes. The the two open questions are at the top, can we settle them on Thursday?",
-            clean:
-              "Hi Sam, attached are today’s notes. The two open questions are at the top, can we settle them on Thursday?",
-          },
           {
             app: "Slack",
             where: "#design-review",
@@ -2019,166 +2165,164 @@
             hint: "Enter to send",
             rough:
               "Yeah, I’ll, I’ll review the onboarding copy, um, tomorrow morning and send notes by noon.",
-            clean: "I’ll review the onboarding copy tomorrow morning and send notes by noon.",
+            text: "I’ll review the onboarding copy tomorrow morning and send notes by noon.",
           },
           {
-            app: "Cursor",
-            where: "Chat",
+            app: "Mail",
+            where: "Reply to Sam",
+            av: "S",
+            from: "Sam Rivera",
+            msg: "Could you send the notes from today’s review?",
+            ph: "Write your reply",
+            hint: "⌘ Enter to send",
+            rough:
+              "Um, hi Sam, uh, attached are today’s notes. The the two open questions are at the top, can we settle them on Thursday?",
+            text: "Hi Sam, attached are today’s notes. The two open questions are at the top, can we settle them on Thursday?",
+          },
+          {
+            app: "ChatGPT · Claude",
+            where: "New chat",
             av: "AI",
-            from: "Cursor",
-            msg: "What should I change?",
-            ph: "Ask about your code",
+            from: "Assistant",
+            msg: "What would you like to work on?",
+            ph: "Ask anything",
             hint: "Enter to send",
             rough:
-              "Uh, so can you push it to get hub and, um, run pie test on the the login module.",
-            clean: "Can you push it to GitHub and run pytest on the login module.",
+              "Uh, so can you turn these meeting notes into into three action items, each with an owner and a due date.",
+            text: "Can you turn these meeting notes into three action items, each with an owner and a due date.",
           },
         ];
-        function $(el, sel) {
-          return el.querySelector(sel);
-        }
+        var heroDemo = document.getElementById("hero-demo");
+        var sceneIdx = 0;
         function setText(id, v) {
-          var e = document.getElementById(id);
-          if (e) e.textContent = v;
+          var el = document.getElementById(id);
+          if (el) el.textContent = v;
         }
-        function sceneInto(st, sc) {
-          setText("h-app", sc.app);
-          setText("h-where", sc.where);
-          setText("h-av", sc.av);
-          setText("h-from", sc.from);
-          setText("h-msg", sc.msg);
-          setText("h-ph", sc.ph);
-          setText("h-hint", sc.hint);
-          st._rough = "“" + sc.rough + "”";
-          st._clean = sc.clean;
+        if (heroDemo) {
+          heroDemo._next = function () {
+            var s = scenes[sceneIdx];
+            sceneIdx = (sceneIdx + 1) % scenes.length;
+            setText("h-app", s.app);
+            setText("h-where", s.where);
+            setText("h-av", s.av);
+            setText("h-from", s.from);
+            setText("h-msg", s.msg);
+            setText("h-ph", s.ph);
+            setText("h-rough", s.rough);
+            setText("h-text", s.text);
+            setText("h-hint", s.hint);
+          };
         }
-        var stages = [].slice.call(document.querySelectorAll(".stage"));
-        stages.forEach(function (st) {
-          st._say = $(st, ".say-text");
-          st._out = $(st, ".d-text");
-          st._label = $(st, ".d-label");
-          st._rough = st._say.textContent.replace(/\s+/g, " ").trim();
-          st._clean = st._out.textContent.replace(/\s+/g, " ").trim();
-          st._timers = [];
-          st._hero = st.id === "hero-demo";
-          st._scene = 0;
-          st._inView = false;
-        });
-        function state(st, s, label) {
-          st.dataset.state = s;
-          if (st._label) st._label.textContent = label || "Done";
-        }
-        function later(st, ms, fn) {
-          st._timers.push(setTimeout(fn, ms));
-        }
-        function stop(st) {
-          st._timers.forEach(clearTimeout);
-          st._timers = [];
-        }
-        function finish(st) {
-          stop(st);
-          st._say.textContent = st._rough;
-          st._out.textContent = st._clean;
-          state(st, "pasted", "Done");
-        }
-        function rowSelected(st) {
-          if (st._hero) return true;
-          var r = document.getElementById("t-" + st.id.slice(2));
-          return !!(r && r.checked);
-        }
-        function play(st) {
-          stop(st);
-          if (st._hero && st._scene >= 0) sceneInto(st, scenes[st._scene]);
-          var words = st._rough.split(" "),
-            chars = st._clean,
-            t = 0;
-          st._say.textContent = "";
-          st._out.textContent = "";
-          state(st, "idle", "");
-          t = 500;
-          later(st, t, function () {
-            state(st, "listening", "Listening…");
+
+        // Phone visitors: copy the link to open on a Mac later
+        var copyBtn = document.getElementById("copy-link");
+        if (copyBtn)
+          copyBtn.addEventListener("click", function () {
+            var url = "https://vocetlabs.com/";
+            if (navigator.share) {
+              navigator.share({ title: "Vocet for Mac", url: url }).catch(function () {});
+              return;
+            }
+            if (navigator.clipboard)
+              navigator.clipboard.writeText(url).then(
+                function () {
+                  copyBtn.textContent = "Link copied";
+                },
+                function () {},
+              );
           });
-          words.forEach(function (w, i) {
-            later(st, t + 200 * (i + 1), function () {
-              st._say.textContent = words.slice(0, i + 1).join(" ");
-            });
-          });
-          t += 200 * words.length + 500;
-          later(st, t, function () {
-            state(st, "transcribing", "Cleaning up…");
-          });
-          t += 800;
-          later(st, t, function () {
-            state(st, "typing", "Typing…");
-          });
-          var step = Math.max(1, Math.ceil(chars.length / 60));
-          for (var n = step; n < chars.length + step; n += step) {
-            (function (k) {
-              later(st, t + 28 * (k / step), function () {
-                st._out.textContent = chars.slice(0, k);
-              });
-            })(n);
-          }
-          t += 28 * Math.ceil(chars.length / step) + 200;
-          later(st, t, function () {
-            st._out.textContent = chars;
-            state(st, "pasted", "Done");
-          });
-          later(st, t + 3500, function () {
-            next(st);
-          });
+
+        var reduce =
+          window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        var labels = {
+          idle: "",
+          listening: "Listening…",
+          transcribing: "Transcribing…",
+          pasted: "Done",
+        };
+        function setState(d, s) {
+          d.dataset.state = s;
+          var l = d.querySelector(".d-label");
+          if (l) l.textContent = labels[s];
         }
-        function next(st) {
-          if (st._hero) {
-            st._scene = (st._scene + 1) % scenes.length;
-            play(st);
-            return;
-          }
-          var radios = [].slice.call(document.querySelectorAll('.tabset input[type="radio"]'));
+        function stop(d) {
+          (d._timers || []).forEach(clearTimeout);
+          d._timers = [];
+        }
+        var radios = [].slice.call(document.querySelectorAll('.tabset input[type="radio"]'));
+        function advanceTab() {
           var i = radios.findIndex(function (r) {
             return r.checked;
           });
           radios[(i + 1) % radios.length].checked = true;
-          refresh();
+          demos.forEach(stop);
+          refreshDemos();
         }
-        function refresh() {
-          stages.forEach(function (st) {
-            if (st._inView && rowSelected(st)) {
-              if (!st._timers.length) play(st);
+        function play(d) {
+          stop(d);
+          if (reduce) {
+            setState(d, "pasted");
+            return;
+          }
+          if (d._next) d._next();
+          setState(d, "idle");
+          d._timers = [
+            setTimeout(function () {
+              setState(d, "listening");
+            }, 700),
+            setTimeout(function () {
+              setState(d, "transcribing");
+            }, 3000),
+            setTimeout(function () {
+              setState(d, "pasted");
+            }, 3800),
+            setTimeout(function () {
+              if (d.classList.contains("use-row")) advanceTab();
+              else play(d);
+            }, 9000),
+          ];
+        }
+        var demos = [].slice.call(document.querySelectorAll(".demo"));
+        function shown(d) {
+          if (!d.classList.contains("use-row")) return true;
+          var r = document.getElementById("t-" + d.id.slice(2));
+          return !!(r && r.checked);
+        }
+        function refreshDemos() {
+          demos.forEach(function (d) {
+            if (shown(d) && d._inView) {
+              if (!d._timers || !d._timers.length) play(d);
             } else {
-              finish(st);
+              stop(d);
+              setState(d, "pasted");
             }
           });
         }
-        if (reduce) {
-          stages.forEach(finish);
-        } else {
-          [].forEach.call(document.querySelectorAll('.tabset input[type="radio"]'), function (r) {
-            r.addEventListener("change", function () {
-              stages.forEach(stop);
-              refresh();
-            });
+        radios.forEach(function (r) {
+          r.addEventListener("change", function () {
+            demos.forEach(stop);
+            refreshDemos();
           });
-          if ("IntersectionObserver" in window) {
-            var io = new IntersectionObserver(
-              function (es) {
-                es.forEach(function (e) {
-                  e.target._inView = e.isIntersecting;
-                });
-                refresh();
-              },
-              { threshold: 0.4 },
-            );
-            stages.forEach(function (st) {
-              io.observe(st);
-            });
-          } else {
-            stages.forEach(function (st) {
-              st._inView = true;
-            });
-            refresh();
-          }
+        });
+        if (reduce) return;
+        if ("IntersectionObserver" in window) {
+          var io = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (e) {
+                e.target._inView = e.isIntersecting;
+              });
+              refreshDemos();
+            },
+            { threshold: 0.4 },
+          );
+          demos.forEach(function (d) {
+            io.observe(d);
+          });
+        } else {
+          demos.forEach(function (d) {
+            d._inView = true;
+          });
+          refreshDemos();
         }
       })();
     </script>
