@@ -32,7 +32,6 @@ import {
   KEY_SAVED_COPY,
   LOCAL_ONLY,
   MODEL_COPY,
-  SpeechStep,
 } from "./onboarding/SpeechStep";
 import {
   ASKED_AGAIN,
@@ -992,6 +991,16 @@ describe("Speech", () => {
     expect(backend.named("download_local_model")).toEqual([]);
   });
 
+  it("Q4 round 7: a missing speech model starts the download even while the cleanup model downloads", async () => {
+    backend.cleanup = [{ ...GEMMA, state: "downloading", downloaded_bytes: 1_000_000_000 }];
+    show();
+    await screen.findByText("English · 477 MB");
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Download and continue" }));
+    await screen.findByText("Two permissions");
+    expect(backend.named("download_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
+  });
+
   it("stays on the step and says why when the download can't start", async () => {
     backend.handle = ((original) => (command: string, payload: unknown) => {
       if (command === "choose_local_model") {
@@ -1029,30 +1038,21 @@ describe("Speech", () => {
     });
   }
 
-  it("Q4 round 6: pressing the preselected OpenRouter card records the choice in state", () => {
+  it("Q4 round 6: pressing the preselected OpenRouter card keeps the choice after Back", async () => {
     // A click on a checked radio fires no change, so the card records it on click.
-    const picks: string[] = [];
-    render(
-      <SpeechStep
-        parts={{ back: null, strip: null, error: null, busy: false, exitBlock: null }}
-        kept={null}
-        onPick={(choice) => picks.push(choice)}
-        settings={backend.settings}
-        onStored={() => undefined}
-        models={backend.models}
-        cleanup={null}
-        modelsError={null}
-        refreshModels={() => Promise.resolve()}
-        refreshEngine={() => Promise.resolve()}
-        onContinue={() => undefined}
-      />,
+    show();
+    await screen.findByText("English · 477 MB");
+    const card = () => screen.getByRole<HTMLInputElement>("radio", { name: /Use OpenRouter/ });
+    expect(card().checked).toBe(true);
+    fireEvent.click(card());
+    fireEvent.click(primary("Continue"));
+    await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await screen.findByText("How should Vocet transcribe?");
+    expect(card().checked).toBe(true);
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: "Use this Mac" }).checked).toBe(
+      false,
     );
-    const card = screen.getByRole<HTMLInputElement>("radio", { name: "Use OpenRouter" });
-    expect(card.checked).toBe(true);
-    expect(picks).toEqual([]);
-    fireEvent.click(card);
-    expect(picks).toEqual(["key"]);
-    expect(card.checked).toBe(true);
   });
 
   it("Q3: selecting OpenRouter shows no form, only Continue", async () => {

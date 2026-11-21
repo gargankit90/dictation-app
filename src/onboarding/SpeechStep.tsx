@@ -152,10 +152,13 @@ function SpeechForm({
     await makeRoomFor(chosen.id);
     // The download is speech, then cleanup: resume it while either is missing
     // (a restart during the cleanup part leaves the speech model ready). A
-    // running cleanup download needs nothing started.
+    // running cleanup download needs nothing started, but a missing speech
+    // model always starts one.
     const gemma = await currentCleanup();
-    const missing = chosen.state !== "ready" || (gemma !== null && gemma.state !== "ready");
-    if (missing && gemma?.state !== "downloading") {
+    const speechMissing = chosen.state !== "ready";
+    const cleanupMissing =
+      gemma !== null && gemma.state !== "ready" && gemma.state !== "downloading";
+    if (speechMissing || cleanupMissing) {
       const failed = await startDownload(chosen.id);
       if (failed !== null) return failed;
     }
