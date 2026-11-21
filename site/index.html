@@ -6,13 +6,13 @@
     <title>Vocet: Mac dictation that cleans up what you say</title>
     <meta
       name="description"
-      content="Hold one key and talk. Vocet removes fillers and false starts, fixes punctuation and pastes clean text into any Mac app. Made for students and engineers. Free beta."
+      content="Free Mac dictation for students and engineers. Vocet removes fillers and false starts, then pastes clean text where you type. Run it with OpenRouter or offline on your Mac."
     />
     <link rel="canonical" href="https://vocetlabs.com/" />
     <meta property="og:title" content="Vocet: Mac dictation that cleans up what you say" />
     <meta
       property="og:description"
-      content="Speak rough. Paste clean, in any Mac app. Free beta for students and engineers."
+      content="Speak rough. Paste clean. Free beta for students and engineers."
     />
     <meta property="og:url" content="https://vocetlabs.com/" />
     <meta property="og:type" content="website" />
@@ -21,18 +21,18 @@
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="Spoken: um so in the auth function, no wait, the login handler, can you add a retry. Pasted: In the login handler, add a retry (three attempts)."
+      content="Spoken: um so in the auth function, no wait, the login handler, add a retry, like three times. Pasted: In the login handler, add a retry (three attempts)."
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Vocet: Mac dictation that cleans up what you say" />
     <meta
       name="twitter:description"
-      content="Speak rough. Paste clean, in any Mac app. Free beta for students and engineers."
+      content="Speak rough. Paste clean. Free beta for students and engineers."
     />
     <meta name="twitter:image" content="https://vocetlabs.com/og.png" />
     <meta
       name="twitter:image:alt"
-      content="Spoken: um so in the auth function, no wait, the login handler, can you add a retry. Pasted: In the login handler, add a retry (three attempts)."
+      content="Spoken: um so in the auth function, no wait, the login handler, add a retry, like three times. Pasted: In the login handler, add a retry (three attempts)."
     />
     <script type="application/ld+json">
       {
@@ -568,10 +568,10 @@
 
     <main>
       <section class="wrap hero">
-        <h1>Speak rough. Paste clean, in any Mac app.</h1>
+        <h1>Speak rough. Paste clean.</h1>
         <p class="lede">
-          Hold one key and talk. Vocet cleans up fillers, false starts and punctuation, then pastes
-          the text where your cursor is: Claude Code, Cursor, Google Docs, Notion, Slack or Mail.
+          Hold one key and talk. Vocet cuts fillers and false starts, fixes punctuation, and pastes
+          where you type: Google Docs, Notion, Claude Code, Cursor, Slack or Mail.
         </p>
         <div class="actions">
           <a class="btn" data-download href="https://github.com/gargankit90/dictation-app/releases"
@@ -579,14 +579,22 @@
           >
           <a href="https://github.com/gargankit90/dictation-app">Source on GitHub</a>
         </div>
-        <p class="fine">Free beta. Needs macOS 13 or later and an Apple silicon Mac.</p>
+        <p class="fine">macOS 13 or later · M1 or newer Mac · Free beta</p>
 
         <div class="ba">
           <div class="card">
-            <p class="label">You say</p>
+            <p class="label">Student says</p>
+            <p>“so basically the treaty failed because, well actually, it lacked enforcement”</p>
+          </div>
+          <div class="card after">
+            <p class="label">Vocet pastes</p>
+            <p>The treaty failed because it lacked enforcement.</p>
+          </div>
+          <div class="card">
+            <p class="label">Engineer says</p>
             <p>
-              “um so in the auth function, no wait, the login handler, can you add a retry, like
-              three times”
+              “um so in the auth function, no wait, the login handler, add a retry, like three
+              times”
             </p>
           </div>
           <div class="card after">
@@ -603,15 +611,15 @@
             <div class="card">
               <h3>Engineers</h3>
               <p>
-                Long prompts to Claude Code, Cursor and Codex. PR and code-review comments. Slack
-                replies. Docs.
+                Long prompts for Claude Code, Cursor or Codex. Code-review comments. Slack replies.
+                Docs.
               </p>
             </div>
             <div class="card">
               <h3>Students</h3>
               <p>
-                Lecture and reading notes. First drafts of essays and reports. Emails. Questions to
-                an AI tutor.
+                Lecture notes. Essay and lab drafts. Prompts to AI tutors and coding assistants.
+                Emails to professors.
               </p>
             </div>
           </div>
@@ -622,21 +630,20 @@
         <h2>Two ways to run</h2>
         <div class="cols">
           <div class="card">
-            <h3>Connect OpenRouter</h3>
+            <h3>Connect OpenRouter (default)</h3>
             <p>
-              Vocet is free. Click Connect OpenRouter and authorize your account. If you need
-              credits, OpenRouter’s minimum top-up is $5. About $0.70 per 1,000 dictations.
+              Vocet is free. OpenRouter, the AI service you pay directly, charges about $0.70 per
+              1,000 dictations; the minimum top-up is $5.
             </p>
           </div>
           <div class="card">
-            <h3>On this Mac only</h3>
-            <p>Free and private. A one-time 4.4 GB download, works offline, English.</p>
+            <h3>On this Mac: $0, no account or card</h3>
+            <p>Offline, English. One-time 4.4 GB download. Your audio and text stay on your Mac.</p>
           </div>
         </div>
         <p class="note">
-          We publish our cleanup prompts, model choices and
-          <a href="https://github.com/gargankit90/dictation-app/tree/main/eval">eval harness</a> on
-          GitHub.
+          See the cleanup prompts, models and accuracy tests we use on
+          <a href="https://github.com/gargankit90/dictation-app/tree/main/eval">GitHub</a>.
         </p>
       </section>
 
@@ -647,18 +654,18 @@
             <div class="card">
               <h3>Connect OpenRouter</h3>
               <p>
-                Audio goes through OpenRouter to OpenAI for transcription. The text goes through
-                OpenRouter to a zero-data-retention cleanup provider. There is no Vocet server.
+                OpenRouter sends your audio to OpenAI to turn it into text and routes the text to a
+                provider for cleanup. Vocet doesn’t run a server that receives your dictations.
               </p>
             </div>
             <div class="card">
-              <h3>On this Mac only</h3>
-              <p>Audio and text stay on your Mac.</p>
+              <h3>On this Mac</h3>
+              <p>Your audio and dictation text stay on your Mac.</p>
             </div>
           </div>
           <p class="note">
-            In both modes your history stays on your Mac. Anonymous usage and error reports are on
-            by default and can be turned off in Settings → Privacy. Details:
+            In both modes your history stays on your Mac. Usage and error reports are on by default;
+            turn them off in Settings → Privacy. Details:
             <a href="https://github.com/gargankit90/dictation-app/blob/main/docs/privacy.md"
               >privacy notes</a
             >.
@@ -671,37 +678,37 @@
         <details>
           <summary>What does it cost?</summary>
           <p>
-            Vocet is free during the beta. With On this Mac only there is nothing else to pay. With
-            Connect OpenRouter you pay OpenRouter for what you use: about $0.70 per 1,000
-            dictations, with a $5 minimum top-up.
+            Vocet is free during the beta. On this Mac there is nothing else to pay. With Connect
+            OpenRouter you pay OpenRouter for what you use: about $0.70 per 1,000 dictations, with a
+            $5 minimum top-up.
           </p>
         </details>
         <details>
-          <summary>How is this different from macOS Dictation?</summary>
+          <summary>What does Vocet clean up?</summary>
           <p>
-            Cleanup. Dictation types what you said, fillers and false starts included. Vocet removes
-            them and fixes the punctuation before it pastes.
+            Fillers like “um”, false starts and self-corrections, and punctuation. It keeps what you
+            meant and drops how you stumbled getting there.
           </p>
         </details>
         <details>
-          <summary>Why does it need Accessibility?</summary>
+          <summary>Why does Vocet need Accessibility access?</summary>
           <p>
             To press paste for you in the app you are using, and to notice the hotkey. Vocet does
             not read what is on your screen.
           </p>
         </details>
         <details>
-          <summary>What if the paste misses?</summary>
+          <summary>What if my text doesn’t paste?</summary>
           <p>
             Use Copy last. It puts your most recent text back on the clipboard so you can paste it
             yourself.
           </p>
         </details>
         <details>
-          <summary>Is the code available?</summary>
+          <summary>Can I see the source code?</summary>
           <p>
-            It is source available, under the Functional Source License (FSL-1.1-ALv2). You can read
-            and build the code, and each version becomes Apache 2.0 after two years.
+            Yes. It is source available under the Functional Source License (FSL-1.1-ALv2). You can
+            read and build the code, and each version becomes Apache 2.0 after two years.
           </p>
         </details>
       </section>
