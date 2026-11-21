@@ -80,10 +80,10 @@ obs_mode() {
   obs_shot "2-speech-hindi-680x520-$mode"
   obs_size 740 560
   ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" English
-  ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" "Use my own OpenRouter key"
+  ax_ok radio-press "$APP_NAME" "$OBS_WINDOW" "Use OpenRouter"
   obs_shot "2-speech-own-key-selected-$mode"
   ax_ok press "$APP_NAME" "$OBS_WINDOW" Continue
-  expect "$mode: Connect your key" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Continue unlocks after Test" 10
+  expect "$mode: Connect your key" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Continue unlocks once OpenRouter" 10
   obs_shot "2-key-none-$mode"
   obs_size 680 520
   obs_shot "2-key-none-680x520-$mode"
@@ -94,7 +94,7 @@ obs_mode() {
   ax_ok press "$APP_NAME" "$OBS_WINDOW" "Download and continue"
   # The server holds the download part way, so each state below stays on screen
   # until the picture is taken.
-  expect "$mode: the strip" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Downloading English" 15
+  expect "$mode: the strip" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Downloading on-device models" 15
   obs_shot "3-permissions-download-strip-$mode"
   ax_ok press "$APP_NAME" "$OBS_WINDOW" Cancel
   expect "$mode: paused" ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Download paused" 10
@@ -116,7 +116,7 @@ obs_mode() {
   ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Two permissions" 10
   vm "rm -rf $(q "$OBS_MODELS")"
   ax_ok press "$APP_NAME" "$OBS_WINDOW" Resume
-  ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Downloading English" 10
+  ax_ok wait-text "$APP_NAME" "$OBS_WINDOW" "Downloading on-device models" 10
   expect "$mode: quit mid-download" quit_from_tray
   clear_app_log
   obs_launch

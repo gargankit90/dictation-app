@@ -1,18 +1,17 @@
-// Q4: the cleanup model's line under "On this Mac" in Settings, with the app's commands replaced
-// by a fake backend.
+// Q4: "On this Mac" is one download (owner): the speech model and the
+// cleanup model shown as one, with summed sizes and progress.
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { LocalModelInfo_Serialize } from "../bindings";
-import { CleanupStatus, cleanupLine } from "./CleanupModel";
+import { withCleanup } from "./CleanupModel";
+import { downloadingText } from "./modelRow";
 
-const GEMMA: LocalModelInfo_Serialize = {
-  id: "gemma-4-e2b-it-q4_k_m",
-  name: "Gemma 4 E2B",
-  languages: "English",
+const SPEECH: LocalModelInfo_Serialize = {
+  id: "orukqwen-asr-1.7b-q4_k_m",
+  name: "OrukQwen 1.7B",
+  languages: "English only",
   language_codes: ["en"],
-  size_bytes: 3_106_738_272,
+  size_bytes: 1_319_830_656,
   downloaded_bytes: 0,
   state: "missing",
   resumed_from_bytes: null,
@@ -21,81 +20,54 @@ const GEMMA: LocalModelInfo_Serialize = {
   default: true,
 };
 
-let model: LocalModelInfo_Serialize;
-let calls: { command: string; args: unknown }[];
+const GEMMA: LocalModelInfo_Serialize = {
+  ...SPEECH,
+  id: "gemma-4-e2b-it-q4_k_m",
+  name: "Gemma 4 E2B",
+  languages: "English",
+  size_bytes: 3_106_738_272,
+};
 
-beforeEach(() => {
-  model = { ...GEMMA };
-  calls = [];
-  mockIPC((command, args) => {
-    calls.push({ command, args });
-    switch (command) {
-      case "list_cleanup_models":
-        return [model];
-      case "download_local_model":
-        model = { ...model, state: "downloading", downloaded_bytes: 1_000_000_000 };
-        return null;
-      case "cancel_local_model_download":
-        model = { ...model, state: "partial" };
-        return null;
-      default:
-        throw new Error(`unexpected command ${command}`);
-    }
+describe("withCleanup", () => {
+  it("sums the sizes and keeps the speech model's id and languages", () => {
+    const both = withCleanup(SPEECH, GEMMA);
+    expect(both.id).toBe(SPEECH.id);
+    expect(both.language_codes).toEqual(["en"]);
+    expect(both.size_bytes).toBe(4_426_568_928);
+    expect(both.state).toBe("missing");
+    expect(downloadingText(both)).toBe("Downloading on-device models (speech + cleanup) · 4.4 GB");
   });
-});
 
-afterEach(() => {
-  cleanup();
-  clearMocks();
-});
-
-describe("cleanupLine", () => {
-  it("offers one action per state, with the size, and says nothing leaves the Mac", () => {
-    expect(cleanupLine(GEMMA)).toEqual({
-      text: "Cleanup (punctuation, fillers) · 3107 MB · not downloaded",
-      action: "download",
-      progress: null,
-    });
-    expect(cleanupLine({ ...GEMMA, state: "downloading", downloaded_bytes: 500_000_000 })).toEqual({
-      text: "Cleanup (punctuation, fillers) · 3107 MB · ↓ 500 of 3107 MB",
-      action: "cancel",
-      progress: { value: 500_000_000, max: 3_106_738_272 },
-    });
-    expect(cleanupLine({ ...GEMMA, state: "partial", downloaded_bytes: 2_000_000 }).action).toBe(
-      "resume",
+  it("is one progress: the speech model's, then the cleanup model's on top", () => {
+    const speech = withCleanup(
+      { ...SPEECH, state: "downloading", downloaded_bytes: 500_000_000 },
+      GEMMA,
     );
-    expect(cleanupLine({ ...GEMMA, state: "ready" })).toEqual({
-      text: "Cleanup (punctuation, fillers) · 3107 MB · ✓ Ready · Private: nothing leaves this Mac",
-      action: null,
-      progress: null,
-    });
-  });
-});
+    expect(speech.state).toBe("downloading");
+    expect(speech.downloaded_bytes).toBe(500_000_000);
 
-describe("CleanupStatus", () => {
-  it("starts the cleanup model's download", async () => {
-    render(<CleanupStatus model={model} />);
-    fireEvent.click(screen.getByRole("button", { name: "Download cleanup" }));
-    await waitFor(() => {
-      expect(calls.find((call) => call.command === "download_local_model")?.args).toEqual({
-        id: GEMMA.id,
-      });
-    });
-  });
-
-  it("shows progress and cancels a running download", async () => {
-    render(
-      <CleanupStatus model={{ ...GEMMA, state: "downloading", downloaded_bytes: 1_000_000_000 }} />,
+    const cleanup = withCleanup(
+      { ...SPEECH, state: "ready" },
+      { ...GEMMA, state: "downloading", downloaded_bytes: 1_000_000_000, restarted: true },
     );
-    expect(screen.getByRole("progressbar", { name: "Cleanup model download" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel cleanup" }));
-    await waitFor(() => {
-      expect(calls.map((call) => call.command)).toContain("cancel_local_model_download");
-    });
+    expect(cleanup.state).toBe("downloading");
+    expect(cleanup.downloaded_bytes).toBe(1_319_830_656 + 1_000_000_000);
+    expect(cleanup.restarted).toBe(true);
   });
 
-  it("offers nothing once it is ready", () => {
-    render(<CleanupStatus model={{ ...GEMMA, state: "ready" }} />);
-    expect(screen.queryByRole("button")).toBeNull();
+  it("is ready only when both are, and paused or failed when the cleanup model is", () => {
+    expect(withCleanup({ ...SPEECH, state: "ready" }, { ...GEMMA, state: "ready" }).state).toBe(
+      "ready",
+    );
+    expect(withCleanup({ ...SPEECH, state: "ready" }, { ...GEMMA, state: "partial" }).state).toBe(
+      "partial",
+    );
+    const failed = withCleanup({ ...SPEECH, state: "ready" }, { ...GEMMA, error: "No space." });
+    expect(failed.error).toBe("No space.");
+  });
+
+  it("without a cleanup model, it is the speech model", () => {
+    expect(withCleanup(SPEECH, null)).toBe(SPEECH);
+    expect(withCleanup(SPEECH, undefined)).toBe(SPEECH);
   });
 });

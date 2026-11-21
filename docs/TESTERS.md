@@ -10,13 +10,12 @@ You need an **Apple Silicon Mac (M1 or newer; Intel Macs are not supported)**
 with **macOS 13 (Ventura) or newer**, and one of two ways to turn speech into
 text:
 
-- **On this Mac**: you download the models once (English speech
-  recognition, about 1.3 GB, and a cleanup model that adds punctuation and
-  removes fillers, about 3.1 GB). Your speech then stays on the Mac. It is
-  a choice in setup, not the default.
-- **Your own key**: an internet connection and an OpenRouter API key (you
-  pay OpenRouter for what you use). Your speech goes through OpenRouter to
+- **OpenRouter** (the default): an internet connection and an OpenRouter account (you
+  pay OpenRouter for what you use; Connect OpenRouter makes the key). Your speech goes through OpenRouter to
   OpenAI for transcription, and the text to a cleanup model that keeps no data.
+- **On this Mac**: one download (about 4.4 GB: English speech recognition,
+  then a cleanup model that adds punctuation and removes fillers). Your
+  speech then stays on the Mac. It is a choice in setup, not the default.
 
 ## 1. Install
 
@@ -59,17 +58,16 @@ buttons. A permission step moves on by itself once you have allowed it.
 1. **Welcome.** Click **Get started**.
 2. **Speech.** Pick the language you will mostly speak (English, Hindi, or
    **More…**). Then choose how to turn speech into text:
-   - **On this Mac only** (not selected by default): select it, then click
-     **Download and continue**. The speech model (about 1.3 GB) and then the
-     cleanup model (about 3.1 GB) download once; they keep going while you
-     do the next steps. A language the on-device models don't cover needs
-     your own key.
-   - **Use my own OpenRouter key**: click **Continue**, paste your key and
-     click **Test & Save**. Create the key at
-     <https://openrouter.ai/settings/keys> and add credits on OpenRouter.
-     A wrong key shows the reason and nothing is saved. A good one is kept
-     in your macOS Keychain and never shown again. It is sent only to
+   - **Use OpenRouter** (selected by default): click **Continue**, then **Connect OpenRouter**.
+     Your browser opens OpenRouter; sign in and allow it. A new account needs
+     a few dollars of credit: **Add credits** opens that page. The key
+     OpenRouter makes is kept in your macOS Keychain and never shown in
+     full. If the browser can't come back, **Paste a key instead**. It is sent only to
      OpenRouter.
+   - **On this Mac only** (not selected by default): select it, then click
+     **Download and continue**. One download of about 4.4 GB (speech, then
+     cleanup) with one progress bar; it keeps going while you do the next
+     steps. A language the on-device models don't cover needs OpenRouter.
 3. **Permissions.** Click **Allow** for the **Microphone** (macOS asks once;
    choose **Allow**) and for **Accessibility** (the dictation key and typing
    into other apps need it). For Accessibility, switch **Vocet** on under
@@ -91,9 +89,11 @@ Menu-bar icon > **Settings…** has these sections:
 - **General**: open Vocet at login, and **Check for updates** (**Check now**).
 - **Dictation**: the **dictation key** (hold it to talk, release to paste),
   **Language**, and a **Test microphone** check.
-- **Speech**: the list of engines. Select a row to use it: a model on this
-  Mac (download it first), or **Your own key** (its own sheet: pick the
-  provider, paste a key, **Test** it, **Save** it).
+- **Speech**: the list of engines. Select a row to use it: **OpenRouter**
+  (first; its own sheet: **Connect OpenRouter**, **Add credits**,
+  **Disconnect**), or **On this Mac** (download it first: one download of
+  speech and cleanup models, about 4.4 GB, with one progress bar and one
+  **Pause**).
 - **Privacy**: the **Share usage and error events** switch.
 - **History**: your recent dictations, with **Copy** and **Delete** on each,
   how many to **Keep** (10, 25, 50 or 100, or off) and **Clear history…**.
@@ -163,7 +163,7 @@ and install it over the old app, as in section 1.
 ## Privacy
 
 - **Your words.** With **On this Mac**, your speech is turned into text on the
-  Mac and not sent anywhere. With **Your own key**, it goes through OpenRouter.
+  Mac and not sent anywhere. With **OpenRouter**, it goes through OpenRouter.
   Your history stays on this Mac. Audio stays in memory.
 - **Anonymous usage and error events are on by default.** Turn them off with
   **Share usage and error events** in Settings > Privacy (or on the last setup

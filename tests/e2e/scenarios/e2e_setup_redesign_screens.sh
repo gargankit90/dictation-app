@@ -76,30 +76,28 @@ srs_mode() {
   expect "$mode: choose Gujarati" \
     ax_ok combo-pick "$APP_NAME" "$SRS_WINDOW" ob-language gujarati "Gujarati (ગુજરાતી)"
   expect "$mode: Gujarati needs the key" \
-    ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Gujarati needs your own key" 10
+    ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Gujarati needs OpenRouter" 10
   srs_settled_shot "speech-uncovered-$mode"
   ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" English
-  ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" "Use my own OpenRouter key"
+  ax_ok radio-press "$APP_NAME" "$SRS_WINDOW" "Use OpenRouter"
   expect "$mode: no form yet" ax_ok wait-no-text "$APP_NAME" "$SRS_WINDOW" "Test & Save" 2
   srs_settled_shot "speech-own-key-selected-$mode"
   ax_ok press "$APP_NAME" "$SRS_WINDOW" Continue
-  expect "$mode: Connect your key" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Connect your key" 10
-  expect "$mode: no key yet" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Continue unlocks after Test" 10
+  expect "$mode: Connect your key" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Connect OpenRouter" 10
+  expect "$mode: no key yet" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Continue unlocks once OpenRouter" 10
   srs_settled_shot "key-none-$mode"
   obs_size 680 520
   srs_settled_shot "key-none-680x520-$mode"
   obs_size 740 560
+  ax_ok press "$APP_NAME" "$SRS_WINDOW" "Paste a key instead"
   ax_ok secret-set "$APP_NAME" "$SRS_WINDOW" api-key "$PROVIDER_GOOD_KEY"
   ax_ok press "$APP_NAME" "$SRS_WINDOW" "Test & Save"
-  expect "$mode: Key saved" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Key saved" 15
+  expect "$mode: Connected" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Connected to OpenRouter" 15
   API_KEY_STORED=1
   srs_settled_shot "key-saved-$mode"
   obs_size 680 520
   srs_settled_shot "key-saved-680x520-$mode"
   obs_size 740 560
-  ax_ok press "$APP_NAME" "$SRS_WINDOW" Replace
-  expect "$mode: Replace shows the field" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Test & Save" 5
-  srs_settled_shot "key-replace-$mode"
   ax_ok press "$APP_NAME" "$SRS_WINDOW" Continue
   expect "$mode: Permissions" ax_ok wait-text "$APP_NAME" "$SRS_WINDOW" "Records only while you hold your key" 15
   srs_settled_shot "permissions-$mode"

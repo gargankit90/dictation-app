@@ -317,6 +317,7 @@ fn criterion_5_remove_key_deletes_it_from_the_keychain() {
 fn links_are_a_closed_list_of_https_pages() {
     for link in [
         Link::OpenrouterKeys,
+        Link::OpenrouterCredits,
         Link::Privacy,
         Link::Repository,
         Link::Licence,

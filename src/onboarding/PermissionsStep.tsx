@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { commands } from "../bindings";
 import type { AppPermission, OnboardingStatus, PermissionState } from "../bindings";
-import { BROKEN, messageOf } from "../keyTest";
+import { BROKEN, messageOf } from "../messages";
 import { MicMeter, useLiveMeter } from "../settings/MicMeter";
 import { StepFrame } from "./StepFrame";
 import type { FrameParts } from "./StepFrame";

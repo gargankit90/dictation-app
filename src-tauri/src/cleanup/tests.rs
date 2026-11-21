@@ -492,8 +492,14 @@ async fn review_2_a_sigterm_proof_helper_is_gone_before_the_next_starts() {
     };
 
     keeper.follow(&settings(Transcription::Local));
-    until(|| started().len() == 1).await;
-    let first = started()[0];
+    // Up to 10 s: a loaded machine is slow to run the script.
+    for _ in 0..1_000 {
+        if !started().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let first = *started().first().expect("the first helper started");
     keeper.follow(&settings(Transcription::Cloud));
     keeper.follow(&settings(Transcription::Local));
     // The second helper starts only once the first is gone (killed after

@@ -8,7 +8,7 @@ import type {
   LocalModelInfo_Serialize,
   Settings_Serialize,
 } from "../bindings";
-import { megabytes, modelTitle } from "../settings/modelRow";
+import { DOWNLOADING, megabytes } from "../settings/modelRow";
 
 /** The bindings allow null for sizes (NaN); the app never sends it. */
 function size(model: LocalModelInfo_Serialize): number {
@@ -86,7 +86,7 @@ export function stripView(
       note = `Continued from ${megabytes(running.resumed_from_bytes)}.`;
     }
     return {
-      text: `Downloading ${modelTitle(running)} · ${progressText(running)}`,
+      text: `${DOWNLOADING} · ${progressText(running)}`,
       note,
       percent: total > 0 ? Math.min(100, Math.round((bytes / total) * 100)) : 0,
       actions: ["cancel"],
@@ -96,7 +96,7 @@ export function stripView(
   if (chosen === null || chosen.state === "ready") return null;
   if (chosen.error !== null) {
     return {
-      text: `Download of ${modelTitle(chosen)} stopped: ${chosen.error}`,
+      text: `Download of the on-device models stopped: ${chosen.error}`,
       note: null,
       percent: null,
       actions: ["retry", "use-key"],
@@ -107,32 +107,11 @@ export function stripView(
     text:
       chosen.state === "partial"
         ? `Download paused · ${progressText(chosen)}`
-        : `${modelTitle(chosen)} isn't downloaded yet`,
+        : "The on-device models aren't downloaded yet",
     note: null,
     percent: null,
     actions: ["resume", "use-key"],
     model: chosen,
-  };
-}
-
-/**
- * The cleanup model's strip (Q4), while it downloads: after the speech model,
- * setup fetches it too (about 3.1 GB). Dictation works meanwhile, without
- * cleanup, so nothing waits for it and it has no action here (Settings can
- * cancel it).
- */
-export function cleanupStripView(
-  cleanup: readonly LocalModelInfo_Serialize[] | null,
-): StripView | null {
-  const running = cleanup?.find((model) => model.state === "downloading") ?? null;
-  if (running === null) return null;
-  const total = size(running);
-  return {
-    text: `Downloading the cleanup model · ${progressText(running)}`,
-    note: "You can dictate meanwhile. Punctuation and filler removal start once it's in.",
-    percent: total > 0 ? Math.min(100, Math.round((done(running) / total) * 100)) : 0,
-    actions: [],
-    model: running,
   };
 }
 

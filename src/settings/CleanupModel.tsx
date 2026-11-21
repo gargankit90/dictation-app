@@ -1,24 +1,19 @@
-// The on-device cleanup model (Q4, Gemma 4 E2B): part of "On this Mac". It
-// downloads after the speech model and goes with it when that is deleted, so
-// it has no row of its own: one line under the speech model's row says where
-// it is, and offers Download, Resume or Cancel. Dictation works without it,
-// uncleaned.
+// The on-device cleanup model (Q4, Gemma 4 E2B): part of "On this Mac",
+// which is one download (owner): the speech model, then the cleanup model,
+// shown as one row with one progress bar and one Cancel. The app treats the
+// speech model's id as the whole: downloading it fetches both, cancelling it
+// cancels both, deleting it deletes both.
 
 import { useEffect, useState } from "react";
 import { commands } from "../bindings";
 import type { LocalModelInfo_Serialize } from "../bindings";
-import { BROKEN, messageOf } from "../keyTest";
-import { megabytes } from "./modelRow";
 
-/** How often the cleanup model is read while on-device speech is chosen. */
+/** How often the cleanup model is read. */
 export const CLEANUP_POLL_MS = 1_000;
 
-export const PRIVATE = "Private: nothing leaves this Mac";
-
 /**
- * The cleanup models, read every second while `active` (on-device speech is
- * chosen): their download follows the speech model's, so it can start at
- * any time.
+ * The cleanup models, read every second while `active`: their download
+ * follows the speech model's, so it can start at any time.
  */
 export function useCleanupModels(active: boolean): LocalModelInfo_Serialize[] | null {
   const [models, setModels] = useState<LocalModelInfo_Serialize[] | null>(null);
@@ -44,76 +39,26 @@ export function useCleanupModels(active: boolean): LocalModelInfo_Serialize[] | 
   return active ? models : null;
 }
 
-type Action = "download" | "resume" | "cancel";
+type Model = LocalModelInfo_Serialize;
 
-/** What the line says and offers in each download state. */
-export function cleanupLine(model: LocalModelInfo_Serialize): {
-  text: string;
-  action: Action | null;
-  progress: { value: number; max: number } | null;
-} {
-  const size = model.size_bytes ?? 0;
-  const done = model.downloaded_bytes ?? 0;
-  const of = `${String(Math.round(done / 1_000_000))} of ${megabytes(size)}`;
-  const name = `Cleanup (punctuation, fillers) · ${megabytes(size)}`;
-  switch (model.state) {
-    case "downloading":
-      return {
-        text: `${name} · ↓ ${of}`,
-        action: "cancel",
-        progress: { value: done, max: size },
-      };
-    case "partial":
-      return { text: `${name} · Paused · ${of}`, action: "resume", progress: null };
-    case "ready":
-      return { text: `${name} · ✓ Ready · ${PRIVATE}`, action: null, progress: null };
-    case "missing":
-      return { text: `${name} · not downloaded`, action: "download", progress: null };
-  }
-}
-
-const LABELS: Record<Action, string> = {
-  download: "Download cleanup",
-  resume: "Resume cleanup",
-  cancel: "Cancel cleanup",
-};
-
-/** The line under the "On this Mac" row. */
-export function CleanupStatus({ model }: { model: LocalModelInfo_Serialize }) {
-  const [error, setError] = useState<string | null>(null);
-  const line = cleanupLine(model);
-  const action = line.action;
-
-  async function act(action: Action) {
-    setError(null);
-    try {
-      const result =
-        action === "cancel"
-          ? await commands.cancelLocalModelDownload(model.id)
-          : await commands.downloadLocalModel(model.id);
-      if (result.status === "error") setError(messageOf(result.error));
-    } catch {
-      setError(BROKEN);
-    }
-  }
-
-  const problem = error ?? model.error;
-  return (
-    <div className="hint" data-testid="cleanup-status">
-      <span aria-live="polite">{line.text}</span>{" "}
-      {action === null ? null : (
-        <button type="button" onClick={() => void act(action)}>
-          {LABELS[action]}
-        </button>
-      )}
-      {line.progress === null ? null : (
-        <progress
-          aria-label="Cleanup model download"
-          max={line.progress.max}
-          value={line.progress.value}
-        />
-      )}
-      {problem === null ? null : <p className="row-error">{problem}</p>}
-    </div>
-  );
+/**
+ * The on-device download as one: `speech` with `cleanup` added. Sizes and
+ * progress are summed; the state, error and resume details are the speech
+ * model's until it is in, then the cleanup model's. The id stays the speech
+ * model's (see the top of this file).
+ */
+export function withCleanup(speech: Model, cleanup: Model | null | undefined): Model {
+  if (cleanup === null || cleanup === undefined) return speech;
+  const bytes = (model: Model) =>
+    model.state === "ready" ? (model.size_bytes ?? 0) : (model.downloaded_bytes ?? 0);
+  const part = speech.state === "ready" ? cleanup : speech;
+  return {
+    ...speech,
+    size_bytes: (speech.size_bytes ?? 0) + (cleanup.size_bytes ?? 0),
+    downloaded_bytes: bytes(speech) + bytes(cleanup),
+    state: part.state,
+    error: part.error,
+    resumed_from_bytes: part.resumed_from_bytes,
+    restarted: part.restarted,
+  };
 }

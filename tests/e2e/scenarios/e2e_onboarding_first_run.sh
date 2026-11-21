@@ -40,14 +40,18 @@ e2e_onboarding_first_run() {
   expect "the local model is offered" \
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "English · 1320 MB" 10
   expect "choose my own key" \
-    ax_ok radio-press "$APP_NAME" "$ONBOARDING_WINDOW" "Use my own OpenRouter key"
+    ax_ok radio-press "$APP_NAME" "$ONBOARDING_WINDOW" "Use OpenRouter"
   expect "selecting it opens no form" \
     ax_ok wait-no-text "$APP_NAME" "$ONBOARDING_WINDOW" "Test & Save" 2
   expect "press Continue" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" Continue
-  expect "the next screen is Connect your key" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Connect your key" 10
-  expect "Continue waits for Test & Save, and says so" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Continue unlocks after Test" 10
+  expect "the next screen is Connect OpenRouter" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Connect OpenRouter" 10
+  expect "Connect OpenRouter is the primary action" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Paste a key instead" 10
+  expect "Continue waits for a connection, and says so" \
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Continue unlocks once OpenRouter" 10
+  expect "open Paste a key instead" \
+    ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" "Paste a key instead"
 
   # A key the provider rejects: the user stays on the step, told why, and
   # nothing is saved (a saved key rebuilds the engine).
@@ -60,7 +64,7 @@ e2e_onboarding_first_run() {
     ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "rejected this API key" 15
   expect "the test reached the provider with that key" provider_request_has 1 auth=bad
   expect "Continue is still locked" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Continue unlocks after Test" 5
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Continue unlocks once OpenRouter" 5
   expect "nothing was saved" test "$(log_count 'engine rebuilt')" = "$rebuilt"
 
   # The made-up key the provider takes.
@@ -68,7 +72,7 @@ e2e_onboarding_first_run() {
     ax_ok secret-set "$APP_NAME" "$ONBOARDING_WINDOW" api-key "$PROVIDER_GOOD_KEY"
   expect "press Test & Save" ax_ok press "$APP_NAME" "$ONBOARDING_WINDOW" "Test & Save"
   expect "the window says the key is saved" \
-    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Key saved" 15
+    ax_ok wait-text "$APP_NAME" "$ONBOARDING_WINDOW" "Connected to OpenRouter" 15
   expect "the test reached the provider with the typed key" provider_request_has 2 auth=good
   # Saved to the keychain; the cleanup removes it.
   API_KEY_STORED=1

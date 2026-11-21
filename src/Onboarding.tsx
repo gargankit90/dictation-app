@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "./bindings";
 import type { OnboardingStatus, Settings_Serialize, Step } from "./bindings";
-import { BROKEN, messageOf } from "./keyTest";
-import { chosenModel, cleanupStripView, modelWait, stripView } from "./onboarding/logic";
+import { BROKEN, messageOf } from "./messages";
+import { chosenModel, modelWait, stripView } from "./onboarding/logic";
 import type { StripAction } from "./onboarding/logic";
 import { PermissionsStep } from "./onboarding/PermissionsStep";
 import { ReadyStep } from "./onboarding/ReadyStep";
@@ -13,7 +13,7 @@ import type { FrameParts } from "./onboarding/StepFrame";
 import { FINISH_REASON } from "./onboarding/ReadyStep";
 import { sharingBlock, useSharingSwitch } from "./settings/Privacy";
 import { useEngineStatus, useModels } from "./Settings";
-import { useCleanupModels } from "./settings/CleanupModel";
+import { useCleanupModels, withCleanup } from "./settings/CleanupModel";
 import "./settings.css";
 
 export const STEPS: readonly { id: Step; name: string }[] = [
@@ -239,15 +239,14 @@ export function Onboarding({ onFinished, onOpenHistory }: Props) {
   const index = STEPS.findIndex((item) => item.id === status.step);
   const previous = STEPS[index - 1];
   const next = STEPS[index + 1];
-  const cleanupStrip = cleanupStripView(cleanupModels);
-  const strip = stripView(models, chosen) ?? cleanupStrip;
+  // "On this Mac" is one download: speech, then cleanup (Q4).
+  const onDevice = models?.map((model) => withCleanup(model, cleanupModels?.[0])) ?? null;
+  const strip = stripView(onDevice, chosenModel(settings, onDevice));
   // A strip only for a running download on the first two steps: until the
   // user has chosen, a stopped one isn't news.
   const stripShown =
     strip !== null &&
-    (strip === cleanupStrip ||
-      strip.actions.includes("cancel") ||
-      index >= STEPS.findIndex((s) => s.id === "permissions"));
+    (strip.actions.includes("cancel") || index >= STEPS.findIndex((s) => s.id === "permissions"));
   const downloading = models?.some((model) => model.state === "downloading") ?? false;
 
   const parts: FrameParts = {

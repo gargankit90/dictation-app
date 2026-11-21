@@ -62,7 +62,7 @@ e2e_onboarding_five_steps() {
     ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Download and continue"
   expect "Permissions" \
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Records only while you hold your key" 15
-  expect "the strip shows the download" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading English" 15
+  expect "the strip shows the download" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading on-device models" 15
   expect "the rail says it runs" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Download running" 5
   expect "the settings choose the model already" settings_file_has transcription local
   expect "some of it is on disk" wait_for_part
@@ -74,7 +74,7 @@ e2e_onboarding_five_steps() {
   expect "it comes back at Permissions" \
     wait_for_log 'onboarding shown at launch step=Permissions' 30
   expect "the download picks up by itself" \
-    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading English" 30
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Downloading on-device models" 30
   expect "and the server answered about the earlier part" five_download_picked_up
   expect "the server was asked for the rest only" model_server_saw_resume
   expect "allowed" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Allowed" 10

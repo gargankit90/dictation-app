@@ -309,13 +309,16 @@ async fn the_cleanup_model_follows_the_speech_model() {
         requests[0].url.path(),
         format!("/{}", local_models::GEMMA_4_E2B.file_name)
     );
-    downloads.cancel(gemma);
+    // "On this Mac" is one download: cancelling the speech model cancels
+    // the cleanup model that follows it.
+    downloads.cancel(DEFAULT);
     for _ in 0..250 {
         if !downloads.is_running(gemma) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    assert!(!downloads.is_running(gemma));
 
     // Already downloaded: nothing starts.
     let model = &local_models::GEMMA_4_E2B;

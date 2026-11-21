@@ -582,6 +582,8 @@ button.link {
 .row-caption {
   color: var(--vc-muted);
   font-size: var(--vc-text-sm);
+  /* No lone last word when a caption wraps beside the row's buttons. */
+  text-wrap: pretty;
 }
 
 .row-control {
@@ -665,10 +667,10 @@ button.menu-button {
 }
 
 .row-popover {
-  position: absolute;
-  z-index: 1;
-  top: calc(100% + var(--vc-space-1));
-  right: 0;
+  /* Under the row's text, in its flow: it pushes what follows down instead
+     of covering it (Q4). */
+  display: block;
+  margin-top: var(--vc-space-2);
   padding: var(--vc-space-1);
   border: 1px solid var(--vc-line);
   border-radius: var(--vc-radius-sm);
@@ -678,7 +680,8 @@ button.menu-button {
 }
 
 .row-popover {
-  width: 260px;
+  max-width: 360px;
+  margin-left: auto;
   white-space: normal;
 }
 

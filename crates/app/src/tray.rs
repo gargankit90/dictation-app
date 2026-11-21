@@ -39,6 +39,8 @@ pub mod id {
     pub const FIX_KEY: &str = "fix-choose-key";
     /// "Troubleshoot…" as the fix.
     pub const FIX_TROUBLESHOOT: &str = "fix-troubleshoot";
+    /// "Add credits…".
+    pub const FIX_CREDITS: &str = "fix-add-credits";
     /// "Copy last dictation".
     pub const COPY_LAST: &str = "copy-last";
     /// "History…" (U7).
@@ -70,10 +72,12 @@ pub enum Fix {
     ChooseAnotherKey,
     /// The Troubleshoot page.
     Troubleshoot,
+    /// `OpenRouter`'s page for adding credits.
+    AddCredits,
 }
 
 impl Fix {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::OpenSpeechSettings,
         Self::OpenMicrophoneSettings,
         Self::OpenAccessibilitySettings,
@@ -81,6 +85,7 @@ impl Fix {
         Self::DownloadModel,
         Self::ChooseAnotherKey,
         Self::Troubleshoot,
+        Self::AddCredits,
     ];
 
     /// The item's id.
@@ -94,6 +99,7 @@ impl Fix {
             Self::DownloadModel => id::FIX_MODEL,
             Self::ChooseAnotherKey => id::FIX_KEY,
             Self::Troubleshoot => id::FIX_TROUBLESHOOT,
+            Self::AddCredits => id::FIX_CREDITS,
         }
     }
 
@@ -108,6 +114,7 @@ impl Fix {
             Self::DownloadModel => "Download the model…",
             Self::ChooseAnotherKey => "Choose another key…",
             Self::Troubleshoot => "Troubleshoot…",
+            Self::AddCredits => "Add credits…",
         }
     }
 
@@ -139,6 +146,7 @@ pub const fn fix_for(code: ErrorCode) -> Fix {
         ErrorCode::MicDenied => Fix::OpenMicrophoneSettings,
         ErrorCode::AccessibilityMissing | ErrorCode::PasteFailed => Fix::OpenAccessibilitySettings,
         ErrorCode::ModelMissing | ErrorCode::ModelLoadingFailed => Fix::DownloadModel,
+        ErrorCode::OutOfCredits => Fix::AddCredits,
         ErrorCode::HotkeyUnregistered => Fix::ChooseAnotherKey,
         ErrorCode::MicFailed
         | ErrorCode::NetworkUnreachable
@@ -172,6 +180,7 @@ pub const fn is_engine_error(code: ErrorCode) -> bool {
             | ErrorCode::KeyUnreadable
             | ErrorCode::NetworkUnreachable
             | ErrorCode::ProviderQuota
+            | ErrorCode::OutOfCredits
             | ErrorCode::ProviderRedirect
             | ErrorCode::ModelMissing
             | ErrorCode::ModelLoading
@@ -814,6 +823,7 @@ mod tests {
                 "fix-troubleshoot",
                 "Troubleshoot…",
             ),
+            (ErrorCode::OutOfCredits, "fix-add-credits", "Add credits…"),
             (
                 ErrorCode::ProviderRedirect,
                 "fix-speech-settings",

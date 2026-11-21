@@ -258,7 +258,15 @@ impl ModelDownloads {
     /// Cancels `id`'s download, if one runs. What was fetched stays, so the
     /// next download continues it.
     pub fn cancel(&self, id: &str) {
-        if let Some(running) = lock(&self.inner).running.get(id) {
+        let downloads = lock(&self.inner);
+        if let Some(running) = downloads.running.get(id) {
+            running.cancel.cancel();
+        }
+        // "On this Mac" is one download (Q4): cancelling the speech model
+        // cancels the cleanup model that follows it too.
+        if local_models::find(id).is_some()
+            && let Some(running) = downloads.running.get(local_models::DEFAULT_CLEANUP_MODEL)
+        {
             running.cancel.cancel();
         }
     }
