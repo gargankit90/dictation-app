@@ -53,6 +53,8 @@ e2e_onboarding_five_steps() {
   expect "Speech recommends the English model" \
     ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "English · 477 MB" 15
   expect "with its real size" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "477 MB" 5
+  # OpenRouter is the default choice now: pick the model first.
+  expect "choose this Mac" ax_ok radio-press "$APP_NAME" "$FIVE_WINDOW" "Use this Mac"
   expect "press Download and continue" \
     ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Download and continue"
   expect "Permissions" \
