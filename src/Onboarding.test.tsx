@@ -32,6 +32,7 @@ import {
   KEY_SAVED_COPY,
   LOCAL_ONLY,
   MODEL_COPY,
+  SpeechStep,
 } from "./onboarding/SpeechStep";
 import {
   ASKED_AGAIN,
@@ -1037,6 +1038,32 @@ describe("Speech", () => {
       expect(screen.queryByText("Checking for a saved key…")).toBeNull();
     });
   }
+
+  it("Q4 round 6: pressing the preselected OpenRouter card records the choice in state", () => {
+    // A click on a checked radio fires no change, so the card records it on click.
+    const picks: string[] = [];
+    render(
+      <SpeechStep
+        parts={{ back: null, strip: null, error: null, busy: false, exitBlock: null }}
+        kept={null}
+        onPick={(choice) => picks.push(choice)}
+        settings={backend.settings}
+        onStored={() => undefined}
+        models={backend.models}
+        cleanup={null}
+        modelsError={null}
+        refreshModels={() => Promise.resolve()}
+        refreshEngine={() => Promise.resolve()}
+        onContinue={() => undefined}
+      />,
+    );
+    const card = screen.getByRole<HTMLInputElement>("radio", { name: "Use OpenRouter" });
+    expect(card.checked).toBe(true);
+    expect(picks).toEqual([]);
+    fireEvent.click(card);
+    expect(picks).toEqual(["key"]);
+    expect(card.checked).toBe(true);
+  });
 
   it("Q4 round 6: pressing the preselected OpenRouter card keeps the choice after Back", async () => {
     // A click on a checked radio fires no change, so the card records it on click.
