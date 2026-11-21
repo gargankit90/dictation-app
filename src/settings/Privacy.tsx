@@ -27,11 +27,11 @@ export function WhatsSent() {
         <li>That a dictation worked, with its length and speed in rough ranges (not the words).</li>
         <li>That a dictation failed, and the kind of failure (not the message).</li>
         <li>
-          Error reports, sent to Sentry (US): when the app crashes (a panic) or a dictation fails,
-          the error code (for example mic_denied), the app version, your macOS major version and
-          chip, and for a crash the source file names, line numbers and function names from Vocet's
-          own code where it happened. Never the error message, your words, paths to your files, your
-          user name or computer name.
+          Error reports, sent to Sentry (US), when the app crashes or a dictation fails. A crash
+          report includes the app version, the macOS major version, an error code and a stack trace:
+          function names and source-file locations from Vocet, the libraries it uses and the Rust
+          standard library, as they were when the app was built. It never includes the error
+          message, paths to your files, your audio, dictated text, keys or app names.
         </li>
         <li>Which setting you changed (not the new value).</li>
         <li>That the app updated, from which version to which.</li>

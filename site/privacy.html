@@ -342,10 +342,11 @@
           setting changed (not its value), and that the app updated. No profiles, no IP address.
         </li>
         <li>
-          <strong>Sentry (US)</strong> gets a report when the app crashes or a dictation fails: the
-          app version, macOS major version, chip, an error code, and for a crash the source file
-          names and line numbers and function names from Vocet's own code (not paths on your Mac).
-          Never audio, text, keys, app names, paths to your files, your user name or computer name.
+          <strong>Sentry (US)</strong> gets a report when the app crashes or a dictation fails. A
+          crash report includes the app version, the macOS major version, an error code and a stack
+          trace: function names and source-file locations from Vocet, the libraries it uses and the
+          Rust standard library, as they were when the app was built. It never includes the error
+          message, paths to your files, your audio, dictated text, keys or app names.
         </li>
         <li>
           <strong>Setup is the exception to the switch.</strong> The switch appears on the last

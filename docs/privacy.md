@@ -55,7 +55,7 @@ and error reports are built field by field from an allow-list
 
 ## Error reports (Sentry)
 
-When the app panics (a crash in our own code) or a dictation fails, it can
+When the app panics (a crash) or a dictation fails, it can
 send a report to Sentry in the US region (`*.ingest.us.sentry.io`), from the
 app itself, never the webview. A build without `DICTATION_SENTRY_DSN` (dev
 builds, CI, forks) sends nothing. A report holds only:
@@ -68,12 +68,14 @@ builds, CI, forks) sends nothing. A report holds only:
 | tag `error_type` | the kind of failure, as in `dictation_failed` above |
 | tag `arch`, `macos_major` | the chip and the macOS major version |
 | exception type | `panic`, or the error code |
-| for a panic | the source location (for example `crates/app/src/x.rs:10`) and the stack: function names and file names relative to the crate, with line numbers |
+| for a panic | the source location (for example `crates/app/src/x.rs:10`) and the stack: function names, and file names and line numbers relative to the crate or dependency, from Vocet, the libraries it uses and the Rust standard library, as they were when the app was built |
+
+**Wording used everywhere (policy, app, testers' guide):** A crash report includes the app version, the macOS major version, an error code and a stack trace: function names and source-file locations from Vocet, the libraries it uses and the Rust standard library, as they were when the app was built. It never includes the error message, paths to your files, your audio, dictated text, keys or app names.
 
 Never in a report: the panic's or the error's message, breadcrumbs, a user, an
 IP address (the app sets none; the Sentry project should also have "Prevent
 storing of IP addresses" on), the computer's host name or name, environment
-variables, a file path beyond the crate-relative one, local variables, or
+variables, a path to your files, local variables, or
 memory. The report is built from the fields above only; nothing else is
 copied in. A panic report is written to a small file in the app's data folder
 and sent at the next launch (so a crash that ends the app is still reported);
@@ -86,7 +88,7 @@ be cleaned. If that changes it will be listed here first.
 ## Never sent
 
 In usage events and error reports, never: audio. Transcripts, and your dictation history. Anything you type or paste. API
-keys. The names, bundle IDs or window titles of the apps you use. Paths to your files (Sentry reports hold only crate-relative source file names and line numbers from our own code). Host names. Your user
+keys. The names, bundle IDs or window titles of the apps you use. Paths to your files. Host names. Your user
 name. Error messages (only the kind of failure). Setting values (only which
 setting changed). Your IP address: the app sends no `$ip` and sets
 `$geoip_disable`; the PostHog project must also be set to discard client IP
