@@ -10,12 +10,17 @@ export interface ProviderInfo {
    * keeps the two equal).
    */
   readonly defaultModel: string;
+  /** Display names from the catalog in `crates/core/src/cloud_models.rs` (same test). */
+  readonly speechModelName: string;
+  readonly cleanupModelName: string;
 }
 
 const OPENROUTER: ProviderInfo = {
   id: "openrouter",
   name: "OpenRouter",
   defaultModel: "openai/gpt-4o-mini-transcribe",
+  speechModelName: "GPT-4o mini Transcribe (OpenAI)",
+  cleanupModelName: "GLM 5.3 Flash (Z.ai)",
 };
 
 export const PROVIDERS: readonly ProviderInfo[] = [OPENROUTER];

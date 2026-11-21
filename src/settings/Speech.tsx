@@ -439,7 +439,7 @@ export function Speech({
           <EngineRow
             id="engine-own-key"
             name="Your own key"
-            caption={ownKeyCaption(info.name, keyStatus.state === "saved")}
+            caption={ownKeyCaption(info, keyStatus.state === "saved")}
             checked={cloudActive && switching === null}
             blockedBecause={busy && !cloudActive ? waitReason : null}
             disabled={busy}

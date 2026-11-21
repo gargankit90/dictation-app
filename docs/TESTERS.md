@@ -13,9 +13,9 @@ text:
 - **On this Mac**: you download a model once (Parakeet for English, about
   480 MB; Qwen3-ASR for about 30 languages, including Hindi, about 590 MB).
   Your speech then stays on the Mac. It is the recommended choice in setup.
-- **Your own key**: an internet connection and an API key for Groq or OpenAI.
-  Your speech goes to that provider. Groq has a free tier; OpenAI works the
-  same way.
+- **Your own key**: an internet connection and an OpenRouter API key (you
+  pay OpenRouter for what you use). Your speech goes through OpenRouter to
+  OpenAI for transcription, and the text to a cleanup model that keeps no data.
 
 ## 1. Install
 
@@ -62,14 +62,12 @@ buttons. A permission step moves on by itself once you have allowed it.
      continue**. The model downloads once; it can keep going while you do
      the next steps. A language the on-device models don't cover needs your
      own key.
-   - **Use my own Groq or OpenAI key**: click **Continue**, pick the provider,
-     paste your key and click **Test & Save**. Groq: go to
-     <https://console.groq.com/keys>, sign up (free), click **Create API
-     Key** and copy it (it starts with `gsk_`; you see it only once).
-     OpenAI: create a key at <https://platform.openai.com/api-keys> (needs a
-     billing-enabled account). A wrong key shows the reason and nothing is
-     saved. A good one is kept in your macOS Keychain and never shown again.
-     It is sent only to the provider you chose.
+   - **Use my own OpenRouter key**: click **Continue**, paste your key and
+     click **Test & Save**. Create the key at
+     <https://openrouter.ai/settings/keys> and add credits on OpenRouter.
+     A wrong key shows the reason and nothing is saved. A good one is kept
+     in your macOS Keychain and never shown again. It is sent only to
+     OpenRouter.
 3. **Permissions.** Click **Allow** for the **Microphone** (macOS asks once;
    choose **Allow**) and for **Accessibility** (the dictation key and typing
    into other apps need it). For Accessibility, switch **Vocet** on under
@@ -148,7 +146,7 @@ You install from the DMG once. After that, Vocet updates itself:
   settings, history and saved key stay.)
 - **macOS may ask once whether Vocet can use the key saved in your Keychain.
   Choose Always Allow.** Your key stays in your Keychain and is sent only to
-  your speech provider (Groq or OpenAI). The prompt reads "Vocet wants to
+  OpenRouter. The prompt reads "Vocet wants to
   access key com.dictationapp.desktop"; enter your Mac password. Until you
   answer, Vocet can't read the key and says so. It can come back after any
   update.
@@ -163,7 +161,7 @@ and install it over the old app, as in section 1.
 ## Privacy
 
 - **Your words.** With **On this Mac**, your speech is turned into text on the
-  Mac and not sent anywhere. With **Your own key**, it goes to Groq or OpenAI.
+  Mac and not sent anywhere. With **Your own key**, it goes through OpenRouter.
   Your history stays on this Mac. Audio stays in memory.
 - **Anonymous usage and error events are on by default.** Turn them off with
   **Share usage and error events** in Settings > Privacy (or on the last setup
@@ -223,7 +221,7 @@ public issue; see [SECURITY.md](../SECURITY.md).
 
   4. Remove the saved API key: open **Keychain Access**, search for
      `com.dictationapp.desktop` and delete that entry. (You can also delete the
-     key itself on your provider's key page: Groq or OpenAI, as in section 3.)
+     key itself on your key page on OpenRouter, as in section 3.)
   5. In **System Settings > Privacy & Security**, remove Vocet from
      **Microphone** and **Accessibility** (select it, click **−**).
 
@@ -244,7 +242,7 @@ The same list is in the [changelog](../CHANGELOG.md).
 - A crash inside the on-device engine is not reported (it could contain what
   you said): if the app quits on its own, tell us in a bug report
   ([#226](https://github.com/gargankit90/dictation-app/issues/226)).
-- With **Your own key**, speech goes to your chosen provider's servers (Groq
-  or OpenAI). Don't dictate anything you would not send to a cloud service.
+- With **Your own key**, speech goes through OpenRouter to OpenAI, and the
+  text to a cleanup model. Don't dictate anything you would not send to a cloud service.
 - Anonymous usage and error events are on by default; turn them off in
   Settings > Privacy. What is sent: [privacy.md](privacy.md).

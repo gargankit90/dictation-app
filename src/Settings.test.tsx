@@ -563,7 +563,9 @@ describe("u12_criterion_3 Speech is one pick-one list", () => {
     ).toHaveLength(3);
     expect(screen.getAllByText("On this Mac · works offline")).toHaveLength(2);
     expect(
-      await screen.findByText("OpenRouter · about 100 languages · speech is sent to OpenRouter"),
+      await screen.findByText(
+        "OpenRouter · about 100 languages · speech is sent to OpenRouter · speech: GPT-4o mini Transcribe (OpenAI) · cleanup: GLM 5.3 Flash (Z.ai)",
+      ),
     ).toBeTruthy();
     for (const gone of ["Downloaded", "✓ Active", "Use this", "Hide", "Set up…", "Multilingual"]) {
       expect(screen.queryByText(gone), gone).toBeNull();
@@ -905,7 +907,9 @@ describe("u12_criterion_4 the key sheet", () => {
       slow.open();
       expect(await screen.findByRole("button", { name: "Add key…" })).toBeTruthy();
       expect(
-        screen.queryByText("OpenRouter · about 100 languages · speech is sent to OpenRouter"),
+        screen.queryByText(
+          "OpenRouter · about 100 languages · speech is sent to OpenRouter · speech: GPT-4o mini Transcribe (OpenAI) · cleanup: GLM 5.3 Flash (Z.ai)",
+        ),
       ).toBeNull();
     });
   });

@@ -1292,6 +1292,20 @@ mod tests {
                 assert!(providers.contains(&entry), "src/providers.ts lacks {entry}");
             }
         }
+        for (field, id) in [
+            (
+                "speechModelName",
+                dictation_core::cloud_models::DEFAULT_SPEECH,
+            ),
+            (
+                "cleanupModelName",
+                dictation_core::cloud_models::DEFAULT_CLEANUP,
+            ),
+        ] {
+            let name = dictation_core::cloud_models::find(id).unwrap().display_name;
+            let entry = format!("{field}: \"{name}\"");
+            assert!(providers.contains(&entry), "src/providers.ts lacks {entry}");
+        }
     }
 
     /// The field names of a generated TypeScript object type's body.
