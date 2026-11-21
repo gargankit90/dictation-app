@@ -1,6 +1,6 @@
 import { commands } from "./bindings";
 import type { Settings_Serialize } from "./bindings";
-import { BROKEN, messageOf } from "./keyTest";
+import { BROKEN, messageOf } from "./messages";
 
 /**
  * Sets `hotkey` as the dictation key, through the command that is its only

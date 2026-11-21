@@ -41,8 +41,10 @@ pub enum ErrorCode {
     KeyUnreadable,
     /// The provider couldn't be reached.
     NetworkUnreachable,
-    /// The provider is limiting requests, or the account is out of credits.
+    /// The provider is limiting requests.
     ProviderQuota,
+    /// The `OpenRouter` account has no credits left (402).
+    OutOfCredits,
     /// The provider answered with a redirect.
     ProviderRedirect,
     /// The on-device model isn't downloaded.
@@ -74,6 +76,8 @@ pub enum FixAction {
     OpenSettings,
     /// Open the Troubleshoot window.
     OpenTroubleshoot,
+    /// Open `OpenRouter`'s page for adding credits.
+    AddCredits,
     /// Nothing to click: the next dictation is the retry.
     TryAgain,
 }
@@ -102,6 +106,7 @@ impl FixAction {
             Self::OpenAccessibilitySettings => "Open Accessibility Settings",
             Self::OpenSettings => "Open Settings",
             Self::OpenTroubleshoot => "Troubleshoot",
+            Self::AddCredits => "Add credits",
             Self::TryAgain => "Try again",
         }
     }
@@ -128,7 +133,7 @@ pub const USER_TEXT_MAX_CHARS: usize = 150;
 
 /// The table: every code once. A code missing here fails
 /// `every_code_has_one_row_in_order`.
-const TABLE: [CodeInfo; 17] = [
+const TABLE: [CodeInfo; 18] = [
     row(
         ErrorCode::MicDenied,
         "Vocet can't use the microphone.",
@@ -179,9 +184,15 @@ const TABLE: [CodeInfo; 17] = [
     ),
     row(
         ErrorCode::ProviderQuota,
-        "The provider is limiting requests, or your credits ran out.",
-        "Wait a minute, or add credits on OpenRouter.",
+        "The provider is limiting requests.",
+        "Wait a minute and try again.",
         FixAction::TryAgain,
+    ),
+    row(
+        ErrorCode::OutOfCredits,
+        "Your OpenRouter credits ran out.",
+        "Add credits.",
+        FixAction::AddCredits,
     ),
     row(
         ErrorCode::ProviderRedirect,
@@ -235,7 +246,7 @@ const TABLE: [CodeInfo; 17] = [
 
 impl ErrorCode {
     /// Every code, in the table's order.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::MicDenied,
         Self::MicFailed,
         Self::AccessibilityMissing,
@@ -245,6 +256,7 @@ impl ErrorCode {
         Self::KeyUnreadable,
         Self::NetworkUnreachable,
         Self::ProviderQuota,
+        Self::OutOfCredits,
         Self::ProviderRedirect,
         Self::ModelMissing,
         Self::ModelLoading,
@@ -268,6 +280,7 @@ impl ErrorCode {
             Self::KeyUnreadable => "key_unreadable",
             Self::NetworkUnreachable => "network_unreachable",
             Self::ProviderQuota => "provider_quota",
+            Self::OutOfCredits => "out_of_credits",
             Self::ProviderRedirect => "provider_redirect",
             Self::ModelMissing => "model_missing",
             Self::ModelLoading => "model_loading",
@@ -326,7 +339,7 @@ impl ErrorCode {
             ("read your api key from the keychain", Self::KeyUnreadable),
             ("rejected your api key", Self::KeyRejected),
             ("limiting requests", Self::ProviderQuota),
-            ("add credits on openrouter", Self::ProviderQuota),
+            ("credits ran out", Self::OutOfCredits),
             ("answered with a redirect", Self::ProviderRedirect),
             ("didn't answer in time", Self::NetworkUnreachable),
             ("couldn't reach the provider", Self::NetworkUnreachable),
@@ -440,6 +453,7 @@ mod tests {
                 | ErrorCode::KeyUnreadable
                 | ErrorCode::NetworkUnreachable
                 | ErrorCode::ProviderQuota
+                | ErrorCode::OutOfCredits
                 | ErrorCode::ProviderRedirect
                 | ErrorCode::ModelMissing
                 | ErrorCode::ModelLoading

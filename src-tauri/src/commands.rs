@@ -547,7 +547,7 @@ pub async fn set_api_key(
 /// Writes the key through the engine's bounded writes (T3, #113): a keychain
 /// that never answers is an error at the deadline, which the form shows,
 /// not a save that never ends.
-async fn save_key<S: SecretStore + 'static>(
+pub(crate) async fn save_key<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
     provider: Provider,
@@ -1068,6 +1068,9 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         set_api_key,
         has_api_key,
         test_api_key,
+        crate::connect::connect_openrouter,
+        crate::connect::cancel_connect,
+        crate::connect::saved_key_hint,
         get_onboarding,
         request_permission,
         open_setup,
@@ -1202,6 +1205,9 @@ mod tests {
             "setApiKey",
             "hasApiKey",
             "testApiKey",
+            "connectOpenrouter",
+            "cancelConnect",
+            "savedKeyHint",
             "getOnboarding",
             "requestPermission",
             "openSetup",
@@ -1258,7 +1264,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 54,
+            commands, 57,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1279,32 +1285,34 @@ mod tests {
 
     #[test]
     fn the_ui_default_models_match_core() {
-        let providers = std::fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/providers.ts"),
+        let names = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/settings/modelRow.ts"),
         )
         .unwrap();
-        for provider in Provider::ALL {
-            for entry in [
-                format!("id: \"{provider}\""),
-                format!("name: \"{}\"", provider_name(provider)),
-                format!("defaultModel: \"{}\"", provider.default_model()),
-            ] {
-                assert!(providers.contains(&entry), "src/providers.ts lacks {entry}");
-            }
-        }
-        for (field, id) in [
+        let provider = format!(
+            "PROVIDER_NAME = \"{}\"",
+            provider_name(Provider::OpenRouter)
+        );
+        assert!(
+            names.contains(&provider),
+            "src/settings/modelRow.ts lacks {provider}"
+        );
+        for (constant, id) in [
             (
-                "speechModelName",
+                "SPEECH_MODEL_NAME",
                 dictation_core::cloud_models::DEFAULT_SPEECH,
             ),
             (
-                "cleanupModelName",
+                "CLEANUP_MODEL_NAME",
                 dictation_core::cloud_models::DEFAULT_CLEANUP,
             ),
         ] {
             let name = dictation_core::cloud_models::find(id).unwrap().display_name;
-            let entry = format!("{field}: \"{name}\"");
-            assert!(providers.contains(&entry), "src/providers.ts lacks {entry}");
+            let entry = format!("{constant} = \"{name}\"");
+            assert!(
+                names.contains(&entry),
+                "src/settings/modelRow.ts lacks {entry}"
+            );
         }
     }
 
@@ -3239,6 +3247,7 @@ mod capability_tests {
             std::sync::Arc::clone(&config),
         ));
         app.manage(LiveEngine::fixed());
+        app.manage(crate::connect::AppConnect::default());
         app.manage(crate::models::ModelDownloads::default());
         app.manage(super::ActiveHotkey(super::tests::hotkey::listening().0));
         app.manage(std::sync::Arc::new(crate::onboarding::Onboarding::new()));
@@ -3479,7 +3488,9 @@ mod capability_tests {
             "set_api_key" => {
                 serde_json::json!({ "provider": "openrouter", "key": "sk-or-not-a-real-key" })
             }
-            "has_api_key" | "test_api_key" => serde_json::json!({ "provider": "openrouter" }),
+            "has_api_key" | "test_api_key" | "saved_key_hint" => {
+                serde_json::json!({ "provider": "openrouter" })
+            }
             "request_permission" => serde_json::json!({ "permission": "microphone" }),
             "set_onboarding_step" => serde_json::json!({ "step": "welcome" }),
             "set_share_usage_events" => serde_json::json!({ "share": true }),
@@ -3569,6 +3580,26 @@ mod capability_tests {
                     Err(error) if !error.to_string().contains("not allowed") => Ok(()),
                     other => other.map(|_| ()),
                 },
+                // Q3: the sign-in waits for a browser that never comes; cancel
+                // it until it ends. Ending in any error but the ACL's means
+                // the command ran.
+                "connect_openrouter" => {
+                    let done = std::sync::atomic::AtomicBool::new(false);
+                    std::thread::scope(|scope| {
+                        scope.spawn(|| {
+                            while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                                std::thread::sleep(std::time::Duration::from_millis(50));
+                                let _ = invoke(main, "cancel_connect", args("cancel_connect"));
+                            }
+                        });
+                        let result = invoke(main, command, args(command));
+                        done.store(true, std::sync::atomic::Ordering::SeqCst);
+                        match result {
+                            Err(error) if !error.to_string().contains("not allowed") => Ok(()),
+                            other => other.map(|_| ()),
+                        }
+                    })
+                }
                 // F1: it must succeed, through the fake opener.
                 "open_issue" => invoke(main, command, args(command)).map(|_| ()),
                 "run_checks"
@@ -3611,9 +3642,15 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 54);
+        assert_eq!(COMMAND_NAMES.len(), 57);
         // F1: open_issue reached the fake, not a browser: exactly one call.
-        let urls = fixture.opener.urls();
+        // Q3: and connect_openrouter opened its sign-in page, also through it.
+        let urls: Vec<String> = fixture
+            .opener
+            .urls()
+            .into_iter()
+            .filter(|url| !url.starts_with("https://openrouter.ai/auth?"))
+            .collect();
         assert_eq!(urls.len(), 1, "{urls:?}");
         assert!(
             urls[0].starts_with("https://github.com/gargankit90/dictation-app/issues/new?"),

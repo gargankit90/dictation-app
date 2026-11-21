@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { commands } from "./bindings";
 import type { Check, FixAction } from "./bindings";
-import { BROKEN, messageOf } from "./keyTest";
-import type { Notice } from "./keyTest";
+import { BROKEN, messageOf } from "./messages";
+import type { Notice } from "./messages";
 
 interface Props {
   /** Back to the settings form. */
@@ -96,6 +96,9 @@ export function Troubleshoot({ onBack, onOpenSettings, onReport }: Props) {
           break;
         case "open_settings":
           onOpenSettings();
+          break;
+        case "add_credits":
+          await commands.openLink("openrouter_credits");
           break;
         case "open_troubleshoot":
         case "try_again":

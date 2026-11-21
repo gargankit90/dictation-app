@@ -49,6 +49,7 @@
 #[cfg(test)]
 mod command_names;
 pub mod commands;
+mod connect;
 pub mod diagnostics;
 pub mod engine;
 mod flags;
@@ -344,6 +345,7 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     let version = app.package_info().version.to_string();
     tracing::info!(version, log_dir = %log_dir.display(), "starting");
     app.manage(LogDir(log_dir));
+    app.manage(connect::AppConnect::default());
     app.manage(diagnostics::AppOpener(Arc::new(
         dictation_platform::reveal::SystemOpener,
     )));

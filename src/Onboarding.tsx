@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "./bindings";
 import type { OnboardingStatus, Settings_Serialize, Step } from "./bindings";
-import { BROKEN, messageOf } from "./keyTest";
+import { BROKEN, messageOf } from "./messages";
 import { chosenModel, modelWait, stripView } from "./onboarding/logic";
 import type { StripAction } from "./onboarding/logic";
 import { PermissionsStep } from "./onboarding/PermissionsStep";
