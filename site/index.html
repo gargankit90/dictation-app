@@ -409,7 +409,7 @@
         outline-offset: 2px;
       }
       .wrap {
-        max-width: 960px;
+        max-width: 1200px;
         margin: 0 auto;
         padding-left: 24px;
         padding-right: 24px;
@@ -454,9 +454,7 @@
         color: var(--vc-ink);
         text-decoration: none;
       }
-      .hero {
-        padding-top: 40px;
-      }
+
       .lede {
         margin-top: 20px;
         max-width: 640px;
@@ -620,7 +618,7 @@
         margin-left: 1px;
       }
       .d-text {
-        white-space: pre-line;
+        white-space: normal;
       }
       .composer2,
       .cw-body,
@@ -1269,6 +1267,216 @@
           min-height: 340px;
         }
       }
+
+      /* hero: copy left, animated app window right */
+      .ph {
+        color: #8a877f;
+      }
+      .hero {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 48px;
+        align-items: center;
+        padding-top: 40px;
+        padding-bottom: 64px;
+      }
+      .hero-copy {
+        flex: 1 1 380px;
+        min-width: 0;
+      }
+      .hero-demo {
+        flex: 1 1 460px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .demo-body {
+        padding: 20px 22px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        font-size: 15px;
+      }
+      .msg {
+        display: flex;
+        gap: 10px;
+      }
+      .msg p {
+        margin-top: 2px;
+        color: var(--ink-2);
+      }
+      .avatar-sq {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        background: #e7e2d7;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 700;
+        color: #5c5a55;
+      }
+      .composer {
+        position: relative;
+        border: 2px solid var(--accent);
+        border-radius: 12px;
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .composer-text {
+        font-size: 16px;
+        line-height: 1.5;
+        min-height: 72px;
+      }
+      .composer-foot {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .composer-hint {
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .keyhint {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .keyhint kbd {
+        font-family: var(--vc-font-mono);
+        font-size: 12px;
+        background: #f1eee7;
+        border: 1px solid var(--line-3);
+        border-bottom-width: 3px;
+        border-radius: 6px;
+        padding: 2px 8px;
+        color: var(--ink);
+        transition:
+          background 0.15s,
+          transform 0.15s;
+      }
+      .keyhint-label::after {
+        content: "Released";
+      }
+      .say-text {
+        min-height: 3.1em;
+      }
+      /* animation states; with no script (or reduced motion) the page shows the final state */
+      .stage[data-state="idle"] .keyhint-label::after {
+        content: "Hold to talk";
+      }
+      .stage[data-state="listening"] .keyhint-label::after {
+        content: "Held, speaking";
+      }
+      .stage[data-state="listening"] .keyhint kbd {
+        background: var(--ink);
+        color: #fff;
+        border-color: var(--ink);
+        transform: translateY(1px);
+      }
+      .stage[data-state="idle"] .ph,
+      .stage[data-state="listening"] .ph,
+      .stage[data-state="transcribing"] .ph {
+        display: inline;
+      }
+      .stage[data-state="idle"] .dict-pill {
+        opacity: 0;
+      }
+      .stage:not([data-state="pasted"]) .d-label::before {
+        content: none;
+      }
+      .stage:not([data-state="listening"]) .wave {
+        display: none;
+      }
+      .stage[data-state="listening"] .wave {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        height: 14px;
+        margin-right: 8px;
+      }
+      .wave i {
+        display: block;
+        width: 3px;
+        height: 4px;
+        border-radius: 2px;
+        background: #e5484d;
+        animation: wave 0.9s ease-in-out infinite;
+      }
+      .wave i:nth-child(2) {
+        animation-delay: 0.12s;
+      }
+      .wave i:nth-child(3) {
+        animation-delay: 0.24s;
+      }
+      .wave i:nth-child(4) {
+        animation-delay: 0.36s;
+      }
+      .wave i:nth-child(5) {
+        animation-delay: 0.48s;
+      }
+      @keyframes wave {
+        0%,
+        100% {
+          height: 4px;
+        }
+        50% {
+          height: 14px;
+        }
+      }
+      /* Claude Code is a terminal */
+      .termapp {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 16px;
+        background: #1c1b19;
+        color: #f2f1ee;
+        font-family: var(--vc-font-mono);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .term-dim {
+        color: #8f8b83;
+      }
+      .term-ok {
+        color: #d97757;
+      }
+      .term-input {
+        position: relative;
+        margin-top: auto;
+        border: 1px solid #4a4844;
+        border-radius: 8px;
+        padding: 10px 12px;
+      }
+      .term-input .prompt {
+        color: #7ea2ff;
+      }
+      .term-input .caret {
+        background: #f2f1ee;
+      }
+      .term-input .dict-pill {
+        background: #f2f1ee;
+        color: #1c1b19;
+      }
+      @media (max-width: 640px) {
+        .hero {
+          gap: 32px;
+          padding-top: 16px;
+        }
+        .composer-text {
+          min-height: 96px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1289,226 +1497,327 @@
 
     <main>
       <section class="wrap hero">
-        <h1>Speak rough. Paste clean, in any Mac app.</h1>
-        <p class="lede">
-          Hold one key and talk. Vocet cuts fillers and false starts, then pastes where you type:
-          Google Docs, Notion, Claude Code, Cursor, Slack or Mail.
-        </p>
-        <div class="actions">
-          <a
-            class="btn"
-            href="https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/Vocet_0.2.0_aarch64.dmg"
-            >Download for Mac</a
-          >
+        <div class="hero-copy">
+          <h1>Speak rough. Paste clean, in any Mac app.</h1>
+          <p class="lede">
+            Hold one key and talk. Vocet cuts fillers and false starts, then pastes where you type:
+            Google Docs, Notion, Claude Code, Cursor, Slack or Mail.
+          </p>
+          <div class="actions">
+            <a
+              class="btn"
+              href="https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/Vocet_0.2.0_aarch64.dmg"
+              >Download for Mac</a
+            >
+          </div>
+          <p class="fine">
+            Apple silicon Mac (M1 or later) · macOS 13 or later · signed and notarized
+          </p>
         </div>
-        <p class="fine">
-          Apple silicon Mac (M1 or later) · macOS 13 or later · signed and notarized
-        </p>
-
-        <div class="tabset">
-          <input class="sr" type="radio" name="app" id="t-ai" aria-label="Claude Code" checked />
-          <input class="sr" type="radio" name="app" id="t-chat" aria-label="Slack" />
-          <input class="sr" type="radio" name="app" id="t-doc" aria-label="Docs / Notion" />
-          <input class="sr" type="radio" name="app" id="t-mail" aria-label="Mail" />
-          <div class="tabs">
-            <label for="t-ai">Claude Code</label>
-            <label for="t-chat">Slack</label>
-            <label for="t-doc">Docs / Notion</label>
-            <label for="t-mail">Mail</label>
+        <div class="hero-demo stage" id="hero-demo">
+          <div class="card say">
+            <p class="label">You say</p>
+            <p class="say-text" id="h-say">
+              “Um, hi Sam, uh, attached are today’s notes. The the two open questions are at the
+              top, can we settle them on Thursday?”
+            </p>
           </div>
-          <div class="use-row" id="p-ai">
-            <div class="card say">
-              <p class="label">You say</p>
-              <p>
-                “Um, so in the login handler, uh, add a retry with a two second delay, wait, no,
-                three seconds, and run pie test.”
-              </p>
+          <div
+            class="illo"
+            role="img"
+            aria-label="Illustration: holding the Right Option key, speaking, and the cleaned text pasted into an email reply"
+          >
+            <div class="illo-bar">
+              <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
+              ><strong id="h-app">Mail</strong
+              ><span class="illo-where" id="h-where">Reply to Sam</span>
             </div>
-            <div
-              class="illo"
-              role="img"
-              aria-label="Illustration: a prompt pasted into Claude Code with fillers removed, the spoken correction kept and pie test written as pytest"
-            >
-              <div class="illo-bar">
-                <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
-                ><strong>Claude Code</strong><span class="illo-where">login-service</span>
-              </div>
-              <div class="panel aiapp">
-                <div class="ai-side" aria-hidden="true">
-                  <span class="new-chat">+ New chat</span>
-                  <p class="ai-group">Recent</p>
-                  <span class="ai-row ai-row-on">Login retry</span>
-                  <span class="ai-row">Flaky CI tests</span>
-                  <span class="ai-row">Token refresh</span>
-                  <span class="ai-row">Release notes</span>
+            <div class="demo-body">
+              <div class="msg">
+                <span class="avatar-sq" id="h-av" aria-hidden="true">S</span>
+                <div>
+                  <strong id="h-from">Sam Rivera</strong>
+                  <p id="h-msg">Could you send the notes from today’s review?</p>
                 </div>
-                <div class="ai-main">
-                  <div class="ai-msgs">
-                    <div class="ai-user">Logins fail when the auth service is slow.</div>
-                    <div class="ai-bot">
-                      <span class="bot-ico"></span>
-                      <p>Understood. What should I change?</p>
-                    </div>
-                  </div>
-                  <div class="ai-input">
+              </div>
+              <div class="composer">
+                <div class="dict-pill">
+                  <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
+                  ><span class="d-label">Done</span>
+                </div>
+                <p class="composer-text c-input">
+                  <span class="ph" id="h-ph">Write your reply</span
+                  ><span class="d-text" id="h-text"
+                    >Hi Sam, attached are today’s notes. The two open questions are at the top, can
+                    we settle them on Thursday?</span
+                  ><span class="caret"></span>
+                </p>
+                <div class="composer-foot">
+                  <span class="keyhint"><kbd>Right ⌥</kbd><span class="keyhint-label"></span></span>
+                  <span class="composer-hint" id="h-hint">⌘ Enter to send</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" id="uses">
+        <div class="wrap">
+          <h2>Wherever you type</h2>
+          <div class="tabset">
+            <input class="sr" type="radio" name="app" id="t-ai" aria-label="Claude Code" checked />
+            <input class="sr" type="radio" name="app" id="t-chat" aria-label="Slack" />
+            <input class="sr" type="radio" name="app" id="t-doc" aria-label="Docs / Notion" />
+            <input class="sr" type="radio" name="app" id="t-mail" aria-label="Mail" />
+            <div class="tabs">
+              <label for="t-ai">Claude Code</label>
+              <label for="t-chat">Slack</label>
+              <label for="t-doc">Docs / Notion</label>
+              <label for="t-mail">Mail</label>
+            </div>
+            <div class="use-row stage" id="p-ai">
+              <div class="card say">
+                <p class="label">You say</p>
+                <p class="say-text">
+                  “Um, so in the login handler, uh, add a retry with a two second delay, and run pie
+                  test.”
+                </p>
+              </div>
+              <div
+                class="illo"
+                role="img"
+                aria-label="Illustration: a Claude Code terminal where the spoken prompt is pasted with fillers removed and pie test written as pytest"
+              >
+                <div class="illo-bar">
+                  <span class="dots" aria-hidden="true"
+                    ><span></span><span></span><span></span></span
+                  ><strong>Terminal</strong><span class="illo-where">claude · ~/login-service</span>
+                </div>
+                <div class="panel termapp">
+                  <p><span class="term-ok">●</span> Claude Code</p>
+                  <p class="term-dim">What should I work on?</p>
+                  <div class="term-input">
                     <div class="dict-pill">
                       <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
                       ><span class="d-label">Done</span>
                     </div>
                     <p class="c-input">
-                      <span class="d-text"
-                        >In the login handler, add a retry with a two second delay, wait, no, three
-                        seconds, and run pytest.</span
+                      <span class="prompt">&gt;</span> <span class="ph">Describe a task</span
+                      ><span class="d-text"
+                        >In the login handler, add a retry with a two second delay, and run
+                        pytest.</span
                       ><span class="caret"></span>
                     </p>
-                    <div class="ai-tools">
-                      <span class="tools"><b>+</b><b>Tools</b></span
-                      ><span class="sendc"
-                        ><svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="#1C1B19"
-                          stroke-width="2.6"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        >
-                          <path d="M12 19V5M6 11l6-6 6 6" /></svg
-                      ></span>
-                    </div>
                   </div>
+                  <p class="term-dim">? for shortcuts</p>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div class="use-row" id="p-chat">
-            <div class="card say">
-              <p class="label">You say</p>
-              <p>
-                “Yeah, the the pricing page is ready, um, I’m swapping in the new screenshots now
-                and I’ll post the link here this afternoon.”
-              </p>
-            </div>
-            <div
-              class="illo"
-              role="img"
-              aria-label="Illustration: a reply pasted into a Slack message box with fillers and a repeated word removed"
-            >
-              <div class="illo-bar">
-                <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
-                ><strong>Slack</strong><span class="illo-where">#launch</span>
+            <div class="use-row stage" id="p-chat">
+              <div class="card say">
+                <p class="label">You say</p>
+                <p class="say-text">
+                  “Yeah, the the pricing page is ready, um, I’m swapping in the new screenshots now
+                  and I’ll post the link here this afternoon.”
+                </p>
               </div>
-              <div class="panel chatapp">
-                <div class="rail" aria-hidden="true">
-                  <span class="ws">A</span><span class="ws ws-off"></span
-                  ><span class="ws ws-off"></span>
+              <div
+                class="illo"
+                role="img"
+                aria-label="Illustration: a reply pasted into a Slack message box with fillers and a repeated word removed"
+              >
+                <div class="illo-bar">
+                  <span class="dots" aria-hidden="true"
+                    ><span></span><span></span><span></span></span
+                  ><strong>Slack</strong><span class="illo-where">#launch</span>
                 </div>
-                <div class="channels" aria-hidden="true">
-                  <p class="ch-team">Acme</p>
-                  <span class="ch ch-on"># launch</span><span class="ch"># design</span
-                  ><span class="ch"># general</span>
-                  <p class="ch-group">Direct messages</p>
-                  <span class="ch"><i class="dot-on"></i>Maya Chen</span
-                  ><span class="ch"><i class="dot-on"></i>Daniel Ortiz</span>
-                </div>
-                <div class="chat-main">
-                  <div class="chat-top">
-                    <strong># launch</strong><span>Pricing page and launch prep</span>
+                <div class="panel chatapp">
+                  <div class="rail" aria-hidden="true">
+                    <span class="ws">A</span><span class="ws ws-off"></span
+                    ><span class="ws ws-off"></span>
                   </div>
-                  <div class="feed">
-                    <div class="post">
-                      <span class="pav" style="background: #c9d3f0; color: #2b3a66">M</span>
-                      <div>
-                        <p class="who">Maya Chen <span>2:14 PM</span></p>
-                        <p>Is the pricing page ready for review?</p>
+                  <div class="channels" aria-hidden="true">
+                    <p class="ch-team">Acme</p>
+                    <span class="ch ch-on"># launch</span><span class="ch"># design</span
+                    ><span class="ch"># general</span>
+                    <p class="ch-group">Direct messages</p>
+                    <span class="ch"><i class="dot-on"></i>Maya Chen</span
+                    ><span class="ch"><i class="dot-on"></i>Daniel Ortiz</span>
+                  </div>
+                  <div class="chat-main">
+                    <div class="chat-top">
+                      <strong># launch</strong><span>Pricing page and launch prep</span>
+                    </div>
+                    <div class="feed">
+                      <div class="post">
+                        <span class="pav" style="background: #c9d3f0; color: #2b3a66">M</span>
+                        <div>
+                          <p class="who">Maya Chen <span>2:14 PM</span></p>
+                          <p>Is the pricing page ready for review?</p>
+                        </div>
+                      </div>
+                      <div class="post">
+                        <span class="pav" style="background: #f0d9c9; color: #6a3b1e">D</span>
+                        <div>
+                          <p class="who">Daniel Ortiz <span>2:15 PM</span></p>
+                          <p>Same question — sales wants to share it today.</p>
+                        </div>
                       </div>
                     </div>
-                    <div class="post">
-                      <span class="pav" style="background: #f0d9c9; color: #6a3b1e">D</span>
-                      <div>
-                        <p class="who">Daniel Ortiz <span>2:15 PM</span></p>
-                        <p>Same question — sales wants to share it today.</p>
+                    <div class="composer2">
+                      <div class="dict-pill">
+                        <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
+                        ><span class="d-label">Done</span>
                       </div>
-                    </div>
-                  </div>
-                  <div class="composer2">
-                    <div class="dict-pill">
-                      <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
-                      ><span class="d-label">Done</span>
-                    </div>
-                    <p class="c-input">
-                      <span class="d-text"
-                        >The pricing page is ready, I’m swapping in the new screenshots now and I’ll
-                        post the link here this afternoon.</span
-                      ><span class="caret"></span>
-                    </p>
-                    <div class="c-tools">
-                      <span class="tools"><b>+</b><b>Aa</b><b>@</b></span>
-                      <span class="sendbtn"
-                        ><svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="#fff"
-                          stroke-width="2.4"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        >
-                          <path d="M5 12h14M13 6l6 6-6 6" /></svg
-                      ></span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Gmail (animated) -->
-
-          <div class="use-row" id="p-doc">
-            <div class="card say">
-              <p class="label">You say</p>
-              <p>“Um, so the treaty failed because, uh, it it lacked enforcement.”</p>
-            </div>
-            <div
-              class="illo"
-              role="img"
-              aria-label="Illustration: a sentence pasted into a document with fillers and a repeated word removed"
-            >
-              <div class="illo-bar">
-                <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
-                ><strong>Google Docs · Notion</strong><span class="illo-where">Editing</span>
-              </div>
-              <div class="panel docapp">
-                <div class="doc-top" aria-hidden="true">
-                  <span class="doc-ico"></span>
-                  <div class="doc-meta">
-                    <strong>History essay — draft</strong
-                    ><span class="doc-menu"
-                      >File&nbsp;&nbsp;Edit&nbsp;&nbsp;View&nbsp;&nbsp;Insert&nbsp;&nbsp;Format</span
-                    >
-                  </div>
-                  <span class="share">Share</span>
-                </div>
-                <div class="doc-toolbar" aria-hidden="true">
-                  <b>B</b><b style="font-style: italic">I</b
-                  ><b style="text-decoration: underline">U</b><span class="sep"></span><b>H1</b
-                  ><b>H2</b><span class="sep"></span><b>• List</b><b>Link</b>
-                </div>
-                <div class="doc-canvas">
-                  <div class="page2">
-                    <p class="page-sec">OUTLINE</p>
-                    <ul>
-                      <li>Why the treaty was signed</li>
-                      <li>What the sources say</li>
-                    </ul>
-                    <p class="page-sec">ARGUMENT</p>
-                    <div class="doc-ins">
                       <p class="c-input">
-                        <span class="d-text">The treaty failed because it lacked enforcement.</span
+                        <span class="d-text"
+                          >The pricing page is ready, I’m swapping in the new screenshots now and
+                          I’ll post the link here this afternoon.</span
+                        ><span class="caret"></span>
+                      </p>
+                      <div class="c-tools">
+                        <span class="tools"><b>+</b><b>Aa</b><b>@</b></span>
+                        <span class="sendbtn"
+                          ><svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="#fff"
+                            stroke-width="2.4"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          >
+                            <path d="M5 12h14M13 6l6 6-6 6" /></svg
+                        ></span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Gmail (animated) -->
+
+            <div class="use-row stage" id="p-doc">
+              <div class="card say">
+                <p class="label">You say</p>
+                <p class="say-text">
+                  “Um, so the treaty failed because, uh, it it lacked enforcement.”
+                </p>
+              </div>
+              <div
+                class="illo"
+                role="img"
+                aria-label="Illustration: a sentence pasted into a document with fillers and a repeated word removed"
+              >
+                <div class="illo-bar">
+                  <span class="dots" aria-hidden="true"
+                    ><span></span><span></span><span></span></span
+                  ><strong>Google Docs · Notion</strong><span class="illo-where">Editing</span>
+                </div>
+                <div class="panel docapp">
+                  <div class="doc-top" aria-hidden="true">
+                    <span class="doc-ico"></span>
+                    <div class="doc-meta">
+                      <strong>History essay — draft</strong
+                      ><span class="doc-menu"
+                        >File&nbsp;&nbsp;Edit&nbsp;&nbsp;View&nbsp;&nbsp;Insert&nbsp;&nbsp;Format</span
+                      >
+                    </div>
+                    <span class="share">Share</span>
+                  </div>
+                  <div class="doc-toolbar" aria-hidden="true">
+                    <b>B</b><b style="font-style: italic">I</b
+                    ><b style="text-decoration: underline">U</b><span class="sep"></span><b>H1</b
+                    ><b>H2</b><span class="sep"></span><b>• List</b><b>Link</b>
+                  </div>
+                  <div class="doc-canvas">
+                    <div class="page2">
+                      <p class="page-sec">OUTLINE</p>
+                      <ul>
+                        <li>Why the treaty was signed</li>
+                        <li>What the sources say</li>
+                      </ul>
+                      <p class="page-sec">ARGUMENT</p>
+                      <div class="doc-ins">
+                        <p class="c-input">
+                          <span class="ph">Message #launch</span
+                          ><span class="d-text"
+                            >The treaty failed because it lacked enforcement.</span
+                          ><span class="caret"></span>
+                        </p>
+                        <div class="dict-pill">
+                          <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
+                          ><span class="d-label">Done</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="use-row stage" id="p-mail">
+              <div class="card say">
+                <p class="label">You say</p>
+                <p class="say-text">
+                  “Hi Professor Rivera, um, I’d like to, I’d like to ask about the deadline. You can
+                  reach me at sam at example dot com.”
+                </p>
+              </div>
+              <div
+                class="illo"
+                role="img"
+                aria-label="Illustration: an email to a professor with fillers and a false start removed and a spoken address written as sam@example.com"
+              >
+                <div class="illo-bar">
+                  <span class="dots" aria-hidden="true"
+                    ><span></span><span></span><span></span></span
+                  ><strong>Mail</strong><span class="illo-where">Inbox</span>
+                </div>
+                <div class="panel mailapp">
+                  <div class="inbox2" aria-hidden="true">
+                    <div class="row">
+                      <strong>Prof. Rivera</strong><span class="t">2:02 PM</span
+                      ><span class="s">Re: Essay deadline</span>
+                    </div>
+                    <div class="row">
+                      <strong>Finance team</strong><span class="t">1:40 PM</span
+                      ><span class="s">Offsite budget — draft attached</span>
+                    </div>
+                    <div class="row">
+                      <strong>Priya Nair</strong><span class="t">11:18 AM</span
+                      ><span class="s">Onboarding copy, round two</span>
+                    </div>
+                    <div class="row">
+                      <strong>Jordan Lee</strong><span class="t">9:05 AM</span
+                      ><span class="s">Agenda for our 1:1</span>
+                    </div>
+                    <div class="row">
+                      <strong>Registrar</strong><span class="t">Mon</span
+                      ><span class="s">Spring schedule is open</span>
+                    </div>
+                  </div>
+                  <div class="compose2">
+                    <div class="cw-head">
+                      <span>New message</span
+                      ><span class="cw-ctrl" aria-hidden="true"><i></i><i></i><i></i></span>
+                    </div>
+                    <div class="cw-field">
+                      <span class="lbl">To</span
+                      ><span class="chip"><span class="chip-av">R</span>Prof. Rivera</span>
+                    </div>
+                    <div class="cw-field">
+                      <span class="lbl">Subject</span><span>Re: Essay deadline</span>
+                    </div>
+                    <div class="cw-body">
+                      <p class="c-input">
+                        <span class="d-text"
+                          >Hi Professor Rivera, I’d like to ask about the deadline. You can reach me
+                          at sam@example.com.</span
                         ><span class="caret"></span>
                       </p>
                       <div class="dict-pill">
@@ -1516,90 +1825,21 @@
                         ><span class="d-label">Done</span>
                       </div>
                     </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="use-row" id="p-mail">
-            <div class="card say">
-              <p class="label">You say</p>
-              <p>
-                “Hi Professor Rivera, um, I’d like to, I’d like to ask about the deadline. You can
-                reach me at sam at example dot com.”
-              </p>
-            </div>
-            <div
-              class="illo"
-              role="img"
-              aria-label="Illustration: an email to a professor with fillers and a false start removed and a spoken address written as sam@example.com"
-            >
-              <div class="illo-bar">
-                <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span
-                ><strong>Mail</strong><span class="illo-where">Inbox</span>
-              </div>
-              <div class="panel mailapp">
-                <div class="inbox2" aria-hidden="true">
-                  <div class="row">
-                    <strong>Prof. Rivera</strong><span class="t">2:02 PM</span
-                    ><span class="s">Re: Essay deadline</span>
-                  </div>
-                  <div class="row">
-                    <strong>Finance team</strong><span class="t">1:40 PM</span
-                    ><span class="s">Offsite budget — draft attached</span>
-                  </div>
-                  <div class="row">
-                    <strong>Priya Nair</strong><span class="t">11:18 AM</span
-                    ><span class="s">Onboarding copy, round two</span>
-                  </div>
-                  <div class="row">
-                    <strong>Jordan Lee</strong><span class="t">9:05 AM</span
-                    ><span class="s">Agenda for our 1:1</span>
-                  </div>
-                  <div class="row">
-                    <strong>Registrar</strong><span class="t">Mon</span
-                    ><span class="s">Spring schedule is open</span>
-                  </div>
-                </div>
-                <div class="compose2">
-                  <div class="cw-head">
-                    <span>New message</span
-                    ><span class="cw-ctrl" aria-hidden="true"><i></i><i></i><i></i></span>
-                  </div>
-                  <div class="cw-field">
-                    <span class="lbl">To</span
-                    ><span class="chip"><span class="chip-av">R</span>Prof. Rivera</span>
-                  </div>
-                  <div class="cw-field">
-                    <span class="lbl">Subject</span><span>Re: Essay deadline</span>
-                  </div>
-                  <div class="cw-body">
-                    <p class="c-input">
-                      <span class="d-text"
-                        >Hi Professor Rivera, I’d like to ask about the deadline. You can reach me
-                        at sam@example.com.</span
-                      ><span class="caret"></span>
-                    </p>
-                    <div class="dict-pill">
-                      <span class="wave"><i></i><i></i><i></i><i></i><i></i></span
-                      ><span class="d-label">Done</span>
+                    <div class="cw-foot">
+                      <span class="send2">Send</span
+                      ><span class="tools"><b>A</b><b>⌘</b><b>⧉</b></span>
                     </div>
                   </div>
-                  <div class="cw-foot">
-                    <span class="send2">Send</span
-                    ><span class="tools"><b>A</b><b>⌘</b><b>⧉</b></span>
-                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <!-- Google Docs / Notion -->
+            <!-- Google Docs / Notion -->
+          </div>
         </div>
       </section>
 
-      <section class="band">
+      <section>
         <div class="wrap">
           <h2>Made for how you work</h2>
           <div class="cols">
@@ -1621,32 +1861,34 @@
         </div>
       </section>
 
-      <section class="wrap">
-        <h2>Two ways to run</h2>
-        <div class="cols">
-          <div class="card">
-            <h3>Connect OpenRouter (default)</h3>
-            <p>
-              Click Connect OpenRouter and authorize your account (or paste a key). You pay
-              OpenRouter directly: about $0.70 per 1,000 dictations, $5 minimum top-up. Uses
-              gpt-4o-mini-transcribe for speech and GLM 5.3 Flash for cleanup.
-            </p>
+      <section class="band">
+        <div class="wrap">
+          <h2>Two ways to run</h2>
+          <div class="cols">
+            <div class="card">
+              <h3>Connect OpenRouter (default)</h3>
+              <p>
+                Click Connect OpenRouter and authorize your account (or paste a key). You pay
+                OpenRouter directly: about $0.70 per 1,000 dictations, $5 minimum top-up. Uses
+                gpt-4o-mini-transcribe for speech and GLM 5.3 Flash for cleanup.
+              </p>
+            </div>
+            <div class="card">
+              <h3>On this Mac: $0, no account or card</h3>
+              <p>
+                Choose On this Mac and download about 4.4 GB once (OrukQwen 1.7B + Gemma 4 E2B).
+                English, works offline. Your audio and text stay on your Mac.
+              </p>
+            </div>
           </div>
-          <div class="card">
-            <h3>On this Mac: $0, no account or card</h3>
-            <p>
-              Choose On this Mac and download about 4.4 GB once (OrukQwen 1.7B + Gemma 4 E2B).
-              English, works offline. Your audio and text stay on your Mac.
-            </p>
-          </div>
+          <p class="note">
+            See the cleanup prompts, models and accuracy tests we use on
+            <a href="https://github.com/gargankit90/dictation-app/tree/main/eval">GitHub</a>.
+          </p>
         </div>
-        <p class="note">
-          See the cleanup prompts, models and accuracy tests we use on
-          <a href="https://github.com/gargankit90/dictation-app/tree/main/eval">GitHub</a>.
-        </p>
       </section>
 
-      <section class="band" id="data">
+      <section id="data">
         <div class="wrap">
           <h2>Where your data goes</h2>
           <div class="cols">
@@ -1670,51 +1912,53 @@
         </div>
       </section>
 
-      <section class="wrap">
-        <h2>Questions</h2>
-        <details>
-          <summary>What does it cost?</summary>
-          <p>
-            Vocet is free during the beta. On this Mac there is nothing else to pay. With Connect
-            OpenRouter you pay OpenRouter for what you use: about $0.70 per 1,000 dictations, with a
-            $5 minimum top-up.
-          </p>
-        </details>
-        <details>
-          <summary>What does Vocet clean up?</summary>
-          <p>
-            Vocet removes filler words (um, uh, you know), false starts and stammers, writes spoken
-            email addresses and links as symbols (sam at example dot com becomes sam@example.com),
-            and fixes clearly misheard technical words (get hub becomes GitHub). It keeps your other
-            words and self-corrections exactly as you said them.
-          </p>
-        </details>
-        <details>
-          <summary>Why does Vocet need Accessibility access?</summary>
-          <p>
-            To notice the dictation key, paste for you, and check the one character before your
-            cursor for spacing. It never reads whole fields, password fields or your screen.
-          </p>
-        </details>
-        <details>
-          <summary>What if my text doesn’t paste?</summary>
-          <p>
-            Choose Copy last dictation from the Vocet menu (or open History for the last 25) to
-            paste it yourself. Vocet skips password fields.
-          </p>
-        </details>
-        <details>
-          <summary>Can I see the source code?</summary>
-          <p>
-            Yes, <a href="https://github.com/gargankit90/dictation-app">on GitHub</a>. It is source
-            available under the Functional Source License. You can read and build the code. Each
-            release is available under FSL-1.1-ALv2 and becomes available under Apache 2.0 two years
-            after it is published.
-          </p>
-        </details>
+      <section class="band">
+        <div class="wrap">
+          <h2>Questions</h2>
+          <details>
+            <summary>What does it cost?</summary>
+            <p>
+              Vocet is free during the beta. On this Mac there is nothing else to pay. With Connect
+              OpenRouter you pay OpenRouter for what you use: about $0.70 per 1,000 dictations, with
+              a $5 minimum top-up.
+            </p>
+          </details>
+          <details>
+            <summary>What does Vocet clean up?</summary>
+            <p>
+              Vocet removes filler words (um, uh, you know), false starts and stammers, writes
+              spoken email addresses and links as symbols (sam at example dot com becomes
+              sam@example.com), and fixes clearly misheard technical words (get hub becomes GitHub).
+              It keeps your other words and self-corrections exactly as you said them.
+            </p>
+          </details>
+          <details>
+            <summary>Why does Vocet need Accessibility access?</summary>
+            <p>
+              To notice the dictation key, paste for you, and check the one character before your
+              cursor for spacing. It never reads whole fields, password fields or your screen.
+            </p>
+          </details>
+          <details>
+            <summary>What if my text doesn’t paste?</summary>
+            <p>
+              Choose Copy last dictation from the Vocet menu (or open History for the last 25) to
+              paste it yourself. Vocet skips password fields.
+            </p>
+          </details>
+          <details>
+            <summary>Can I see the source code?</summary>
+            <p>
+              Yes, <a href="https://github.com/gargankit90/dictation-app">on GitHub</a>. It is
+              source available under the Functional Source License. You can read and build the code.
+              Each release is available under FSL-1.1-ALv2 and becomes available under Apache 2.0
+              two years after it is published.
+            </p>
+          </details>
+        </div>
       </section>
 
-      <section class="band">
+      <section>
         <div class="wrap">
           <h2>Free beta, source available</h2>
           <p>
@@ -1743,5 +1987,200 @@
         <a href="https://github.com/gargankit90/dictation-app/issues">Report a problem</a>
       </p>
     </footer>
+
+    <script>
+      // The hero and the app tabs replay one story: hold the key, the rough words appear,
+      // let go, the clean text is typed into the app. Without this script, or with reduced
+      // motion, the page shows the finished state.
+      (function () {
+        var reduce =
+          window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        var scenes = [
+          {
+            app: "Mail",
+            where: "Reply to Sam",
+            av: "S",
+            from: "Sam Rivera",
+            msg: "Could you send the notes from today’s review?",
+            ph: "Write your reply",
+            hint: "⌘ Enter to send",
+            rough:
+              "Um, hi Sam, uh, attached are today’s notes. The the two open questions are at the top, can we settle them on Thursday?",
+            clean:
+              "Hi Sam, attached are today’s notes. The two open questions are at the top, can we settle them on Thursday?",
+          },
+          {
+            app: "Slack",
+            where: "#design-review",
+            av: "P",
+            from: "Priya",
+            msg: "Can you look at the onboarding copy before Friday?",
+            ph: "Message #design-review",
+            hint: "Enter to send",
+            rough:
+              "Yeah, I’ll, I’ll review the onboarding copy, um, tomorrow morning and send notes by noon.",
+            clean: "I’ll review the onboarding copy tomorrow morning and send notes by noon.",
+          },
+          {
+            app: "Cursor",
+            where: "Chat",
+            av: "AI",
+            from: "Cursor",
+            msg: "What should I change?",
+            ph: "Ask about your code",
+            hint: "Enter to send",
+            rough:
+              "Uh, so can you push it to get hub and, um, run pie test on the the login module.",
+            clean: "Can you push it to GitHub and run pytest on the login module.",
+          },
+        ];
+        function $(el, sel) {
+          return el.querySelector(sel);
+        }
+        function setText(id, v) {
+          var e = document.getElementById(id);
+          if (e) e.textContent = v;
+        }
+        function sceneInto(st, sc) {
+          setText("h-app", sc.app);
+          setText("h-where", sc.where);
+          setText("h-av", sc.av);
+          setText("h-from", sc.from);
+          setText("h-msg", sc.msg);
+          setText("h-ph", sc.ph);
+          setText("h-hint", sc.hint);
+          st._rough = "“" + sc.rough + "”";
+          st._clean = sc.clean;
+        }
+        var stages = [].slice.call(document.querySelectorAll(".stage"));
+        stages.forEach(function (st) {
+          st._say = $(st, ".say-text");
+          st._out = $(st, ".d-text");
+          st._label = $(st, ".d-label");
+          st._rough = st._say.textContent.replace(/\s+/g, " ").trim();
+          st._clean = st._out.textContent.replace(/\s+/g, " ").trim();
+          st._timers = [];
+          st._hero = st.id === "hero-demo";
+          st._scene = 0;
+          st._inView = false;
+        });
+        function state(st, s, label) {
+          st.dataset.state = s;
+          if (st._label) st._label.textContent = label || "Done";
+        }
+        function later(st, ms, fn) {
+          st._timers.push(setTimeout(fn, ms));
+        }
+        function stop(st) {
+          st._timers.forEach(clearTimeout);
+          st._timers = [];
+        }
+        function finish(st) {
+          stop(st);
+          st._say.textContent = st._rough;
+          st._out.textContent = st._clean;
+          state(st, "pasted", "Done");
+        }
+        function rowSelected(st) {
+          if (st._hero) return true;
+          var r = document.getElementById("t-" + st.id.slice(2));
+          return !!(r && r.checked);
+        }
+        function play(st) {
+          stop(st);
+          if (st._hero && st._scene >= 0) sceneInto(st, scenes[st._scene]);
+          var words = st._rough.split(" "),
+            chars = st._clean,
+            t = 0;
+          st._say.textContent = "";
+          st._out.textContent = "";
+          state(st, "idle", "");
+          t = 500;
+          later(st, t, function () {
+            state(st, "listening", "Listening…");
+          });
+          words.forEach(function (w, i) {
+            later(st, t + 200 * (i + 1), function () {
+              st._say.textContent = words.slice(0, i + 1).join(" ");
+            });
+          });
+          t += 200 * words.length + 500;
+          later(st, t, function () {
+            state(st, "transcribing", "Cleaning up…");
+          });
+          t += 800;
+          later(st, t, function () {
+            state(st, "typing", "Typing…");
+          });
+          var step = Math.max(1, Math.ceil(chars.length / 60));
+          for (var n = step; n < chars.length + step; n += step) {
+            (function (k) {
+              later(st, t + 28 * (k / step), function () {
+                st._out.textContent = chars.slice(0, k);
+              });
+            })(n);
+          }
+          t += 28 * Math.ceil(chars.length / step) + 200;
+          later(st, t, function () {
+            st._out.textContent = chars;
+            state(st, "pasted", "Done");
+          });
+          later(st, t + 3500, function () {
+            next(st);
+          });
+        }
+        function next(st) {
+          if (st._hero) {
+            st._scene = (st._scene + 1) % scenes.length;
+            play(st);
+            return;
+          }
+          var radios = [].slice.call(document.querySelectorAll('.tabset input[type="radio"]'));
+          var i = radios.findIndex(function (r) {
+            return r.checked;
+          });
+          radios[(i + 1) % radios.length].checked = true;
+          refresh();
+        }
+        function refresh() {
+          stages.forEach(function (st) {
+            if (st._inView && rowSelected(st)) {
+              if (!st._timers.length) play(st);
+            } else {
+              finish(st);
+            }
+          });
+        }
+        if (reduce) {
+          stages.forEach(finish);
+        } else {
+          [].forEach.call(document.querySelectorAll('.tabset input[type="radio"]'), function (r) {
+            r.addEventListener("change", function () {
+              stages.forEach(stop);
+              refresh();
+            });
+          });
+          if ("IntersectionObserver" in window) {
+            var io = new IntersectionObserver(
+              function (es) {
+                es.forEach(function (e) {
+                  e.target._inView = e.isIntersecting;
+                });
+                refresh();
+              },
+              { threshold: 0.4 },
+            );
+            stages.forEach(function (st) {
+              io.observe(st);
+            });
+          } else {
+            stages.forEach(function (st) {
+              st._inView = true;
+            });
+            refresh();
+          }
+        }
+      })();
+    </script>
   </body>
 </html>

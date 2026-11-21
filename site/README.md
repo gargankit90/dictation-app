@@ -2,7 +2,7 @@
 
 The public website for Vocet (issue #211): one static page, no build step.
 
-- `index.html`: the landing page, with its styles inline; the Download buttons are plain links to the 0.2.0 DMG.
+- `index.html`: the landing page, with its styles and a small script that replays the hero and tab animation (without it, or with reduced motion, the page shows the finished state); the Download buttons are plain links to the 0.2.0 DMG.
 - `fonts/`: Inter and Inter Tight (WOFF2, SIL OFL, `fonts/LICENSE.txt`), served from here so the page makes no request to Google.
 - `og.png`: the 1200×630 link-preview image.
 
