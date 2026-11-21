@@ -46,6 +46,8 @@ e2e_connect_openrouter() {
   expect "no key is saved yet" wait_for_log 'engine settings provider=openrouter .*has_key=false' 30
   expect "onboarding shows at Welcome" \
     wait_for_log 'onboarding shown at launch step=Welcome' 30
+  expect "Welcome is on screen" \
+    ax_ok wait-text "$APP_NAME" "$CONNECT_WINDOW" "Talk instead of type" 10
   expect "press Get started" ax_ok press "$APP_NAME" "$CONNECT_WINDOW" "Get started"
   expect "Speech offers OpenRouter" \
     ax_ok wait-text "$APP_NAME" "$CONNECT_WINDOW" "Use OpenRouter" 15
