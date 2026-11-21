@@ -45,8 +45,6 @@ pub enum ErrorCode {
     ProviderQuota,
     /// The `OpenRouter` account has no credits left (402).
     OutOfCredits,
-    /// The provider answered with a redirect.
-    ProviderRedirect,
     /// The on-device model isn't downloaded.
     ModelMissing,
     /// The on-device model is still loading.
@@ -133,7 +131,7 @@ pub const USER_TEXT_MAX_CHARS: usize = 150;
 
 /// The table: every code once. A code missing here fails
 /// `every_code_has_one_row_in_order`.
-const TABLE: [CodeInfo; 18] = [
+const TABLE: [CodeInfo; 17] = [
     row(
         ErrorCode::MicDenied,
         "Vocet can't use the microphone.",
@@ -195,12 +193,6 @@ const TABLE: [CodeInfo; 18] = [
         FixAction::AddCredits,
     ),
     row(
-        ErrorCode::ProviderRedirect,
-        "The provider sent a redirect.",
-        "Check the provider in Settings → Speech.",
-        FixAction::OpenSettings,
-    ),
-    row(
         ErrorCode::ModelMissing,
         "The model on this Mac isn't downloaded.",
         "Download it in Settings → Speech.",
@@ -246,7 +238,7 @@ const TABLE: [CodeInfo; 18] = [
 
 impl ErrorCode {
     /// Every code, in the table's order.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 17] = [
         Self::MicDenied,
         Self::MicFailed,
         Self::AccessibilityMissing,
@@ -257,7 +249,6 @@ impl ErrorCode {
         Self::NetworkUnreachable,
         Self::ProviderQuota,
         Self::OutOfCredits,
-        Self::ProviderRedirect,
         Self::ModelMissing,
         Self::ModelLoading,
         Self::ModelLoadingFailed,
@@ -281,7 +272,6 @@ impl ErrorCode {
             Self::NetworkUnreachable => "network_unreachable",
             Self::ProviderQuota => "provider_quota",
             Self::OutOfCredits => "out_of_credits",
-            Self::ProviderRedirect => "provider_redirect",
             Self::ModelMissing => "model_missing",
             Self::ModelLoading => "model_loading",
             Self::ModelLoadingFailed => "model_loading_failed",
@@ -333,14 +323,13 @@ impl ErrorCode {
     pub fn from_reason(reason: &str) -> Self {
         let reason = reason.to_ascii_lowercase();
         // Most specific first.
-        let table: [(&str, Self); 13] = [
+        let table: [(&str, Self); 12] = [
             ("add your api key", Self::KeyMissing),
             ("still reading your api key", Self::KeyUnreadable),
             ("read your api key from the keychain", Self::KeyUnreadable),
             ("rejected your api key", Self::KeyRejected),
             ("limiting requests", Self::ProviderQuota),
             ("credits ran out", Self::OutOfCredits),
-            ("answered with a redirect", Self::ProviderRedirect),
             ("didn't answer in time", Self::NetworkUnreachable),
             ("couldn't reach the provider", Self::NetworkUnreachable),
             ("model isn't downloaded", Self::ModelMissing),
@@ -454,7 +443,6 @@ mod tests {
                 | ErrorCode::NetworkUnreachable
                 | ErrorCode::ProviderQuota
                 | ErrorCode::OutOfCredits
-                | ErrorCode::ProviderRedirect
                 | ErrorCode::ModelMissing
                 | ErrorCode::ModelLoading
                 | ErrorCode::ModelLoadingFailed

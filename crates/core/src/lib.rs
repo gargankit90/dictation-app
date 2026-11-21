@@ -21,5 +21,4 @@ pub mod report;
 pub mod retry;
 pub mod settings;
 pub mod text;
-pub mod upload_limits;
 pub mod wav;

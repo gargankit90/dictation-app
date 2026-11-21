@@ -55,7 +55,6 @@ keyring = { version = "3.6.3", default-features = false }
 specta = { version = "=2.0.0-rc.26", features = ["derive"] }
 specta-typescript = "0.0.13"
 tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
-httpdate = "1.0.3"
 wiremock = "0.6.5"
 # On-device speech-to-text (L1): transcribe.cpp's Rust binding, MIT. Builds
 # ggml from source with CMake and a C++ compiler. Pinned: the crate is 0.x.

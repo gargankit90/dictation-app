@@ -36,7 +36,6 @@ use dictation_platform::fakes::{
 use dictation_platform::history_file::HistoryFile;
 use dictation_ports::{
     Audio, EngineKind, HotkeyEvent, InsertError, PermissionStatus, TranscribeError, Transcriber,
-    Transcript,
 };
 use dictation_transcribe::engine::Transcribers;
 use wiremock::matchers::{header, method, path};
@@ -296,11 +295,6 @@ impl Transcriber for Panicky {
     async fn transcribe(&self, audio: &Audio) -> Result<String, TranscribeError> {
         self.maybe_panic();
         self.inner.transcribe(audio).await
-    }
-
-    async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
-        self.maybe_panic();
-        self.inner.transcribe_detailed(audio).await
     }
 }
 

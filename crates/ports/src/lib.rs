@@ -59,7 +59,6 @@ pub use clipboard::{
 pub use clock::Clock;
 pub use cursor::{BeforeCursor, CursorReadError, TextBeforeCursor};
 pub use dictation_core::error::Permission;
-pub use dictation_core::text::Transcript;
 pub use history::{HistoryStore, HistoryStoreError};
 pub use hotkey::{HotkeyError, HotkeyEvent, HotkeySink, HotkeySource};
 pub use insert::{InsertError, TextInserter};

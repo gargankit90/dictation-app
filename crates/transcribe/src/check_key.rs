@@ -14,7 +14,7 @@
 use std::time::Duration;
 
 use dictation_core::retry::RetryPolicy;
-use dictation_ports::{Audio, Secret, TranscribeError};
+use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
 
 use crate::openrouter::{Config, OpenRouter};
 
@@ -58,7 +58,7 @@ pub async fn check_key_within(
     timeout: Duration,
 ) -> Result<(), TranscribeError> {
     let engine = OpenRouter::new(check_config(config, timeout), key)?;
-    engine.transcribe_verbose(&clip()).await.map(|_| ())
+    engine.transcribe(&clip()).await.map(|_| ())
 }
 
 /// What the check sends, whatever the dictation `config` says: its own

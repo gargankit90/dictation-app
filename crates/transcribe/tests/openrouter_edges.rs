@@ -35,7 +35,6 @@ fn config(server: &MockServer, max_attempts: u32) -> Config {
         privacy: dictation_core::cloud_models::PrivacyFilter::DenyDataCollection,
         timeout: Duration::from_secs(5),
         timeout_grows_with_audio: false,
-        long_clip: dictation_core::upload_limits::LONG_CLIP,
         retry: RetryPolicy {
             max_attempts,
             base_delay: Duration::from_millis(100),
@@ -112,7 +111,7 @@ async fn a_401_with_retry_after_is_still_not_retried() {
 }
 
 #[tokio::test]
-async fn empty_text_and_empty_segments_are_fine() {
+async fn empty_text_is_fine() {
     let server = MockServer::start().await;
     mount(
         &server,
@@ -121,9 +120,7 @@ async fn empty_text_and_empty_segments_are_fine() {
     )
     .await;
     let (engine, _) = engine(config(&server, 1));
-    let t = engine.transcribe_verbose(&audio()).await.unwrap();
-    assert_eq!(t.text, "");
-    assert!(t.segments.is_empty());
+    assert_eq!(engine.transcribe(&audio()).await.unwrap(), "");
 }
 
 #[tokio::test]
@@ -177,68 +174,6 @@ async fn openrouter_tls_handshake_and_dummy_key_is_invalid_key() {
         engine.transcribe(&audio).await,
         Err(TranscribeError::InvalidKey)
     );
-}
-
-// Run 2: `Retry-After` as an HTTP date, end to end (124871d).
-
-fn date_in(seconds: u64) -> String {
-    httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_secs(seconds))
-}
-
-#[tokio::test]
-async fn retry_after_http_date_is_honoured() {
-    let server = MockServer::start().await;
-    let date = date_in(10);
-    mount(
-        &server,
-        ResponseTemplate::new(429).insert_header("retry-after", date.as_str()),
-        Some(1),
-    )
-    .await;
-    mount(&server, ok(), None).await;
-    let (engine, wait) = engine(config(&server, 3));
-    assert_eq!(engine.transcribe(&audio()).await.unwrap(), "ok");
-    let waits = wait.0.lock().unwrap().clone();
-    // Whole-second dates: between 8 and 10 s from now, never the backoff.
-    assert_eq!(waits.len(), 1);
-    assert!(
-        waits[0] >= Duration::from_secs(8) && waits[0] <= Duration::from_secs(10),
-        "{waits:?}"
-    );
-}
-
-#[tokio::test]
-async fn a_past_http_date_retries_at_once() {
-    let server = MockServer::start().await;
-    mount(
-        &server,
-        ResponseTemplate::new(503).insert_header("retry-after", "Wed, 21 Oct 2015 07:28:00 GMT"),
-        Some(1),
-    )
-    .await;
-    mount(&server, ok(), None).await;
-    let (engine, wait) = engine(config(&server, 3));
-    assert_eq!(engine.transcribe(&audio()).await.unwrap(), "ok");
-    assert_eq!(*wait.0.lock().unwrap(), [Duration::ZERO]);
-}
-
-#[tokio::test]
-async fn an_http_date_beyond_the_cap_gives_up_at_once() {
-    let server = MockServer::start().await;
-    let date = date_in(MAX_RETRY_AFTER.as_secs() + 60);
-    mount(
-        &server,
-        ResponseTemplate::new(429).insert_header("retry-after", date.as_str()),
-        None,
-    )
-    .await;
-    let (engine, wait) = engine(config(&server, 3));
-    assert_eq!(
-        engine.transcribe(&audio()).await,
-        Err(TranscribeError::RateLimited)
-    );
-    assert_eq!(requests(&server).await, 1);
-    assert!(wait.0.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

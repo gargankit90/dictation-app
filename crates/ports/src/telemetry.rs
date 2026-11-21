@@ -438,7 +438,6 @@ mod tests {
                 | ErrorCode::NetworkUnreachable
                 | ErrorCode::ProviderQuota
                 | ErrorCode::OutOfCredits
-                | ErrorCode::ProviderRedirect
                 | ErrorCode::ModelMissing
                 | ErrorCode::ModelLoading
                 | ErrorCode::ModelLoadingFailed

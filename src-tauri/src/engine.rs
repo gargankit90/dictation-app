@@ -1617,7 +1617,7 @@ mod tests {
     use std::io::{Read as _, Write as _};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use dictation_ports::{Audio, Transcriber, Transcript};
+    use dictation_ports::{Audio, Transcriber};
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
     /// How the raw provider answers the next connection.
@@ -1771,10 +1771,6 @@ mod tests {
     impl Transcriber for DropProbe {
         async fn transcribe(&self, audio: &Audio) -> Result<String, TranscribeError> {
             self.inner.transcribe(audio).await
-        }
-
-        async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
-            self.inner.transcribe_detailed(audio).await
         }
     }
 

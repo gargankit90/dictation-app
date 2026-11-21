@@ -12,15 +12,15 @@
 //! request and never dropped: if no provider matches, the request fails
 //! (closed). `HTTP-Referer` and `X-Title` attribute the requests to the app.
 //!
-//! The reply is `{"text": …}`; `segments` with `no_speech_prob` are read if
-//! a provider sends them (`verbose_json`), else the hallucination filter
-//! has no probability to go by.
+//! The reply is `{"text": …}`.
 //!
+//! Each request may take [`DEFAULT_TIMEOUT`] plus half a second per second
+//! of audio, so a long dictation on a slow connection still gets up.
 //! Rate limits (429), server errors (5xx), timeouts and network errors are
-//! retried under a [`RetryPolicy`]; a `Retry-After` header (delay seconds or
-//! an HTTP date) on a 429 or 5xx replaces the backoff, up to
-//! [`MAX_RETRY_AFTER`]. A rejected key (401, 403), no credits (402), any
-//! other 4xx and an unreadable reply are not retried; a 404 is `OpenRouter`'s
+//! retried under a [`RetryPolicy`]; a `Retry-After` header (delay seconds)
+//! on a 429 or 5xx replaces the backoff, up to [`MAX_RETRY_AFTER`]. A
+//! rejected key (401, 403), no credits (402), a redirect (never followed),
+//! any other 4xx and an unreadable reply are not retried; a 404 is `OpenRouter`'s
 //! "no eligible route" for the model with its privacy filter
 //! ([`TranscribeError::NoRoute`]). There is no fallback to another model:
 //! switching models is a catalog change.
@@ -32,12 +32,10 @@
 
 use std::future::Future;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use dictation_core::cloud_models::{self, PrivacyFilter};
 use dictation_core::retry::{RetryPolicy, SplitMix64};
-use dictation_core::text::{Transcript, mean_no_speech_prob};
-use dictation_core::upload_limits::{LONG_CLIP, may_retry_after_timeout, request_timeout};
 use dictation_core::wav;
 use dictation_ports::{Audio, Secret, TranscribeError, Transcriber};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, RETRY_AFTER};
@@ -113,41 +111,6 @@ pub(crate) fn base64(bytes: &[u8]) -> String {
     out
 }
 
-/// A transcript with the per-segment detail `verbose_json` returns.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Transcription {
-    /// The whole text, trimmed.
-    pub text: String,
-    /// The segments, in order; empty if the provider sent none.
-    pub segments: Vec<Segment>,
-}
-
-impl Transcription {
-    /// The text with the mean `no_speech_prob` of the segments, for the
-    /// pipeline's silence filter; `None` if the provider sent no segments.
-    #[must_use]
-    pub fn into_transcript(self) -> Transcript {
-        Transcript {
-            no_speech_prob: mean_no_speech_prob(self.segments.iter().map(|s| s.no_speech_prob)),
-            text: self.text,
-        }
-    }
-}
-
-/// One segment of a [`Transcription`].
-#[derive(Debug, Clone, PartialEq)]
-pub struct Segment {
-    /// Start, in seconds from the beginning of the audio.
-    pub start: f64,
-    /// End, in seconds.
-    pub end: f64,
-    /// The segment's text.
-    pub text: String,
-    /// The model's probability that the segment is silence or noise
-    /// (closer to 1 means probably no speech); 0 if missing.
-    pub no_speech_prob: f64,
-}
-
 /// Waits between attempts. [`TokioWait`] in the app; tests record the
 /// waits instead, so retries never really sleep.
 pub trait Wait: Send + Sync {
@@ -180,14 +143,9 @@ pub struct Config {
     pub privacy: PrivacyFilter,
     /// Per-request timeout, for a clip of no length.
     pub timeout: Duration,
-    /// Whether each request gets extra time for the length of its clip
-    /// ([`request_timeout`]). On for dictation; off for the key check, which
-    /// has a fixed budget.
+    /// Whether each request gets half a second more per second of audio.
+    /// On for dictation; off for the key check, which has a fixed budget.
     pub timeout_grows_with_audio: bool,
-    /// The clip length from which a timeout is retried at most once
-    /// ([`LONG_CLIP`] in the app; a test uses a short one to avoid waiting
-    /// out a real 30 s limit).
-    pub long_clip: Duration,
     /// Retries for rate limits, server errors, timeouts and network errors.
     pub retry: RetryPolicy,
 }
@@ -213,7 +171,6 @@ impl Config {
             privacy: entry.map_or(PrivacyFilter::ZeroDataRetention, |m| m.privacy),
             timeout: DEFAULT_TIMEOUT,
             timeout_grows_with_audio: true,
-            long_clip: LONG_CLIP,
             retry: RetryPolicy::default(),
         }
     }
@@ -271,20 +228,16 @@ impl<W: Wait> OpenRouter<W> {
         })
     }
 
-    /// Transcribes `audio`, keeping the segments.
+    /// Transcribes `audio`.
     ///
     /// # Errors
     ///
     /// As [`Transcriber::transcribe`], after retries.
-    pub async fn transcribe_verbose(
-        &self,
-        audio: &Audio,
-    ) -> Result<Transcription, TranscribeError> {
+    async fn transcribe_retrying(&self, audio: &Audio) -> Result<String, TranscribeError> {
         let wav = wav::encode_f32(&audio.samples, audio.sample_rate)
             .map_err(|e| TranscribeError::Engine(format!("could not encode the audio: {e}")))?;
-        let clip = audio_duration(audio);
         let timeout = if self.config.timeout_grows_with_audio {
-            request_timeout(self.config.timeout, clip)
+            self.config.timeout.saturating_add(audio.duration() / 2)
         } else {
             self.config.timeout
         };
@@ -292,27 +245,15 @@ impl<W: Wait> OpenRouter<W> {
         let audio_b64 = base64(&wav);
         tracing::debug!(bytes = wav.len(), model = %self.config.model, ?timeout, "transcribing");
         let mut failures = 0u32;
-        let mut timeouts = 0u32;
         loop {
             let error = match self.attempt(&audio_b64, timeout).await {
-                Ok(transcription) => {
-                    tracing::debug!(
-                        chars = transcription.text.chars().count(),
-                        segments = transcription.segments.len(),
-                        "transcribed"
-                    );
-                    return Ok(transcription);
+                Ok(text) => {
+                    tracing::debug!(chars = text.chars().count(), "transcribed");
+                    return Ok(text);
                 }
                 Err(failure) => failure,
             };
             failures = failures.saturating_add(1);
-            if error.error == TranscribeError::Timeout {
-                timeouts = timeouts.saturating_add(1);
-                if !may_retry_after_timeout(clip, self.config.long_clip, timeouts) {
-                    tracing::debug!(failures, timeouts, "a long clip timed out again; giving up");
-                    return Err(error.error);
-                }
-            }
             let Some(delay) = self.retry_delay(&error, failures) else {
                 tracing::debug!(failures, error = %error.error, "giving up");
                 return Err(error.error);
@@ -338,7 +279,7 @@ impl<W: Wait> OpenRouter<W> {
         }
     }
 
-    async fn attempt(&self, audio_b64: &str, timeout: Duration) -> Result<Transcription, Failure> {
+    async fn attempt(&self, audio_b64: &str, timeout: Duration) -> Result<String, Failure> {
         let body = self.request_body(audio_b64);
         let response = self
             .client
@@ -380,13 +321,7 @@ impl<W: Wait> OpenRouter<W> {
 
 impl<W: Wait> Transcriber for OpenRouter<W> {
     async fn transcribe(&self, audio: &Audio) -> Result<String, TranscribeError> {
-        self.transcribe_verbose(audio).await.map(|t| t.text)
-    }
-
-    async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
-        self.transcribe_verbose(audio)
-            .await
-            .map(Transcription::into_transcript)
+        self.transcribe_retrying(audio).await
     }
 }
 
@@ -398,17 +333,6 @@ impl<W> std::fmt::Debug for OpenRouter<W> {
             .field("key", &self.key)
             .finish_non_exhaustive()
     }
-}
-
-/// How long `audio` plays.
-fn audio_duration(audio: &Audio) -> Duration {
-    if audio.sample_rate == 0 {
-        return Duration::ZERO;
-    }
-    let seconds = audio.samples.len() as u64 / u64::from(audio.sample_rate);
-    let rest = audio.samples.len() as u64 % u64::from(audio.sample_rate);
-    Duration::from_secs(seconds)
-        + Duration::from_nanos(rest * 1_000_000_000 / u64::from(audio.sample_rate))
 }
 
 /// A failed attempt and whether to retry it.
@@ -441,7 +365,8 @@ impl Failure {
         let retry_after = headers
             .get(RETRY_AFTER)
             .and_then(|v| v.to_str().ok())
-            .and_then(|v| parse_retry_after(v, SystemTime::now()));
+            .and_then(|v| v.trim().parse().ok())
+            .map(Duration::from_secs);
         match status {
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
                 Self::fatal(TranscribeError::InvalidKey)
@@ -452,8 +377,11 @@ impl Failure {
             // filter. Not retried: the same request gets the same answer.
             StatusCode::NOT_FOUND => Self::fatal(TranscribeError::NoRoute),
             // Never followed (issue #76) and never retried: the same request
-            // gets the same answer. Its own error, so the UI can say so (#86).
-            s if s.is_redirection() => Self::fatal(TranscribeError::Redirected(s.as_u16())),
+            // gets the same answer.
+            s if s.is_redirection() => Self::fatal(TranscribeError::Engine(format!(
+                "the provider answered with a redirect (HTTP {}), which isn't followed",
+                s.as_u16()
+            ))),
             s if s.is_server_error() => Self::retry(
                 TranscribeError::Engine(format!("the provider failed (HTTP {})", s.as_u16())),
                 retry_after,
@@ -483,57 +411,18 @@ impl Failure {
     }
 }
 
-/// A `Retry-After` value (RFC 9110): delay seconds, or an HTTP date turned
-/// into the wait from `now` (zero if it's already past). `None` if it's
-/// neither, so the backoff applies. The [`MAX_RETRY_AFTER`] cap is applied
-/// by the caller.
-fn parse_retry_after(value: &str, now: SystemTime) -> Option<Duration> {
-    let value = value.trim();
-    if let Ok(seconds) = value.parse::<u64>() {
-        return Some(Duration::from_secs(seconds));
-    }
-    let at = httpdate::parse_http_date(value).ok()?;
-    Some(at.duration_since(now).unwrap_or(Duration::ZERO))
-}
-
 #[derive(Deserialize)]
-struct VerboseJson {
+struct Reply {
     text: String,
-    #[serde(default)]
-    segments: Vec<VerboseSegment>,
 }
 
-#[derive(Deserialize)]
-struct VerboseSegment {
-    #[serde(default)]
-    start: f64,
-    #[serde(default)]
-    end: f64,
-    #[serde(default)]
-    text: String,
-    #[serde(default)]
-    no_speech_prob: f64,
-}
-
-/// Parses a `verbose_json` reply. The error never quotes the body, which
+/// Parses a reply's text, trimmed. The error never quotes the body, which
 /// could hold the transcript.
-fn parse(body: &[u8]) -> Result<Transcription, TranscribeError> {
-    let reply: VerboseJson = serde_json::from_slice(body).map_err(|e| {
+fn parse(body: &[u8]) -> Result<String, TranscribeError> {
+    let reply: Reply = serde_json::from_slice(body).map_err(|e| {
         TranscribeError::Engine(format!("unreadable reply ({:?} error)", e.classify()))
     })?;
-    Ok(Transcription {
-        text: reply.text.trim().to_owned(),
-        segments: reply
-            .segments
-            .into_iter()
-            .map(|s| Segment {
-                start: s.start,
-                end: s.end,
-                text: s.text,
-                no_speech_prob: s.no_speech_prob,
-            })
-            .collect(),
-    })
+    Ok(reply.text.trim().to_owned())
 }
 
 #[cfg(test)]
@@ -610,33 +499,10 @@ mod tests {
     }
 
     #[test]
-    fn the_transcript_carries_the_mean_no_speech_prob() {
-        let t = parse(
-            br#"{"text":"Thank you.","segments":[{"no_speech_prob":0.8},{"no_speech_prob":0.6}]}"#,
-        )
-        .unwrap()
-        .into_transcript();
-        assert_eq!(t.text, "Thank you.");
-        assert!((t.no_speech_prob.unwrap() - 0.7).abs() < 1e-12);
-
-        // No segments: nothing to judge by, so none.
-        let t = parse(br#"{"text":"hi"}"#).unwrap().into_transcript();
-        assert_eq!(t.no_speech_prob, None);
-    }
-
-    #[test]
-    fn parses_text_and_segments_with_defaults() {
-        let t = parse(br#"{"text":" hi there ","segments":[{"start":0.0,"end":1.5,"text":" hi","no_speech_prob":0.01},{"text":"x"}]}"#).unwrap();
-        assert_eq!(t.text, "hi there");
-        assert_eq!(t.segments.len(), 2);
-        assert!((t.segments[0].no_speech_prob - 0.01).abs() < 1e-12);
-        assert!((t.segments[0].end - 1.5).abs() < 1e-12);
-        assert_eq!(t.segments[1].no_speech_prob, 0.0);
-        assert!(
-            parse(br#"{"text":"no segments"}"#)
-                .unwrap()
-                .segments
-                .is_empty()
+    fn parses_the_text_trimmed() {
+        assert_eq!(
+            parse(br#"{"text":" hi there ","segments":[]}"#).unwrap(),
+            "hi there"
         );
     }
 
@@ -683,47 +549,22 @@ mod tests {
         );
         let f = Failure::from_status(StatusCode::BAD_GATEWAY, &none);
         assert!(f.retryable && f.retry_after.is_none());
-        // A date long past means retry at once; garbage means the backoff.
-        headers.insert(
-            RETRY_AFTER,
-            HeaderValue::from_static("Wed, 21 Oct 2015 07:28:00 GMT"),
-        );
-        assert_eq!(
-            Failure::from_status(StatusCode::SERVICE_UNAVAILABLE, &headers).retry_after,
-            Some(Duration::ZERO)
-        );
-        headers.insert(RETRY_AFTER, HeaderValue::from_static("soon"));
-        assert_eq!(
-            Failure::from_status(StatusCode::SERVICE_UNAVAILABLE, &headers).retry_after,
-            None
-        );
-    }
-
-    #[test]
-    fn retry_after_parses_seconds_and_http_dates() {
-        let now = httpdate::parse_http_date("Sat, 31 Oct 2026 12:00:00 GMT").unwrap();
-        let parse = |v| parse_retry_after(v, now);
-        assert_eq!(parse("120"), Some(Duration::from_secs(120)));
-        assert_eq!(parse(" 0 "), Some(Duration::ZERO));
-        // All three RFC 9110 date forms.
-        for date in [
-            "Sat, 31 Oct 2026 12:00:05 GMT",
-            "Saturday, 31-Oct-26 12:00:05 GMT",
-            "Sat Oct 31 12:00:05 2026",
-        ] {
-            assert_eq!(parse(date), Some(Duration::from_secs(5)), "{date}");
+        // Anything but delay seconds (an HTTP date too) means the backoff.
+        for value in ["soon", "Wed, 21 Oct 2015 07:28:00 GMT", "-5"] {
+            headers.insert(RETRY_AFTER, HeaderValue::from_static(value));
+            assert_eq!(
+                Failure::from_status(StatusCode::SERVICE_UNAVAILABLE, &headers).retry_after,
+                None,
+                "{value}"
+            );
         }
-        // Past, or exactly now: no wait.
-        assert_eq!(parse("Sat, 31 Oct 2026 11:59:00 GMT"), Some(Duration::ZERO));
-        assert_eq!(parse("Sat, 31 Oct 2026 12:00:00 GMT"), Some(Duration::ZERO));
-        // A far date parses; the 30 s cap is the caller's.
-        assert_eq!(
-            parse("Sat, 31 Oct 2026 13:00:00 GMT"),
-            Some(Duration::from_secs(3_600))
+        let f = Failure::from_status(StatusCode::FOUND, &none);
+        assert!(!f.retryable);
+        assert!(
+            f.error.to_string().contains("redirect (HTTP 302)"),
+            "{}",
+            f.error
         );
-        for bad in ["", "-5", "1.5", "tomorrow", "Sat, 32 Oct 2026 12:00:00 GMT"] {
-            assert_eq!(parse(bad), None, "{bad:?}");
-        }
     }
 
     #[test]

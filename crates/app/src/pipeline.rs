@@ -35,7 +35,7 @@ use dictation_core::cleanup::{self as cleanup_rules, Judgement};
 use dictation_core::coordinator::{Phase, State, step};
 use dictation_core::error::DictationError;
 use dictation_core::events::{Command, Event};
-use dictation_core::text::{Cleaned, Transcript, clean};
+use dictation_core::text::{Cleaned, clean};
 use dictation_ports::{
     Audio, AudioError, AudioSource, Cleaner, CleanupError, CleanupOutcome, Clock, HotkeyError,
     HotkeyEvent, HotkeySource, InsertError, LevelMeter, Permission, PermissionStatus, Permissions,
@@ -477,7 +477,7 @@ fn level_interval() -> Interval {
 /// with `preceding` the character before the cursor if known (the smart
 /// leading space): the text to insert, or "nothing to paste" (no error).
 /// Never logs the text or `preceding`.
-fn cleaned_event(transcript: &Transcript, preceding: Option<char>) -> Event {
+fn cleaned_event(transcript: &str, preceding: Option<char>) -> Event {
     match clean(transcript, preceding) {
         Cleaned::Text(text) => Event::TranscriptReady(text),
         Cleaned::Dropped(why) => {
@@ -524,7 +524,7 @@ enum JobResult {
     /// cursor right after it, and what the cleanup did.
     Transcribed(
         u64,
-        Result<Transcript, TranscribeError>,
+        Result<String, TranscribeError>,
         Option<char>,
         Option<CleanupOutcome>,
     ),
@@ -1254,15 +1254,15 @@ where
                 };
             }
             tracing::debug!(job, duration = ?audio.duration(), "transcribing");
-            let mut result = transcriber.transcribe_detailed(&audio).await;
+            let mut result = transcriber.transcribe(&audio).await;
             let mut outcome = None;
             if let (Ok(transcript), Some(cleanup)) = (&mut result, cleanup)
                 // Only text that would be pasted: never a dropped one.
                 && matches!(clean(transcript, None), Cleaned::Text(_))
             {
-                let (cleaned, done) = cleanup.run(&transcript.text).await;
+                let (cleaned, done) = cleanup.run(transcript).await;
                 if let Some(cleaned) = cleaned {
-                    transcript.text = cleaned;
+                    *transcript = cleaned;
                 }
                 outcome = done;
             }
@@ -1750,7 +1750,7 @@ mod tests {
             let job = runner.job;
             deliver(
                 &mut runner,
-                JobResult::Transcribed(job, Ok(Transcript::from_text(text)), Some('a'), None),
+                JobResult::Transcribed(job, Ok(text.to_owned()), Some('a'), None),
             );
             assert_eq!(runner.state, State::Idle, "{text:?}");
         }
@@ -1771,7 +1771,7 @@ mod tests {
         vec![
             (
                 "transcribed",
-                |n| JobResult::Transcribed(n, Ok(Transcript::from_text("hello")), None, None),
+                |n| JobResult::Transcribed(n, Ok("hello".to_owned()), None, None),
                 Event::TranscriptReady("hello".into()),
             ),
             (

@@ -406,8 +406,6 @@ export type ErrorCode =
 "provider_quota" | 
 /**  The `OpenRouter` account has no credits left (402). */
 "out_of_credits" | 
-/**  The provider answered with a redirect. */
-"provider_redirect" | 
 /**  The on-device model isn't downloaded. */
 "model_missing" | 
 /**  The on-device model is still loading. */

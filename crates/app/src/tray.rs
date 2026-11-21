@@ -139,10 +139,9 @@ impl Fix {
 #[must_use]
 pub const fn fix_for(code: ErrorCode) -> Fix {
     match code {
-        ErrorCode::KeyMissing
-        | ErrorCode::KeyRejected
-        | ErrorCode::KeyUnreadable
-        | ErrorCode::ProviderRedirect => Fix::OpenSpeechSettings,
+        ErrorCode::KeyMissing | ErrorCode::KeyRejected | ErrorCode::KeyUnreadable => {
+            Fix::OpenSpeechSettings
+        }
         ErrorCode::MicDenied => Fix::OpenMicrophoneSettings,
         ErrorCode::AccessibilityMissing | ErrorCode::PasteFailed => Fix::OpenAccessibilitySettings,
         ErrorCode::ModelMissing | ErrorCode::ModelLoadingFailed => Fix::DownloadModel,
@@ -181,7 +180,6 @@ pub const fn is_engine_error(code: ErrorCode) -> bool {
             | ErrorCode::NetworkUnreachable
             | ErrorCode::ProviderQuota
             | ErrorCode::OutOfCredits
-            | ErrorCode::ProviderRedirect
             | ErrorCode::ModelMissing
             | ErrorCode::ModelLoading
             | ErrorCode::ModelLoadingFailed
@@ -808,11 +806,6 @@ mod tests {
                 "Troubleshoot…",
             ),
             (ErrorCode::OutOfCredits, "fix-add-credits", "Add credits…"),
-            (
-                ErrorCode::ProviderRedirect,
-                "fix-speech-settings",
-                "Open Speech settings…",
-            ),
             (
                 ErrorCode::ModelMissing,
                 "fix-download-model",

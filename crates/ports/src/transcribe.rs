@@ -6,7 +6,6 @@ use std::future::Future;
 use thiserror::Error;
 
 use dictation_core::redact;
-use dictation_core::text::Transcript;
 
 use crate::Audio;
 
@@ -48,10 +47,6 @@ pub enum TranscribeError {
     /// ([`dictation_core::redact::summary`]), as a backstop.
     #[error("network error: {}", redact::summary(.0))]
     Network(String),
-    /// The provider answered with a redirect (3xx), which is never followed
-    /// (requests go only to the configured provider). Holds the HTTP status.
-    #[error("the provider answered with a redirect (HTTP {0}), which isn't followed")]
-    Redirected(u16),
     /// The on-device engine is selected but its model isn't downloaded (or
     /// the catalogue no longer has the saved one), so there is nothing to
     /// run (L1).
@@ -89,8 +84,6 @@ impl fmt::Debug for TranscribeError {
                 .debug_tuple("Network")
                 .field(&redact::summary(text))
                 .finish(),
-            // Holds only the HTTP status, never the Location header or a body.
-            Self::Redirected(status) => f.debug_tuple("Redirected").field(status).finish(),
             Self::ModelMissing => f.write_str("ModelMissing"),
             Self::ModelLoading => f.write_str("ModelLoading"),
             Self::Engine(text) => f
@@ -132,9 +125,6 @@ impl TranscribeError {
             Self::Network(_) => {
                 "Couldn't reach the provider. Check your internet connection.".to_owned()
             }
-            Self::Redirected(_) => "The provider answered with a redirect, which the app \
-                 doesn't follow. Check the provider selected in Settings."
-                .to_owned(),
             Self::ModelMissing => {
                 "The on-device model isn't downloaded. Download the model in Settings.".to_owned()
             }
@@ -170,25 +160,6 @@ pub trait Transcriber: Send + Sync {
         &self,
         audio: &Audio,
     ) -> impl Future<Output = Result<String, TranscribeError>> + Send;
-
-    /// Like [`transcribe`](Self::transcribe), plus the engine's
-    /// `no_speech_prob`, which the pipeline uses to drop Whisper's stock
-    /// phrases for silence (`dictation_core::text`). The pipeline calls
-    /// this one.
-    ///
-    /// The default reports no probability, so an engine that can't tell
-    /// only implements `transcribe`; the hallucination filter then never
-    /// drops its text. Same errors and threading as `transcribe`.
-    ///
-    /// # Errors
-    ///
-    /// As [`transcribe`](Self::transcribe).
-    fn transcribe_detailed(
-        &self,
-        audio: &Audio,
-    ) -> impl Future<Output = Result<Transcript, TranscribeError>> + Send {
-        async move { self.transcribe(audio).await.map(Transcript::from_text) }
-    }
 }
 
 #[cfg(test)]
@@ -232,10 +203,6 @@ mod tests {
                 "Couldn't read your API key from the Keychain. Unlock the Keychain or allow access, then try again, or enter the key again in Settings.",
             ),
             (
-                TranscribeError::Redirected(302),
-                "The provider answered with a redirect, which the app doesn't follow. Check the provider selected in Settings.",
-            ),
-            (
                 TranscribeError::ModelMissing,
                 "The on-device model isn't downloaded. Download the model in Settings.",
             ),
@@ -275,10 +242,6 @@ mod tests {
             (
                 TranscribeError::Network("dns".into()),
                 ErrorCode::NetworkUnreachable,
-            ),
-            (
-                TranscribeError::Redirected(302),
-                ErrorCode::ProviderRedirect,
             ),
             (TranscribeError::ModelMissing, ErrorCode::ModelMissing),
             (TranscribeError::ModelLoading, ErrorCode::ModelLoading),
@@ -321,19 +284,6 @@ mod tests {
             }
             let debug = format!("{error:?}");
             assert!(!debug.contains(key) && debug.len() < 300, "{debug}");
-        }
-    }
-
-    /// The redirect error carries only the status: neither the target URL
-    /// (which may hold a key in its query) nor a body can reach any output.
-    #[test]
-    fn redirected_shows_only_the_status() {
-        let error = TranscribeError::Redirected(302);
-        assert_eq!(format!("{error:?}"), "Redirected(302)");
-        let shown = [error.to_string(), error.user_message()];
-        for text in shown {
-            assert!(!text.contains("http"), "{text}");
-            assert!(!text.contains('\n') && text.chars().count() < 300, "{text}");
         }
     }
 

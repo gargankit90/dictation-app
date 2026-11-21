@@ -28,7 +28,6 @@
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use dictation_core::settings::Settings;
-use dictation_core::text::Transcript;
 use dictation_ports::{
     Audio, Cleaner, CleanupError, Secret, SecretError, TranscribeError, Transcriber,
 };
@@ -141,17 +140,6 @@ impl Transcriber for Engine {
             Self::Mock(engine) => engine.transcribe(audio).await,
             Self::Remote(engine) => engine.speech.transcribe(audio).await,
             Self::Local(engine) => engine.transcribe(audio).await,
-            Self::Unavailable(error) => Err(error.clone()),
-        }
-    }
-
-    // Forwarded, so the engine's no_speech_prob reaches the pipeline's
-    // hallucination filter.
-    async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
-        match self {
-            Self::Mock(engine) => engine.transcribe_detailed(audio).await,
-            Self::Remote(engine) => engine.speech.transcribe_detailed(audio).await,
-            Self::Local(engine) => engine.transcribe_detailed(audio).await,
             Self::Unavailable(error) => Err(error.clone()),
         }
     }
@@ -321,11 +309,6 @@ impl Transcriber for Transcribers {
         let engine = self.engine_for_dictation().await;
         engine.transcribe(audio).await
     }
-
-    async fn transcribe_detailed(&self, audio: &Audio) -> Result<Transcript, TranscribeError> {
-        let engine = self.engine_for_dictation().await;
-        engine.transcribe_detailed(audio).await
-    }
 }
 
 impl Cleaner for Transcribers {
@@ -402,8 +385,6 @@ mod tests {
         transcribers.update(|| Engine::Local(local.clone()));
         assert_eq!(transcribers.name(), "local");
         assert_eq!(transcribers.transcribe(&audio).await.unwrap(), "on device");
-        let detailed = transcribers.transcribe_detailed(&audio).await.unwrap();
-        assert_eq!(detailed, Transcript::from_text("on device".to_owned()));
         let Engine::Local(current) = &*transcribers.current() else {
             panic!("not local");
         };
