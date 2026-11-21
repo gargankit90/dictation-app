@@ -22,9 +22,9 @@ const NEVER = "Never audio, transcripts, typed text, keys or app names.";
 const OFF_STOPS = "Off stops them and deletes what's waiting.";
 const CHANGE = "Change it any time in Settings → Privacy.";
 /** On, and it has been for all of setup. */
-export const EVENTS_CAPTION = `On since setup began: anonymous usage events (with a random install ID) and error reports, so we can see where setup goes wrong. ${NEVER} ${OFF_STOPS} ${CHANGE}`;
+export const EVENTS_CAPTION = `On since setup began: usage events (with a random install ID) and error reports, so we can see where setup goes wrong. ${NEVER} ${OFF_STOPS} ${CHANGE}`;
 /** On, after being off at some point of setup: "since setup began" would be false. */
-export const EVENTS_FROM_NOW_CAPTION = `On from now: anonymous usage events (with a random install ID) and error reports, so we can see where things go wrong. ${NEVER} ${OFF_STOPS} ${CHANGE}`;
+export const EVENTS_FROM_NOW_CAPTION = `On from now: usage events (with a random install ID) and error reports, so we can see where things go wrong. ${NEVER} ${OFF_STOPS} ${CHANGE}`;
 export const EVENTS_OFF_CAPTION = `Off: nothing more is sent, and there's no install ID. ${CHANGE}`;
 export const NOT_TESTED = "Not tested yet: try it from the menu bar any time";
 

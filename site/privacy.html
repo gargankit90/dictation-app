@@ -216,8 +216,8 @@
           We don't use your recordings or text to train any model, and we ask providers not to.
         </li>
         <li>
-          Anonymous usage and error reports are <strong>on by default</strong> and never hold your
-          audio, words or keys. You can turn them off in Settings → Privacy.
+          Usage and error reports are <strong>on by default</strong>, carry a random install ID, and
+          never hold your audio, words or keys. You can turn them off in Settings → Privacy.
         </li>
       </ul>
 
@@ -258,8 +258,8 @@
             <td>None, nothing is sent.</td>
             <td>
               <code>data_collection: deny</code> on every request (use only providers that don't
-              collect data). <code>zdr: true</code> on cleanup requests (use only hosts with zero
-              data retention).
+              collect data). <code>zdr: true</code> on cleanup requests (ask for zero-data-retention
+              hosts; see below for what your OpenRouter account setting decides).
             </td>
           </tr>
           <tr>
@@ -286,11 +286,16 @@
       <ul>
         <li>
           <strong>OpenRouter</strong> says it doesn't store your prompts or responses unless you
-          turn on logging, or content is flagged as possible child sexual abuse material (screened
-          on all requests, including zero-retention ones; flagged content may be kept for review and
-          legal reasons). It does keep metadata such as token counts and timing. Some endpoints
-          marked "Safety Retention" may keep requests to prevent abuse; our <code>zdr: true</code>
-          setting on cleanup requests excludes them. Sources:
+          turn on prompt logging or the separate "use my inputs/outputs" opt-in (both off by
+          default), or content is flagged as possible child sexual abuse material (screened on all
+          requests, including zero-retention ones; flagged content may be kept for review and legal
+          reasons). It does keep metadata such as token counts and timing. Some endpoints marked
+          "Safety Retention" may keep prompts and responses to prevent abuse (not for training).
+          Whether a request can reach them follows your OpenRouter account's settings: our
+          <code>zdr: true</code> request follows the account's choice, and OpenRouter's
+          documentation says self-serve accounts allow Safety Retention by default. To exclude them,
+          turn on "ZDR only" in your OpenRouter privacy settings. So we can't guarantee zero
+          retention for your requests. Sources:
           <a href="https://openrouter.ai/docs/guides/privacy/data-collection">data collection</a>,
           <a href="https://openrouter.ai/docs/features/zdr">zero data retention</a>.
         </li>
@@ -302,10 +307,10 @@
           <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI, your data</a>.
         </li>
         <li>
-          <strong>The cleanup host</strong> is chosen by OpenRouter from hosts with zero data
-          retention, which it describes as no routine storage after processing, apart from the
-          screening above. Source:
-          <a href="https://openrouter.ai/docs/features/zdr">OpenRouter ZDR</a>.
+          <strong>The cleanup host</strong> is chosen by OpenRouter. With "ZDR only" on in your
+          account, it uses hosts OpenRouter lists as zero data retention (no routine storage after
+          processing, apart from the screening above); otherwise a Safety Retention host may be
+          used. Source: <a href="https://openrouter.ai/docs/features/zdr">OpenRouter ZDR</a>.
         </li>
         <li>
           <strong>Hugging Face</strong> serves the one-time model downloads. It sees an ordinary
@@ -329,16 +334,18 @@
       </p>
       <ul>
         <li>
-          <strong>PostHog Cloud (US)</strong> gets a closed list of events: the app opened (version,
-          macOS version, chip), setup steps reached, which engine you chose, that a dictation worked
-          or failed (length and speed in rough ranges, the kind of failure), which setting changed
-          (not its value), and that the app updated. No profiles, no IP address.
+          <strong>PostHog Cloud (US)</strong> gets a closed list of events, each with a random
+          install ID made on your Mac (it links one installation's events; it isn't your name,
+          account or hardware, and switching reports off deletes it). The events: the app opened
+          (version, macOS version, chip), setup steps reached, which engine you chose, that a
+          dictation worked or failed (length and speed in rough ranges, the kind of failure), which
+          setting changed (not its value), and that the app updated. No profiles, no IP address.
         </li>
         <li>
           <strong>Sentry (US)</strong> gets a report when the app crashes or a dictation fails: the
-          app version, macOS major version, chip, an error code, and for a crash the code locations
-          and function names. Never audio, text, keys, app names, file paths, your user name or
-          computer name.
+          app version, macOS major version, chip, an error code, and for a crash the source file
+          names and line numbers and function names from Vocet's own code (not paths on your Mac).
+          Never audio, text, keys, app names, paths to your files, your user name or computer name.
         </li>
         <li>
           <strong>Setup is the exception to the switch.</strong> The switch appears on the last
@@ -363,8 +370,11 @@
         </li>
         <li>
           <strong>Audio</strong> is kept in memory and dropped after use. Release builds never save
-          it. Only a developer debug build, started with a special flag, writes recordings to a
-          folder on the Mac, and they never leave it.
+          it. Only a developer debug build, started with a special flag, saves recordings as WAV
+          files in
+          <code>~/Library/Application Support/com.dictationapp.desktop/debug-recordings</code>. They
+          never leave the Mac and are separate from History: clearing History doesn't remove them.
+          To delete them, quit Vocet and move that folder to the Trash.
         </li>
         <li><strong>Your key</strong> lives in the macOS Keychain.</li>
         <li><strong>Logs</strong> never hold transcripts or keys.</li>

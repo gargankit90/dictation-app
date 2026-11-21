@@ -15,7 +15,7 @@ text:
   Your speech then stays on the Mac. It is the recommended choice in setup.
 - **OpenRouter**: an internet connection and an OpenRouter account (you
   pay OpenRouter for what you use; Connect OpenRouter makes the key). Your speech goes through OpenRouter to
-  OpenAI for transcription, and the text to a cleanup model on a zero-data-retention host. Vocet has no server
+  OpenAI for transcription, and the text to a cleanup model (with ZDR-only on in your OpenRouter account, a zero-data-retention host). Vocet has no server
   of its own that receives it (policy: vocetlabs.com/privacy).
 
 ## 1. Install
@@ -164,7 +164,7 @@ and install it over the old app, as in section 1.
 - **Your words.** With **On this Mac**, your speech is turned into text on the
   Mac and not sent anywhere. With **OpenRouter**, it goes through OpenRouter.
   Your history stays on this Mac. Audio stays in memory.
-- **Anonymous usage and error events are on by default.** Turn them off with
+- **Usage and error events (random install ID) are on by default.** Turn them off with
   **Share usage and error events** in Settings > Privacy (or on the last setup
   screen). Off takes effect at once and deletes what was waiting. Events carry
   no audio, no text you dictated, no API keys, no app names and no file
@@ -245,5 +245,5 @@ The same list is in the [changelog](../CHANGELOG.md).
   ([#226](https://github.com/gargankit90/dictation-app/issues/226)).
 - With **Your own key**, speech goes through OpenRouter to OpenAI, and the
   text to a cleanup model. Don't dictate anything you would not send to a cloud service.
-- Anonymous usage and error events are on by default; turn them off in
+- Usage and error events are on by default; turn them off in
   Settings > Privacy. What is sent: [privacy.md](privacy.md).

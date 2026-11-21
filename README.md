@@ -23,7 +23,7 @@ _Recorded in a macOS VM: a real Right Option hold, speech by macOS `say` fed to 
 You need an Apple Silicon Mac (M1 or newer) with macOS 13 or newer. Releases
 are signed with an Apple Developer ID and notarized, so the first launch needs
 no extra step. What is in each release, and its known limits, is in the
-[changelog](CHANGELOG.md). Anonymous usage and error events are on by default
+[changelog](CHANGELOG.md). Usage and error events (with a random install ID) are on by default
 and can be turned off in Settings; see [what is sent](docs/privacy.md).
 
 ## How it was built

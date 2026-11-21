@@ -16,8 +16,11 @@ and field, and what stays on your Mac. If the two ever disagree, fix both.
   this OpenAI model. How long OpenRouter and OpenAI keep that audio is governed
   by their own policies (OpenAI says it doesn't train on API data by default);
   sources are in the [policy](https://vocetlabs.com/privacy). The **transcript's text** then goes to OpenRouter for cleanup by
-  the `z-ai/glm-5.3-flash` model, only to hosts with zero data retention that
-  don't collect data (`zdr: true`, `data_collection: deny`). If no such host
+  the `z-ai/glm-5.3-flash` model, with `zdr: true` and `data_collection: deny`. `zdr: true`
+  follows the OpenRouter account's Safety Retention choice: OpenRouter's
+  [ZDR page](https://openrouter.ai/docs/features/zdr) says self-serve accounts
+  allow it by default, so zero retention holds only if the user turns on "ZDR
+  only" in their OpenRouter privacy settings. If no such host
   answers in 1.5 seconds, nothing is cleaned and the transcript is pasted as it
   came. Your key stays in your macOS Keychain and is sent only to OpenRouter.
 - **Connect OpenRouter:** the button sends you to `openrouter.ai` in your
@@ -28,13 +31,13 @@ and field, and what stays on your Mac. If the two ever disagree, fix both.
   to your Keychain and is never shown in full or logged. **Add credits** opens
   `openrouter.ai` in your browser; nothing is sent from Vocet.
 
-Vocet can share anonymous usage events and error reports so we can see
+Vocet can share usage events and error reports so we can see
 what works and what breaks. This page lists everything it sends. The list is
 enforced in code: events are a closed enum (`crates/ports/src/telemetry.rs`),
 and error reports are built field by field from an allow-list
 (`crates/telemetry/src/errors.rs`), so a field not listed here cannot be sent.
 
-- **On by default.** During first setup, anonymous usage events and error
+- **On by default.** During first setup, usage events (with a random install ID) and error
   reports are sent from the first screen, so we can see where and why people
   stop.
 - **The switch.** "Share usage and error events" is on the last setup screen
@@ -83,7 +86,7 @@ be cleaned. If that changes it will be listed here first.
 ## Never sent
 
 In usage events and error reports, never: audio. Transcripts, and your dictation history. Anything you type or paste. API
-keys. The names, bundle IDs or window titles of the apps you use. File paths. Host names. Your user
+keys. The names, bundle IDs or window titles of the apps you use. Paths to your files (Sentry reports hold only crate-relative source file names and line numbers from our own code). Host names. Your user
 name. Error messages (only the kind of failure). Setting values (only which
 setting changed). Your IP address: the app sends no `$ip` and sets
 `$geoip_disable`; the PostHog project must also be set to discard client IP
@@ -210,7 +213,7 @@ when you press it.
 - your dictation key, as its keycap label (for example `Right ⌥`)
 - the engine: cloud with the provider's name, or on this Mac with the model id
 - whether the engine is ready
-- whether anonymous usage events are on
+- whether usage events are on
 - the last ten error codes (for example `mic_denied`) with the time of each
 
 It never holds audio, transcripts, your dictation history, anything you typed or copied, API keys, app

@@ -29,8 +29,9 @@ export function WhatsSent() {
         <li>
           Error reports, sent to Sentry (US): when the app crashes (a panic) or a dictation fails,
           the error code (for example mic_denied), the app version, your macOS major version and
-          chip, and for a crash the code locations and function names where it happened. Never the
-          error message, your words, file paths, your user name or computer name.
+          chip, and for a crash the source file names, line numbers and function names from Vocet's
+          own code where it happened. Never the error message, your words, paths to your files, your
+          user name or computer name.
         </li>
         <li>Which setting you changed (not the new value).</li>
         <li>That the app updated, from which version to which.</li>
