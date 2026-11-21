@@ -180,7 +180,6 @@ jobs:
         with:
           tool: cargo-nextest@0.9.149
 
-      - run: cargo build -p dictation-platform --all-targets --all-features
       - run: cargo clippy -p dictation-platform --all-targets --all-features -- -D warnings
       - run: cargo nextest run -p dictation-platform --all-features --profile ci
       - run: cargo test -p dictation-platform --doc --all-features
@@ -195,7 +194,6 @@ jobs:
       # The on-device engine (#219): transcribe-cpp builds its Metal backend
       # only on macOS, so Linux CI never compiles it. rust-cache above keeps
       # the C++ build between runs.
-      - run: cargo build -p dictation-transcribe --all-targets
       - run: cargo clippy -p dictation-transcribe --all-targets -- -D warnings
       - run: cargo nextest run -p dictation-transcribe --profile ci
       # The whole workspace on a Mac (G2), as scripts/gate.sh runs it: core,

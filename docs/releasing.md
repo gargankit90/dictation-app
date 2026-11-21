@@ -10,7 +10,6 @@ unless the owner decides so.
 | Piece                                                  | Where                                                                        |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
 | DMG build, checks, checksums                           | `scripts/build-dmg.sh`, `scripts/check-dmg.sh`                               |
-| DMG on every packaging PR and on `main` (ad-hoc signed) | `.github/workflows/dmg.yml`, artifact `dictation-app-dmg`                   |
 | Third-party licence notice, bundled and checked        | `THIRD-PARTY-LICENSES.txt`, `scripts/gen-licences.sh`, `scripts/check-licences.sh` |
 | Tester guide (attached to each release as README.md)   | `docs/TESTERS.md`                                                            |
 | Release build, signature check, upload                 | `scripts/release.sh` (tests: `scripts/test-release.sh`, in the gate)         |

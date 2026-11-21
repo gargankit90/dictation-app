@@ -321,7 +321,7 @@ The rule stays: run the gate before you push. `scripts/gate.sh` (helpers in
 
 ## CI
 
-CI (`.github/workflows/ci.yml`, `dmg.yml`) runs on GitHub-hosted runners for
+CI (`.github/workflows/ci.yml`) runs on GitHub-hosted runners for
 every pull request (forks included) and every push to `main`. The repository
 is public, and a pull request can edit workflow files, so **no workflow may
 reach the owner's Mac**: there is no self-hosted runner, and
@@ -336,19 +336,19 @@ reach the owner's Mac**: there is no self-hosted runner, and
   builds, lints and tests `dictation-platform` and `dictation-transcribe` (the Metal build of the on-device engine, #219) on `macos-15` (Apple Silicon,
   checked with `uname -m`), the `#[cfg(target_os = "macos")]` code Linux
   compiles out, then also runs workspace clippy, nextest and doctests with
-  `DICTATION_NO_LAUNCH=1` (G2), so every crate's tests run on a Mac too. `dmg.yml` builds the tester DMG on `macos-15`, signed ad hoc
-  (`DMG_ADHOC=1`): there is no certificate and no secret in CI.
+  `DICTATION_NO_LAUNCH=1` (G2), so every crate's tests run on a Mac too. The
+  tester DMG is built on the owner's Mac (`scripts/build-dmg.sh`,
+  `scripts/release.sh`), not in CI.
 - **Job names are stable** (they become required status checks): `Quality gate (Linux)`,
-  `Platform crate (macOS)` and, for packaging changes, `DMG (macOS)`. Renaming
-  one breaks the required check.
+  `Platform crate (macOS)`. Renaming one breaks the required check.
 - **Rules for every workflow** (checked by `scripts/check-workflows.sh`):
   top-level `permissions: contents: read`; every action pinned to a full
   commit SHA (with the version in a comment); `actions/checkout` with
   `persist-credentials: false`; no `pull_request_target`, no `workflow_run`,
   no `secrets.` reads; `runs-on` one hosted image. `workflow_dispatch` stays
-  only where it is harmless on a hosted runner (CI, DMG).
+  only where it is harmless on a hosted runner (CI).
 - **When a pinned tool version changes,** update the `tool:` line in
-  `ci.yml` (and `dmg.yml` for cargo-about) with it.
+  `ci.yml` with it.
 - **One run per PR:** a new push cancels the superseded run. The concurrency
   group is the PR number for pull requests and the run id for everything
   else, so pushes to `main` and manual runs are never cancelled.
