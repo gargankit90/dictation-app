@@ -1,6 +1,6 @@
 # Q3 test report, run 1
 
-PR: #338 at 1a6fcb2 (plus the Tester's e2e commit)
+PR: #338, e2e run on 1a6fcb2; rebased onto af0fe2d (round 2) to push
 Result: PASS
 
 | # | Criterion | Test(s) | Result | Notes |
@@ -30,6 +30,12 @@ Result: PASS
   finds it in the keychain, a dictation pastes with `auth=good`, a 402 shows the Add credits tray fix,
   Settings → Manage… → Disconnect leaves the engine with no key, and neither the log nor any file holds the key.
   The key is made up and never printed; the control file with it is deleted after the exchange.
+
+## Not re-run on af0fe2d
+The Developer's round-1 fix (`05db6cd`: Cancel during the Keychain save, "Saving your key…") landed
+while this ran. A re-run was refused (`VM busy`, another run held `dictation-vm`). The change touches
+only the Cancel path and a status line, not the flows these scenarios drive (vitest covers it).
+Suggest the Lead's post-merge `scripts/e2e-main.sh` run covers `e2e_connect_openrouter`.
 
 ## Gate
 `scripts/gate.sh`: all checks passed (including the e2e helper tests). vitest: 17 files, 439 tests passed.
