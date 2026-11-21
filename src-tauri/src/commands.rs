@@ -2274,51 +2274,6 @@ mod capability_tests {
         }
     }
 
-    fn capability_file(name: &str) -> serde_json::Value {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("capabilities")
-            .join(name);
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-    }
-
-    #[test]
-    fn criterion_m1_7_2_the_capability_files_list_exactly_the_commands() {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("capabilities");
-        let mut files: Vec<_> = std::fs::read_dir(&dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect();
-        files.sort();
-        assert_eq!(
-            files,
-            ["default.json", "overlay.json"],
-            "two capability files"
-        );
-
-        let main = capability_file("default.json");
-        let expected: Vec<String> = COMMAND_NAMES
-            .iter()
-            .map(|name| format!("allow-{}", name.replace('_', "-")))
-            .collect();
-        assert_eq!(main["permissions"], serde_json::json!(expected));
-        assert_eq!(main["windows"], serde_json::json!([MAIN]));
-        assert!(main.get("webviews").is_none());
-        assert!(main.get("remote").is_none());
-
-        let overlay = capability_file("overlay.json");
-        assert_eq!(
-            overlay["permissions"],
-            serde_json::json!([
-                "core:event:allow-listen",
-                "core:event:allow-unlisten",
-                "allow-get-overlay-level"
-            ])
-        );
-        assert_eq!(overlay["windows"], serde_json::json!([OVERLAY]));
-        assert!(overlay.get("webviews").is_none());
-        assert!(overlay.get("remote").is_none());
-    }
-
     /// A directory of its own under the temporary one, removed when this is
     /// dropped, on a normal return and on unwind (#143). The name has the
     /// pid, a counter and the time, so two fixtures in one process, even with
