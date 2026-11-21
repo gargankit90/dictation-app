@@ -30,9 +30,9 @@ use dictation_core::onboarding::Step;
 use dictation_core::settings::Settings;
 use dictation_pipeline::config::{self, Config, ConfigError};
 use dictation_pipeline::hotkey_setting::{self, HotkeyChange, HotkeyControl, UndoFailed};
-use dictation_pipeline::launch::LoginSync;
+use dictation_pipeline::launch::LoginItem;
 use dictation_platform::secrets::KeychainSecretStore;
-use dictation_ports::{EngineKind, LaunchAtLogin, Permission, SecretStore, SetupProblem};
+use dictation_ports::{EngineKind, Permission, SecretStore, SetupProblem};
 use dictation_transcribe::check_key::check_key;
 use dictation_transcribe::openrouter;
 use tauri::State;
@@ -47,29 +47,6 @@ pub const BINDINGS_PATH: &str = "../src/bindings.ts";
 
 /// The settings file and keys the commands use.
 pub struct AppConfig(pub Arc<Config<KeychainSecretStore>>);
-
-/// The OS's login item for the launch-at-login setting (M5.3), and the
-/// thread that changes it, so no save waits for the OS (S1, #238).
-pub struct LoginItem {
-    /// For reading the OS's state.
-    pub login: Arc<dyn LaunchAtLogin>,
-    /// Changes it, off the caller's thread, the latest choice winning.
-    pub sync: LoginSync,
-}
-
-impl LoginItem {
-    /// Changes of the login item are stored in `config`'s settings file once
-    /// the OS has answered.
-    pub fn new<S: SecretStore + 'static>(
-        login: Arc<dyn LaunchAtLogin>,
-        config: Arc<Config<S>>,
-    ) -> Self {
-        let sync = LoginSync::new(Arc::clone(&login), move |outcome| {
-            store_launch_at_login(&config, outcome.enabled).map_err(|error| error.to_string())
-        });
-        Self { login, sync }
-    }
-}
 
 /// Stores what the OS ended up with as the launch-at-login setting.
 fn store_launch_at_login<S: SecretStore>(
@@ -131,11 +108,11 @@ async fn on_config<T: Send + 'static, E: std::fmt::Display + Send + 'static>(
 #[specta::specta]
 pub async fn get_settings(
     state: State<'_, AppConfig>,
-    login: State<'_, LoginItem>,
+    login: State<'_, Arc<LoginItem>>,
     hotkey: State<'_, ActiveHotkey>,
 ) -> Result<Settings, String> {
     let hotkey = hotkey.0.clone();
-    let login = login.sync.clone();
+    let login = Arc::clone(&login);
     on_config(&state, move |config| read_settings(config, &login, &hotkey)).await
 }
 
@@ -143,7 +120,7 @@ pub async fn get_settings(
 /// they really are.
 fn read_settings<S: SecretStore>(
     config: &Config<S>,
-    login: &LoginSync,
+    login: &LoginItem,
     hotkey: &HotkeyControl,
 ) -> Result<Settings, ConfigError> {
     let saved = login.shown(config.settings()?);
@@ -346,29 +323,28 @@ pub async fn set_hotkey(
     saved.problem().map_or(Ok(()), Err)
 }
 
-/// Turns launch at login on or off, and nothing else. It returns at once
-/// with the OS's answer for the latest choice: the OS can take 40 s to
-/// unregister the login item (#238), so the window must not wait on it and
-/// Settings shows "Applying…" until this resolves. The change runs on a
-/// thread of its own, one at a time; if the user toggles again meanwhile,
-/// every call resolves with the outcome of the last choice. The result is
-/// whether the app starts at login now; an error says why not, and what to
-/// do (the user may have to approve it in System Settings).
+/// Turns launch at login on or off, and nothing else, on the blocking pool:
+/// the OS can take 40 s to unregister the login item (#238), so Settings
+/// shows "Applying…" with the switch disabled until this answers. The
+/// result is whether the app starts at login now, as stored in the settings
+/// file; an error says why not, and what to do (the user may have to approve
+/// it in System Settings).
 #[tauri::command]
 #[specta::specta]
 pub async fn set_launch_at_login(
-    login: State<'_, LoginItem>,
+    state: State<'_, AppConfig>,
+    login: State<'_, Arc<LoginItem>>,
     enabled: bool,
 ) -> Result<bool, String> {
-    let outcome = login
-        .sync
-        .request(enabled)
-        .await
-        .map_err(|_| "the login item task crashed".to_owned())?;
-    match outcome.problem {
-        Some(problem) => Err(problem.to_string()),
-        None => Ok(outcome.enabled),
-    }
+    let (config, login) = (Arc::clone(&state.0), Arc::clone(&login));
+    tauri::async_runtime::spawn_blocking(move || {
+        login.set(enabled, |now| {
+            store_launch_at_login(&config, now).map_err(|error| error.to_string())
+        })
+    })
+    .await
+    .map_err(|_| "the login item task crashed".to_owned())?
+    .map_err(|problem| problem.to_string())
 }
 
 /// While the user is choosing a new dictation key, pressing the current one
@@ -1290,7 +1266,6 @@ mod tests {
     }
 
     mod launch_at_login {
-        use std::time::Duration;
 
         use dictation_platform::fakes::{FakeLaunchAtLogin, MemSecretStore};
         use dictation_ports::LaunchAtLoginState;
@@ -1322,75 +1297,17 @@ mod tests {
         fn the_screen_follows_the_os_after_a_change_outside_the_app() {
             let (config, dir) = config();
             let fake = FakeLaunchAtLogin::new();
-            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
-            tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
+            let item = LoginItem::new(Arc::new(fake.clone()));
+            let store = |now| store_launch_at_login(&config, now).map_err(|e| e.to_string());
+            assert_eq!(item.set(true, store), Ok(true));
+            assert!(config.settings().unwrap().launch_at_login);
             fake.set_state(LaunchAtLoginState::Disabled);
             let (hotkey, _) = listening();
-            let shown = read_settings(&config, &item.sync, &hotkey).unwrap();
+            let shown = read_settings(&config, &item, &hotkey).unwrap();
             assert!(!shown.launch_at_login);
             // Asking for it on again does reach the OS, whatever the file says.
-            let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
-            assert!(outcome.enabled);
+            assert_eq!(item.set(true, store), Ok(true));
             assert_eq!(fake.calls(), [true, true]);
-            let _ = std::fs::remove_dir_all(dir);
-        }
-
-        /// Toggled again while the first change is pending: the file and the
-        /// OS both end on the last choice.
-        #[test]
-        fn the_file_and_the_os_agree_on_the_last_choice() {
-            let (config, dir) = config();
-            let fake = FakeLaunchAtLogin::new();
-            fake.delay_changes(Duration::from_millis(300));
-            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
-            let first = item.sync.request(true);
-            std::thread::sleep(Duration::from_millis(50));
-            let second = item.sync.request(false);
-            let (first, second) =
-                tauri::async_runtime::block_on(async { (first.await, second.await) });
-            assert_eq!(first.unwrap(), second.unwrap());
-            assert_eq!(fake.state(), Ok(LaunchAtLoginState::Disabled));
-            assert!(!config.settings().unwrap().launch_at_login);
-            let _ = std::fs::remove_dir_all(dir);
-        }
-
-        /// S1 review, R2: an unwritable settings file after the OS changed is
-        /// an error the user sees, the OS result is kept, and a later change
-        /// stores again.
-        #[test]
-        fn a_settings_file_that_cannot_be_written_is_reported() {
-            let (config, dir) = config();
-            let _ = std::fs::remove_dir_all(&dir);
-            // A file where the settings directory should be.
-            std::fs::write(&dir, "not a directory").unwrap();
-            let fake = FakeLaunchAtLogin::new();
-            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
-            let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
-            assert!(outcome.enabled);
-            assert_eq!(fake.state(), Ok(LaunchAtLoginState::Enabled));
-            let text = outcome.problem.unwrap().to_string();
-            assert!(text.contains("Vocet couldn't save that setting"), "{text}");
-            assert!(text.contains("see Troubleshoot"), "{text}");
-            let _ = std::fs::remove_file(&dir);
-            let again = tauri::async_runtime::block_on(item.sync.request(false)).unwrap();
-            assert!(again.problem.is_none(), "{again:?}");
-            assert!(!config.settings().unwrap().launch_at_login);
-            let _ = std::fs::remove_dir_all(dir);
-        }
-
-        /// A refusal stores what the OS really has, and says why.
-        #[test]
-        fn a_refused_change_stores_the_real_state() {
-            let (config, dir) = config();
-            let fake = FakeLaunchAtLogin::new();
-            fake.enabling_gives(LaunchAtLoginState::RequiresApproval);
-            let item = LoginItem::new(Arc::new(fake), Arc::clone(&config));
-            let outcome = tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
-            assert_eq!(
-                outcome.problem,
-                Some(dictation_pipeline::launch::LaunchProblem::NeedsApproval)
-            );
-            assert!(!config.settings().is_ok_and(|saved| saved.launch_at_login));
             let _ = std::fs::remove_dir_all(dir);
         }
 
@@ -1845,12 +1762,8 @@ mod tests {
             // The file still has RightAlt and the old limit; what
             // Settings shows is the hotkey that works, with the rest as saved.
             assert_eq!(config.settings().unwrap().hotkey, "RightAlt");
-            let shown = read_settings(
-                &config,
-                &LoginSync::new(Arc::new(login.clone()), |_| Ok(())),
-                &hotkey,
-            )
-            .unwrap();
+            let shown =
+                read_settings(&config, &LoginItem::new(Arc::new(login.clone())), &hotkey).unwrap();
             assert_eq!(shown.hotkey, "F6");
             assert_eq!(shown.history_limit, 10);
             let _ = std::fs::remove_dir_all(dir);
@@ -1875,13 +1788,9 @@ mod tests {
             assert_eq!(error.to_string(), "settings file prefs: disk full");
             assert!(keys.listening("RightAlt") && !keys.listening("F6"));
             assert_eq!(
-                read_settings(
-                    &config,
-                    &LoginSync::new(Arc::new(login.clone()), |_| Ok(())),
-                    &hotkey
-                )
-                .unwrap()
-                .hotkey,
+                read_settings(&config, &LoginItem::new(Arc::new(login.clone())), &hotkey)
+                    .unwrap()
+                    .hotkey,
                 "RightAlt"
             );
             let _ = std::fs::remove_dir_all(dir);
@@ -2488,9 +2397,10 @@ mod capability_tests {
         app.manage(crate::diagnostics::AppOpener(std::sync::Arc::new(
             opener.clone(),
         )));
-        app.manage(crate::commands::LoginItem::new(
-            std::sync::Arc::new(dictation_platform::fakes::FakeLaunchAtLogin::new()),
-            std::sync::Arc::clone(&config),
+        app.manage(std::sync::Arc::new(
+            dictation_pipeline::launch::LoginItem::new(std::sync::Arc::new(
+                dictation_platform::fakes::FakeLaunchAtLogin::new(),
+            )),
         ));
         app.manage(LiveEngine::fixed());
         app.manage(crate::connect::AppConnect::default());

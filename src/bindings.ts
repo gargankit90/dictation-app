@@ -114,14 +114,12 @@ export const commands = {
 	 */
 	getHotkeyNotice: () => typedError<string | null, string>(__TAURI_INVOKE("get_hotkey_notice")),
 	/**
-	 *  Turns launch at login on or off, and nothing else. It returns at once
-	 *  with the OS's answer for the latest choice: the OS can take 40 s to
-	 *  unregister the login item (#238), so the window must not wait on it and
-	 *  Settings shows "Applying…" until this resolves. The change runs on a
-	 *  thread of its own, one at a time; if the user toggles again meanwhile,
-	 *  every call resolves with the outcome of the last choice. The result is
-	 *  whether the app starts at login now; an error says why not, and what to
-	 *  do (the user may have to approve it in System Settings).
+	 *  Turns launch at login on or off, and nothing else, on the blocking pool:
+	 *  the OS can take 40 s to unregister the login item (#238), so Settings
+	 *  shows "Applying…" with the switch disabled until this answers. The
+	 *  result is whether the app starts at login now, as stored in the settings
+	 *  file; an error says why not, and what to do (the user may have to approve
+	 *  it in System Settings).
 	 */
 	setLaunchAtLogin: (enabled: boolean) => typedError<boolean, string>(__TAURI_INVOKE("set_launch_at_login", { enabled })),
 	/**

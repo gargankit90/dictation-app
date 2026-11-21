@@ -445,23 +445,19 @@ describe("criterion_u6_3 launch at login never blocks", () => {
     expect(screen.queryByText(/Applying…/u)).toBeNull();
   });
 
-  it("ends on the last choice when toggled again while the OS is busy", async () => {
+  it("the switch waits while the OS is busy, so one change runs at a time", async () => {
     const slow = gate();
     backend.holds.set("set_launch_at_login", slow.closed);
     await open("general");
     fireEvent.click(box());
-    fireEvent.click(box());
-    fireEvent.click(box());
+    expect(box().disabled).toBe(true);
     slow.open();
     await waitFor(() => {
       expect(screen.queryByText(/Applying…/u)).toBeNull();
     });
+    expect(box().disabled).toBe(false);
     expect(box().checked).toBe(true);
-    expect(backend.named("set_launch_at_login").map((call) => call.args.enabled)).toEqual([
-      true,
-      false,
-      true,
-    ]);
+    expect(backend.named("set_launch_at_login").map((call) => call.args.enabled)).toEqual([true]);
   });
 
   it("reads the OS again when the hidden window is shown again", async () => {

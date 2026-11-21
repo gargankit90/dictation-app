@@ -161,6 +161,7 @@ export function ReadyStep({
             <Switch
               id="ob-login"
               checked={atLogin}
+              disabled={login.save.state === "saving"}
               labelledBy="ob-login-label"
               onChange={(enabled) => void setLogin(enabled)}
             />

@@ -21,7 +21,8 @@
 //!
 //! M5.3: logs go to a size-bounded rotating file ([`logging`]), the tray's
 //! "Reveal log" opens its folder, and the settings screen has a "Launch at
-//! login" toggle backed by the OS's own login item (`commands::LoginItem`).
+//! login" toggle backed by the OS's own login item
+//! (`dictation_pipeline::launch::LoginItem`).
 //!
 //! M3.4: Settings… shows the `main` window, which holds the settings UI; its
 //! close button hides it instead of destroying it, so the tray can show it
@@ -72,6 +73,7 @@ use anyhow::Context as _;
 use dictation_pipeline::debug_audio::SavingAudio;
 use dictation_pipeline::history::{History, Recording};
 use dictation_pipeline::hotkey_setting::{self, ConfigurableHotkey, HotkeyControl};
+use dictation_pipeline::launch::LoginItem;
 use dictation_pipeline::pipeline::{
     CleanupStep, Config, CursorReader, Extras, Pipeline, Ports, UiEvent,
 };
@@ -480,10 +482,9 @@ fn setup(app: &mut App, mut instance: Instance) -> anyhow::Result<()> {
     let levels = pipeline.levels();
     app.manage(RunningPipeline(Mutex::new(Some(pipeline))));
     app.manage(commands::AppConfig(Arc::clone(&config)));
-    app.manage(commands::LoginItem::new(
-        Arc::new(SystemLaunchAtLogin::new()),
-        Arc::clone(&config),
-    ));
+    app.manage(Arc::new(LoginItem::new(Arc::new(
+        SystemLaunchAtLogin::new(),
+    ))));
     app.manage(commands::ActiveHotkey(hotkey_control.clone()));
     app.manage(commands::ConfigDir(config_dir.clone()));
     app.manage(commands::AppShell(Arc::new(TauriShell(
