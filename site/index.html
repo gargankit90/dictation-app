@@ -1706,6 +1706,9 @@
               </div>
             </div>
           </div>
+          <button type="button" class="linkbtn anim-toggle" aria-pressed="false" hidden>
+            Pause animation
+          </button>
         </div>
       </section>
 
@@ -1713,6 +1716,9 @@
         <div class="wrap">
           <h2>Wherever you type</h2>
           <div class="tabset">
+            <button type="button" class="linkbtn anim-toggle" aria-pressed="false" hidden>
+              Pause animation
+            </button>
             <input class="sr" type="radio" name="app" id="t-ai" aria-label="Claude Code" checked />
             <input class="sr" type="radio" name="app" id="t-chat" aria-label="Slack" />
             <input class="sr" type="radio" name="app" id="t-doc" aria-label="Docs / Notion" />
@@ -2115,7 +2121,8 @@
           <div class="actions">
             <a
               class="btn btn-primary"
-              href="https://github.com/gargankit90/dictation-app/releases/download/v0.2.0/Vocet_0.2.0_aarch64.dmg"
+              data-download
+              href="https://github.com/gargankit90/dictation-app/releases"
               >Download for Mac</a
             >
           </div>
@@ -2250,7 +2257,21 @@
           d._timers = [];
         }
         var radios = [].slice.call(document.querySelectorAll('.tabset input[type="radio"]'));
-        function advanceTab() {
+        var paused = false,
+          userChose = false;
+        // Keep the example steady while the visitor hovers or has keyboard focus in it.
+        function held(d) {
+          var box = d.classList.contains("use-row")
+            ? d.closest(".tabset")
+            : d.closest(".hero-demo");
+          return !!(box && (box.matches(":hover") || box.contains(document.activeElement)));
+        }
+        function advanceTab(d) {
+          if (userChose || held(d)) {
+            d._replay = true;
+            play(d);
+            return;
+          }
           var i = radios.findIndex(function (r) {
             return r.checked;
           });
@@ -2264,7 +2285,8 @@
             setState(d, "pasted");
             return;
           }
-          if (d._next) d._next();
+          if (d._next && !d._replay) d._next();
+          d._replay = false;
           setState(d, "idle");
           d._timers = [
             setTimeout(function () {
@@ -2277,8 +2299,11 @@
               setState(d, "pasted");
             }, 3800),
             setTimeout(function () {
-              if (d.classList.contains("use-row")) advanceTab();
-              else play(d);
+              if (d.classList.contains("use-row")) advanceTab(d);
+              else {
+                d._replay = held(d);
+                play(d);
+              }
             }, 9000),
           ];
         }
@@ -2290,7 +2315,7 @@
         }
         function refreshDemos() {
           demos.forEach(function (d) {
-            if (shown(d) && d._inView) {
+            if (shown(d) && d._inView && !paused) {
               if (!d._timers || !d._timers.length) play(d);
             } else {
               stop(d);
@@ -2300,11 +2325,26 @@
         }
         radios.forEach(function (r) {
           r.addEventListener("change", function () {
+            userChose = true;
             demos.forEach(stop);
             refreshDemos();
           });
         });
         if (reduce) return;
+        // Pause / play for everything that moves (WCAG 2.2.2)
+        var toggles = [].slice.call(document.querySelectorAll(".anim-toggle"));
+        toggles.forEach(function (b) {
+          b.hidden = false;
+          b.addEventListener("click", function () {
+            paused = !paused;
+            toggles.forEach(function (t) {
+              t.textContent = paused ? "Play animation" : "Pause animation";
+              t.setAttribute("aria-pressed", paused ? "true" : "false");
+            });
+            demos.forEach(stop);
+            refreshDemos();
+          });
+        });
         if ("IntersectionObserver" in window) {
           var io = new IntersectionObserver(
             function (entries) {
