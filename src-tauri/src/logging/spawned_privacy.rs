@@ -508,7 +508,7 @@ impl Run {
             hotkey: hotkey.clone(),
             audio: FileAudioSource::new(wav),
             transcriber,
-            inserter: Recording::new(inserter.clone(), history, || "OpenRouter".to_owned()),
+            inserter: Recording::new(inserter.clone(), history),
             permissions: FakePermissions::all_granted(),
             clock: clock.clone(),
         };

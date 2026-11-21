@@ -179,7 +179,6 @@ export function Dictation({ settings, onStored, languages, onOpenSpeech }: Props
             value={settings.hotkey}
             onChange={recordHotkey}
             onRecording={setHotkeyRecording}
-            compact
             describedBy="hotkey-label"
           />
         </Row>

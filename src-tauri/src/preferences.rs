@@ -366,8 +366,6 @@ pub fn stop_microphone_test(test: State<'_, AppMicTest>) -> Result<(), String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum Link {
-    /// `OpenRouter`'s page for creating an API key.
-    OpenrouterKeys,
     /// `OpenRouter`'s page for adding credits.
     OpenrouterCredits,
     /// The privacy notice: what the app sends.
@@ -387,7 +385,6 @@ impl Link {
     #[must_use]
     pub fn url(self) -> String {
         match self {
-            Self::OpenrouterKeys => "https://openrouter.ai/settings/keys".to_owned(),
             Self::OpenrouterCredits => "https://openrouter.ai/settings/credits".to_owned(),
             Self::Privacy => format!("{REPOSITORY}/blob/main/docs/privacy.md"),
             Self::Repository => REPOSITORY.to_owned(),
@@ -441,22 +438,6 @@ pub fn get_app_info() -> Result<AppInfo, String> {
 /// Starts the update check that says what it found in a dialog (Settings →
 /// General). Managed state, so the command needn't name the runtime.
 pub struct UpdateCheck(pub Arc<dyn Fn() + Send + Sync>);
-
-/// Retitles the window for the screen it shows. Managed state, so the command
-/// needn't name the runtime.
-pub struct WindowPages(
-    pub Arc<dyn Fn(crate::window::WindowPage) -> Result<(), String> + Send + Sync>,
-);
-
-/// The page says which screen it shows, for the window's title (U12).
-#[tauri::command]
-#[specta::specta]
-pub fn set_window_page(
-    pages: State<'_, WindowPages>,
-    page: crate::window::WindowPage,
-) -> Result<(), String> {
-    (pages.0)(page)
-}
 
 /// Check now, in Settings → General: a dialog says what it found.
 #[tauri::command]

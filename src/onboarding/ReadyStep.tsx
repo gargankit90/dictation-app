@@ -61,8 +61,8 @@ function useEngineLine(
     void (async () => {
       let saved = false;
       try {
-        const result = await commands.hasApiKey(provider);
-        saved = result.status === "ok" && result.data;
+        const result = await commands.savedKeyHint(provider);
+        saved = result.status === "ok" && result.data !== null;
       } catch {
         // Not connected, as far as this line can tell.
       }

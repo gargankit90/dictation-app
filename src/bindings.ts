@@ -15,25 +15,8 @@ export const commands = {
 	 *  hotkey listening than the file holds; T3 round 2).
 	 */
 	getSettings: () => typedError<Settings_Serialize, string>(__TAURI_INVOKE("get_settings")),
-	/**
-	 *  Validates and saves the settings and switches to the saved hotkey. An error means something didn't
-	 *  take effect; its text says what was saved and what wasn't.
-	 * 
-	 *  The "share anonymous usage events" field of `settings` is ignored: the
-	 *  stored choice stays, whatever the form held when it was loaded. Only
-	 *  [`set_share_usage_events`] changes it, so a Save can never undo a newer
-	 *  opt-out (A1 review, round 1). The same goes for the hotkey, which only
-	 *  [`set_hotkey`] changes (K1 review, round 1): a form loaded before the key
-	 *  was recorded can't switch it back, for `launch_at_login`, which only
-	 *  [`set_launch_at_login`] changes (S1), and for `history_limit`, which only
-	 *  [`crate::history::set_history_limit`] changes (U7), since lowering it
-	 *  deletes entries only after the user confirms.
-	 */
-	saveSettings: (settings: Settings_Deserialize) => typedError<null, string>(__TAURI_INVOKE("save_settings", { settings })),
 	/**  Stores `key` as `provider`'s API key in the keychain. Write-only. */
 	setApiKey: (provider: Provider, key: string) => typedError<null, string>(__TAURI_INVOKE("set_api_key", { provider, key })),
-	/**  Whether `provider` has an API key stored. */
-	hasApiKey: (provider: Provider) => typedError<boolean, string>(__TAURI_INVOKE("has_api_key", { provider })),
 	/**
 	 *  Tests an API key with a short silent clip through `provider`'s
 	 *  transcription endpoint: the key typed in the form (`key`, used for this
@@ -212,8 +195,6 @@ export const commands = {
 	getAppInfo: () => typedError<AppInfo_Serialize, string>(__TAURI_INVOKE("get_app_info")),
 	/**  Check now, in Settings → General: a dialog says what it found. */
 	checkForUpdates: () => typedError<null, string>(__TAURI_INVOKE("check_for_updates")),
-	/**  The page says which screen it shows, for the window's title (U12). */
-	setWindowPage: (page: WindowPage) => typedError<null, string>(__TAURI_INVOKE("set_window_page", { page })),
 	/**
 	 *  Chooses on-device model `id` before it is on this Mac (U8's "Download and
 	 *  continue"): the settings choose it now, so the choice survives a quit and
@@ -628,8 +609,6 @@ export type KeyTestKind =
  *  other URL.
  */
 export type Link = 
-/**  `OpenRouter`'s page for creating an API key. */
-"openrouter_keys" | 
 /**  `OpenRouter`'s page for adding credits. */
 "openrouter_credits" | 
 /**  The privacy notice: what the app sends. */
@@ -970,18 +949,6 @@ export type View =
 "settings" | 
 /**  The onboarding steps. */
 "onboarding";
-
-/**
- *  Which Settings screen the window shows (U12): each has its own title, and
- *  the page says when it changes.
- */
-export type WindowPage = 
-/**  The sidebar and its sections. */
-"settings" | 
-/**  Troubleshoot's checks. */
-"troubleshoot" | 
-/**  Report a problem. */
-"report";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

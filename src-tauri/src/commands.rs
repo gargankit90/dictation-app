@@ -2,16 +2,16 @@
 //! tauri-specta into `src/bindings.ts`.
 //!
 //! Thin wrappers over `dictation_pipeline::config::Config`. The API key is
-//! write-only: `set_api_key` stores it and `has_api_key` says whether one is
-//! stored; no command returns it (M3.3 criterion 2, checked against the
+//! write-only: `set_api_key` stores it and `saved_key_hint` gives only its
+//! masked form; no command returns it (M3.3 criterion 2, checked against the
 //! generated bindings by `tests::criterion_2_*`). Keychain calls can block
 //! (and on macOS, show an access prompt), so every command runs on the
 //! blocking pool, never the main thread.
 //!
-//! `save_settings` and `set_api_key` also rebuild the speech-to-text engine
+//! The settings writers and `set_api_key` also rebuild the speech-to-text engine
 //! from what was saved (M4.4, [`crate::engine`]), so the next dictation uses
 //! the new provider, model, language or key without a restart.
-//! `save_settings` also switches the hotkey to the saved one (T2,
+//! `set_hotkey` also switches the hotkey to the saved one (T2,
 //! `dictation_pipeline::hotkey_setting`); if it can't, the old hotkey keeps
 //! listening, the file keeps it too, and the error says so. `get_settings`
 //! shows the hotkey that listens, as it shows the OS's login item, so a
@@ -267,60 +267,7 @@ pub(crate) fn settings_write() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Validates and saves the settings and switches to the saved hotkey. An error means something didn't
-/// take effect; its text says what was saved and what wasn't.
-///
-/// The "share anonymous usage events" field of `settings` is ignored: the
-/// stored choice stays, whatever the form held when it was loaded. Only
-/// [`set_share_usage_events`] changes it, so a Save can never undo a newer
-/// opt-out (A1 review, round 1). The same goes for the hotkey, which only
-/// [`set_hotkey`] changes (K1 review, round 1): a form loaded before the key
-/// was recorded can't switch it back, for `launch_at_login`, which only
-/// [`set_launch_at_login`] changes (S1), and for `history_limit`, which only
-/// [`crate::history::set_history_limit`] changes (U7), since lowering it
-/// deletes entries only after the user confirms.
-#[tauri::command]
-#[specta::specta]
-pub async fn save_settings(
-    state: State<'_, AppConfig>,
-    engine: State<'_, LiveEngine>,
-    hotkey: State<'_, ActiveHotkey>,
-    usage: State<'_, Usage>,
-    settings: Settings,
-) -> Result<(), String> {
-    let live = engine.inner().clone();
-    let hotkey = hotkey.0.clone();
-    let (change, saved) = on_config(&state, move |config| {
-        save_keeping_sharing(config, &live, &hotkey, settings)
-    })
-    .await?;
-    // Usage events: names of what changed, never values (A1).
-    if let Some(change) = change {
-        usage::settings_saved(&usage, change);
-    }
-    saved.problem().map_or(Ok(()), Err)
-}
-
-/// [`save_with_login`] with the stored sharing choice and hotkey kept, and
-/// the usage change it made, if the stored settings could be read first.
-fn save_keeping_sharing<S: SecretStore + 'static>(
-    config: &Arc<Config<S>>,
-    live: &LiveEngine,
-    hotkey: &HotkeyControl,
-    mut settings: Settings,
-) -> Result<(Option<usage::SettingsChange>, Saved), SaveFailed> {
-    let _writing = settings_write();
-    let before = config.settings().ok();
-    if let Some(before) = &before {
-        settings.share_usage_events = before.share_usage_events;
-        settings.launch_at_login = before.launch_at_login;
-        settings.hotkey.clone_from(&before.hotkey);
-        settings.history_limit = before.history_limit;
-    }
-    save_locked(config, live, hotkey, settings, before)
-}
-
-/// Like [`save_keeping_sharing`], but `hotkey` is the key to switch to and
+/// `hotkey` is the key to switch to and
 /// everything else is what is stored: the one writer of the dictation key.
 /// Fails if the stored settings can't be read.
 fn write_hotkey<S: SecretStore + 'static>(
@@ -551,20 +498,9 @@ pub(crate) async fn save_key<S: SecretStore + 'static>(
         })
 }
 
-/// Whether `provider` has an API key stored.
-// Bounded: a keychain that never answers gives an error after
-// `engine::KEY_READ_TIMEOUT`, so the UI shows it and offers a retry instead
-// of waiting for ever.
-#[tauri::command]
-#[specta::specta]
-pub async fn has_api_key(
-    state: State<'_, AppConfig>,
-    engine: State<'_, LiveEngine>,
-    provider: Provider,
-) -> Result<bool, String> {
-    has_key(&state.0, engine.inner(), provider).await
-}
-
+/// Whether `provider` has a key stored (for the keychain tests; the UI asks
+/// `saved_key_hint`).
+#[cfg(test)]
 async fn has_key<S: SecretStore + 'static>(
     config: &Arc<Config<S>>,
     live: &LiveEngine,
@@ -1052,9 +988,7 @@ pub fn relaunch_from_tray(shell: &AppShell) {
 pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
     tauri_specta::Builder::<R>::new().commands(tauri_specta::collect_commands![
         get_settings,
-        save_settings,
         set_api_key,
-        has_api_key,
         test_api_key,
         crate::connect::connect_openrouter,
         crate::connect::cancel_connect,
@@ -1093,7 +1027,6 @@ pub fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
         crate::preferences::open_link,
         crate::preferences::get_app_info,
         crate::preferences::check_for_updates,
-        crate::preferences::set_window_page,
         crate::preferences::choose_local_model,
         set_try_outcome,
         practice_paste_missed,
@@ -1188,9 +1121,7 @@ mod tests {
         let bindings = std::fs::read_to_string(committed()).unwrap();
         for command in [
             "getSettings",
-            "saveSettings",
             "setApiKey",
-            "hasApiKey",
             "testApiKey",
             "connectOpenrouter",
             "cancelConnect",
@@ -1229,7 +1160,6 @@ mod tests {
             "openLink",
             "getAppInfo",
             "checkForUpdates",
-            "setWindowPage",
             "chooseLocalModel",
             "setTryOutcome",
             "setDownloadPaused",
@@ -1250,7 +1180,7 @@ mod tests {
         }
         let commands = bindings.matches("__TAURI_INVOKE(\"").count();
         assert_eq!(
-            commands, 56,
+            commands, 53,
             "a command was added; check it doesn't return a key"
         );
     }
@@ -1326,9 +1256,10 @@ mod tests {
                 .unwrap()
                 .to_owned()
         };
-        // The key goes in and nothing comes back; the check returns a bool.
+        // The key goes in and nothing comes back; the check returns only
+        // the masked hint.
         assert!(command("setApiKey").contains("typedError<null, string>"));
-        assert!(command("hasApiKey").contains("typedError<boolean, string>"));
+        assert!(command("savedKeyHint").contains("typedError<string | null, string>"));
         // The Test key command sends the key out and returns success or a
         // `KeyTestError` (kind and message), never the key.
         assert!(command("testApiKey").contains("typedError<null, KeyTestError>"));
@@ -1390,7 +1321,6 @@ mod tests {
         use dictation_platform::fakes::MemSecretStore;
 
         use super::super::*;
-        use super::hotkey::listening;
 
         fn config(tag: &str) -> (Arc<Config<MemSecretStore>>, std::path::PathBuf) {
             let dir = std::env::temp_dir().join(format!(
@@ -1421,61 +1351,6 @@ mod tests {
             assert_eq!(after.language.as_deref(), Some("de"));
             write_sharing(&config, &usage, true).unwrap();
             assert!(stored(&config));
-            let _ = std::fs::remove_dir_all(dir);
-        }
-
-        /// The form was loaded while sharing was on and Save is pressed
-        /// after the opt-out: its stale `true` must not win.
-        #[test]
-        fn a_save_with_a_stale_sharing_value_keeps_the_opt_out() {
-            let (config, dir) = config("stale");
-            write_sharing(&config, &Usage::disabled(), false).unwrap();
-            let (hotkey, _keys) = listening();
-            let stale = Settings {
-                share_usage_events: true,
-                language: Some("fr".into()),
-                ..Settings::default()
-            };
-            let (change, _) =
-                save_keeping_sharing(&config, &LiveEngine::fixed(), &hotkey, stale).unwrap();
-            let saved = config.settings().unwrap();
-            assert!(!saved.share_usage_events, "the opt-out was undone");
-            assert_eq!(saved.language.as_deref(), Some("fr"), "the rest saved");
-            assert_eq!(change.unwrap().sharing, None, "no re-enabling");
-            let _ = std::fs::remove_dir_all(dir);
-        }
-
-        /// U7: only `set_history_limit` changes the limit, since lowering it
-        /// deletes entries, so a stale form can't bring back or lower it.
-        #[test]
-        fn a_save_keeps_the_stored_history_limit() {
-            let (config, dir) = config("history");
-            let (hotkey, _keys) = listening();
-            let mut stored = config.settings().unwrap();
-            stored.history_limit = 0;
-            config.save_settings(&stored).unwrap();
-            let stale = Settings {
-                history_limit: 100,
-                language: Some("fr".into()),
-                ..Settings::default()
-            };
-            save_keeping_sharing(&config, &LiveEngine::fixed(), &hotkey, stale).unwrap();
-            let saved = config.settings().unwrap();
-            assert_eq!(saved.history_limit, 0, "Off was undone");
-            assert_eq!(saved.language.as_deref(), Some("fr"), "the rest saved");
-            let _ = std::fs::remove_dir_all(dir);
-        }
-
-        #[test]
-        fn a_save_cannot_turn_sharing_on_either() {
-            let (config, dir) = config("on");
-            let (hotkey, _keys) = listening();
-            let off = Settings {
-                share_usage_events: false,
-                ..Settings::default()
-            };
-            save_keeping_sharing(&config, &LiveEngine::fixed(), &hotkey, off).unwrap();
-            assert!(stored(&config), "the stored choice (on) stays");
             let _ = std::fs::remove_dir_all(dir);
         }
     }
@@ -1843,27 +1718,6 @@ mod tests {
             let _ = std::fs::remove_dir_all(dir);
         }
 
-        /// A form loaded before the key was recorded, saved after: its old
-        /// key must not switch the hotkey back, and its other fields save.
-        #[test]
-        fn a_save_with_a_stale_hotkey_keeps_the_recorded_one() {
-            let (config, dir) = config("k1-stale-key");
-            let (hotkey, _keys) = listening();
-            let live = LiveEngine::fixed();
-            write_hotkey(&config, &live, &hotkey, "RightCmd").unwrap();
-            let stale = Settings {
-                hotkey: "RightAlt".into(),
-                language: Some("fr".into()),
-                ..Settings::default()
-            };
-            save_keeping_sharing(&config, &live, &hotkey, stale).unwrap();
-            let stored = config.settings().unwrap();
-            assert_eq!(stored.hotkey, "RightCmd", "the recorded key was undone");
-            assert_eq!(stored.language.as_deref(), Some("fr"), "the rest saved");
-            assert_eq!(hotkey.spec(), "RightCmd".parse().unwrap());
-            let _ = std::fs::remove_dir_all(dir);
-        }
-
         #[test]
         fn a_key_that_cannot_work_is_refused_and_the_old_one_stays() {
             let (config, dir) = config("k1-refused");
@@ -1877,7 +1731,7 @@ mod tests {
     }
 
     mod launch_at_login {
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
 
         use dictation_platform::fakes::{FakeLaunchAtLogin, MemSecretStore};
         use dictation_ports::LaunchAtLoginState;
@@ -1901,73 +1755,6 @@ mod tests {
                 launch_at_login: true,
                 ..Settings::default()
             }
-        }
-
-        /// S1 (#238): a save never waits for the login item, even while the
-        /// OS takes its time, and the answer arrives apart from it.
-        #[test]
-        fn saving_does_not_wait_for_a_slow_login_item() {
-            let (config, dir) = config();
-            let fake = FakeLaunchAtLogin::new();
-            fake.set_state(LaunchAtLoginState::Enabled);
-            fake.delay_changes(Duration::from_millis(1500));
-            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
-            let (hotkey, _) = listening();
-
-            let answer = item.sync.request(false);
-            let started = Instant::now();
-            let settings = Settings {
-                language: Some("de".into()),
-                launch_at_login: false,
-                ..Settings::default()
-            };
-            let saved = save_keeping_sharing(&config, &LiveEngine::fixed(), &hotkey, settings);
-            assert_eq!(saved.unwrap().1.problem(), None);
-            assert!(
-                started.elapsed() < Duration::from_millis(1000),
-                "the save waited {:?}",
-                started.elapsed()
-            );
-            assert_eq!(config.settings().unwrap().language.as_deref(), Some("de"));
-            // The OS is still working.
-            assert_eq!(item.sync.pending(), Some(false));
-            assert_eq!(fake.state(), Ok(LaunchAtLoginState::Enabled));
-
-            let outcome = tauri::async_runtime::block_on(answer).unwrap();
-            assert!(!outcome.enabled && outcome.problem.is_none());
-            assert_eq!(fake.state(), Ok(LaunchAtLoginState::Disabled));
-            assert!(!config.settings().unwrap().launch_at_login, "stored");
-            let _ = std::fs::remove_dir_all(dir);
-        }
-
-        /// The form's `launch_at_login` is ignored by a save, like the
-        /// sharing choice: a form loaded before the box changed can't undo it.
-        #[test]
-        fn saving_keeps_the_stored_choice_and_leaves_the_os_alone() {
-            let (config, dir) = config();
-            let fake = FakeLaunchAtLogin::new();
-            let item = LoginItem::new(Arc::new(fake.clone()), Arc::clone(&config));
-            let (hotkey, _) = listening();
-            tauri::async_runtime::block_on(item.sync.request(true)).unwrap();
-            assert!(config.settings().unwrap().launch_at_login);
-
-            // A stale form says off; saving other things must keep it on.
-            save_keeping_sharing(
-                &config,
-                &LiveEngine::fixed(),
-                &hotkey,
-                Settings {
-                    language: Some("fr".into()),
-                    launch_at_login: false,
-                    ..Settings::default()
-                },
-            )
-            .unwrap();
-            let saved = config.settings().unwrap();
-            assert!(saved.launch_at_login);
-            assert_eq!(saved.language.as_deref(), Some("fr"));
-            assert_eq!(fake.calls(), [true], "the save never touched the OS");
-            let _ = std::fs::remove_dir_all(dir);
         }
 
         /// The screen shows the OS's state, so a change made in System
@@ -3067,9 +2854,9 @@ mod capability_tests {
         narrowed["default"]["permissions"]
             .as_array_mut()
             .unwrap()
-            .retain(|permission| permission != "allow-save-settings");
+            .retain(|permission| permission != "allow-get-settings");
         let breach = check_windows(&resolve(narrowed)).unwrap_err();
-        assert!(breach.contains("save_settings"), "{breach}");
+        assert!(breach.contains("get_settings"), "{breach}");
     }
 
     #[test]
@@ -3197,6 +2984,16 @@ mod capability_tests {
         opener: dictation_platform::fakes::FakeOpener,
     }
 
+    /// Writes `settings` straight to the fixture's settings file.
+    fn save_settings(fixture: &AclApp, settings: &dictation_core::settings::Settings) {
+        dictation_pipeline::config::Config::new(
+            &fixture.scratch.0,
+            dictation_platform::secrets::KeychainSecretStore::disabled(),
+        )
+        .save_settings(settings)
+        .unwrap();
+    }
+
     /// The app on Tauri's mock runtime with this build's ACL and the real
     /// command handler, its settings in a fresh directory (no keychain call
     /// is made by the commands invoked below; the directory is removed when
@@ -3261,9 +3058,6 @@ mod capability_tests {
             })),
         ));
         app.manage(crate::preferences::UpdateCheck(std::sync::Arc::new(|| {})));
-        app.manage(crate::preferences::WindowPages(std::sync::Arc::new(|_| {
-            Ok(())
-        })));
         let windows = labels
             .iter()
             .map(|label| {
@@ -3428,7 +3222,11 @@ mod capability_tests {
     fn the_acl_fixture_leaves_nothing_behind_after_a_save() {
         let fixture = app_with_windows(&[MAIN]);
         let dir = fixture.scratch.0.clone();
-        let saved = invoke(&fixture.windows[0], "save_settings", args("save_settings"));
+        let saved = invoke(
+            &fixture.windows[0],
+            "set_share_usage_events",
+            serde_json::json!({ "share": false }),
+        );
         assert!(saved.is_ok(), "{saved:?}");
         assert!(dir.exists(), "the save should have written under {dir:?}");
         drop(fixture);
@@ -3467,20 +3265,16 @@ mod capability_tests {
     /// Valid arguments for each command, so a refusal can only be the ACL's.
     fn args(command: &str) -> serde_json::Value {
         match command {
-            "save_settings" => {
-                serde_json::json!({ "settings": dictation_core::settings::Settings::default() })
-            }
             "set_api_key" => {
                 serde_json::json!({ "provider": "openrouter", "key": "sk-or-not-a-real-key" })
             }
-            "has_api_key" | "test_api_key" | "saved_key_hint" => {
+            "test_api_key" | "saved_key_hint" => {
                 serde_json::json!({ "provider": "openrouter" })
             }
             "request_permission" => serde_json::json!({ "permission": "microphone" }),
             "set_onboarding_step" => serde_json::json!({ "step": "welcome" }),
             "set_share_usage_events" => serde_json::json!({ "share": true }),
             "set_hotkey_recording" => serde_json::json!({ "recording": false }),
-            "set_window_page" => serde_json::json!({ "page": "settings" }),
             "copy_history_entry" | "delete_history_entry" => serde_json::json!({ "id": "1" }),
             "set_history_limit" => serde_json::json!({ "limit": 25 }),
             _ => serde_json::json!({}),
@@ -3533,7 +3327,7 @@ mod capability_tests {
     /// M5.1 criterion 2 and #110: ...while the settings window may call
     /// every app command through the real handler, so a command left out of
     /// its grant fails here instead of breaking Settings at run time.
-    /// `get_settings` and `save_settings` touch only the settings file; the
+    /// `get_settings` touches only the settings file; the
     /// keychain and network commands are called with arguments they refuse,
     /// which the ACL checks before. (What the capability files grant, and
     /// that widening or narrowing them is caught, is
@@ -3549,12 +3343,7 @@ mod capability_tests {
             transcription: dictation_core::settings::Transcription::Local,
             ..dictation_core::settings::Settings::default()
         };
-        invoke(
-            main,
-            "save_settings",
-            serde_json::json!({ "settings": local }),
-        )
-        .unwrap();
+        save_settings(&fixture, &local);
         // F1: a report on screen, so `open_issue` has something to open.
         invoke(main, "build_report", args("build_report")).unwrap();
         for command in COMMAND_NAMES {
@@ -3597,8 +3386,7 @@ mod capability_tests {
                 | "read_microphone_test"
                 | "stop_microphone_test"
                 | "get_app_info"
-                | "check_for_updates"
-                | "set_window_page" => invoke(main, command, args(command)).map(|_| ()),
+                | "check_for_updates" => invoke(main, command, args(command)).map(|_| ()),
                 // U6: the fake microphone refuses; the command ran.
                 "start_microphone_test" => match invoke(main, command, args(command)) {
                     Err(error) if !error.to_string().contains("not allowed") => Ok(()),
@@ -3607,7 +3395,6 @@ mod capability_tests {
                 // No keychain, network or OS prompt: the onboarding ones
                 // run on fakes (granted permissions, no shell).
                 "get_settings"
-                | "save_settings"
                 | "get_onboarding"
                 | "finish_onboarding"
                 | "relaunch_app"
@@ -3627,7 +3414,6 @@ mod capability_tests {
                 "{command}: {refused}"
             );
         }
-        assert_eq!(COMMAND_NAMES.len(), 57);
         // F1: open_issue reached the fake, not a browser: exactly one call.
         // Q3: and connect_openrouter opened its sign-in page, also through it.
         let urls: Vec<String> = fixture
@@ -3674,12 +3460,7 @@ mod capability_tests {
             transcription: dictation_core::settings::Transcription::Local,
             ..dictation_core::settings::Settings::default()
         };
-        invoke(
-            main,
-            "save_settings",
-            serde_json::json!({ "settings": local }),
-        )
-        .unwrap();
+        save_settings(&fixture, &local);
         invoke(main, "build_report", args("build_report")).unwrap();
         fixture.opener.fail_from_now_on();
         let error = invoke(main, "open_issue", args("open_issue")).unwrap_err();

@@ -250,8 +250,8 @@ export function Speech({
     setActionError(null);
     let saved = false;
     try {
-      const result = await commands.hasApiKey("openrouter");
-      saved = result.status === "ok" && result.data;
+      const result = await commands.savedKeyHint("openrouter");
+      saved = result.status === "ok" && result.data !== null;
     } catch {
       // Treated as no key: the sheet says what is wrong.
     }

@@ -242,8 +242,6 @@ class Backend {
       case "set_launch_at_login":
         this.settings = { ...this.settings, launch_at_login: args.enabled as boolean };
         return args.enabled;
-      case "has_api_key":
-        return this.keys[args.provider as Provider];
       case "saved_key_hint":
         return this.keys[args.provider as Provider] ? "sk-or-…cdef" : null;
       case "connect_openrouter": {
@@ -985,7 +983,7 @@ describe("Speech", () => {
     show();
     await screen.findByText("English · 477 MB");
     await waitFor(() => {
-      expect(backend.named("has_api_key").length).toBeGreaterThan(1);
+      expect(backend.named("saved_key_hint").length).toBeGreaterThan(1);
     });
     expect(
       screen.getByRole<HTMLInputElement>("radio", { name: "Recommended for your language" })

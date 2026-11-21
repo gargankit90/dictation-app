@@ -96,14 +96,11 @@ describe("App", () => {
   });
 
   /** A backend whose first window request is `request`; returns how to ask again. */
-  function backendAsking(request: string, seen: string[] = [], pages: unknown[] = []) {
+  function backendAsking(request: string, seen: string[] = []) {
     let asked = request;
-    mockIPC((command, payload) => {
+    mockIPC((command) => {
       seen.push(command);
       switch (command) {
-        case "set_window_page":
-          pages.push((payload as { page: unknown }).page);
-          return null;
         case "get_onboarding":
           return {
             view: "settings",
@@ -263,21 +260,6 @@ describe("App", () => {
     expect(await screen.findByLabelText("Report")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Back to Troubleshoot" }));
     expect(await heading()).toBe("Troubleshoot");
-  });
-
-  it("u12_criterion_2 each screen gives the window its title", async () => {
-    const pages: unknown[] = [];
-    window.localStorage.clear();
-    backendAsking("help", [], pages);
-    render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Open…" }));
-    expect(await heading()).toBe("Troubleshoot");
-    fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Preview…" }));
-    expect(await heading()).toBe("Report a problem");
-    await waitFor(() => {
-      expect(pages).toEqual(["settings", "troubleshoot", "settings", "report"]);
-    });
   });
 
   // U12 criterion 7: the menu's Help… and Settings….

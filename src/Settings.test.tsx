@@ -137,8 +137,6 @@ class Backend {
       case "delete_api_key":
         this.keys[args.provider as Provider] = false;
         return null;
-      case "has_api_key":
-        return this.keys[args.provider as Provider];
       case "saved_key_hint":
         return this.keys[args.provider as Provider] ? "sk-or-…cdef" : null;
       case "connect_openrouter":
@@ -167,8 +165,6 @@ class Backend {
       case "check_for_updates":
       case "open_link":
         return null;
-      case "save_settings":
-        throw new Error("U6 has no global Save: save_settings must not be called");
       default:
         throw new Error(`unexpected command ${command}`);
     }
@@ -423,7 +419,6 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
       screen.getByRole<HTMLInputElement>("switch", { name: "Share usage and error events" })
         .checked,
     ).toBe(false);
-    expect(backend.named("save_settings")).toHaveLength(0);
   });
 
   it("a change made elsewhere is never put back by another control", async () => {

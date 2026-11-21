@@ -9,9 +9,7 @@
 /// so a command left out here can't be called from any window.
 pub const COMMAND_NAMES: &[&str] = &[
     "get_settings",
-    "save_settings",
     "set_api_key",
-    "has_api_key",
     "test_api_key",
     "connect_openrouter",
     "cancel_connect",
@@ -50,7 +48,6 @@ pub const COMMAND_NAMES: &[&str] = &[
     "open_link",
     "get_app_info",
     "check_for_updates",
-    "set_window_page",
     "choose_local_model",
     "set_try_outcome",
     "practice_paste_missed",
