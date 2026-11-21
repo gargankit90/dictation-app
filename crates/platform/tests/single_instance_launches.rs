@@ -182,7 +182,7 @@ fn child_launch(config: &Config) {
     let launch = acquire(config, &message(&arg));
     let ms = started.elapsed().as_millis();
     match launch {
-        Ok(Launch::Forwarded) => {
+        Ok(Launch::Forwarded | Launch::Secondary) => {
             let receipt = config.dir.join(format!("r-{arg}")).exists();
             say(&format!("FORWARDED receipt={receipt} ms={ms}"));
         }

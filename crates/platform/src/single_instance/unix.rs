@@ -485,6 +485,31 @@ mod tests {
         Ok(reply[0])
     }
 
+    /// SIMP1 item 12: with forwarding off (release builds) there is no
+    /// socket, a later launch exits at once, and listening is refused.
+    #[test]
+    fn without_forwarding_there_is_no_socket_and_a_second_launch_just_exits() {
+        let mut config = temp_config();
+        config.forwarding = false;
+        let Launch::Primary(mut instance) = acquire(&config, &message("first")).unwrap() else {
+            panic!("not the primary");
+        };
+        assert!(!config.socket_path().exists());
+        let started = Instant::now();
+        assert!(matches!(
+            acquire(&config, &message("--press")).unwrap(),
+            Launch::Secondary
+        ));
+        assert!(started.elapsed() < config.forward_timeout);
+        let error = instance.listen(|_| {}).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        drop(instance);
+        assert!(matches!(
+            acquire(&config, &message("again")).unwrap(),
+            Launch::Primary(_)
+        ));
+    }
+
     #[test]
     fn a_second_launch_forwards_and_is_acknowledged() {
         let config = temp_config();
@@ -758,7 +783,14 @@ mod tests {
             })
             .unwrap();
         let (events_tx, events) = mpsc::channel();
-        *instance.server.shutdown.wait_started.lock().unwrap() = Some(events_tx.clone());
+        *instance
+            .server
+            .as_mut()
+            .unwrap()
+            .shutdown
+            .wait_started
+            .lock()
+            .unwrap() = Some(events_tx.clone());
         let second = {
             let config = config.clone();
             std::thread::spawn(move || acquire(&config, &message("b")))
@@ -982,7 +1014,14 @@ mod tests {
             })
             .unwrap();
         let (events_tx, events) = mpsc::channel();
-        *instance.server.shutdown.wait_started.lock().unwrap() = Some(events_tx);
+        *instance
+            .server
+            .as_mut()
+            .unwrap()
+            .shutdown
+            .wait_started
+            .lock()
+            .unwrap() = Some(events_tx);
         let second = {
             let config = config.clone();
             std::thread::spawn(move || acquire(&config, &message("b")))
@@ -1038,8 +1077,15 @@ mod tests {
             })
             .unwrap();
         let (events_tx, events) = mpsc::channel();
-        *instance.server.shutdown.wait_started.lock().unwrap() = Some(events_tx);
-        let shutdown = Arc::clone(&instance.server.shutdown);
+        *instance
+            .server
+            .as_mut()
+            .unwrap()
+            .shutdown
+            .wait_started
+            .lock()
+            .unwrap() = Some(events_tx);
+        let shutdown = Arc::clone(&instance.server.as_mut().unwrap().shutdown);
         let second = {
             let config = config.clone();
             std::thread::spawn(move || acquire(&config, &message("b")))
@@ -1074,7 +1120,7 @@ mod tests {
             panic!("not the primary");
         };
         let (fence, ended) = mpsc::channel::<()>();
-        instance.server.accept_exit_fence = Some(fence);
+        instance.server.as_mut().unwrap().accept_exit_fence = Some(fence);
         instance.listen(|_| {}).unwrap();
         // A launch gets through while it runs.
         assert!(matches!(

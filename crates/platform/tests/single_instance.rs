@@ -102,7 +102,7 @@ fn child_launch() {
     }
     let config = Config::in_dir(dir, "p");
     match acquire(&config, &message(&arg)).unwrap() {
-        Launch::Forwarded => println!("RESULT forwarded"),
+        Launch::Forwarded | Launch::Secondary => println!("RESULT forwarded"),
         Launch::Primary(mut instance) => {
             let (tx, rx) = mpsc::channel();
             instance

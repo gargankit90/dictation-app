@@ -83,6 +83,11 @@ pub struct Config {
     /// How long the running instance waits for one launch's message, and a
     /// launch for the acknowledgement.
     pub io_timeout: Duration,
+    /// Whether the running instance binds the socket and later launches
+    /// forward their message to it. Off (release builds, SIMP1 item 12):
+    /// there is no socket, and a later launch just exits
+    /// ([`Launch::Secondary`]).
+    pub forwarding: bool,
 }
 
 impl Config {
@@ -102,6 +107,7 @@ impl Config {
             name: name.to_owned(),
             forward_timeout: Duration::from_secs(5),
             io_timeout: Duration::from_secs(2),
+            forwarding: true,
         }
     }
 
@@ -172,6 +178,9 @@ pub enum Launch {
     /// Another instance is running and has handled this launch's message;
     /// this process should exit.
     Forwarded,
+    /// Another instance is running and [`Config::forwarding`] is off, so
+    /// nothing was sent; this process should exit.
+    Secondary,
 }
 
 /// Becomes the running instance, or hands `message` to the one that is.
@@ -201,6 +210,7 @@ pub fn acquire(config: &Config, message: &Message) -> io::Result<Launch> {
     loop {
         match lock.try_lock() {
             Ok(()) => return Instance::start(config, lock).map(Launch::Primary),
+            Err(TryLockError::WouldBlock) if !config.forwarding => return Ok(Launch::Secondary),
             Err(TryLockError::WouldBlock) => {}
             Err(TryLockError::Error(error)) => return Err(error),
         }
@@ -292,8 +302,9 @@ enum Forward {
 /// The running instance: holds the lock and the socket until dropped.
 #[derive(Debug)]
 pub struct Instance {
+    /// `None` when [`Config::forwarding`] is off.
     #[cfg(unix)]
-    server: unix::Server,
+    server: Option<unix::Server>,
     /// Released last, after the socket is gone, so no one else can bind
     /// while this instance's socket still exists.
     lock: File,
@@ -302,7 +313,9 @@ pub struct Instance {
 impl Drop for Instance {
     fn drop(&mut self) {
         #[cfg(unix)]
-        self.server.stop();
+        if let Some(server) = &mut self.server {
+            server.stop();
+        }
         // The lock goes with the file; unlocking first just makes it
         // explicit. Any error leaves it to the close.
         let _ = self.lock.unlock();
@@ -312,10 +325,12 @@ impl Drop for Instance {
 #[cfg(unix)]
 impl Instance {
     fn start(config: &Config, lock: File) -> io::Result<Self> {
-        Ok(Self {
-            server: unix::Server::bind(config)?,
-            lock,
-        })
+        let server = if config.forwarding {
+            Some(unix::Server::bind(config)?)
+        } else {
+            None
+        };
+        Ok(Self { server, lock })
     }
 
     /// Calls `on_message` with each later launch's message, one at a time,
@@ -347,12 +362,16 @@ impl Instance {
     ///
     /// # Errors
     ///
-    /// If the thread can't be started, or this instance already listens.
+    /// If the thread can't be started, this instance already listens, or
+    /// [`Config::forwarding`] is off ([`io::ErrorKind::Unsupported`]).
     pub fn listen_checked(
         &mut self,
         on_message: impl FnMut(Message) -> Result<(), Rejected> + Send + 'static,
     ) -> io::Result<()> {
-        self.server.listen(Box::new(on_message))
+        self.server
+            .as_mut()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Unsupported, "forwarding is off"))?
+            .listen(Box::new(on_message))
     }
 }
 
