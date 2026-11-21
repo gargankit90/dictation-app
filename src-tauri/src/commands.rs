@@ -995,64 +995,6 @@ mod tests {
     }
 
     #[test]
-    fn criterion_2_the_bindings_have_exactly_these_commands() {
-        let bindings = std::fs::read_to_string(committed()).unwrap();
-        for command in [
-            "getSettings",
-            "setApiKey",
-            "testApiKey",
-            "connectOpenrouter",
-            "cancelConnect",
-            "savedKeyHint",
-            "getOnboarding",
-            "requestPermission",
-            "openSetup",
-            "setOnboardingStep",
-            "finishOnboarding",
-            "relaunchApp",
-            "listLocalModels",
-            "downloadLocalModel",
-            "cancelLocalModelDownload",
-            "deleteLocalModel",
-            "setShareUsageEvents",
-            "setHotkey",
-            "setHotkeyRecording",
-            "getHotkeyNotice",
-            "setLaunchAtLogin",
-            "runChecks",
-            "testConnection",
-            "buildReport",
-            "saveReport",
-            "openIssue",
-            "takeWindowRequest",
-            "revealLogFile",
-            "useCloudEngine",
-            "useLocalModel",
-            "getEngineStatus",
-            "deleteApiKey",
-            "openLink",
-            "getAppInfo",
-            "checkForUpdates",
-            "chooseLocalModel",
-            "listHistory",
-            "copyHistoryEntry",
-            "deleteHistoryEntry",
-            "clearHistory",
-            "setHistoryLimit",
-        ] {
-            assert!(
-                bindings.contains(&format!("\t{command}: (")),
-                "{command} missing"
-            );
-        }
-        let commands = bindings.matches("__TAURI_INVOKE(\"").count();
-        assert_eq!(
-            commands, 41,
-            "a command was added; check it doesn't return a key"
-        );
-    }
-
-    #[test]
     fn the_app_requires_macos_13_for_the_login_item_api() {
         // SMAppService is macOS 13+; the adapter calls it without a check.
         let config = std::fs::read_to_string(

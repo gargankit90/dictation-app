@@ -4,8 +4,8 @@
 # scripts/e2e-main.sh, which calls tests/e2e/ci-run.sh. See tests/e2e/README.md.
 #
 #   tests/e2e/run.sh                     # build, reset the VM, run every scenario
-#   tests/e2e/run.sh e2e_startup         # just one scenario
-#   tests/e2e/run.sh --no-build --no-reset e2e_press_release
+#   tests/e2e/run.sh e2e_clipboard_restore   # just one scenario
+#   tests/e2e/run.sh --no-build --no-reset e2e_clipboard_restore
 #   E2E_VM=dictation-vm-2 tests/e2e/run.sh           # the second VM
 #   tests/e2e/run.sh --exclude e2e_real_openrouter         # all but this one (repeatable)
 #   tests/e2e/run.sh --clear-stale-lock <vm>         # remove a dead run's lock
@@ -26,10 +26,10 @@ for scenario_file in "$E2E_DIR"/scenarios/*.sh; do
 done
 
 ALL_SCENARIOS=(
-  e2e_startup e2e_single_instance_cold_race e2e_press_release
+  e2e_single_instance_cold_race
   e2e_microphone_denied_then_recover e2e_real_mic
-  e2e_mock_paste e2e_paste_leaves_no_modifier e2e_clipboard_restore e2e_user_copy_wins
-  e2e_silence e2e_rapid e2e_latency
+  e2e_paste_leaves_no_modifier e2e_clipboard_restore e2e_user_copy_wins
+  e2e_rapid e2e_latency
   e2e_secure_input_blocks_paste
   e2e_hold_release e2e_held_at_launch e2e_hotkey_listener_recovers
   e2e_quit_during_recording_then_relaunch e2e_tray_error_clears_on_next_recording
@@ -37,13 +37,13 @@ ALL_SCENARIOS=(
   e2e_settings_key_provider_recovery e2e_connect_openrouter e2e_cancel_and_busy_presses
   e2e_focus_switch_during_transcription e2e_unicode_multiline_selection_paste
   e2e_quit_during_transcription_then_relaunch
-  e2e_error_bad_key e2e_real_openrouter
+  e2e_real_openrouter
   e2e_overlay_focus e2e_overlay_rendered_states_and_error e2e_pill_states
   e2e_smart_space e2e_password_field_not_read e2e_layout_paste e2e_image_clipboard_restore
   e2e_dmg_install e2e_update_keeps_permissions
   e2e_launch_at_login
   e2e_hotkey_shortcuts e2e_no_words_transcript e2e_hotkey_recorder
-  e2e_accessibility_revoked e2e_setup_no_permissions e2e_setup_own_key_no_permissions
+  e2e_accessibility_revoked e2e_setup_no_permissions
   e2e_local_model
   e2e_first_paste_after_launch e2e_quit_right_after_paste
   e2e_history

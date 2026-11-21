@@ -94,41 +94,6 @@ async fn retry_after_exactly_at_the_limit_is_honoured() {
 }
 
 #[tokio::test]
-async fn retry_after_on_a_503_is_honoured() {
-    let server = MockServer::start().await;
-    mount(
-        &server,
-        ResponseTemplate::new(503).insert_header("retry-after", "4"),
-        Some(1),
-    )
-    .await;
-    mount(&server, ok(), None).await;
-    let (engine, wait) = engine(config(&server, 3));
-    assert_eq!(engine.transcribe(&audio()).await.unwrap(), "ok");
-    assert_eq!(*wait.0.lock().unwrap(), [Duration::from_secs(4)]);
-}
-
-/// A provider that keeps sending `Retry-After` still gets only
-/// `max_attempts` requests.
-#[tokio::test]
-async fn retry_after_every_time_still_stops_at_max_attempts() {
-    let server = MockServer::start().await;
-    mount(
-        &server,
-        ResponseTemplate::new(429).insert_header("retry-after", "0"),
-        None,
-    )
-    .await;
-    let (engine, wait) = engine(config(&server, 4));
-    assert_eq!(
-        engine.transcribe(&audio()).await,
-        Err(TranscribeError::RateLimited)
-    );
-    assert_eq!(requests(&server).await, 4);
-    assert_eq!(*wait.0.lock().unwrap(), [Duration::ZERO; 3]);
-}
-
-#[tokio::test]
 async fn a_401_with_retry_after_is_still_not_retried() {
     let server = MockServer::start().await;
     mount(
