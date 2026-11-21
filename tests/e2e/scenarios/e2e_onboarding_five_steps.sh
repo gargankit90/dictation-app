@@ -1,7 +1,8 @@
 # U8 criteria 7 and 8: all five steps with the local model and a real `say`
 # clip (--debug-audio-file, the real on-device engine). Choosing the model
 # starts the download and moves on, the strip shows it on the later steps, and
-# after quitting mid-download setup starts again at Welcome and choosing the
+# after quitting mid-download setup opens at the first step that isn't done
+# (Welcome counts as passed once settings exist); back on Speech, choosing the
 # model again picks the download up. Try it waits for the model, then a
 # dictation lands in the practice box and Done moves on. Ready shows the real
 # states, and Start dictating ends setup.
@@ -61,14 +62,23 @@ e2e_onboarding_five_steps() {
   expect "the settings choose the model already" settings_file_has transcription local
   expect "some of it is on disk" wait_for_part
 
-  # Quit in the middle: only finishing is kept, so setup starts at Welcome, and
-  # choosing the model again picks the download up.
+  # Quit in the middle: only finishing is kept. With settings saved, Welcome
+  # counts as passed, so setup opens at the first step that isn't done: Ready
+  # here (the model is chosen and both permissions are allowed). Back to
+  # Speech, and choosing the model again picks the download up.
   expect "quit from the tray mid-download" quit_from_tray
   clear_app_log
   five_launch
-  expect "it comes back at Welcome" \
-    wait_for_log 'onboarding shown at launch step=Welcome' 30
-  expect "press Get started again" ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Get started"
+  expect "it comes back at the first step that isn't done, Ready" \
+    wait_for_log 'onboarding shown at launch step=Ready' 30
+  expect "Ready is on screen" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "You're set" 15
+  expect "Back to Try it" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Back
+  expect "Try it" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Your dictation key" 15
+  expect "Back to Permissions" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Back
+  expect "Permissions" \
+    ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "Records only while you hold your key" 15
+  expect "Back to Speech" ax_ok press "$APP_NAME" "$FIVE_WINDOW" Back
+  expect "Speech" ax_ok wait-text "$APP_NAME" "$FIVE_WINDOW" "How should Vocet transcribe" 15
   expect "choose this Mac again" ax_ok radio-press "$APP_NAME" "$FIVE_WINDOW" "Use this Mac"
   expect "press Download and continue again" \
     ax_ok press "$APP_NAME" "$FIVE_WINDOW" "Download and continue"
