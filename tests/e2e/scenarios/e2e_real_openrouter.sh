@@ -48,6 +48,8 @@ e2e_real_openrouter() {
   expect "the full state sequence is logged in order" \
     test "$phases" = "Recording Transcribing Inserting Idle"
   expect "no error was shown to the user" apikey_log_lacks 'shown to the user'
+  expect "the cleanup outcome line is in the log (QT1)" \
+    wait_for_log ' cleanup outcome="?(applied|fallback_[a-z]+)"? duration_ms=[0-9]+' 1
   expect "the transcript is not in the log" apikey_log_lacks 'quick brown'
   expect "the key is not in the log" apikey_log_lacks_key
 

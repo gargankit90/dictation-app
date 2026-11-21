@@ -220,37 +220,39 @@ impl CleanupStep {
     /// The text to paste for `raw`, and what happened (`None` when cleanup
     /// is off).
     async fn run(&self, raw: &str) -> (Option<String>, Option<CleanupOutcome>) {
+        let started = tokio::time::Instant::now();
         let timeout = self.cleaner.deadline_boxed().unwrap_or(self.timeout);
         let prompt = self
             .cleaner
             .prompt_boxed()
             .unwrap_or_else(cleanup_rules::prompt);
         let reply = tokio::time::timeout(timeout, self.cleaner.clean_boxed(raw)).await;
-        let outcome = match reply {
+        let (cleaned, outcome) = match reply {
             Ok(Ok(reply)) => match cleanup_rules::judge(raw, &reply, prompt) {
-                Judgement::Accepted => {
-                    tracing::debug!("cleanup applied");
-                    return (Some(reply), Some(CleanupOutcome::Applied));
-                }
+                Judgement::Accepted => (Some(reply), CleanupOutcome::Applied),
                 refused => {
-                    tracing::debug!(
-                        reason = refused.name(),
-                        "cleanup refused; pasting the raw text"
-                    );
-                    CleanupOutcome::FallbackGuard
+                    tracing::debug!(reason = refused.name(), "cleanup refused");
+                    (None, CleanupOutcome::FallbackGuard)
                 }
             },
             Ok(Err(CleanupError::Off)) => return (None, None),
             Ok(Err(CleanupError::Timeout)) | Err(_) => {
                 tracing::debug!(?timeout, "cleanup timed out; pasting the raw text");
-                CleanupOutcome::FallbackTimeout
+                (None, CleanupOutcome::FallbackTimeout)
             }
             Ok(Err(error)) => {
-                tracing::debug!(%error, "cleanup failed; pasting the raw text");
-                CleanupOutcome::FallbackError
+                tracing::debug!(%error, "cleanup failed");
+                (None, CleanupOutcome::FallbackError)
             }
         };
-        (None, Some(outcome))
+        // One line per dictation, never the text: tests and `e2e_real_openrouter`
+        // read the outcome from it.
+        tracing::info!(
+            outcome = outcome.name(),
+            duration_ms = started.elapsed().as_millis(),
+            "cleanup"
+        );
+        (cleaned, Some(outcome))
     }
 }
 

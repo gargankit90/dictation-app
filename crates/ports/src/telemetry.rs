@@ -236,6 +236,19 @@ pub enum CleanupOutcome {
     FallbackError,
 }
 
+impl CleanupOutcome {
+    /// The name in logs and usage events (snake case).
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::FallbackTimeout => "fallback_timeout",
+            Self::FallbackGuard => "fallback_guard",
+            Self::FallbackError => "fallback_error",
+        }
+    }
+}
+
 /// Why a dictation failed, without the reason's text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
