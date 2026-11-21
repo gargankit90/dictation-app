@@ -6,7 +6,7 @@ The public website for Vocet (issue #211): one static page, no build step.
 - `fonts/`: Inter and Inter Tight (WOFF2, SIL OFL, `fonts/LICENSE.txt`), served from here so the page makes no request to Google.
 - `og.png`: the 1200×630 link-preview image.
 
-It is a snapshot of what was live on vocetlabs.com on 2026-11-03, formatted with Prettier; nothing else was changed. The design comes from the Design Lead's round-2 "A" landing page.
+The page is the WEB1 rewrite for 0.2.0 (students and engineers). Before it merges, set `DOWNLOAD_URL` at the bottom of `index.html` to the 0.2.0 release asset or page (not `releases/latest`, which skips pre-releases); until then the Download buttons link to the releases list.
 
 To preview it, open `index.html` in a browser. Hosting is on Cloudflare (the `vocetlabs` Worker, static assets only).
 
