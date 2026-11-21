@@ -56,7 +56,9 @@ export function Onboarding({ onFinished }: Props) {
   const [settings, setSettings] = useState<Settings_Serialize | null>(null);
   const { models, error: modelsError, refresh: refreshModels } = useModels();
   const { engine, refresh: refreshEngine } = useEngineStatus();
-  const cleanupModels = useCleanupModels(settings?.transcription === "local");
+  const cleanupModels = useCleanupModels(
+    settings?.transcription === "local" || status?.step === "speech",
+  );
   const [downPolls, setDownPolls] = useState(0);
   // The engine picked on Speech, kept while the window is open.
   const [speechChoice, setSpeechChoice] = useState<SpeechChoice | null>(null);
@@ -303,6 +305,7 @@ export function Onboarding({ onFinished }: Props) {
           settings={settings}
           onStored={setSettings}
           models={models}
+          cleanup={cleanupModels?.[0] ?? null}
           modelsError={modelsError}
           refreshModels={refreshModels}
           refreshEngine={refreshEngine}
