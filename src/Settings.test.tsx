@@ -1116,6 +1116,21 @@ describe("General and About", () => {
 });
 
 describe("Privacy", () => {
+  it("Q5: summarises the current mode's data flow and links to the policy", async () => {
+    await open("privacy");
+    expect(screen.getByText(/goes through OpenRouter to OpenAI/)).toBeTruthy();
+    click("Read the privacy policy");
+    await waitFor(() => {
+      expect(backend.named("open_link")[0]?.args).toEqual({ link: "privacy" });
+    });
+  });
+
+  it("Q5: says audio and text stay on this Mac in On this Mac mode", async () => {
+    backend.settings = { ...backend.settings, transcription: "local", local_model: ENGLISH };
+    await open("privacy");
+    expect(screen.getByText(/audio and text stay on your Mac/)).toBeTruthy();
+  });
+
   it("lists what is sent in plain words, and links to the full notice", async () => {
     await open("privacy");
     fireEvent.click(screen.getByText("What's sent"));

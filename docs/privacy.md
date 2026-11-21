@@ -1,5 +1,10 @@
 # Privacy: usage events, error reports and dictation history
 
+The plain-language policy is [vocetlabs.com/privacy](https://vocetlabs.com/privacy)
+(`site/privacy.html`): who we are, what leaves your Mac, what providers keep (with
+sources), your choices. This page is the technical list behind it: every event
+and field, and what stays on your Mac. If the two ever disagree, fix both.
+
 ## What dictation sends where
 
 - **On this Mac:** the audio and the text stay on your Mac.
@@ -8,8 +13,9 @@
   passes it to OpenAI's `gpt-4o-mini-transcribe` model. The request asks
   OpenRouter to use only providers that don't collect data
   (`data_collection: deny`); OpenRouter has no zero-data-retention route for
-  this OpenAI model. OpenAI doesn't train on API data and may keep logs for up
-  to 30 days. The **transcript's text** then goes to OpenRouter for cleanup by
+  this OpenAI model. How long OpenRouter and OpenAI keep that audio is governed
+  by their own policies (OpenAI says it doesn't train on API data by default);
+  sources are in the [policy](https://vocetlabs.com/privacy). The **transcript's text** then goes to OpenRouter for cleanup by
   the `z-ai/glm-5.3-flash` model, only to hosts with zero data retention that
   don't collect data (`zdr: true`, `data_collection: deny`). If no such host
   answers in 1.5 seconds, nothing is cleaned and the transcript is pasted as it

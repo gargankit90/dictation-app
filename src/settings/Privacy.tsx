@@ -11,8 +11,9 @@ export function WhatsSent() {
     <details className="row-details">
       <summary>What&apos;s sent</summary>
       <p className="hint">
-        Sent while this is on, from the first setup screen. Off stops it at once and deletes what is
-        waiting and the ID below; it can&apos;t recall what was already sent.
+        Sent while this is on, from the first setup screen (setup events go out before the switch is
+        shown on the last screen). Off stops it at once and deletes what is waiting and the ID
+        below; it can&apos;t recall what was already sent.
       </p>
       <ul className="hint">
         <li>That the app was opened, with its version, your macOS version and chip.</li>
@@ -123,8 +124,28 @@ export function Privacy({
 }) {
   const { save, checked, setSharing } = useSharingSwitch(settings.share_usage_events, onStored);
 
+  const flow =
+    settings.transcription === "local"
+      ? "On this Mac: your audio and text stay on your Mac. Nothing is sent for dictation."
+      : "Connect OpenRouter: your audio goes through OpenRouter to OpenAI to be turned into text, and the text goes through OpenRouter to a cleanup model. Vocet has no server that receives it, and asks providers not to collect it.";
+
   return (
     <Group>
+      <Row
+        label="Where your dictation goes"
+        caption={flow}
+        below={
+          <button
+            type="button"
+            className="link"
+            onClick={() => {
+              void commands.openLink("privacy").catch(() => undefined);
+            }}
+          >
+            Read the privacy policy
+          </button>
+        }
+      />
       <Row
         label="Share usage and error events"
         labelId="share-usage-events-label"

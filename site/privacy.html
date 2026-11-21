@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy policy — Vocet Dictation</title>
+    <meta
+      name="description"
+      content="What Vocet Dictation sends off your Mac, what stays on it, and who keeps what."
+    />
+    <style>
+      :root {
+        color-scheme: light dark;
+
+        /* Brand */
+        --vc-accent: #1f4fc9; /* buttons, links, focus, selection */
+        --vc-accent-hover: #163c9a;
+        --vc-selection-bg: #1f4fc9;
+        --vc-selection-fg: #ffffff;
+        --vc-primary-bg: #1f4fc9;
+        --vc-primary-hover: #163c9a;
+        --vc-primary-fg: #ffffff;
+        --vc-accent-fg: #ffffff; /* text on accent */
+        --vc-accent-soft: #e8eefb; /* selected row, info background */
+
+        /* Neutrals */
+        --vc-ink: #1c1b19; /* primary text */
+        --vc-ink-2: #3b3a36; /* secondary text */
+        --vc-muted: #5c5a55; /* hints, captions */
+        --vc-faint: #6e6b64; /* placeholders (large or non-essential only) */
+        --vc-line: #e4e1d9; /* separators, card borders */
+        --vc-line-strong: #d6d2c8; /* control borders */
+        --vc-bg: #ffffff; /* app window */
+        --vc-bg-grouped: #f5f4f0; /* settings group background, site bands */
+        --vc-bg-site: #fbfaf7; /* website page */
+
+        /* States: always with an icon or word, never colour alone */
+        --vc-ready: #1e7a44; /* ready, success, "Pasted" */
+        --vc-ready-soft: #e6f4ec;
+        --vc-attention: #9a5300; /* needs attention, paused, skipped */
+        --vc-attention-soft: #fdf1e0;
+        --vc-danger: #c4261d; /* errors, destructive */
+        --vc-danger-soft: #fbe9e7;
+        --vc-recording: #e5484d; /* the recording dot only */
+
+        /* Overlay (recording pill): dark in both appearances */
+        --vc-overlay-bg: rgba(28, 27, 25, 0.92);
+        --vc-overlay-fg: #ffffff;
+        --vc-overlay-muted: #c9c6bf;
+        --vc-meter: #ffffff;
+        --vc-meter-idle: rgba(255, 255, 255, 0.28);
+        --vc-overlay-attention: #f2b544; /* warning badge on the dark pill */
+        --vc-overlay-attention-fg: #1c1b19; /* the "!" on that badge */
+        --vc-overlay-ready: #4cc26a; /* "Pasted" check on the dark pill */
+
+        /* Type */
+        --vc-font-ui:
+          -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        --vc-font-display:
+          -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+        --vc-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+        /* App scale (px). Devanagari falls back to the system's Kohinoor/Devanagari MT. */
+        --vc-text-xs: 11px; /* badges */
+        --vc-text-sm: 12px; /* captions, overlay hint */
+        --vc-text-md: 13px; /* body, controls (macOS default) */
+        --vc-text-lg: 15px; /* practice box, overlay label */
+        --vc-text-xl: 17px; /* section titles */
+        --vc-text-2xl: 22px; /* onboarding step titles */
+        --vc-text-3xl: 28px; /* onboarding welcome */
+        --vc-leading: 1.45;
+
+        /* Space: 4 px grid */
+        --vc-space-1: 4px;
+        --vc-space-2: 8px;
+        --vc-space-3: 12px;
+        --vc-space-4: 16px;
+        --vc-space-5: 20px;
+        --vc-space-6: 24px;
+        --vc-space-8: 32px;
+        --vc-space-12: 48px;
+
+        /* Shape */
+        --vc-radius-sm: 6px; /* controls, keycaps */
+        --vc-radius-md: 10px; /* settings groups, cards */
+        --vc-radius-lg: 14px; /* onboarding cards, site cards */
+        --vc-radius-pill: 999px;
+
+        /* Size */
+        --vc-control-h: 28px; /* settings buttons, fields */
+        --vc-control-h-lg: 44px; /* onboarding and website primary actions */
+        --vc-target-min: 44px; /* website touch targets */
+
+        /* Elevation */
+        --vc-shadow-card: 0 1px 2px rgba(28, 27, 25, 0.06);
+        --vc-shadow-pop: 0 12px 32px rgba(28, 27, 25, 0.18);
+
+        /* Motion */
+        --vc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+        --vc-dur-fast: 120ms;
+        --vc-dur: 200ms;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --vc-accent: #7ea2ff;
+          --vc-accent-hover: #a3bdff;
+          --vc-selection-bg: #1c2747;
+          --vc-selection-fg: #ffffff;
+          --vc-primary-bg: #3b6be0;
+          --vc-primary-hover: #3461cf;
+          --vc-primary-fg: #ffffff;
+          --vc-accent-fg: #0b1430;
+          --vc-accent-soft: #1c2747;
+
+          --vc-ink: #f2f1ee;
+          --vc-ink-2: #d9d6cf;
+          --vc-muted: #aaa69e;
+          --vc-faint: #8f8b83;
+          --vc-line: #3a3936;
+          --vc-line-strong: #4a4844;
+          --vc-bg: #1e1e1e;
+          --vc-bg-grouped: #262624;
+          --vc-bg-site: #161614;
+
+          --vc-ready: #4cc26a;
+          --vc-ready-soft: #17301f;
+          --vc-attention: #f2b544;
+          --vc-attention-soft: #33270f;
+          --vc-danger: #ff6b62;
+          --vc-danger-soft: #3a1a17;
+
+          --vc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+          --vc-shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.5);
+        }
+      }
+
+      body {
+        margin: 0;
+        background: var(--vc-bg-site);
+        color: var(--vc-ink);
+        font:
+          16px/1.6 Inter,
+          system-ui,
+          -apple-system,
+          sans-serif;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 40px 24px 72px;
+      }
+      h1,
+      h2 {
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+      }
+      h2 {
+        margin-top: 40px;
+      }
+      a {
+        color: var(--vc-accent);
+      }
+      .summary {
+        background: var(--vc-bg-grouped);
+        border: 1px solid var(--vc-line);
+        border-radius: 12px;
+        padding: 8px 24px;
+      }
+      .muted {
+        color: var(--vc-muted);
+      }
+      .scroll {
+        overflow-x: auto;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 15px;
+      }
+      th,
+      td {
+        border: 1px solid var(--vc-line);
+        padding: 8px 12px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: var(--vc-bg-grouped);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p><a href="/">← Vocet Dictation</a></p>
+      <h1>Privacy policy</h1>
+      <p class="muted">
+        For Vocet Dictation 0.2.0 and later on Mac. Last updated 20 November 2026.
+      </p>
+
+      <h2>In short</h2>
+      <ul class="summary">
+        <li>
+          Vocet has no server that receives your dictations, and no account with us exists. We never
+          see your audio or your words.
+        </li>
+        <li>
+          <strong>On this Mac:</strong> audio and text stay on your Mac. Only the one-time model
+          download comes from Hugging Face.
+        </li>
+        <li>
+          <strong>Connect OpenRouter:</strong> your audio and text go from your Mac to OpenRouter
+          and the model providers behind it, under your own OpenRouter account. We ask them not to
+          collect your data.
+        </li>
+        <li>
+          We don't use your recordings or text to train any model, and we ask providers not to.
+        </li>
+        <li>
+          Anonymous usage and error reports are <strong>on by default</strong> and never hold your
+          audio, words or keys. You can turn them off in Settings → Privacy.
+        </li>
+      </ul>
+
+      <h2>Who we are</h2>
+      <p>
+        Vocet Dictation is made by Ankit Garg, Vocet Labs. Questions, or want to know what we hold
+        about you? Write to
+        <a href="mailto:privacy@vocetlabs.com">privacy@vocetlabs.com</a>.
+      </p>
+
+      <h2>What leaves your Mac, by mode</h2>
+      <div class="scroll">
+        <table>
+          <tr>
+            <th></th>
+            <th>On this Mac</th>
+            <th>Connect OpenRouter</th>
+          </tr>
+          <tr>
+            <th>Your audio</th>
+            <td>Stays on your Mac.</td>
+            <td>
+              Sent to OpenRouter, which passes it to OpenAI (<code>gpt-4o-mini-transcribe</code>) to
+              turn it into text.
+            </td>
+          </tr>
+          <tr>
+            <th>The text, and your custom words (if you have any)</th>
+            <td>Stays on your Mac.</td>
+            <td>
+              Sent to OpenRouter, which passes it to a cleanup model
+              (<code>z-ai/glm-5.3-flash</code>) that fixes punctuation and wording. If no host
+              answers within 1.5 seconds, nothing is cleaned and your text is pasted as it came.
+            </td>
+          </tr>
+          <tr>
+            <th>Settings we send with every request</th>
+            <td>None, nothing is sent.</td>
+            <td>
+              <code>data_collection: deny</code> on every request (use only providers that don't
+              collect data). <code>zdr: true</code> on cleanup requests (use only hosts with zero
+              data retention).
+            </td>
+          </tr>
+          <tr>
+            <th>Who handles it</th>
+            <td>Nobody but you.</td>
+            <td>
+              OpenRouter and the provider behind each step, under <strong>your</strong> OpenRouter
+              account and its terms. Vocet is not in the path.
+            </td>
+          </tr>
+        </table>
+      </div>
+      <p>
+        Your OpenRouter key stays in your macOS Keychain and is sent only to OpenRouter. Signing in
+        with <strong>Connect OpenRouter</strong> sends nothing about you to us.
+      </p>
+
+      <h2>What providers keep</h2>
+      <p>
+        We state only what the providers publish today, and link it. Where a period isn't published
+        for our exact route, we don't guess one: what they keep is governed by OpenRouter's and the
+        provider's own policies.
+      </p>
+      <ul>
+        <li>
+          <strong>OpenRouter</strong> says it doesn't store your prompts or responses unless you
+          turn on logging, or content is flagged as possible child sexual abuse material (screened
+          on all requests, including zero-retention ones; flagged content may be kept for review and
+          legal reasons). It does keep metadata such as token counts and timing. Some endpoints
+          marked "Safety Retention" may keep requests to prevent abuse; our <code>zdr: true</code>
+          setting on cleanup requests excludes them. Sources:
+          <a href="https://openrouter.ai/docs/guides/privacy/data-collection">data collection</a>,
+          <a href="https://openrouter.ai/docs/features/zdr">zero data retention</a>.
+        </li>
+        <li>
+          <strong>OpenAI</strong> (speech to text) says API data isn't used for training by default,
+          and its table lists no abuse-monitoring retention for the audio transcription endpoint
+          when called directly. How long the copy that comes through OpenRouter is kept is governed
+          by OpenRouter's and OpenAI's policies; we can't promise a number. Source:
+          <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI, your data</a>.
+        </li>
+        <li>
+          <strong>The cleanup host</strong> is chosen by OpenRouter from hosts with zero data
+          retention, which it describes as no routine storage after processing, apart from the
+          screening above. Source:
+          <a href="https://openrouter.ai/docs/features/zdr">OpenRouter ZDR</a>.
+        </li>
+        <li>
+          <strong>Hugging Face</strong> serves the one-time model downloads. It sees an ordinary
+          download request (your IP address), not your audio. See
+          <a href="https://huggingface.co/privacy">its privacy policy</a>.
+        </li>
+      </ul>
+
+      <h2>No training</h2>
+      <p>
+        Vocet doesn't use your recordings or text to train models. It asks providers not to collect
+        or train on them (<code>data_collection: deny</code>). If we ever want to use recordings, it
+        will be a separate opt-in that we announce first; nothing like that exists in this version.
+      </p>
+
+      <h2>Usage and error reports</h2>
+      <p>
+        <strong>On by default</strong>, with one off switch in Settings → Privacy ("Share usage and
+        error events"). Off takes effect at once, deletes what was waiting and your random install
+        ID, and can't recall what was already sent.
+      </p>
+      <ul>
+        <li>
+          <strong>PostHog Cloud (US)</strong> gets a closed list of events: the app opened (version,
+          macOS version, chip), setup steps reached, which engine you chose, that a dictation worked
+          or failed (length and speed in rough ranges, the kind of failure), which setting changed
+          (not its value), and that the app updated. No profiles, no IP address.
+        </li>
+        <li>
+          <strong>Sentry (US)</strong> gets a report when the app crashes or a dictation fails: the
+          app version, macOS major version, chip, an error code, and for a crash the code locations
+          and function names. Never audio, text, keys, app names, file paths, your user name or
+          computer name.
+        </li>
+        <li>
+          <strong>Setup is the exception to the switch.</strong> The switch appears on the last
+          setup screen, so the setup events (steps reached, where setup stopped, and fixed reasons
+          such as a failed download or a refused permission) are sent before you see it, unless a
+          choice you made earlier is stored. Nothing about what you say is among them.
+        </li>
+      </ul>
+      <p>
+        The full list of every event and field is in
+        <a href="https://github.com/gargankit90/dictation-app/blob/main/docs/privacy.md"
+          >docs/privacy.md</a
+        >, and the code enforces it.
+      </p>
+
+      <h2>What stays on your Mac</h2>
+      <ul>
+        <li>
+          <strong>History:</strong> your last 25 dictations by default (Off, 10, 25, 50 or 100),
+          text only, in a file only your user can read. Never sent anywhere. Delete one, clear all,
+          or turn it off in Settings → History.
+        </li>
+        <li>
+          <strong>Audio</strong> is kept in memory and dropped after use. Release builds never save
+          it. Only a developer debug build, started with a special flag, writes recordings to a
+          folder on the Mac, and they never leave it.
+        </li>
+        <li><strong>Your key</strong> lives in the macOS Keychain.</li>
+        <li><strong>Logs</strong> never hold transcripts or keys.</li>
+      </ul>
+
+      <h2>Update checks</h2>
+      <p>
+        The app asks GitHub for a small file that names the latest version
+        (<code>github.com/…/releases/latest/download/latest.json</code>). Vocet adds nothing
+        personal to that request; GitHub sees it as it sees any download.
+      </p>
+
+      <h2>Your choices</h2>
+      <ul>
+        <li>Turn reports off: Settings → Privacy.</li>
+        <li>Delete history: Settings → History.</li>
+        <li>
+          Stop cloud use: switch to On this Mac, or Disconnect OpenRouter in Settings → Speech. You
+          can also delete the key at openrouter.ai.
+        </li>
+        <li>Uninstall the app by dragging it to the Trash.</li>
+        <li>
+          Ask about data: email <a href="mailto:privacy@vocetlabs.com">privacy@vocetlabs.com</a>. We
+          hold no account for you, and usage events carry only a random ID, so we may not be able to
+          find yours.
+        </li>
+      </ul>
+
+      <h2>Children</h2>
+      <p>Vocet isn't directed at children under 13 (under 16 in the EU).</p>
+
+      <h2>Changes</h2>
+      <p>
+        We'll date every change on this page and announce material ones in the release notes before
+        they apply.
+      </p>
+    </main>
+  </body>
+</html>

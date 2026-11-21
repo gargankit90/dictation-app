@@ -15,7 +15,8 @@ text:
   Your speech then stays on the Mac. It is the recommended choice in setup.
 - **OpenRouter**: an internet connection and an OpenRouter account (you
   pay OpenRouter for what you use; Connect OpenRouter makes the key). Your speech goes through OpenRouter to
-  OpenAI for transcription, and the text to a cleanup model that keeps no data.
+  OpenAI for transcription, and the text to a cleanup model on a zero-data-retention host. Vocet has no server
+  of its own that receives it (policy: vocetlabs.com/privacy).
 
 ## 1. Install
 
