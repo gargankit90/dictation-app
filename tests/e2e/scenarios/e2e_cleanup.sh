@@ -13,7 +13,9 @@
 
 CLEANED_TEXT="Hello, world."
 # The deadline is 1.5 s; this is generous for the dictation around it.
-CLEANUP_PASTE_BOUND=8
+# The VM's dictation (record, transcribe, settle) takes 6-7 s under load, so the
+# bound is on the app's own logged duration, not on wall time.
+CLEANUP_PASTE_BOUND_MS=2500
 
 # cleanup_reply <base64 of UTF-8 text>: what the cleanup answers with.
 cleanup_reply() {
@@ -31,6 +33,11 @@ cleanup_gate_open() {
 # The app's info lines for the cleanup, outcomes in order, space-separated.
 cleanup_outcomes() {
   app_log | sed -n 's/.* cleanup outcome="\{0,1\}\([a-z_]*\).*/\1/p' | paste -sd ' ' -
+}
+
+# The first cleanup line's duration in ms.
+cleanup_first_ms() {
+  app_log | sed -n 's/.* cleanup outcome=.* duration_ms=\([0-9]*\).*/\1/p' | head -n 1
 }
 
 e2e_cleanup_applied() {
@@ -73,7 +80,8 @@ e2e_cleanup_deadline() {
   log "  the dictation took about $((SECONDS - start)) s"
   expect "the cleanup was held at the provider" provider_wait_event '^cleanup_held' 5
   expect "the raw transcript was pasted" textedit_is "$(esc_b64 "$PROVIDER_TEXT")"
-  expect "within the bound" test $((SECONDS - start)) -le "$CLEANUP_PASTE_BOUND"
+  expect "the cleanup gave up at the deadline (app-side, not wall clock)" \
+    test "$(cleanup_first_ms)" -le "$CLEANUP_PASTE_BOUND_MS"
   expect "the outcome is the timeout" test "$(cleanup_outcomes)" = fallback_timeout
 
   # The cancelled cleanup leaves nothing behind.
