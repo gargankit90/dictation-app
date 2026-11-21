@@ -39,15 +39,17 @@ e2e_setup_own_key_no_permissions() {
   expect "the hotkey is off" wait_for_log 'PermissionMissing' 15
   expect "press Get started" ax_ok press "$APP_NAME" "$OWNKEY_WINDOW" "Get started"
   expect "choose my own key" \
-    ax_ok radio-press "$APP_NAME" "$OWNKEY_WINDOW" "Use my own OpenRouter key"
+    ax_ok radio-press "$APP_NAME" "$OWNKEY_WINDOW" "Use OpenRouter"
   expect "press Continue" ax_ok press "$APP_NAME" "$OWNKEY_WINDOW" Continue
-  expect "the next screen is Connect your key" \
-    ax_ok wait-text "$APP_NAME" "$OWNKEY_WINDOW" "Connect your key" 10
+  expect "the next screen is Connect OpenRouter" \
+    ax_ok wait-text "$APP_NAME" "$OWNKEY_WINDOW" "Connect OpenRouter" 10
+  expect "open Paste a key instead" \
+    ax_ok press "$APP_NAME" "$OWNKEY_WINDOW" "Paste a key instead"
   expect "type the key the provider takes" \
     ax_ok secret-set "$APP_NAME" "$OWNKEY_WINDOW" api-key "$PROVIDER_GOOD_KEY"
   expect "press Test & Save" ax_ok press "$APP_NAME" "$OWNKEY_WINDOW" "Test & Save"
-  expect "the window says the key is saved" \
-    ax_ok wait-text "$APP_NAME" "$OWNKEY_WINDOW" "Key saved" 15
+  expect "the window says OpenRouter is connected" \
+    ax_ok wait-text "$APP_NAME" "$OWNKEY_WINDOW" "Connected to OpenRouter" 15
   API_KEY_STORED=1
   expect "step 2 doesn't mention the hotkey" ownkey_message_absent
   expect "press Continue" ax_ok press "$APP_NAME" "$OWNKEY_WINDOW" Continue

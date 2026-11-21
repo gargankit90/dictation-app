@@ -2,10 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { commands } from "./bindings";
 import type { EngineStatus, LocalModelInfo_Serialize, Settings_Serialize } from "./bindings";
-import { BROKEN, messageOf } from "./keyTest";
+import { BROKEN, messageOf } from "./messages";
 import { cloudLanguages } from "./languages";
-import { providerInfo } from "./providers";
-import { modelTitle } from "./settings/modelRow";
+import { PROVIDER_NAME, modelTitle } from "./settings/modelRow";
 import "./settings.css";
 import { Dictation } from "./settings/Dictation";
 import type { LanguageChoice } from "./settings/Dictation";
@@ -130,7 +129,7 @@ function languageChoice(
   if (settings.transcription === "cloud") {
     return {
       supported: cloudLanguages(settings.provider),
-      engineName: providerInfo().name,
+      engineName: PROVIDER_NAME,
       englishOnly: false,
     };
   }

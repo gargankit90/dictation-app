@@ -1,27 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { commands } from "../bindings";
-import type {
-  EngineStatus,
-  LocalModelInfo_Serialize,
-  Provider,
-  Settings_Serialize,
-} from "../bindings";
-import { BROKEN, messageOf } from "../keyTest";
-import { providerInfo } from "../providers";
+import type { EngineStatus, LocalModelInfo_Serialize, Settings_Serialize } from "../bindings";
+import { BROKEN, messageOf } from "../messages";
 import {
   MODEL_CAPTION,
   megabytes,
   modelDetails,
   modelRow,
   modelTitle,
-  ownKeyCaption,
+  cloudCaption,
 } from "./modelRow";
 import type { ModelAction } from "./modelRow";
-import { OwnKeySheet, useOwnKey } from "./ownKey";
+import { ConnectSheet, useConnection } from "./connection";
 import { Chip, Group, Row, SaveStatus, useSave } from "./ui";
 
-export { CONNECTED, KEY_NOT_SAVED } from "./ownKey";
+export { CONNECTED, KEY_NOT_SAVED } from "./connection";
 
 /** Where "Got it" on the Keychain notice is remembered (this window's storage). */
 export const NOTICE_DISMISSED_KEY = "vocet.settings.keychainNoticeDismissed";
@@ -156,7 +150,7 @@ export function Speech({
   const cloud = useSave();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [dismissed, setDismissed] = useState(noticeDismissed);
-  // Selecting the own key with no key waits here for one that works.
+  // Selecting OpenRouter with no key waits here for a connection that works.
   const switchOnceConnected = useRef(false);
   // Whatever gets the sheet's focus back when it closes.
   const sheetOpener = useRef<HTMLElement | null>(null);
@@ -218,31 +212,26 @@ export function Speech({
     await refreshEngine();
   }
 
-  async function switchToCloud(which: Provider) {
+  async function switchToCloud() {
     await cloud.track(async () => {
-      const result = await commands.useCloudEngine(which);
+      const result = await commands.useCloudEngine("openrouter");
       await reread();
       await refreshEngine();
       return result.status === "error" ? messageOf(result.error) : null;
     });
   }
 
-  const ownKey = useOwnKey({
-    settings,
-    onDevice,
-    switchToCloud,
+  const connection = useConnection({
     refreshEngine,
-    draftProvider: true,
-    onConnected: async (which) => {
+    onConnected: async () => {
       const waiting = switchOnceConnected.current;
       switchOnceConnected.current = false;
-      if (waiting) await switchToCloud(which);
+      if (waiting) await switchToCloud();
     },
   });
-  const { provider, keyStatus } = ownKey;
-  const info = providerInfo();
+  const { status } = connection;
   const cloudActive = !onDevice;
-  const stored = keyStatus.state;
+  const stored = status.state;
 
   // The own key is the engine and needs a key: the sheet opens by itself, once
   // and not again on every return to Speech (Design Lead item 6). State from
@@ -262,25 +251,27 @@ export function Speech({
     setSheetOpen(true);
   }
 
-  function closeSheet() {
+  async function closeSheet() {
+    // A key that is being saved keeps the sheet: it shows how that ends.
+    if (!(await connection.canLeave())) return;
     switchOnceConnected.current = false;
-    ownKey.abandon();
+    connection.clearNotice();
     setSheetOpen(false);
     sheetOpener.current?.focus();
     sheetOpener.current = null;
   }
 
-  async function chooseOwnKey() {
+  async function chooseCloud() {
     setActionError(null);
     let saved = false;
     try {
-      const result = await commands.hasApiKey(provider);
+      const result = await commands.hasApiKey("openrouter");
       saved = result.status === "ok" && result.data;
     } catch {
       // Treated as no key: the sheet says what is wrong.
     }
     if (saved) {
-      await switchToCloud(provider);
+      await switchToCloud();
       return;
     }
     switchOnceConnected.current = true;
@@ -291,7 +282,7 @@ export function Speech({
   const switchingName = models?.find((model) => model.id === switching);
   const waitReason =
     switchingName === undefined ? null : `Wait until ${modelTitle(switchingName)} has loaded.`;
-  const showNotice = launchNotice !== null && !dismissed && keyStatus.state === "saved";
+  const showNotice = launchNotice !== null && !dismissed && status.state === "connected";
 
   return (
     <>
@@ -437,22 +428,22 @@ export function Speech({
             })
           )}
           <EngineRow
-            id="engine-own-key"
-            name="Your own key"
-            caption={ownKeyCaption(info, keyStatus.state === "saved")}
+            id="engine-openrouter"
+            name="OpenRouter"
+            caption={cloudCaption(status.state === "connected")}
             checked={cloudActive && switching === null}
             blockedBecause={busy && !cloudActive ? waitReason : null}
             disabled={busy}
-            onPick={() => void chooseOwnKey()}
+            onPick={() => void chooseCloud()}
             below={<SaveStatus save={cloud.save} />}
           >
             {!cloudActive ? null : stored === "checking" ? (
               <Chip tone="plain">Checking…</Chip>
-            ) : stored === "saved" ? null : (
-              <Chip tone="attention">! Needs a key</Chip>
+            ) : stored === "connected" ? null : (
+              <Chip tone="attention">! Not connected</Chip>
             )}
-            <button type="button" aria-description="Your own key" onClick={openSheet}>
-              {keyStatus.state === "none" ? "Add key…" : "Change key…"}
+            <button type="button" aria-description="OpenRouter" onClick={openSheet}>
+              {status.state === "connected" ? "Manage…" : "Connect…"}
             </button>
           </EngineRow>
         </div>
@@ -467,7 +458,14 @@ export function Speech({
           One model downloads at a time. Downloads go on while Settings is closed.
         </p>
       )}
-      {sheetOpen && <OwnKeySheet ownKey={ownKey} onDone={closeSheet} />}
+      {sheetOpen && (
+        <ConnectSheet
+          connection={connection}
+          onDone={() => {
+            void closeSheet();
+          }}
+        />
+      )}
     </>
   );
 }

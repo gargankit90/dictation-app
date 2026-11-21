@@ -105,7 +105,8 @@ pub const DEBUG_MODEL_URL_FLAG: &str = "--debug-model-url";
 
 /// `--debug-provider-url <url>` (or `=<url>`): where the real engine sends
 /// its requests instead of the provider's endpoint (debug builds only;
-/// loopback `http` URLs only).
+/// loopback `http` URLs only). Connect OpenRouter uses it too: it signs in at
+/// `<url>/auth` and exchanges at `<url>/auth/keys` (see `connect::plan`).
 pub const DEBUG_PROVIDER_URL_FLAG: &str = "--debug-provider-url";
 
 /// Whether this build acts on the test hooks.

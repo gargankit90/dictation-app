@@ -42,6 +42,23 @@ export const commands = {
 	 */
 	testApiKey: (provider: Provider, key: string | null) => typedError<null, KeyTestError>(__TAURI_INVOKE("test_api_key", { provider, key })),
 	/**
+	 *  Signs in at `OpenRouter` and saves the key. Returns when it is saved, or
+	 *  with the reason it isn't. A cancelled attempt is an error too; the window
+	 *  that cancelled it knows.
+	 */
+	connectOpenrouter: () => typedError<null, string>(__TAURI_INVOKE("connect_openrouter")),
+	/**
+	 *  Ends the attempt if it still waits for the browser: `true`. `false` means
+	 *  there is none, or the key has arrived and is being saved, which always
+	 *  finishes (the window says so and waits).
+	 */
+	cancelConnect: () => typedError<boolean, string>(__TAURI_INVOKE("cancel_connect")),
+	/**
+	 *  The saved key as Settings shows it: `sk-or-…` and its last four
+	 *  characters. `None` if no key is saved. Never the whole key.
+	 */
+	savedKeyHint: (provider: Provider) => typedError<string | null, string>(__TAURI_INVOKE("saved_key_hint", { provider })),
+	/**
 	 *  The view the settings window shows and, for onboarding (M5.2), the step
 	 *  the user is on and the two permissions. Never blocks: the key isn't read.
 	 */
@@ -529,8 +546,10 @@ export type ErrorCode =
 "key_unreadable" | 
 /**  The provider couldn't be reached. */
 "network_unreachable" | 
-/**  The provider is limiting requests, or the account is out of credits. */
+/**  The provider is limiting requests. */
 "provider_quota" | 
+/**  The `OpenRouter` account has no credits left (402). */
+"out_of_credits" | 
 /**  The provider answered with a redirect. */
 "provider_redirect" | 
 /**  The on-device model isn't downloaded. */
@@ -558,6 +577,8 @@ export type FixAction =
 "open_settings" | 
 /**  Open the Troubleshoot window. */
 "open_troubleshoot" | 
+/**  Open `OpenRouter`'s page for adding credits. */
+"add_credits" | 
 /**  Nothing to click: the next dictation is the retry. */
 "try_again";
 
@@ -614,6 +635,8 @@ export type KeyTestKind =
 export type Link = 
 /**  `OpenRouter`'s page for creating an API key. */
 "openrouter_keys" | 
+/**  `OpenRouter`'s page for adding credits. */
+"openrouter_credits" | 
 /**  The privacy notice: what the app sends. */
 "privacy" | 
 /**  The source code. */

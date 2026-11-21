@@ -464,6 +464,7 @@ mod tests {
                 | ErrorCode::KeyUnreadable
                 | ErrorCode::NetworkUnreachable
                 | ErrorCode::ProviderQuota
+                | ErrorCode::OutOfCredits
                 | ErrorCode::ProviderRedirect
                 | ErrorCode::ModelMissing
                 | ErrorCode::ModelLoading

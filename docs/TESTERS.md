@@ -13,8 +13,8 @@ text:
 - **On this Mac**: you download a model once (Parakeet for English, about
   480 MB; Qwen3-ASR for about 30 languages, including Hindi, about 590 MB).
   Your speech then stays on the Mac. It is the recommended choice in setup.
-- **Your own key**: an internet connection and an OpenRouter API key (you
-  pay OpenRouter for what you use). Your speech goes through OpenRouter to
+- **OpenRouter**: an internet connection and an OpenRouter account (you
+  pay OpenRouter for what you use; Connect OpenRouter makes the key). Your speech goes through OpenRouter to
   OpenAI for transcription, and the text to a cleanup model that keeps no data.
 
 ## 1. Install
@@ -62,11 +62,11 @@ buttons. A permission step moves on by itself once you have allowed it.
      continue**. The model downloads once; it can keep going while you do
      the next steps. A language the on-device models don't cover needs your
      own key.
-   - **Use my own OpenRouter key**: click **Continue**, paste your key and
-     click **Test & Save**. Create the key at
-     <https://openrouter.ai/settings/keys> and add credits on OpenRouter.
-     A wrong key shows the reason and nothing is saved. A good one is kept
-     in your macOS Keychain and never shown again. It is sent only to
+   - **Use OpenRouter**: click **Continue**, then **Connect OpenRouter**.
+     Your browser opens OpenRouter; sign in and allow it. A new account needs
+     a few dollars of credit: **Add credits** opens that page. The key
+     OpenRouter makes is kept in your macOS Keychain and never shown in
+     full. If the browser can't come back, **Paste a key instead**. It is sent only to
      OpenRouter.
 3. **Permissions.** Click **Allow** for the **Microphone** (macOS asks once;
    choose **Allow**) and for **Accessibility** (the dictation key and typing
@@ -90,8 +90,8 @@ Menu-bar icon > **Settings…** has these sections:
 - **Dictation**: the **dictation key** (hold it to talk, release to paste),
   **Language**, and a **Test microphone** check.
 - **Speech**: the list of engines. Select a row to use it: a model on this
-  Mac (download it first), or **Your own key** (its own sheet: pick the
-  provider, paste a key, **Test** it, **Save** it).
+  Mac (download it first), or **OpenRouter** (its own sheet:
+  **Connect OpenRouter**, **Add credits**, **Disconnect**).
 - **Privacy**: the **Share usage and error events** switch.
 - **History**: your recent dictations, with **Copy** and **Delete** on each,
   how many to **Keep** (10, 25, 50 or 100, or off) and **Clear history…**.
@@ -161,7 +161,7 @@ and install it over the old app, as in section 1.
 ## Privacy
 
 - **Your words.** With **On this Mac**, your speech is turned into text on the
-  Mac and not sent anywhere. With **Your own key**, it goes through OpenRouter.
+  Mac and not sent anywhere. With **OpenRouter**, it goes through OpenRouter.
   Your history stays on this Mac. Audio stays in memory.
 - **Anonymous usage and error events are on by default.** Turn them off with
   **Share usage and error events** in Settings > Privacy (or on the last setup

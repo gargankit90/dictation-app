@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "../bindings";
 import type { DictationProgressView, OnboardingStatus, Settings_Serialize } from "../bindings";
 import { HotkeyRecorder } from "../HotkeyRecorder";
-import { messageOf } from "../keyTest";
+import { messageOf } from "../messages";
 import { saveHotkey, setHotkeyRecording } from "../saveHotkey";
 import { holdsWords, tryView } from "./logic";
 import type { PasteCheck } from "./logic";

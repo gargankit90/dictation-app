@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { commands } from "./bindings";
-import { BROKEN, messageOf } from "./keyTest";
-import type { Notice } from "./keyTest";
+import { BROKEN, messageOf } from "./messages";
+import type { Notice } from "./messages";
 
 interface Props {
   /** Says where Back goes: "Back to Settings", "Back to Troubleshoot". */

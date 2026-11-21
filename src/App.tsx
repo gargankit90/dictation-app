@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BROKEN, messageOf } from "./keyTest";
+import { BROKEN, messageOf } from "./messages";
 import { commands } from "./bindings";
 import type { View, WindowPage } from "./bindings";
 import { Onboarding } from "./Onboarding";
