@@ -4,19 +4,16 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "./App";
 import type {
-  DictationProgressView,
   KeyTestError,
   LocalModelInfo_Serialize,
   OnboardingStatus,
   PermissionState,
   Provider,
   Settings_Serialize,
-  SpeechChoice,
   Step,
-  TryOutcome,
   View,
 } from "./bindings";
 import { Onboarding, RELAUNCH_AFTER_POLLS, STEPS } from "./Onboarding";
@@ -26,7 +23,6 @@ import {
   EVENTS_FROM_NOW_CAPTION,
   EVENTS_OFF_CAPTION,
   FINISH_REASON,
-  NOT_TESTED,
 } from "./onboarding/ReadyStep";
 import { EXPLAINER } from "./settings/connection";
 import {
@@ -44,13 +40,12 @@ import {
   OLD_ROW_LEAD,
   OLD_ROW_STEPS,
 } from "./onboarding/PermissionsStep";
-import { CONTINUE_REASON } from "./onboarding/TryStep";
+import { PRACTICE_WORDS } from "./onboarding/TryStep";
 import { Privacy } from "./settings/Privacy";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
 const KEY = "sk-or-dummy-NOT-A-REAL-KEY-0123456789";
 const ORDER: Step[] = ["welcome", "speech", "permissions", "try", "ready"];
-const WORDS = "this is my first dictation";
 
 const PARAKEET: LocalModelInfo_Serialize = {
   id: "parakeet-unified-en-0.6b-q4_k_m",
@@ -92,17 +87,6 @@ interface Call {
   args: Record<string, unknown>;
 }
 
-const NO_PROGRESS: DictationProgressView = {
-  started: 0,
-  finished: 0,
-  completed: 0,
-  errors: 0,
-  stages: [],
-  error: null,
-  failure: null,
-  heard: false,
-};
-
 /** The app's side: permissions, the step it keeps, keys, settings and models. */
 class Backend {
   view: View = "onboarding";
@@ -112,10 +96,7 @@ class Backend {
   accessibility: PermissionState = "not_determined";
   needsRelaunch = false;
   askedAgain = false;
-  tryOutcome: TryOutcome = "not_tried";
   sharingOnThroughout = true;
-  downloadPaused = false;
-  speechChoice: SpeechChoice | null = null;
   /** The server answers a resume with the whole file. */
   ignoresRange = false;
   micAnswer: PermissionState = "granted";
@@ -125,7 +106,6 @@ class Backend {
     version: 2,
     provider: "openrouter",
     model: "openai/gpt-4o-mini-transcribe",
-    language: null,
     hotkey: "RightAlt",
     launch_at_login: false,
     transcription: "cloud",
@@ -137,8 +117,6 @@ class Backend {
     state: "ready",
     message: null,
   };
-  progress: DictationProgressView = { ...NO_PROGRESS };
-  words: string | null = null;
   testResult: KeyTestError | null = null;
   /** Fails the command named, with the message (a string, as the app sends). */
   failing = new Map<string, string>();
@@ -156,10 +134,7 @@ class Backend {
       accessibility: this.accessibility,
       needs_relaunch: this.needsRelaunch,
       asked_again: this.askedAgain,
-      try_outcome: this.tryOutcome,
       sharing_on_throughout: this.sharingOnThroughout,
-      download_paused: this.downloadPaused,
-      speech_choice: this.speechChoice,
     };
   }
 
@@ -201,40 +176,19 @@ class Backend {
         return this.status();
       }
       case "finish_onboarding":
-      case "leave_setup_for_settings":
         this.view = "settings";
         return null;
       case "list_history":
         return { entries: [], unreadable: false, write_error: null };
       case "relaunch_app":
         return null;
-      case "dictation_progress":
-        return this.progress;
-      case "practice_paste_missed":
-        return null;
-      case "practice_words":
-        return this.words;
-      case "copy_practice_words":
       case "set_hotkey_recording":
-      case "start_microphone_test":
-      case "stop_microphone_test":
       case "open_link":
-        return null;
-      case "read_microphone_test":
-        return { level: -20, device: "MacBook Microphone" };
-      case "set_try_outcome":
-        this.tryOutcome = args.outcome as TryOutcome;
-        return null;
-      case "set_download_paused":
-        this.downloadPaused = args.paused as boolean;
         return null;
       case "get_settings":
         return this.settings;
       case "set_share_usage_events":
         this.settings = { ...this.settings, share_usage_events: args.share as boolean };
-        return null;
-      case "set_language":
-        this.settings = { ...this.settings, language: args.language as string | null };
         return null;
       case "set_hotkey":
         this.settings = { ...this.settings, hotkey: args.spec as string };
@@ -242,8 +196,6 @@ class Backend {
       case "set_launch_at_login":
         this.settings = { ...this.settings, launch_at_login: args.enabled as boolean };
         return args.enabled;
-      case "has_api_key":
-        return this.keys[args.provider as Provider];
       case "saved_key_hint":
         return this.keys[args.provider as Provider] ? "sk-or-…cdef" : null;
       case "connect_openrouter": {
@@ -291,9 +243,6 @@ class Backend {
         else if (part > 0) model.resumed_from_bytes = part;
         return null;
       }
-      case "set_speech_choice":
-        this.speechChoice = args.choice as SpeechChoice;
-        return null;
       case "cancel_local_model_download": {
         const model = this.model(args.id as string);
         model.state = model.downloaded_bytes ? "partial" : "missing";
@@ -319,7 +268,7 @@ class Backend {
     this.welcomePassed = true;
     this.microphone = "granted";
     this.accessibility = "granted";
-    this.settings = { ...this.settings, transcription: "local", language: "en" };
+    this.settings = { ...this.settings, transcription: "local" };
     this.model(PARAKEET.id).state = "ready";
     this.model(PARAKEET.id).downloaded_bytes = PARAKEET.size_bytes;
   }
@@ -417,16 +366,6 @@ describe("the frame", () => {
     expect(rule(".ob-footer")).toContain("flex: 0 0 auto");
     expect(rule(".ob-reason")).toContain("overflow-wrap: anywhere");
   });
-
-  it("criterion 1: pseudo-long labels stay inside their elements", async () => {
-    backend.step = "speech";
-    backend.welcomePassed = true;
-    backend.settings = { ...backend.settings, language: "gu" };
-    show();
-    // A long sentence is rendered as text in the wrapping column.
-    const line = await screen.findByText(/needs OpenRouter/);
-    expect(line.closest(".ob-content")).not.toBeNull();
-  });
 });
 
 describe("Welcome", () => {
@@ -500,7 +439,7 @@ describe("Welcome", () => {
       expect(primary("Get started").disabled).toBe(false);
     });
     fireEvent.click(primary("Get started"));
-    await screen.findByText("Which language will you mostly speak?");
+    await screen.findByText("How should Vocet transcribe?");
     expect(backend.step).toBe("speech");
   });
 });
@@ -677,7 +616,7 @@ describe("the sharing switch across setup (U10)", () => {
       expect(primary("Get started").disabled).toBe(false);
     });
     fireEvent.click(primary("Get started"));
-    await screen.findByText("Which language will you mostly speak?");
+    await screen.findByText("How should Vocet transcribe?");
   });
 });
 
@@ -789,7 +728,6 @@ describe("one queue for the whole window (round 5)", () => {
 describe("Ready's switch before Start dictating", () => {
   beforeEach(() => {
     backend.allSet("ready");
-    backend.tryOutcome = "passed";
   });
 
   /** Holds `set_share_usage_events` until `finish` is called. */
@@ -946,58 +884,11 @@ describe("Speech", () => {
     backend.welcomePassed = true;
   });
 
-  it("finding 3: the own key choice survives a quit, with no key saved and none kept", async () => {
-    const { unmount } = show();
-    await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
-    fireEvent.click(screen.getByRole("radio", { name: /Use OpenRouter/ }));
-    await waitFor(() => {
-      expect(backend.speechChoice).toBe("own_key");
-    });
-    fireEvent.click(primary("Continue"));
-    await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
-    unmount();
-
-    // The relaunch: the app's status has the choice.
-    show();
-    await screen.findByText("English · 477 MB");
-    expect(screen.getByRole<HTMLInputElement>("radio", { name: /Use OpenRouter/ }).checked).toBe(
-      true,
-    );
-    fireEvent.click(primary("Continue"));
-    await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
-    expect(JSON.stringify(backend.named("set_speech_choice"))).not.toContain(KEY);
-  });
-
-  it("finding 3: choosing local survives a quit, even with a cloud key saved", async () => {
-    backend.keys.openrouter = true;
-    const { unmount } = show();
-    await waitFor(() => {
-      expect(screen.getByRole<HTMLInputElement>("radio", { name: /Use OpenRouter/ }).checked).toBe(
-        true,
-      );
-    });
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
-    await waitFor(() => {
-      expect(backend.speechChoice).toBe("local");
-    });
-    unmount();
-    show();
-    await screen.findByText("English · 477 MB");
-    await waitFor(() => {
-      expect(backend.named("has_api_key").length).toBeGreaterThan(1);
-    });
-    expect(
-      screen.getByRole<HTMLInputElement>("radio", { name: "Recommended for your language" })
-        .checked,
-    ).toBe(true);
-  });
-
   it("Q3: a fresh install selects OpenRouter, listed first, with Continue to Connect", async () => {
     show();
     await screen.findByText("English · 477 MB");
     const radios = screen.getAllByRole<HTMLInputElement>("radio", {
-      name: /OpenRouter|Recommended/,
+      name: /OpenRouter|Use this Mac/,
     });
     expect(radios.map((radio) => radio.checked)).toEqual([true, false]);
     expect(radios[0]?.getAttribute("aria-label")).toBe("Use OpenRouter");
@@ -1008,35 +899,17 @@ describe("Speech", () => {
   it("criterion 3: English preselects Parakeet English, with its real size", async () => {
     show();
     const name = await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     expect(name).toBeTruthy();
-    expect(screen.getByText("Recommended for your language")).toBeTruthy();
+    expect(screen.getByText("On this Mac")).toBeTruthy();
     expect(screen.getByText(MODEL_COPY)).toBeTruthy();
     expect(primary("Download and continue").disabled).toBe(false);
-  });
-
-  it("criterion 3: Hindi recommends the multilingual model, with its real size", async () => {
-    show();
-    await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
-    await screen.findByText("30 languages · 590 MB");
-    await waitFor(() => {
-      expect(backend.settings.language).toBe("hi");
-    });
-  });
-
-  it("criterion 3: More… offers the searchable picker", async () => {
-    show();
-    await screen.findByText("English · 477 MB");
-    expect(screen.queryByRole("combobox")).toBeNull();
-    fireEvent.click(screen.getByRole("radio", { name: "More…" }));
-    expect(screen.getByRole("combobox")).toBeTruthy();
   });
 
   it("criterion 3: Download and continue chooses, starts the download and moves on", async () => {
     show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     fireEvent.click(primary("Download and continue"));
     await screen.findByText("Two permissions");
     expect(backend.named("choose_local_model")[0]?.args).toEqual({ id: PARAKEET.id });
@@ -1049,7 +922,7 @@ describe("Speech", () => {
     backend.model(PARAKEET.id).state = "ready";
     show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     fireEvent.click(primary("Continue"));
     await screen.findByText("Two permissions");
     expect(backend.named("download_local_model")).toEqual([]);
@@ -1067,7 +940,7 @@ describe("Speech", () => {
     mockIPC(backend.handle);
     show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     fireEvent.click(primary("Download and continue"));
     await screen.findByText("The disk is full.");
     expect(backend.step).toBe("speech");
@@ -1078,7 +951,7 @@ describe("Speech", () => {
     show();
     await screen.findByText("English · 477 MB");
     // OpenRouter is the default: move off it and back, so the choice is written.
-    fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
     fireEvent.click(screen.getByRole("radio", { name: /Use OpenRouter/ }));
   }
 
@@ -1095,9 +968,6 @@ describe("Speech", () => {
 
   it("Q3: selecting OpenRouter shows no form, only Continue", async () => {
     await selectCloud();
-    await waitFor(() => {
-      expect(backend.speechChoice).toBe("own_key");
-    });
     expect(screen.queryByText("Connect OpenRouter", { selector: "button" })).toBeNull();
     expect(primary("Continue").disabled).toBe(false);
     expect(document.querySelector(".ob-reason")?.textContent).toBe("");
@@ -1107,8 +977,6 @@ describe("Speech", () => {
   it("Q3: Continue opens the screen, Back returns with all as it was", async () => {
     show();
     await screen.findByText("English · 477 MB");
-    fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
-    await screen.findByText("30 languages · 590 MB");
     fireEvent.click(screen.getByRole("radio", { name: /Use OpenRouter/ }));
     fireEvent.click(primary("Continue"));
     await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
@@ -1118,11 +986,10 @@ describe("Speech", () => {
     expect(backend.step).toBe("speech");
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    await screen.findByText("Which language will you mostly speak?");
+    await screen.findByText("How should Vocet transcribe?");
     expect(current()).toContain("Speech");
     expect(backend.step).toBe("speech");
     expect(backend.named("set_onboarding_step")).toEqual([]);
-    expect(screen.getByRole("radio", { name: "Hindi" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole<HTMLInputElement>("radio", { name: /Use OpenRouter/ }).checked).toBe(
       true,
     );
@@ -1172,8 +1039,7 @@ describe("Speech", () => {
       await screen.findByText("Waiting for OpenRouter in your browser…");
       leave();
       expect((await screen.findAllByText("Saving your key…")).length).toBeGreaterThan(0);
-      expect(screen.queryByText("Which language will you mostly speak?")).toBeNull();
-      expect(backend.speechChoice).not.toBe("local");
+      expect(screen.queryByText("How should Vocet transcribe?")).toBeNull();
       await act(async () => {
         release();
         await hold;
@@ -1200,21 +1066,17 @@ describe("Speech", () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect OpenRouter" }));
     await screen.findByText("Waiting for OpenRouter in your browser…");
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    await screen.findByText("Which language will you mostly speak?");
+    await screen.findByText("How should Vocet transcribe?");
     expect(backend.named("cancel_connect")).toHaveLength(1);
   });
 
   it('Q3: "I\'ll use Vocet on this Mac only" goes back with the on-device model chosen', async () => {
     await openConnectScreen();
     fireEvent.click(screen.getByRole("button", { name: LOCAL_ONLY }));
-    await screen.findByText("Which language will you mostly speak?");
-    await waitFor(() => {
-      expect(backend.speechChoice).toBe("local");
-    });
-    expect(
-      screen.getByRole<HTMLInputElement>("radio", { name: "Recommended for your language" })
-        .checked,
-    ).toBe(true);
+    await screen.findByText("How should Vocet transcribe?");
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: "Use this Mac" }).checked).toBe(
+      true,
+    );
   });
 
   it("Q3: a saved key shows Connected with the masked key, and Continue is open", async () => {
@@ -1261,35 +1123,10 @@ describe("Speech", () => {
       screen.getByText(KEY_CARD_COPY);
     });
 
-    it("Hindi, with the count from the model's language codes", async () => {
-      show();
-      await screen.findByText("English · 477 MB");
-      fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
-      await screen.findByText(`${String(THIRTY_LANGUAGES.length)} languages · 590 MB`);
-      expect(THIRTY_LANGUAGES).toHaveLength(30);
-      screen.getByText("Runs on this Mac. Works offline after a one-time download.");
-    });
-
-    it("a language no on-device model covers: the key is the selected choice", async () => {
-      backend.settings = { ...backend.settings, language: "gu" };
-      show();
-      await screen.findByText(
-        "Gujarati needs OpenRouter. Vocet's on-device models don't cover it yet.",
-      );
-      expect(screen.getByRole<HTMLInputElement>("radio", { name: /Use OpenRouter/ }).checked).toBe(
-        true,
-      );
-      expect(screen.queryByRole("radio", { name: "Recommended for your language" })).toBeNull();
-      expect(primary("Continue").disabled).toBe(false);
-      fireEvent.click(primary("Continue"));
-      await screen.findByText("Connect OpenRouter", { selector: "h1, h2" });
-      expect(backend.speechChoice).toBe("own_key");
-    });
-
     it("no catalogue name and no refused wording, on any of the screens", async () => {
       show();
       await screen.findByText("English · 477 MB");
-      fireEvent.click(screen.getByRole("radio", { name: "Recommended for your language" }));
+      fireEvent.click(screen.getByRole("radio", { name: "Use this Mac" }));
       const shown = () => document.querySelector(".ob-main")?.textContent ?? "";
       const clean = () => {
         for (const gone of [PARAKEET.name, QWEN.name, "Parakeet", "Qwen", "Multilingual"]) {
@@ -1298,11 +1135,8 @@ describe("Speech", () => {
         expect(shown()).not.toMatch(/All languages|100\+/);
       };
       clean();
-      fireEvent.click(screen.getByRole("radio", { name: "Hindi" }));
-      await screen.findByText("30 languages · 590 MB");
-      clean();
       fireEvent.click(primary("Download and continue"));
-      await screen.findByText("Downloading 30 languages · 0 of 590 MB");
+      await screen.findByText("Downloading English · 0 of 477 MB");
       clean();
     });
   });
@@ -1316,27 +1150,6 @@ describe("the form's and the chip's looks (round 2)", () => {
     expect(css.indexOf(".ob-key-panel button.primary")).toBeGreaterThan(
       css.indexOf(".onboarding button.primary"),
     );
-  });
-
-  it("the selected chip has the primary colours in every state", () => {
-    const rules = [...css.matchAll(/button\.ob-chip\[aria-checked="true"\][^{]*\{([^}]*)\}/g)];
-    expect(rules.length).toBeGreaterThan(0);
-    for (const [, body = ""] of rules) {
-      expect(body).toContain("--vc-primary-");
-      expect(body).not.toContain("--vc-accent");
-    }
-  });
-});
-
-describe("Speech with More… open (U9, Design Lead's fix 2)", () => {
-  it("gives no reason in the footer before a language is chosen", async () => {
-    backend.step = "speech";
-    show();
-    fireEvent.click(await screen.findByRole("radio", { name: "More…" }));
-    await screen.findByRole("combobox");
-    const reason = document.querySelector(".ob-reason");
-    expect(reason?.textContent).toBe("");
-    expect(screen.queryByText(/No on-device model speaks this language/)).toBeNull();
   });
 });
 
@@ -1366,16 +1179,14 @@ describe("the download strip", () => {
     }
   });
 
-  it("Cancel stops it, keeps that it was the user's choice, and offers Resume", async () => {
+  it("Cancel stops it and offers Resume", async () => {
     downloading();
     show();
     await screen.findByText("Downloading English · 212 of 477 MB");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await screen.findByText("Download paused · 212 of 477 MB");
-    expect(backend.downloadPaused).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     await screen.findByText("Downloading English · 212 of 477 MB");
-    expect(backend.downloadPaused).toBe(false);
   });
 
   it("a failed download offers Retry and the own key", async () => {
@@ -1387,45 +1198,7 @@ describe("the download strip", () => {
     await screen.findByText(/stopped: The disk is full\./);
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Use my own key" }));
-    await screen.findByText("Which language will you mostly speak?");
-  });
-
-  it("criterion 7: a part left by a quit picks up by itself, and says so", async () => {
-    downloading();
-    const model = backend.model(PARAKEET.id);
-    model.state = "partial";
-    show();
-    await waitFor(() => {
-      expect(backend.named("download_local_model")).toHaveLength(1);
-    });
-    await screen.findByText("Continued from 212 MB.");
-  });
-
-  it("criterion 7: a restart stays a restart, also once it passes the old part's size", async () => {
-    downloading();
-    backend.ignoresRange = true;
-    const model = backend.model(PARAKEET.id);
-    model.state = "partial";
-    show();
-    const said = "The earlier download couldn't continue, so it started again.";
-    await screen.findByText(said);
-    model.downloaded_bytes = 400_000_000;
-    refocus();
-    await screen.findByText("Downloading English · 400 of 477 MB", undefined, {
-      timeout: 2000,
-    });
-    expect(screen.getByText(said)).toBeTruthy();
-    expect(screen.queryByText(/Continued from/)).toBeNull();
-  });
-
-  it("criterion 7: a download the user cancelled doesn't start again by itself", async () => {
-    downloading();
-    const model = backend.model(PARAKEET.id);
-    model.state = "partial";
-    backend.downloadPaused = true;
-    show();
-    await screen.findByText("Download paused · 212 of 477 MB");
-    expect(backend.named("download_local_model")).toEqual([]);
+    await screen.findByText("How should Vocet transcribe?");
   });
 });
 
@@ -1560,37 +1333,6 @@ describe("Permissions", () => {
     await screen.findByText("Your dictation key");
   });
 
-  it("criterion 4: the mic card shows the live meter and input name after the grant only", async () => {
-    show();
-    await screen.findByRole("button", { name: "Allow Microphone" });
-    expect(document.querySelectorAll('[data-testid="mic-bar"]')).toHaveLength(0);
-    backend.microphone = "granted";
-    refocus();
-    await screen.findByText("MacBook Microphone: say something, the bars should move.", undefined, {
-      timeout: 2000,
-    });
-    expect(screen.getByText("No sound? Check System Settings → Sound.")).toBeTruthy();
-    expect(document.querySelectorAll('[data-testid="mic-bar"]').length).toBeGreaterThan(0);
-    await waitFor(() => {
-      expect(backend.named("read_microphone_test").length).toBeGreaterThan(0);
-    });
-  });
-
-  it("criterion 4: leaving the step stops the meter", async () => {
-    backend.microphone = "granted";
-    backend.accessibility = "granted";
-    show();
-    await waitFor(() => {
-      expect(backend.named("start_microphone_test").length).toBeGreaterThan(0);
-    });
-    fireEvent.click(primary("Back"));
-    await screen.findByText("Which language will you mostly speak?");
-    // The meter's cleanup is a passive effect: it runs after the new step shows.
-    await waitFor(() => {
-      expect(backend.named("stop_microphone_test").length).toBeGreaterThan(0);
-    });
-  });
-
   it("criterion 4: denied gives Open System Settings, the exact path, and the relaunch", async () => {
     backend.microphone = "denied";
     show();
@@ -1630,81 +1372,8 @@ describe("Try it", () => {
   async function stepOpen() {
     show();
     await screen.findByText("Your dictation key");
-    await waitFor(() => {
-      expect(backend.named("dictation_progress").length).toBeGreaterThan(0);
-    });
-    return screen.getByLabelText<HTMLTextAreaElement>("Hold the key, say a sentence, let go.");
+    return screen.getByLabelText<HTMLTextAreaElement>(/Hold the key, say/);
   }
-
-  function stage(name: string) {
-    return screen.getByText(name, { exact: false }).closest("li")?.className ?? "";
-  }
-
-  function report(update: Partial<DictationProgressView>) {
-    backend.progress = { ...backend.progress, ...update };
-  }
-
-  it("criterion 5: typing in the box never advances anything", async () => {
-    const box = await stepOpen();
-    fireEvent.change(box, { target: { value: WORDS } });
-    backend.words = WORDS;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    for (const name of ["Heard you", "Transcribed", "Pasted"]) {
-      expect(stage(name)).not.toContain("done");
-    }
-    expect(primary("Continue").disabled).toBe(true);
-    expect(screen.getByText(CONTINUE_REASON)).toBeTruthy();
-  });
-
-  it("criterion 5: each stage needs its own real event", async () => {
-    const box = await stepOpen();
-    report({ started: 1, stages: ["recorded"] });
-    await waitFor(() => {
-      expect(backend.named("dictation_progress").length).toBeGreaterThan(1);
-    });
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    expect(stage("Heard you")).not.toContain("done");
-
-    report({ heard: true });
-    await waitFor(() => {
-      expect(stage("Heard you")).toContain("done");
-    });
-    expect(stage("Transcribed")).not.toContain("done");
-
-    report({ stages: ["recorded", "transcribed"] });
-    await waitFor(() => {
-      expect(stage("Transcribed")).toContain("done");
-    });
-    expect(stage("Pasted")).not.toContain("done");
-
-    // The paste landed in the box.
-    backend.words = WORDS;
-    fireEvent.change(box, { target: { value: WORDS } });
-    report({ finished: 1, completed: 1, stages: ["recorded", "transcribed", "pasted"] });
-    await waitFor(() => {
-      expect(stage("Pasted")).toContain("done");
-    });
-    await waitFor(() => {
-      expect(primary("Continue").disabled).toBe(false);
-    });
-    expect(backend.tryOutcome).toBe("passed");
-    expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
-  });
-
-  it("criterion 5: a dictation from before the step opened doesn't count", async () => {
-    backend.progress = {
-      ...NO_PROGRESS,
-      started: 3,
-      finished: 3,
-      completed: 3,
-      heard: true,
-      stages: ["recorded", "transcribed", "pasted"],
-    };
-    await stepOpen();
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    expect(stage("Heard you")).not.toContain("done");
-    expect(primary("Continue").disabled).toBe(true);
-  });
 
   it("criterion 5: while the model downloads, practice is blocked with progress", async () => {
     const model = backend.model(PARAKEET.id);
@@ -1738,145 +1407,16 @@ describe("Try it", () => {
     });
   });
 
-  it("criterion 5: a paste that missed shows the words with Copy, and never pastes again", async () => {
-    await stepOpen();
-    backend.words = WORDS;
-    report({
-      started: 1,
-      finished: 1,
-      completed: 1,
-      heard: true,
-      stages: ["recorded", "transcribed", "pasted"],
-    });
-    await screen.findByText(WORDS, undefined, { timeout: 2500 });
-    expect(stage("Pasted")).not.toContain("done");
-    expect(primary("Continue").disabled).toBe(true);
-    expect(screen.getByText(/Click the box and press ⌘V/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-    await screen.findByText("Copied.");
-    expect(backend.named("copy_practice_words")).toHaveLength(1);
-  });
-
-  it("U10 criterion 4: a missed paste tells the app once, with nothing from the box", async () => {
-    await stepOpen();
-    backend.words = WORDS;
-    report({
-      started: 1,
-      finished: 1,
-      completed: 1,
-      heard: true,
-      stages: ["recorded", "transcribed", "pasted"],
-    });
-    await screen.findByText(WORDS, undefined, { timeout: 2500 });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 900));
-    });
-    expect(backend.named("practice_paste_missed")).toEqual([
-      { command: "practice_paste_missed", args: {} },
-    ]);
-  });
-
-  it("U10 criterion 4: a paste that landed isn't a missed one", async () => {
-    await stepOpen();
-    backend.words = WORDS;
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: WORDS } });
-    report({
-      started: 1,
-      finished: 1,
-      completed: 1,
-      heard: true,
-      stages: ["recorded", "transcribed", "pasted"],
-    });
-    await screen.findByText(/It works/, undefined, { timeout: 2500 });
-    expect(backend.named("practice_paste_missed")).toEqual([]);
-  });
-
   it("Design Lead: the title is Try it, with the key as a small label", async () => {
     await stepOpen();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Try it");
     expect(screen.getByText("Your dictation key").tagName).toBe("SPAN");
   });
 
-  it("Design Lead: the panel of a missed paste is scrolled into view, also once the words arrive", async () => {
-    const scrolled = vi
-      .spyOn(Element.prototype, "scrollIntoView")
-      .mockImplementation(() => undefined);
-    try {
-      await stepOpen();
-      expect(document.querySelector(".ob-fix-area")).toBeNull();
-      backend.words = WORDS;
-      report({
-        started: 1,
-        finished: 1,
-        errors: 1,
-        heard: true,
-        stages: ["recorded", "transcribed"],
-        failure: "paste",
-        error: "Vocet couldn't paste.",
-      });
-      await screen.findByText(WORDS, undefined, { timeout: 2500 });
-      const area = document.querySelector(".ob-fix-area");
-      expect(area).not.toBeNull();
-      await waitFor(() => {
-        expect(scrolled.mock.contexts).toContain(area);
-      });
-      // Its last line, the instruction, is inside what was scrolled to.
-      expect(area?.textContent).toContain("Click the box and press ⌘V");
-    } finally {
-      scrolled.mockRestore();
-    }
-  });
-
-  it("criterion 5: a failed paste shows the words at once", async () => {
+  it("Done moves on to Ready, whatever the box holds", async () => {
     await stepOpen();
-    backend.words = WORDS;
-    report({
-      started: 1,
-      finished: 1,
-      errors: 1,
-      heard: true,
-      stages: ["recorded", "transcribed"],
-      failure: "paste",
-      error: "Vocet couldn't paste.",
-    });
-    await screen.findByText(WORDS, undefined, { timeout: 2500 });
-    expect(primary("Continue").disabled).toBe(true);
-  });
-
-  it("no sound gives the microphone help", async () => {
-    await stepOpen();
-    report({ started: 1, finished: 1, heard: false, stages: ["recorded"] });
-    await screen.findByText(
-      "Vocet didn't hear anything. Check System Settings → Sound.",
-      undefined,
-      {
-        timeout: 2000,
-      },
-    );
-  });
-
-  it("a rejected key goes back to Speech", async () => {
-    await stepOpen();
-    report({
-      started: 1,
-      finished: 1,
-      errors: 1,
-      heard: true,
-      stages: ["recorded"],
-      failure: "key",
-      error: "OpenRouter rejected the key.",
-    });
-    await screen.findByText("OpenRouter rejected the key.", undefined, { timeout: 2000 });
-    fireEvent.click(screen.getByRole("button", { name: "Back to Speech" }));
-    await screen.findByText("Which language will you mostly speak?");
-  });
-
-  it("criterion 5: Skip for now leads to Ready with Not tested yet", async () => {
-    await stepOpen();
-    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    fireEvent.click(primary("Done"));
     await screen.findByText("You're set");
-    expect(backend.tryOutcome).toBe("skipped");
-    expect(screen.getByText(NOT_TESTED)).toBeTruthy();
   });
 
   it("U11 criterion 7: no Reset to default, a small Change key, and the instruction", async () => {
@@ -1885,7 +1425,7 @@ describe("Try it", () => {
     expect(screen.queryByRole("button", { name: /Reset to default|Use default/ })).toBeNull();
     const change = screen.getByRole("button", { name: "Change key" });
     expect(change.className).toBe("link");
-    expect(screen.getByText("Hold the key, say a sentence, let go.")).toBeTruthy();
+    expect(screen.getByText(new RegExp(PRACTICE_WORDS))).toBeTruthy();
     expect(document.body.textContent).not.toContain("Click the box");
     fireEvent.click(change);
     await screen.findByText("Press a key…");
@@ -1949,57 +1489,12 @@ describe("Try it", () => {
       expect(box.value).toBe("");
       releaseAllKeys();
     });
-
-    it("gets it back when the window becomes active again", async () => {
-      const box = await stepOpen();
-      box.blur();
-      expect(document.activeElement).not.toBe(box);
-      window.dispatchEvent(new Event("focus"));
-      expect(document.activeElement).toBe(box);
-    });
-
-    it("isn't taken during a recording, not even by the window returning", async () => {
-      const box = await stepOpen();
-      fireEvent.click(screen.getByRole("button", { name: "Change key" }));
-      await screen.findByText("Press a key…");
-      box.blur();
-      const button = screen.getByRole("button", { name: "Cancel" });
-      button.focus();
-      window.dispatchEvent(new Event("focus"));
-      expect(document.activeElement).toBe(button);
-      expect(box.value).toBe("");
-      fireEvent.click(button);
-    });
-
-    it("keeps the failed paste's panel in view while it refocuses", async () => {
-      const box = await stepOpen();
-      backend.words = WORDS;
-      report({
-        started: 1,
-        finished: 1,
-        errors: 1,
-        stages: ["recorded", "transcribed"],
-        error: "Vocet couldn't paste the text.",
-        failure: "paste",
-        heard: true,
-      });
-      const panel = await screen.findByText(/didn't reach the box/);
-      const area = panel.closest(".ob-fix-area");
-      const focus = vi.spyOn(box, "focus");
-      const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
-      box.blur();
-      window.dispatchEvent(new Event("focus"));
-      expect(focus).toHaveBeenCalledWith({ preventScroll: true });
-      expect(scroll.mock.instances).toContain(area);
-      scroll.mockRestore();
-    });
   });
 });
 
 describe("Ready", () => {
   beforeEach(() => {
     backend.allSet("ready");
-    backend.tryOutcome = "passed";
   });
 
   it("criterion 6: shows the real states", async () => {
@@ -2008,7 +1503,6 @@ describe("Ready", () => {
     await screen.findByText("Right ⌥ (hold)");
     await screen.findByText("On this Mac · English · ✓ Ready");
     expect(screen.getByText("Find Vocet in the menu bar", { exact: false })).toBeTruthy();
-    expect(screen.queryByText(NOT_TESTED)).toBeNull();
     expect(
       screen.getByRole<HTMLInputElement>("switch", { name: "Open Vocet when I log in" }).checked,
     ).toBe(false);
@@ -2054,9 +1548,6 @@ describe("Ready", () => {
     ]);
     expect(backend.step).toBe("ready");
     expect(share.checked).toBe(true);
-    expect(screen.queryByRole("button", { name: "Change" })?.closest("div")?.textContent).toContain(
-      "History",
-    );
   });
 
   it("nothing leaves Ready while the switch is saving, and the last choice wins", async () => {
@@ -2100,14 +1591,12 @@ describe("Ready", () => {
   it.each([
     { exit: "Start dictating", command: "finish_onboarding" },
     { exit: "Back", command: "set_onboarding_step" },
-    { exit: "History's Change", command: "leave_setup_for_settings" },
     { exit: "the strip's Use my own key", command: "set_onboarding_step" },
   ])("$exit waits for the sharing writes", async ({ exit, command }) => {
     // A paused model, so the strip offers its way out too.
     const model = backend.model(PARAKEET.id);
     model.state = "partial";
     model.downloaded_bytes = 212_000_000;
-    backend.downloadPaused = true;
     const pending: (() => void)[] = [];
     const original = backend.handle;
     mockIPC((name, payload) => {
@@ -2124,12 +1613,7 @@ describe("Ready", () => {
     });
     await screen.findByRole("button", { name: "Use my own key" });
     const pressExit = () => {
-      const name =
-        exit === "History's Change"
-          ? "Change"
-          : exit === "the strip's Use my own key"
-            ? "Use my own key"
-            : exit;
+      const name = exit === "the strip's Use my own key" ? "Use my own key" : exit;
       fireEvent.click(screen.getByRole("button", { name }));
     };
     const exitCalls = () => backend.named(command);
@@ -2175,7 +1659,6 @@ describe("Ready", () => {
   it("a failed save holds every way out", async () => {
     const model = backend.model(PARAKEET.id);
     model.state = "partial";
-    backend.downloadPaused = true;
     const original = backend.handle;
     mockIPC((name, payload) => {
       // eslint-disable-next-line @typescript-eslint/only-throw-error
@@ -2185,17 +1668,13 @@ describe("Ready", () => {
     show();
     fireEvent.click(await screen.findByRole("switch", { name: "Share usage and error events" }));
     await screen.findByText(FINISH_REASON);
-    for (const name of ["Start dictating", "Back", "Change", "Use my own key"]) {
+    for (const name of ["Start dictating", "Back", "Use my own key"]) {
       fireEvent.click(screen.getByRole("button", { name }));
     }
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
-    for (const command of [
-      "finish_onboarding",
-      "set_onboarding_step",
-      "leave_setup_for_settings",
-    ]) {
+    for (const command of ["finish_onboarding", "set_onboarding_step"]) {
       expect(backend.named(command)).toEqual([]);
     }
   });
@@ -2215,18 +1694,10 @@ describe("Ready", () => {
     expect(backend.named("finish_onboarding")).toEqual([]);
   });
 
-  it("criterion 6: shows the real history limit, and Change opens Settings → History", async () => {
+  it("criterion 6: shows the real history limit", async () => {
     backend.settings = { ...backend.settings, history_limit: 50 };
     render(<App />);
     await screen.findByText(/Keeps your last 50 dictations on this Mac/);
-    const row = screen.getByText("History").closest("div");
-    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "Change" }));
-    await waitFor(() => {
-      expect(backend.named("leave_setup_for_settings")).toHaveLength(1);
-    });
-    await waitFor(() => {
-      expect(screen.queryByRole("navigation", { name: "Setup steps" })).toBeNull();
-    });
   });
 
   it("criterion 6: says when history is off", async () => {

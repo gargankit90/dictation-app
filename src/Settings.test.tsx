@@ -16,7 +16,7 @@ import type {
 import { SECTION_KEY, Settings } from "./Settings";
 import type { SectionId } from "./Settings";
 import { HOTKEY_NOTICE_POLL_MS } from "./settings/Dictation";
-import { CONNECTED, KEY_NOT_SAVED, NOTICE_DISMISSED_KEY } from "./settings/Speech";
+import { CONNECTED, KEY_NOT_SAVED } from "./settings/Speech";
 import { keyDown, keyUp, releaseAllKeys } from "./testKeys";
 
 const KEY = "sk-or-dummy-NOT-A-REAL-KEY-0123456789";
@@ -51,7 +51,6 @@ class Backend {
     version: 2,
     provider: "openrouter",
     model: "openai/gpt-4o-mini-transcribe",
-    language: null,
     hotkey: "RightAlt",
     launch_at_login: false,
     transcription: "cloud",
@@ -64,11 +63,6 @@ class Backend {
   engine: EngineStatus = { state: "ready", message: null };
   /** What `test_api_key` answers: `null` for success, or an error to throw. */
   testResult: KeyTestError | null = null;
-  /** What `launch_notice` says: the first launch after the rename (U1). */
-  launchNotice: string | null = null;
-  /** The levels the microphone test reads, in order (then the last again). */
-  micLevels: number[] = [-90];
-  micRunning = false;
   /** Fails the command named, with the message (a string, as the app sends). */
   failing = new Map<string, string>();
   /** Holds the command named until the promise settles. */
@@ -91,17 +85,12 @@ class Backend {
     switch (command) {
       case "get_settings":
         return this.settings;
-      case "launch_notice":
-        return this.launchNotice;
       case "list_history":
         return { rows: [], unreadable: false };
       case "set_hotkey":
         this.settings = { ...this.settings, hotkey: args.spec as string };
         return null;
       case "set_hotkey_recording":
-        return null;
-      case "set_language":
-        this.settings = { ...this.settings, language: args.language as string | null };
         return null;
       case "set_launch_at_login":
         this.settings = { ...this.settings, launch_at_login: args.enabled as boolean };
@@ -141,8 +130,6 @@ class Backend {
       case "delete_api_key":
         this.keys[args.provider as Provider] = false;
         return null;
-      case "has_api_key":
-        return this.keys[args.provider as Provider];
       case "saved_key_hint":
         return this.keys[args.provider as Provider] ? "sk-or-…cdef" : null;
       case "connect_openrouter":
@@ -154,16 +141,6 @@ class Backend {
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         if (this.testResult !== null) throw this.testResult;
         return null;
-      case "start_microphone_test":
-        this.micRunning = true;
-        return null;
-      case "read_microphone_test": {
-        const level = this.micLevels.length > 1 ? this.micLevels.shift() : this.micLevels[0];
-        return { level: this.micRunning ? level : null, device: "MacBook Pro Microphone" };
-      }
-      case "stop_microphone_test":
-        this.micRunning = false;
-        return null;
       case "get_app_info":
         return { version: "0.1.0", last_update_check_ms: null };
       case "get_hotkey_notice":
@@ -171,8 +148,6 @@ class Backend {
       case "check_for_updates":
       case "open_link":
         return null;
-      case "save_settings":
-        throw new Error("U6 has no global Save: save_settings must not be called");
       default:
         throw new Error(`unexpected command ${command}`);
     }
@@ -229,14 +204,6 @@ async function open(section: SectionId = "general", props: Parameters<typeof Set
 
 const click = (name: string | RegExp) => {
   fireEvent.click(screen.getByRole("button", { name }));
-};
-
-/** Chooses a language the way a person does: search by name, press Enter. */
-const pick = (name: string) => {
-  const box = screen.getByLabelText("Language");
-  fireEvent.focus(box);
-  fireEvent.change(box, { target: { value: name } });
-  fireEvent.keyDown(box, { key: "Enter" });
 };
 
 /** What assistive tech would call `element`: enough of the accessible-name rules for these controls. */
@@ -354,24 +321,6 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     expect(screen.getByLabelText("Dictation key").textContent).toBe("Right ⌥");
   });
 
-  it("language: choosing one saves only the language", async () => {
-    await open("dictation");
-    pick("German");
-    expect((await screen.findByRole("status")).textContent).toBe("Saved");
-    expect(backend.named("set_language")[0]?.args).toEqual({ language: "de" });
-    pick("Detect");
-    await waitFor(() => {
-      expect(backend.named("set_language").at(-1)?.args).toEqual({ language: null });
-    });
-  });
-
-  it("language: a refused language shows the app's error next to it", async () => {
-    await open("dictation");
-    backend.failing.set("set_language", "That isn't a language code.");
-    pick("German");
-    expect((await screen.findByRole("alert")).textContent).toContain("isn't a language code");
-  });
-
   it("launch at login: the switch writes through its own command", async () => {
     await open("general");
     fireEvent.click(screen.getByRole("switch", { name: "Open Vocet at login" }));
@@ -405,9 +354,8 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     });
   });
 
-  it("closing and reopening shows the saved values, and nothing ever calls save_settings", async () => {
+  it("closing and reopening shows the saved values", async () => {
     await open("dictation");
-    pick("German");
     click("Change…");
     keyDown("F6");
     await waitFor(() => {
@@ -421,25 +369,11 @@ describe("criterion_u6_2 no Save; each control persists on change", () => {
     cleanup();
     await open("dictation");
     expect(screen.getByLabelText("Dictation key").textContent).toBe("F6");
-    expect(screen.getByLabelText<HTMLInputElement>("Language").value).toContain("German");
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
     expect(
       screen.getByRole<HTMLInputElement>("switch", { name: "Share usage and error events" })
         .checked,
     ).toBe(false);
-    expect(backend.named("save_settings")).toHaveLength(0);
-  });
-
-  it("a change made elsewhere is never put back by another control", async () => {
-    await open("dictation");
-    // The hotkey changes behind the window's back (another window, the tray).
-    backend.settings = { ...backend.settings, hotkey: "F7" };
-    pick("German");
-    await waitFor(() => {
-      expect(backend.settings.language).toBe("de");
-    });
-    expect(backend.settings.hotkey).toBe("F7");
-    expect(screen.getByLabelText("Dictation key").textContent).toBe("F7");
   });
 });
 
@@ -495,9 +429,10 @@ describe("criterion_u6_3 launch at login never blocks", () => {
     expect((await screen.findByRole("status")).textContent).toContain("Applying…");
     // Another section works meanwhile.
     fireEvent.click(screen.getByRole("tab", { name: "Dictation" }));
-    pick("German");
+    click("Change…");
+    keyDown("F6");
     await waitFor(() => {
-      expect(backend.settings.language).toBe("de");
+      expect(backend.settings.hotkey).toBe("F6");
     });
     fireEvent.click(screen.getByRole("tab", { name: "General" }));
     slow.open();
@@ -1015,39 +950,6 @@ describe("u12_criterion_4 the OpenRouter sheet (Q3)", () => {
   });
 });
 
-describe("criterion_u6_6 Test microphone", () => {
-  it("shows the live meter and says it works when it hears sound", async () => {
-    backend.micLevels = [-80, -20, -25];
-    await open("dictation");
-    click("Test microphone");
-    await waitFor(() => {
-      expect(screen.getAllByTestId("mic-bar").length).toBeGreaterThan(0);
-    });
-    expect(await screen.findByText("Hearing you.")).toBeTruthy();
-    expect(screen.getByText("MacBook Pro Microphone")).toBeTruthy();
-  });
-
-  it("says No sound after 5 s of silence, and stops the microphone", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    backend.micLevels = [-90];
-    await open("dictation");
-    click("Test microphone");
-    await screen.findByText("Listening… say something.");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_200);
-    });
-    expect((await screen.findByRole("alert")).textContent).toContain("No sound");
-    expect(backend.named("stop_microphone_test").length).toBeGreaterThan(0);
-  });
-
-  it("says why when the microphone can't start", async () => {
-    backend.failing.set("start_microphone_test", "Vocet isn't allowed to use the microphone.");
-    await open("dictation");
-    click("Test microphone");
-    expect((await screen.findByRole("alert")).textContent).toContain("isn't allowed");
-  });
-});
-
 describe("criterion_u6_7 Help", () => {
   it("each button calls the app's action", async () => {
     const onTroubleshoot = vi.fn();
@@ -1128,59 +1030,6 @@ describe("Privacy", () => {
 });
 
 describe("loading", () => {
-  const KEYCHAIN_NOTICE =
-    "After this update, macOS may ask once whether Vocet can use the key saved in your Keychain. Choose Always Allow. Your key stays in your Keychain and is sent only to OpenRouter.";
-
-  it("U1: says what to expect from the Keychain on the first launch after the rename", async () => {
-    backend.launchNotice = KEYCHAIN_NOTICE;
-    backend.keys.openrouter = true;
-    await open("speech");
-    const notice = await screen.findByTestId("launch-notice");
-    expect(notice.textContent).toContain("Choose Always Allow");
-    expect(notice.textContent).toContain("sent only to OpenRouter");
-  });
-
-  // U12 criterion 11.
-  it("the Keychain notice shows only in Speech, and isn't styled as a success", async () => {
-    backend.launchNotice = KEYCHAIN_NOTICE;
-    backend.keys.openrouter = true;
-    await open("speech");
-    const notice = await screen.findByTestId("launch-notice");
-    expect(notice.className).not.toMatch(/\bok\b/);
-    for (const name of ["General", "Dictation", "Privacy", "History", "Help", "About"]) {
-      fireEvent.click(screen.getByRole("tab", { name }));
-      await screen.findByRole("heading", { level: 1, name });
-      expect(screen.queryByTestId("launch-notice"), name).toBeNull();
-    }
-  });
-
-  it("the Keychain notice doesn't show with no key saved", async () => {
-    backend.launchNotice = KEYCHAIN_NOTICE;
-    await open("speech");
-    await screen.findByText("! Not connected");
-    expect(screen.queryByTestId("launch-notice")).toBeNull();
-  });
-
-  it("Got it hides the Keychain notice for good", async () => {
-    backend.launchNotice = KEYCHAIN_NOTICE;
-    backend.keys.openrouter = true;
-    await open("speech");
-    await screen.findByTestId("launch-notice");
-    click("Got it");
-    expect(screen.queryByTestId("launch-notice")).toBeNull();
-    expect(window.localStorage.getItem(NOTICE_DISMISSED_KEY)).toBe("1");
-    cleanup();
-    await open("speech");
-    await screen.findByRole("button", { name: "Manage…" });
-    expect(screen.queryByTestId("launch-notice")).toBeNull();
-    window.localStorage.removeItem(NOTICE_DISMISSED_KEY);
-  });
-
-  it("U1: says nothing about the Keychain on any other launch", async () => {
-    await open();
-    expect(screen.queryByTestId("launch-notice")).toBeNull();
-  });
-
   it("shows why the settings couldn't load", async () => {
     backend.failing.set("get_settings", "The settings file is damaged.");
     render(<Settings />);

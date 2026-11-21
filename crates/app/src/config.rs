@@ -255,7 +255,7 @@ mod tests {
         let (config, _) = config(&dir);
         let settings = Settings {
             provider: Provider::OpenRouter,
-            language: Some("en".into()),
+            hotkey: "F6".into(),
             ..Settings::default()
         };
         config.save_settings(&settings).unwrap();

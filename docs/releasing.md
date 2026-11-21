@@ -10,7 +10,6 @@ unless the owner decides so.
 | Piece                                                  | Where                                                                        |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
 | DMG build, checks, checksums                           | `scripts/build-dmg.sh`, `scripts/check-dmg.sh`                               |
-| DMG on every packaging PR and on `main` (ad-hoc signed) | `.github/workflows/dmg.yml`, artifact `dictation-app-dmg`                   |
 | Third-party licence notice, bundled and checked        | `THIRD-PARTY-LICENSES.txt`, `scripts/gen-licences.sh`, `scripts/check-licences.sh` |
 | Tester guide (attached to each release as README.md)   | `docs/TESTERS.md`                                                            |
 | Release build, signature check, upload                 | `scripts/release.sh` (tests: `scripts/test-release.sh`, in the gate)         |
@@ -373,7 +372,7 @@ build. This is what a change of certificate or team would involve.)
 A release signed by a different certificate from the builds testers have is, to
 macOS, a different app for permissions. It is
 a one-time step for each tester. This was tried in the VM with a stand-in
-certificate (`tests/e2e/scenarios/e2e_update_to_new_certificate.sh`):
+certificate (a VM scenario since removed; see `docs/history/`):
 
 1. The update installs and the app restarts by itself. The update key doesn't
    care about the certificate, and no quarantine flag comes with an update.

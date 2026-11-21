@@ -1,7 +1,7 @@
 //! Wires the speech-to-text engine to the settings and the keychain (M4.4).
 //!
 //! At startup, and again whenever the settings or an API key are saved, the
-//! engine is rebuilt from the saved provider, model and language and that
+//! engine is rebuilt from the saved provider and model and that
 //! provider's key (`dictation_transcribe::engine`). The key is read here, in
 //! Rust, from the keychain; it goes into the engine and nowhere else: not
 //! into a log, an error message or an IPC reply.
@@ -552,11 +552,10 @@ pub fn engine_for<S: SecretStore + 'static>(
     if settings.transcription == Transcription::Local {
         tracing::info!(
             model = %settings.local_model,
-            language = ?settings.language,
             "engine settings: on this Mac"
         );
         return match local {
-            Some(local) => local.engine(&settings.local_model, settings.language.as_deref(), stage),
+            Some(local) => local.engine(&settings.local_model, None, stage),
             None => Engine::Unavailable(TranscribeError::Engine(
                 "on-device transcription isn't available in this build".to_owned(),
             )),
@@ -729,7 +728,6 @@ fn log_choice(settings: &Settings, has_key: bool) {
     tracing::info!(
         provider = %settings.provider,
         model = %settings.model,
-        language = ?settings.language,
         has_key,
         "engine settings"
     );
@@ -1061,28 +1059,6 @@ mod tests {
 
         rig.live.rebuild(&rig.config); // back to the working server
         assert_eq!(rig.dictate().await, pasted());
-        rig.finish().await;
-    }
-
-    #[tokio::test]
-    async fn saving_settings_rebuilds_the_engine_with_the_new_language() {
-        let mut rig = Rig::start(200).await;
-        rig.save_key(KEY);
-        rig.dictate().await;
-        let settings = Settings {
-            language: Some("fr".into()),
-            ..Settings::default()
-        };
-        changed(&rig.config, &rig.live, |c| c.save_settings(&settings)).unwrap();
-        assert_eq!(rig.dictate().await, pasted());
-
-        let requests = rig.server.received_requests().await.unwrap();
-        let body =
-            |n: usize| -> serde_json::Value { serde_json::from_slice(&requests[n].body).unwrap() };
-        assert_eq!(body(0)["model"], "openai/gpt-4o-mini-transcribe");
-        assert!(body(0).get("language").is_none());
-        assert_eq!(body(1)["model"], "openai/gpt-4o-mini-transcribe");
-        assert_eq!(body(1)["language"], "fr");
         rig.finish().await;
     }
 
@@ -2058,10 +2034,9 @@ mod tests {
             file.set_len(model.size_bytes).unwrap();
         }
 
-        fn choose(rig: &Rig, transcription: Transcription, language: Option<&str>) {
+        fn choose(rig: &Rig, transcription: Transcription) {
             let settings = Settings {
                 transcription,
-                language: language.map(str::to_owned),
                 ..Settings::default()
             };
             changed(&rig.config, &rig.live, |c| c.save_settings(&settings)).unwrap();
@@ -2075,7 +2050,7 @@ mod tests {
                 rig.live
                     .clone()
                     .with_local(models(&rig.dir.0.join("models"), &loads, false));
-            choose(&rig, Transcription::Local, None);
+            choose(&rig, Transcription::Local);
             assert_eq!(
                 rig.dictate().await,
                 failed("The on-device model isn't downloaded. Download the model in Settings.")
@@ -2095,7 +2070,7 @@ mod tests {
             let local = models(&dir, &loads, false);
             rig.live = rig.live.clone().with_local(local.clone());
 
-            choose(&rig, Transcription::Local, None);
+            choose(&rig, Transcription::Local);
             assert_eq!(rig.dictate().await, pasted());
             assert_eq!(rig.inserter.inserted(), [SAID]);
             // No key, no request: nothing left the machine.
@@ -2106,15 +2081,15 @@ mod tests {
             );
 
             // An unrelated save keeps the loaded model.
-            choose(&rig, Transcription::Local, Some("en"));
+            choose(&rig, Transcription::Local);
             assert_eq!(rig.dictate().await, pasted());
             assert_eq!(loads.load(Ordering::SeqCst), 1);
 
             // The cloud releases it; coming back loads it again.
-            choose(&rig, Transcription::Cloud, None);
+            choose(&rig, Transcription::Cloud);
             assert_eq!(local.loaded(), None);
             assert_eq!(rig.dictate().await, failed("Add your API key in Settings."));
-            choose(&rig, Transcription::Local, None);
+            choose(&rig, Transcription::Local);
             assert_eq!(rig.dictate().await, pasted());
             assert_eq!(loads.load(Ordering::SeqCst), 2);
             rig.finish().await;
@@ -2128,7 +2103,7 @@ mod tests {
             download_default(&dir);
             let local = models(&dir, &loads, true);
             rig.live = rig.live.clone().with_local(local.clone());
-            choose(&rig, Transcription::Local, None);
+            choose(&rig, Transcription::Local);
             assert_eq!(
                 rig.dictate().await,
                 failed("Something went wrong: couldn't load the on-device model: bad file.")

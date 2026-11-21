@@ -379,7 +379,7 @@ check "a failed cleanup after a failure keeps the original status (23)" \
 check "and still reports the cleanup failure" has "may still be held" "$(err launch_and_cleanup_fail)"
 check "and the scenario fails" test "$(out_of launch_and_cleanup_fail)" = FAIL
 
-scenario_case setup_fails e2e_mock_paste STUB_FRESH_STATUS=1
+scenario_case setup_fails e2e_clipboard_restore STUB_FRESH_STATUS=1
 check "a failed setup (the old app won't go) fails the scenario" test "$(out_of setup_fails)" = FAIL
 check "before anything is launched" lacks "launch" "$(calls setup_fails)"
 

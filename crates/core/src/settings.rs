@@ -106,9 +106,6 @@ pub struct Settings {
     /// `openai/gpt-4o-mini-transcribe`. An id the catalog no longer has
     /// (a model shut down, or one from before Q2) loads as the default.
     pub model: String,
-    /// An ISO 639-1 (or 639-3) language code such as `en`, or `None` to let
-    /// the engine detect the language.
-    pub language: Option<String>,
     /// The dictation hotkey, as [`HotkeySpec`] writes it (`RightAlt`).
     pub hotkey: String,
     /// Whether the app starts when the user logs in (M5.3). The file keeps
@@ -136,7 +133,6 @@ impl Default for Settings {
             version: CURRENT_VERSION,
             provider,
             model: provider.default_model().to_owned(),
-            language: None,
             hotkey: HotkeySpec::default().to_string(),
             launch_at_login: false,
             transcription: Transcription::default(),
@@ -176,8 +172,8 @@ impl Settings {
     ///
     /// [`SettingsError::Invalid`] for the first field that's wrong:
     /// `version` other than [`CURRENT_VERSION`], an empty, over-long or
-    /// whitespace-holding `model` or `local_model`, a `language` that isn't
-    /// 2–3 lowercase letters, a `hotkey` that doesn't parse, or a
+    /// whitespace-holding `model` or `local_model`, a `hotkey` that doesn't
+    /// parse, or a
     /// `history_limit` not in [`HISTORY_LIMITS`].
     pub fn validate(&self) -> Result<(), SettingsError> {
         if self.version != CURRENT_VERSION {
@@ -188,16 +184,6 @@ impl Settings {
         }
         check_model_name("model", &self.model)?;
         check_model_name("local_model", &self.local_model)?;
-        if let Some(language) = &self.language {
-            let letters = (2..=3).contains(&language.len())
-                && language.chars().all(|c| c.is_ascii_lowercase());
-            if !letters {
-                return Err(invalid(
-                    "language",
-                    format!("{language:?} is not a language code like \"en\""),
-                ));
-            }
-        }
         if let Err(error) = self.hotkey.parse::<HotkeySpec>() {
             return Err(invalid("hotkey", error.to_string()));
         }
@@ -306,12 +292,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn criterion_1_defaults_are_valid_openrouter_with_language_detection() {
+    fn criterion_1_defaults_are_valid_openrouter() {
         let settings = Settings::default();
         assert_eq!(settings.version, CURRENT_VERSION);
         assert_eq!(settings.provider, Provider::OpenRouter);
         assert_eq!(settings.model, "openai/gpt-4o-mini-transcribe");
-        assert_eq!(settings.language, None);
         assert_eq!(settings.hotkey, "RightAlt");
         settings.validate().unwrap();
     }
@@ -328,7 +313,6 @@ mod tests {
         let settings = Settings {
             provider: Provider::OpenRouter,
             model: cloud_models::DEFAULT_SPEECH.into(),
-            language: Some("de".into()),
             hotkey: "Ctrl+Shift+Space".into(),
             ..Settings::default()
         };
@@ -509,7 +493,7 @@ mod tests {
 
     #[test]
     fn criterion_1_validation_rejects_each_bad_field() {
-        let cases: [(&str, Settings); 8] = [
+        let cases: [(&str, Settings); 5] = [
             (
                 "version",
                 Settings {
@@ -539,27 +523,6 @@ mod tests {
                 },
             ),
             (
-                "language",
-                Settings {
-                    language: Some("English".into()),
-                    ..Settings::default()
-                },
-            ),
-            (
-                "language",
-                Settings {
-                    language: Some(String::new()),
-                    ..Settings::default()
-                },
-            ),
-            (
-                "language",
-                Settings {
-                    language: Some("EN".into()),
-                    ..Settings::default()
-                },
-            ),
-            (
                 "hotkey",
                 Settings {
                     hotkey: "Ctrl+Banana".into(),
@@ -574,10 +537,9 @@ mod tests {
             }
             assert!(to_json(&settings).is_err(), "{field}: saved anyway");
         }
-        // The longest model and a three-letter code are fine.
+        // The longest model is fine.
         Settings {
             model: "x".repeat(MAX_MODEL_LEN),
-            language: Some("yue".into()),
             ..Settings::default()
         }
         .validate()
@@ -587,11 +549,11 @@ mod tests {
     #[test]
     fn criterion_1_invalid_values_in_a_file_are_reported() {
         assert_eq!(
-            from_json(r#"{"version": 2, "language": "english"}"#),
-            Err(SettingsError::Invalid {
-                field: "language",
-                reason: r#""english" is not a language code like "en""#.into()
-            })
+            from_json(r#"{"version": 2, "hotkey": "Ctrl+Banana"}"#).map_err(|e| match e {
+                SettingsError::Invalid { field, .. } => field,
+                other => panic!("{other:?}"),
+            }),
+            Err("hotkey")
         );
         assert_eq!(
             SettingsError::Invalid {
@@ -638,7 +600,6 @@ mod tests {
                     version: 2,
                     provider: Provider::OpenRouter,
                     model: cloud_models::DEFAULT_SPEECH.into(),
-                    language: Some("de".into()),
                     hotkey: "Ctrl+Shift+Space".into(),
                     launch_at_login: true,
                     transcription: Transcription::Local,
@@ -682,13 +643,15 @@ mod tests {
 
         #[test]
         fn valid_settings_round_trip(
-            language in proptest::option::of("[a-z]{2,3}"),
+            share_usage_events in any::<bool>(),
+            launch_at_login in any::<bool>(),
         ) {
             let model = cloud_models::DEFAULT_SPEECH;
             let settings = Settings {
                 provider: Provider::OpenRouter,
                 model: model.to_owned(),
-                language,
+                share_usage_events,
+                launch_at_login,
                 ..Settings::default()
             };
             prop_assert_eq!(from_json(&to_json(&settings).unwrap()).unwrap(), settings);

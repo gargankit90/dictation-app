@@ -51,7 +51,7 @@ echo "pwd=$(pwd) head=$(git rev-parse HEAD) file=$(cat file) sha=$GITHUB_SHA" >>
 mkdir -p target/e2e-evidence
 echo "commit: $GITHUB_SHA" >target/e2e-evidence/about.txt
 echo "status: ${STUB_STATUS:-PASSED}" >>target/e2e-evidence/about.txt
-echo "PASS e2e_startup" >target/e2e-evidence/results.txt
+echo "PASS e2e_single_instance_cold_race" >target/e2e-evidence/results.txt
 head -c 200000 /dev/zero | tr '\0' x >target/e2e-evidence/run.log
 exit "${STUB_RC:-0}"
 STUB

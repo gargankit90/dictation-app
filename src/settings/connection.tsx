@@ -23,7 +23,7 @@ export const KEY_NOT_SAVED = "Key works, but couldn't be saved to your Keychain"
 export type Status =
   | { state: "checking" }
   | { state: "none" }
-  | { state: "connected"; hint: string | null }
+  | { state: "connected"; hint: string }
   | { state: "error"; message: string };
 
 type Notice = { kind: "ok" | "error"; text: string } | null;
@@ -51,14 +51,13 @@ export function useConnection({ onConnected, refreshEngine }: Options) {
     const run = lookup.current;
     let next: Status;
     try {
-      const saved = await commands.hasApiKey(PROVIDER);
-      if (saved.status === "error") {
-        next = { state: "error", message: messageOf(saved.error) };
-      } else if (!saved.data) {
+      const hint = await commands.savedKeyHint(PROVIDER);
+      if (hint.status === "error") {
+        next = { state: "error", message: messageOf(hint.error) };
+      } else if (hint.data === null) {
         next = { state: "none" };
       } else {
-        const hint = await commands.savedKeyHint(PROVIDER);
-        next = { state: "connected", hint: hint.status === "ok" ? hint.data : null };
+        next = { state: "connected", hint: hint.data };
       }
     } catch {
       next = { state: "error", message: BROKEN };
@@ -228,7 +227,7 @@ export function ConnectPanel({
       {connected ? (
         <>
           <p id="connect-status" className="hint">
-            {status.hint === null ? "Connected." : `Connected: ${status.hint}`}
+            {`Connected: ${status.hint}`}
           </p>
         </>
       ) : (

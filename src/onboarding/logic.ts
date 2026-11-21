@@ -1,13 +1,8 @@
 // Onboarding's decisions (U8), apart from its views: the recommended model,
-// what the download strip says, whether practice must wait, and what Try it's
-// stage line may claim. Each answer comes only from what the app reports.
+// what the download strip says, and whether practice must wait. Each answer
+// comes only from what the app reports.
 
-import type {
-  DictationProgressView,
-  EngineStatus,
-  LocalModelInfo_Serialize,
-  Settings_Serialize,
-} from "../bindings";
+import type { EngineStatus, LocalModelInfo_Serialize, Settings_Serialize } from "../bindings";
 import { megabytes, modelTitle } from "../settings/modelRow";
 
 /** The bindings allow null for sizes (NaN); the app never sends it. */
@@ -28,21 +23,11 @@ export function progressText(model: LocalModelInfo_Serialize): string {
   return `${String(Math.round(done(model) / 1_000_000))} of ${megabytes(size(model))}`;
 }
 
-/**
- * The model to recommend for `language` (an ISO code, `""` for automatic):
- * the English model for English, otherwise the multilingual one that speaks
- * it. `null` if no on-device model does.
- */
+/** The model to recommend (0.2.0 is English-only): the English model, else the first. */
 export function recommendedModel(
   models: readonly LocalModelInfo_Serialize[],
-  language: string,
 ): LocalModelInfo_Serialize | null {
-  if (language === "en") {
-    return models.find(englishOnly) ?? null;
-  }
-  const multilingual = models.filter((model) => !englishOnly(model));
-  if (language === "") return multilingual[0] ?? null;
-  return multilingual.find((model) => model.language_codes.includes(language)) ?? null;
+  return models.find(englishOnly) ?? models[0] ?? null;
 }
 
 /** The on-device model the settings choose, if they choose one. */
@@ -136,81 +121,4 @@ export function modelWait(
     return engine.message ?? "The model couldn't load. Choose another in the Speech step.";
   }
   return null;
-}
-
-/** Whether the words reached the practice box, as far as can be told. */
-export type PasteCheck = "unknown" | "landed" | "missed";
-
-export type TryFix =
-  | { kind: "none" }
-  | { kind: "microphone"; message: string }
-  | { kind: "key"; message: string }
-  | { kind: "paste" }
-  | { kind: "other"; message: string };
-
-export interface TryView {
-  /** A dictation started since the step opened. */
-  started: boolean;
-  heard: boolean;
-  transcribed: boolean;
-  pasted: boolean;
-  fix: TryFix;
-}
-
-export const NO_SOUND = "Vocet didn't hear anything. Check System Settings → Sound.";
-export const NO_WORDS = "Vocet heard you but found no words. Try a full sentence.";
-
-/**
- * Try it's stage line and its one fix, from the app's reports since the step
- * opened (`baseline`). The practice box's text isn't an input here, except
- * through `paste`, which compares it with the words the app says it pasted
- * after a dictation completes, so typing can't advance anything.
- */
-export function tryView(
-  progress: DictationProgressView | null,
-  baseline: DictationProgressView | null,
-  paste: PasteCheck,
-): TryView {
-  const idle: TryView = {
-    started: false,
-    heard: false,
-    transcribed: false,
-    pasted: false,
-    fix: { kind: "none" },
-  };
-  if (progress === null || baseline === null || progress.started <= baseline.started) return idle;
-  const transcribed = progress.stages.includes("transcribed");
-  const over = progress.finished === progress.started;
-  const view = { ...idle, started: true, heard: progress.heard, transcribed };
-  const message = progress.error ?? "";
-  switch (progress.failure) {
-    case "microphone":
-      return { ...view, fix: { kind: "microphone", message } };
-    case "key":
-      return { ...view, fix: { kind: "key", message } };
-    case "paste":
-      return { ...view, fix: { kind: "paste" } };
-    case "other":
-      return { ...view, fix: { kind: "other", message } };
-    case null:
-      break;
-  }
-  if (paste === "landed") return { ...view, pasted: true };
-  if (paste === "missed") return { ...view, fix: { kind: "paste" } };
-  if (over && !transcribed) {
-    return {
-      ...view,
-      fix: progress.heard
-        ? { kind: "other", message: NO_WORDS }
-        : { kind: "microphone", message: NO_SOUND },
-    };
-  }
-  return view;
-}
-
-/** Whether `words` are in the box, whatever the spacing around them. */
-export function holdsWords(box: string, words: string): boolean {
-  const squeeze = (text: string) => text.replace(/\s+/g, " ").trim();
-  const wanted = squeeze(words);
-  return wanted !== "" && squeeze(box).includes(wanted);
 }

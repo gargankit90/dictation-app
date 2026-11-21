@@ -58,12 +58,7 @@ e2e_setup_no_permissions() {
   expect "Speech recommends the English model" \
     ax_ok wait-text "$APP_NAME" "$NOPERM_WINDOW" "English · 477 MB" 15
   expect "step 2 doesn't mention the hotkey" noperm_listen_message_absent
-  expect "press Hindi" ax_ok radio-press "$APP_NAME" "$NOPERM_WINDOW" Hindi
-  expect "choosing a language doesn't fail either" \
-    ax_ok wait-no-text "$APP_NAME" "$NOPERM_WINDOW" "$NOPERM_LISTEN" 3
-  expect "press English again" ax_ok radio-press "$APP_NAME" "$NOPERM_WINDOW" English
-  expect "and the English model comes back" \
-    ax_ok wait-text "$APP_NAME" "$NOPERM_WINDOW" "English · 477 MB" 15
+  expect "choose this Mac" ax_ok radio-press "$APP_NAME" "$NOPERM_WINDOW" "Use this Mac"
   expect "press Download and continue" \
     ax_ok press "$APP_NAME" "$NOPERM_WINDOW" "Download and continue"
 

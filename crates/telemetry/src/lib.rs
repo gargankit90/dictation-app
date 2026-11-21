@@ -20,7 +20,6 @@
 
 pub mod errors;
 pub mod install_id;
-mod version_marker;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -34,7 +33,6 @@ use serde_json::{Value, json};
 use tokio::sync::{Notify, watch};
 
 pub use errors::SentryReporter;
-pub use version_marker::updated_from;
 
 /// PostHog Cloud US's ingestion host.
 pub const POSTHOG_HOST: &str = "https://us.i.posthog.com";

@@ -10,10 +10,13 @@
     reason = "test helpers fail the test on purpose"
 )]
 
+mod common;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use common::{FIXED_TRANSCRIPT, FixedTranscriber, ToneAudio};
 use dictation_core::coordinator::Phase::{Idle, Inserting, Recording, Transcribing};
 use dictation_core::error::DictationError;
 use dictation_core::hotkey_spec::HotkeySpec;
@@ -23,7 +26,6 @@ use dictation_pipeline::hotkey_setting::{
     self, ConfigurableHotkey, HotkeyChange, HotkeyControl, RESTART_POLICY,
 };
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
-use dictation_pipeline::stand_ins::{FIXED_TRANSCRIPT, FixedTranscriber, ToneAudio};
 use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::fakes::{FakeClock, FakeHotkey, FakeInserter, FakePermissions};
 use dictation_ports::{HotkeyError, HotkeyEvent};

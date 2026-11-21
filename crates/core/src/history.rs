@@ -2,8 +2,8 @@
 //! the list keeps, and the file's JSON. Pure: `dictation-pipeline` holds the
 //! list and a port writes the file.
 //!
-//! An entry holds the text, the time, the engine's name and whether it was
-//! pasted, and has no field for the app or window it was pasted into.
+//! An entry holds the text, the time and whether it was pasted, and has no
+//! field for the app or window it was pasted into.
 //! `Debug` never prints the text or its length, and [`from_json`] gives no
 //! parser message, because serde's can quote what it read.
 
@@ -23,8 +23,6 @@ pub struct Entry {
     pub text: String,
     /// When it finished, in milliseconds since the Unix epoch.
     pub created_at: u64,
-    /// The engine's display name (`"OpenRouter"`, `"On this Mac (Parakeet English)"`).
-    pub engine: String,
     /// Whether the paste worked.
     pub pasted: bool,
 }
@@ -99,7 +97,6 @@ mod tests {
             id,
             text: text.to_owned(),
             created_at: id,
-            engine: "OpenRouter".to_owned(),
             pasted: true,
         }
     }
@@ -134,7 +131,7 @@ mod tests {
             .map(String::as_str)
             .collect();
         fields.sort_unstable();
-        assert_eq!(fields, ["created_at", "engine", "id", "pasted", "text"]);
+        assert_eq!(fields, ["created_at", "id", "pasted", "text"]);
     }
 
     /// Criterion 4: a field put in by hand isn't kept when the file is

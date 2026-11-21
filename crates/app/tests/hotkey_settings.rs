@@ -13,11 +13,14 @@
     reason = "test helpers fail the test on purpose"
 )]
 
+mod common;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
+use common::{FIXED_TRANSCRIPT, FixedTranscriber, ToneAudio};
 use dictation_core::coordinator::Phase::{Idle, Inserting, Recording, Transcribing};
 use dictation_core::error::DictationError;
 use dictation_core::hotkey_spec::HotkeySpec;
@@ -27,7 +30,6 @@ use dictation_pipeline::hotkey_setting::{
     self, ConfigurableHotkey, HotkeyChange, HotkeyControl, Switched,
 };
 use dictation_pipeline::pipeline::{Config, Pipeline, Ports, UiEvent};
-use dictation_pipeline::stand_ins::{FIXED_TRANSCRIPT, FixedTranscriber, ToneAudio};
 use dictation_pipeline::tray::keycap_label;
 use dictation_pipeline::ui_events::UiReceiver;
 use dictation_platform::fakes::{
@@ -562,7 +564,7 @@ async fn a_failed_undo_names_the_hotkey_that_still_works() {
     assert_eq!(saved.hotkey, old.to_string());
     let shown = hotkey_setting::with_active(app.control.spec(), saved.clone());
     assert_eq!(shown.hotkey, "F6");
-    assert_eq!(shown.language, saved.language, "only the hotkey differs");
+    assert_eq!(shown.model, saved.model, "only the hotkey differs");
     app.pipeline.shutdown().await;
 }
 
