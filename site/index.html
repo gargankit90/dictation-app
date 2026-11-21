@@ -12,7 +12,7 @@
     <meta property="og:title" content="Vocet: Mac dictation that cleans up what you say" />
     <meta
       property="og:description"
-      content="Speak rough. Paste clean. Free beta for students and engineers."
+      content="Speak rough. Paste clean, in any Mac app. Free beta for students and engineers."
     />
     <meta property="og:url" content="https://vocetlabs.com/" />
     <meta property="og:type" content="website" />
@@ -27,7 +27,7 @@
     <meta name="twitter:title" content="Vocet: Mac dictation that cleans up what you say" />
     <meta
       name="twitter:description"
-      content="Speak rough. Paste clean. Free beta for students and engineers."
+      content="Speak rough. Paste clean, in any Mac app. Free beta for students and engineers."
     />
     <meta name="twitter:image" content="https://vocetlabs.com/og.png" />
     <meta
@@ -364,6 +364,9 @@
              --vc-bg-grouped: #f5f4f0;
              --vc-bg-site: #fbfaf7;
          /* The page's own names map to the shared tokens. */
+      :root {
+        --accent: var(--vc-accent);
+      }
          * {
            box-sizing: border-box;
          }
@@ -568,7 +571,7 @@
 
     <main>
       <section class="wrap hero">
-        <h1>Speak rough. Paste clean.</h1>
+        <h1>Speak rough. Paste clean, in any Mac app.</h1>
         <p class="lede">
           Hold one key and talk. Vocet cuts fillers and false starts, fixes punctuation, and pastes
           where you type: Google Docs, Notion, Claude Code, Cursor, Slack or Mail.
